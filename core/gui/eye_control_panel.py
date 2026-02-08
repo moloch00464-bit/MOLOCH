@@ -47,6 +47,12 @@ from core.hardware.camera_cloud_bridge import CameraCloudBridge, CloudConfig
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger("EyeControl")
 
+# RTSP URL fallback
+RTSP_URL = os.environ.get(
+    "MOLOCH_RTSP_URL",
+    "rtsp://Moloch_4.5:Auge666@192.168.178.25:554/av_stream/ch0"
+)
+
 
 class CloudController:
     """Async cloud controller wrapper."""
@@ -105,6 +111,7 @@ class EyeControlPanel:
     PREVIEW_W = 640
     PREVIEW_H = 360
     PREVIEW_FPS = 10
+    POSITION_UPDATE_INTERVAL = 2.0  # seconds between position polls
 
     def __init__(self):
         self.root = tk.Tk()
@@ -120,6 +127,9 @@ class EyeControlPanel:
         self.tracker_paused = False
         self.preview_running = False
         self._preview_after_id = None
+        self._latest_frame = None
+        self._frame_lock = threading.Lock()
+        self._last_pos_update = 0
 
         # Styles
         self.style = ttk.Style()
@@ -235,7 +245,7 @@ class EyeControlPanel:
         pos_frame = ttk.Frame(parent)
         pos_frame.pack(fill=tk.X, pady=5)
         ttk.Label(pos_frame, text="Quick:").pack(side=tk.LEFT)
-        for name, pan, tilt in [("Links", -168, 0), ("Mitte", 0, 0), ("Rechts", 174, 0)]:
+        for name, pan, tilt in [("Links", 170, 0), ("Mitte", 0, 0), ("Rechts", -168, 0)]:
             tk.Button(pos_frame, text=name, bg="#2a2a4e", fg="white", width=7,
                       command=lambda p=pan, t=tilt: self._ptz_goto(p, t)).pack(side=tk.LEFT, padx=2)
 
@@ -285,7 +295,6 @@ class EyeControlPanel:
         ttk.Scale(row, from_=0, to=100, variable=self.mic_var,
                   command=lambda v: self.mic_val_label.configure(text=f"{int(float(v))}")).pack(
             side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        # Apply on release
         self.mic_apply_btn = tk.Button(row, text="Set", bg="#2a2a4e", fg="white", width=4,
                                        command=self._set_mic_volume)
         self.mic_apply_btn.pack(side=tk.RIGHT, padx=2)
@@ -356,7 +365,6 @@ class EyeControlPanel:
                 if self.cloud.connected:
                     self.root.after(0, lambda: self.cloud_status.configure(
                         text="Cloud: verbunden"))
-                    # Load current params
                     self.root.after(100, self._refresh_params)
                 else:
                     self.root.after(0, lambda: self.cloud_status.configure(
@@ -370,50 +378,73 @@ class EyeControlPanel:
 
         threading.Thread(target=do_connect, daemon=True).start()
 
+    # =========================================================================
+    # RTSP Live Preview (background thread reader)
+    # =========================================================================
+
     def _start_preview(self):
-        """Start RTSP live preview."""
-        rtsp = os.environ.get("MOLOCH_RTSP_URL", "")
-        if not rtsp:
-            return
-
-        def open_stream():
-            self.cap = cv2.VideoCapture(rtsp, cv2.CAP_FFMPEG)
+        """Start RTSP live preview with background frame reader."""
+        def open_and_read():
+            os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
+                "rtsp_transport;udp|fflags;nobuffer|flags;low_delay"
+            )
+            self.cap = cv2.VideoCapture(RTSP_URL, cv2.CAP_FFMPEG)
             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            if self.cap.isOpened():
-                self.preview_running = True
-                self.root.after(0, self._update_preview)
 
-        threading.Thread(target=open_stream, daemon=True).start()
+            if not self.cap.isOpened():
+                logger.error(f"RTSP open failed: {RTSP_URL}")
+                return
 
-    def _update_preview(self):
-        """Update preview frame."""
-        if not self.running or not self.preview_running or not self.cap:
+            self.preview_running = True
+            self.root.after(0, self._display_frame)
+
+            while self.running and self.preview_running:
+                grabbed = self.cap.grab()
+                if grabbed:
+                    ret, frame = self.cap.retrieve()
+                    if ret and frame is not None:
+                        frame = cv2.resize(frame, (self.PREVIEW_W, self.PREVIEW_H))
+                        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        with self._frame_lock:
+                            self._latest_frame = frame
+                else:
+                    time.sleep(0.5)
+
+        threading.Thread(target=open_and_read, daemon=True).start()
+
+    def _display_frame(self):
+        """Display latest frame in tkinter canvas (called from main thread)."""
+        if not self.running or not self.preview_running:
             return
 
-        try:
-            ret, frame = self.cap.read()
-            if ret:
-                frame = cv2.resize(frame, (self.PREVIEW_W, self.PREVIEW_H))
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        frame = None
+        with self._frame_lock:
+            if self._latest_frame is not None:
+                frame = self._latest_frame
+
+        if frame is not None:
+            try:
                 img = Image.fromarray(frame)
                 self._photo = ImageTk.PhotoImage(image=img)
                 self.preview_canvas.create_image(0, 0, anchor=tk.NW, image=self._photo)
+            except Exception:
+                pass
 
-                # Update position
-                if self.camera:
-                    try:
-                        pos = self.camera.get_position()
-                        self.pos_label.configure(
-                            text=f"Pan: {pos.pan:.1f} | Tilt: {pos.tilt:.1f}")
-                    except:
-                        pass
-        except:
-            pass
+        # Update position (throttled)
+        now = time.time()
+        if self.camera and now - self._last_pos_update > self.POSITION_UPDATE_INTERVAL:
+            self._last_pos_update = now
+            try:
+                pos = self.camera.get_position()
+                self.pos_label.configure(text=f"Pan: {pos.pan:.1f} | Tilt: {pos.tilt:.1f}")
+            except Exception:
+                pass
 
-        if self.running:
-            self._preview_after_id = self.root.after(1000 // self.PREVIEW_FPS, self._update_preview)
+        self._preview_after_id = self.root.after(1000 // self.PREVIEW_FPS, self._display_frame)
 
-    # === ONVIF Controls ===
+    # =========================================================================
+    # ONVIF Controls
+    # =========================================================================
 
     def _ptz_move(self, direction):
         """Move camera in direction."""
@@ -423,17 +454,18 @@ class EyeControlPanel:
 
         def do_move():
             try:
-                pos = self.camera.get_position()
-                if direction == "left":
-                    self.camera.move_absolute(pos.pan + step, pos.tilt, speed=1.0)
-                elif direction == "right":
-                    self.camera.move_absolute(pos.pan - step, pos.tilt, speed=1.0)
-                elif direction == "up":
-                    self.camera.move_absolute(pos.pan, pos.tilt + step, speed=1.0)
-                elif direction == "down":
-                    self.camera.move_absolute(pos.pan, pos.tilt - step, speed=1.0)
-                elif direction == "home":
+                if direction == "home":
                     self.camera.move_absolute(0.0, 0.0, speed=0.5)
+                else:
+                    pos = self.camera.get_position()
+                    if direction == "left":
+                        self.camera.move_absolute(pos.pan + step, pos.tilt, speed=1.0)
+                    elif direction == "right":
+                        self.camera.move_absolute(pos.pan - step, pos.tilt, speed=1.0)
+                    elif direction == "up":
+                        self.camera.move_absolute(pos.pan, pos.tilt + step, speed=1.0)
+                    elif direction == "down":
+                        self.camera.move_absolute(pos.pan, pos.tilt - step, speed=1.0)
             except Exception as e:
                 logger.error(f"PTZ move error: {e}")
 
@@ -448,7 +480,9 @@ class EyeControlPanel:
             daemon=True
         ).start()
 
-    # === eWeLink Controls ===
+    # =========================================================================
+    # eWeLink Controls
+    # =========================================================================
 
     def _cloud_call(self, coro):
         """Run cloud call in background."""
@@ -536,7 +570,9 @@ class EyeControlPanel:
         except Exception as e:
             logger.error(f"Apply params error: {e}")
 
-    # === Tracker Control ===
+    # =========================================================================
+    # Tracker Control
+    # =========================================================================
 
     def _toggle_tracker(self):
         """Pause/resume M.O.L.O.C.H. tracker."""
@@ -552,7 +588,6 @@ class EyeControlPanel:
                 self.tracker_paused = True
                 self.pause_btn.configure(text="M.O.L.O.C.H. RESUME", bg="#44ff44")
         except ImportError:
-            # Tracker not running - toggle is informational
             self.tracker_paused = not self.tracker_paused
             if self.tracker_paused:
                 self.pause_btn.configure(text="M.O.L.O.C.H. RESUME", bg="#44ff44")
