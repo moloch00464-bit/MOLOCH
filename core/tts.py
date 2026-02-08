@@ -227,7 +227,7 @@ class TTSEngine:
                 wf.writeframes(raw_audio)
 
             # Step 2: Apply pitch shift with sox for younger kobold voice
-            if PITCH_SHIFT > 0:
+            if PITCH_SHIFT != 0:
                 sox_cmd = [
                     "sox",
                     str(wav_file),
