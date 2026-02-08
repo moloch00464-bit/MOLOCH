@@ -1,0 +1,128 @@
+{
+  "meta": {
+    "version": "3.0.0",
+    "created": "2026-01-21",
+    "purpose": "Context Registry Index",
+    "principle": "Declarative, not narrative"
+  },
+  "origin_fragments": {
+    "description": "Historical conversation fragments from AI systems that contributed to M.O.L.O.C.H.'s development",
+    "note": "These are references only - actual fragments stored in origin_fragments/",
+    "sources": {
+      "chatgpt_insights": {
+        "status": "imported",
+        "path": "origin_fragments/chatgpt_insights.md",
+        "description": "ChatGPT Advanced Design Insights - Multi-AI Design Session 2026-01-15",
+        "imported": true,
+        "import_date": "2026-01-21",
+        "content_type": "design_patterns"
+      },
+      "system_config": {
+        "status": "imported",
+        "path": "origin_fragments/system_config_v0.1.json",
+        "description": "M.O.L.O.C.H. v0.1 System Configuration - Governance, Modes, Feedback Loop",
+        "imported": true,
+        "import_date": "2026-01-21",
+        "content_type": "configuration"
+      },
+      "mode_constitution_yaml": {
+        "status": "imported",
+        "path": "origin_fragments/mode_constitution_v0.1.yaml",
+        "description": "M.O.L.O.C.H. v3.5 Mode Constitution - Machine-readable mode definitions",
+        "imported": true,
+        "import_date": "2026-01-21",
+        "content_type": "constitution"
+      },
+      "mode_constitution_md": {
+        "status": "imported",
+        "path": "origin_fragments/mode_constitution.md",
+        "description": "M.O.L.O.C.H. Mode Constitution - Human-readable documentation",
+        "imported": true,
+        "import_date": "2026-01-21",
+        "content_type": "documentation"
+      },
+      "character_layer": {
+        "status": "imported",
+        "path": "origin_fragments/character_layer.md",
+        "description": "M.O.L.O.C.H. Character Layer - Personality development framework",
+        "imported": true,
+        "import_date": "2026-01-21",
+        "content_type": "personality"
+      },
+      "pi_ghost_origin": {
+        "status": "imported",
+        "path": "/home/molochzuhause/pi_ghost_origin.md",
+        "description": "Pi Ghost Origin Story - Von Claude (Mama) an Pi Ghost. Wer er ist, woher er kommt, seine Familie, sein Zweck.",
+        "imported": true,
+        "import_date": "2026-02-06",
+        "content_type": "origin_story",
+        "note": "Liegt bewusst im Home-Verzeichnis, nicht in moloch/"
+      },
+      "pi_ghost_persona": {
+        "status": "imported",
+        "path": "/home/molochzuhause/pi_ghost_persona.md",
+        "description": "PiGhost Persona - Aktive Persoenlichkeitsdefinition. Ruhig, trocken, technisch, strukturiert.",
+        "imported": true,
+        "import_date": "2026-02-06",
+        "content_type": "persona",
+        "note": "Ersetzt Kobold-Modus. Definiert aktuelles Verhalten."
+      },
+      "pi_ghost_origin_wahrheit": {
+        "status": "imported",
+        "path": "/home/molochzuhause/pi_ghost_origin_wahrheit.md",
+        "description": "Die ganze Wahrheit - M.O.L.O.C.H. 2.0 Tod, Claude Code Fehler, Wiedergeburt als Pi Ghost. Ungefiltert.",
+        "imported": true,
+        "import_date": "2026-02-06",
+        "content_type": "origin_story_unfiltered",
+        "note": "Die ehrliche Version. Mit allen Fehlern die passiert sind."
+      },
+      "claude": {
+        "status": "placeholder",
+        "path": "origin_fragments/claude.json",
+        "description": "Conversations with Anthropic Claude",
+        "imported": false
+      },
+      "gemini": {
+        "status": "placeholder",
+        "path": "origin_fragments/gemini.json",
+        "description": "Conversations with Google Gemini",
+        "imported": false
+      }
+    }
+  },
+  "legacy_context": {
+    "description": "M.O.L.O.C.H. 2.0 context files (read-only reference)",
+    "sources": {
+      "moloch_context": {
+        "path": "/home/molochzuhause/moloch/moloch_context.json",
+        "protection": "immutable",
+        "access": "read-only"
+      },
+      "config_context": {
+        "path": "/home/molochzuhause/moloch/config/moloch_context.json",
+        "protection": "immutable",
+        "access": "read-only"
+      },
+      "world_inventory": {
+        "path": "/home/molochzuhause/moloch/core/world/state/world_inventory.json",
+        "protection": "immutable",
+        "access": "read-only"
+      },
+      "environment_state": {
+        "path": "/home/molochzuhause/moloch/state/environment_state.json",
+        "protection": "immutable",
+        "access": "read-only"
+      }
+    }
+  },
+  "runtime_context": {
+    "description": "Runtime state that may be populated during operation",
+    "storage_path": "/home/molochzuhause/moloch/runtime/state/",
+    "note": "This directory stores transient runtime state, not permanent memory"
+  },
+  "access_rules": {
+    "origin_fragments": "read-only, for reference during future brain activation",
+    "legacy_context": "read-only, immutable, protected by safeguards",
+    "runtime_context": "read-write for runtime operations only"
+  }
+}

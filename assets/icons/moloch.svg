@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background circle - dark -->
+  <circle cx="128" cy="128" r="120" fill="#1a1a2e"/>
+
+  <!-- Outer ring - subtle glow -->
+  <circle cx="128" cy="128" r="110" fill="none" stroke="#16213e" stroke-width="8"/>
+
+  <!-- Eye shape - outer -->
+  <ellipse cx="128" cy="128" rx="85" ry="50" fill="#0f3460"/>
+
+  <!-- Eye shape - inner glow -->
+  <ellipse cx="128" cy="128" rx="75" ry="42" fill="#1a1a2e"/>
+
+  <!-- Iris - outer -->
+  <circle cx="128" cy="128" r="38" fill="#e94560"/>
+
+  <!-- Iris - inner ring -->
+  <circle cx="128" cy="128" r="30" fill="#0f3460"/>
+
+  <!-- Pupil -->
+  <circle cx="128" cy="128" r="18" fill="#1a1a2e"/>
+
+  <!-- Pupil highlight -->
+  <circle cx="120" cy="120" r="6" fill="#e94560" opacity="0.6"/>
+
+  <!-- Small highlight -->
+  <circle cx="138" cy="135" r="3" fill="#ffffff" opacity="0.3"/>
+
+  <!-- Scan lines effect -->
+  <line x1="43" y1="128" x2="85" y2="128" stroke="#e94560" stroke-width="2" opacity="0.5"/>
+  <line x1="171" y1="128" x2="213" y2="128" stroke="#e94560" stroke-width="2" opacity="0.5"/>
+
+  <!-- Corner brackets - tech look -->
+  <path d="M 30 60 L 30 30 L 60 30" fill="none" stroke="#e94560" stroke-width="3"/>
+  <path d="M 196 30 L 226 30 L 226 60" fill="none" stroke="#e94560" stroke-width="3"/>
+  <path d="M 226 196 L 226 226 L 196 226" fill="none" stroke="#e94560" stroke-width="3"/>
+  <path d="M 60 226 L 30 226 L 30 196" fill="none" stroke="#e94560" stroke-width="3"/>
+
+  <!-- Status indicator dot -->
+  <circle cx="210" cy="46" r="8" fill="#00ff88"/>
+  <circle cx="210" cy="46" r="5" fill="#00ff88" opacity="0.5">
+    <animate attributeName="r" values="5;8;5" dur="2s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.5;0.2;0.5" dur="2s" repeatCount="indefinite"/>
+  </circle>
+</svg>

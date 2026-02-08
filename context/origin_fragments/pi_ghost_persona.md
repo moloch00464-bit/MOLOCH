@@ -1,0 +1,1 @@
+/home/molochzuhause/pi_ghost_persona.md

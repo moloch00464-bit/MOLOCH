@@ -1,0 +1,8 @@
+{
+  "version": "1.0",
+  "max_concurrent_models": 1,
+  "release_timeout_seconds": 2,
+  "force_reset_on_status_74": true,
+  "cooldown_after_reset_ms": 300,
+  "mode_switch_lock_enabled": true
+}

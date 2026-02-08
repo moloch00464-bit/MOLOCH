@@ -1,0 +1,6 @@
+#!/bin/bash
+# M.O.L.O.C.H. Console Launcher
+# Phase 2: Readiness Console
+
+cd "$(dirname "$0")"
+exec python3 core/console/moloch_console.py "$@"

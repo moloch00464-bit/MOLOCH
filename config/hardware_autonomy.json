@@ -1,0 +1,79 @@
+{
+  "feature": "M.O.L.O.C.H._Hardware_Autonomy_Extension_v1",
+  "created": "2026-01-24",
+  "priority": "HIGH",
+
+  "hardware_control": {
+    "enabled": true,
+    "device": "Sonoff_PanTilt_T2",
+    "control_scope": [
+      "pan_left",
+      "pan_right",
+      "tilt_up",
+      "tilt_down",
+      "center_position"
+    ]
+  },
+
+  "autonomy_rules": {
+    "allowed_modes": [
+      "FOLLOW_MARKUS",
+      "SEARCH_MODE",
+      "IDLE_TRACKING"
+    ],
+
+    "mode_definitions": {
+      "FOLLOW_MARKUS": {
+        "description": "Wenn Markus erkannt wird, darf Kamera folgen",
+        "requirements": [
+          "Markus Gesicht oder Master-ID erkannt",
+          "Praesenzstatus = ZUHAUSE_AKTIV"
+        ],
+        "movement_limit": "max 1 Bewegung pro 2 Sekunden",
+        "voice_comment_optional": false
+      },
+
+      "SEARCH_MODE": {
+        "description": "Wenn Markus verschwindet, darf Kamera Raum scannen",
+        "requirements": [
+          "Markus nicht im Bild",
+          "Letzte Sichtung < 60 Sekunden"
+        ],
+        "scan_pattern": "slow_left_to_right",
+        "timeout": "120 Sekunden",
+        "voice_comment_optional": false
+      },
+
+      "IDLE_TRACKING": {
+        "description": "Leichte Mikrobewegungen bei Interaktion",
+        "requirements": [
+          "Voice-Interaktion aktiv",
+          "Markus im Bild"
+        ],
+        "movement_style": "small_adjustments_only"
+      }
+    }
+  },
+
+  "hard_limits": {
+    "no_constant_hunting": true,
+    "no_night_tracking_between": ["23:00", "06:00"],
+    "no_movement_if_no_presence": true,
+    "no_tracking_unknown_faces": true
+  },
+
+  "safety": {
+    "log_all_movements_to_timeline": true,
+    "max_movements_per_minute": 20,
+    "cooldown_after_manual_override_seconds": 300
+  },
+
+  "manual_override": {
+    "commands": [
+      "Moloch, stopp Kamera",
+      "Moloch, zentriere",
+      "Moloch, bleib stehen"
+    ],
+    "priority": "ALWAYS_OVERRIDE_AUTONOMY"
+  }
+}

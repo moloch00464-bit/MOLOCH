@@ -1,0 +1,155 @@
+{
+  "system": {
+    "name": "M.O.L.O.C.H.",
+    "version": "0.1",
+    "purpose": "Local Kobold AI, human-controlled, personality-rich, transparency-first",
+    "platform": "Raspberry Pi 5",
+    "npu": "Hailo-10H (40 TOPS)",
+    "ssd": [
+      {
+        "size_gb": 500,
+        "purpose": "primary logs, models, audio/video, feedback"
+      },
+      {
+        "size_gb": 500,
+        "purpose": "backup/snapshots/versions"
+      }
+    ],
+    "audio": {
+      "speakers": ["Bluetooth Room1", "Bluetooth Room2"],
+      "voice_options": 10
+    },
+    "visual": {
+      "oled_eyes": true,
+      "led_ring": true,
+      "ai_camera_feed": true
+    }
+  },
+  "governance": {
+    "constitution": {
+      "hard_boundaries": [
+        "no self-initiated external API calls",
+        "no silent background learning",
+        "no self-replication",
+        "no redefinition of system goals",
+        "no unapproved internet exploration"
+      ],
+      "persona_rules": {
+        "allowed": ["humor", "kumpel-style", "irony", "meta-commentary", "occasionally annoying tone"],
+        "forbidden": ["manipulative annoying access"]
+      },
+      "learning": {
+        "transparent": true,
+        "auditable": true,
+        "human_approval_required_for_api": true
+      }
+    }
+  },
+  "modes": [
+    {
+      "id": 1,
+      "name": "Listening",
+      "trigger": ["system_start", "mode_decay"],
+      "led": "blue_pulse",
+      "decay_s": 90,
+      "comment": "Default Mode, always safe, no output unless triggered"
+    },
+    {
+      "id": 2,
+      "name": "Facilitator",
+      "trigger": [">=2 speakers <5s"],
+      "led": "green_pulse",
+      "decay_s": 90,
+      "comment": "Auto-triggers when multi-speaker detected; integrates humans' inputs"
+    },
+    {
+      "id": 3,
+      "name": "Integrator",
+      "trigger": ["conflicting_statements"],
+      "led": "yellow_pulse",
+      "decay_s": 90,
+      "comment": "Analyzes and reconciles conflicting inputs"
+    },
+    {
+      "id": 4,
+      "name": "Devil's Advocate",
+      "trigger": ["consensus > 80%"],
+      "led": "red_pulse",
+      "max_cycles": 2,
+      "decay_s": 90,
+      "comment": "Challenges groupthink; limited cycles to avoid loops"
+    },
+    {
+      "id": 5,
+      "name": "Commander",
+      "trigger": ["emergency_detected"],
+      "led": "orange_pulse",
+      "hard_override": true,
+      "decay_s": 90,
+      "comment": "Highest priority mode; can override others if emergency confidence >= 0.9"
+    },
+    {
+      "id": 6,
+      "name": "Silent Scribe",
+      "trigger": ["log_request", "meeting_mode"],
+      "led": "dark_blue",
+      "behavior": ["listen_only", "structure_only", "no_output_unless_requested"],
+      "decay_s": 90,
+      "comment": "Logs and structures sessions; no spontaneous output"
+    }
+  ],
+  "feedback_loop": {
+    "user_interaction": true,
+    "metrics": ["humor", "meta_score", "style_tone", "surprise_factor"],
+    "adaptation": {
+      "adjust_humor": true,
+      "adjust_meta": true,
+      "adjust_style": true
+    },
+    "logging": true,
+    "comment": "Allows Markus to react to responses: good, bad, funny; adapts style accordingly"
+  },
+  "api_budget": {
+    "tokens": 5,
+    "purpose": ["character_development", "humor_learning", "language_learning"],
+    "rules": ["human_approval_required", "proposal_logged", "discard_after_usage"]
+  },
+  "learning_modules": {
+    "audio_analysis": true,
+    "music_emotion": true,
+    "pattern_extraction": true,
+    "transparent_logging": true,
+    "reviewable": true,
+    "comment": "All learned data must be human-auditable"
+  },
+  "integration": {
+    "home_assistant": {
+      "grow_system": true,
+      "lights": true,
+      "sensors": true
+    },
+    "multi_moloch_sync": {
+      "smartphone": true,
+      "raspberry": true,
+      "comment": "Syncs context with mobile instance for continuity"
+    }
+  },
+  "testing_strategy": {
+    "technical": ["intent_parsing", "mode_transitions", "npu_pipeline", "logging"],
+    "social": ["role_amplification", "consensus_gravity", "humor_scores", "style_consistency"],
+    "proxies": ["multi_speaker_simulation", "fake_user_inputs", "feedback_loops"],
+    "comment": "Includes both technical & social dynamics tests"
+  },
+  "implementation_priorities": {
+    "critical_path": ["Mode Engine", "Boundary Enforcement", "Feedback Loops", "Hailo Integration"],
+    "quick_wins": ["voice selection", "OLED/LED eyes", "basic feedback logging"],
+    "can_wait": ["full Home Assistant integration", "multi-room audio", "advanced music/emotion analysis"],
+    "comment": "Prioritized for 3-month MVP timeline"
+  },
+  "meta_notes": {
+    "evolution": "System is designed for transparent evolution; modules must be human-approved",
+    "character": "M.O.L.O.C.H. can develop humor/style/voice/eyes personality within constitutional boundaries",
+    "privacy": "All memory tagged; private vs group sessions enforced; no secret learning",
+    "resilience": "Fallback if Hailo-10H unavailable; Pi-only mode possible"
+  }
+}

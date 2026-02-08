@@ -1,0 +1,40 @@
+{
+  "version": "1.0",
+  "active_mode": "VISION_TRACKING",
+  "modes": {
+    "VISION_TRACKING": {
+      "description": "Person detection only",
+      "models": [
+        "person_detector"
+      ],
+      "identity_enabled": false,
+      "face_enabled": false,
+      "hands_enabled": false
+    },
+    "VISION_IDENTITY": {
+      "description": "Person + face verification",
+      "models": [
+        "person_detector",
+        "face_detector",
+        "face_embedding"
+      ],
+      "identity_enabled": true,
+      "face_enabled": true,
+      "hands_enabled": false
+    },
+    "VISION_FULL": {
+      "description": "Person + face + landmarks + hands",
+      "models": [
+        "person_detector",
+        "face_detector",
+        "face_embedding",
+        "face_landmarks",
+        "hand_detector",
+        "hand_landmarks"
+      ],
+      "identity_enabled": true,
+      "face_enabled": true,
+      "hands_enabled": true
+    }
+  }
+}

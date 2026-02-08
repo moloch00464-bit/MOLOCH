@@ -1,0 +1,9 @@
+{
+  "person_bbox_shrink_factor": 0.04,
+  "face_roi_padding": 0.09,
+  "identity_threshold": 0.56,
+  "min_face_size": 80,
+  "hand_confidence_threshold": 0.74,
+  "pose_confidence_threshold": 0.31,
+  "keypoint_confidence_threshold": 0.44
+}

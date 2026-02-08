@@ -1,0 +1,484 @@
+{
+  "meta": {
+    "version": "1.0.0",
+    "created": "2026-01-19T00:00:00",
+    "last_modified": "2026-01-19T00:00:00",
+    "phase": 2,
+    "description": "M.O.L.O.C.H. World Inventory - Map of possible and actual peripherals"
+  },
+  "interaction": {
+    "description": "Input channels for human-to-M.O.L.O.C.H. communication",
+    "max_slots": 10,
+    "slots": {
+      "slot_1": {
+        "type": "terminal_input",
+        "name": "Console Input",
+        "status": "available",
+        "device": "stdin",
+        "notes": "Primary text input via readiness console"
+      },
+      "slot_2": {
+        "type": "voice_input",
+        "name": "Microphone",
+        "status": "available",
+        "device": "USB Audio",
+        "notes": "Speech-to-Text input"
+      },
+      "slot_3": {
+        "type": "gesture_input",
+        "name": "Gesture Recognition",
+        "status": "placeholder",
+        "device": null,
+        "notes": "Future: Camera-based gesture detection"
+      },
+      "slot_4": {
+        "type": "keyboard_hotkey",
+        "name": "Hardware Hotkeys",
+        "status": "placeholder",
+        "device": null,
+        "notes": "Future: Dedicated hardware buttons"
+      },
+      "slot_5": {
+        "type": "remote_api",
+        "name": "REST API Input",
+        "status": "placeholder",
+        "device": null,
+        "notes": "Future: Remote control via HTTP"
+      },
+      "slot_6": {
+        "type": "mqtt_input",
+        "name": "MQTT Messages",
+        "status": "placeholder",
+        "device": null,
+        "notes": "Future: IoT message bus input"
+      },
+      "slot_7": {
+        "type": null,
+        "name": null,
+        "status": "empty",
+        "device": null,
+        "notes": null
+      },
+      "slot_8": {
+        "type": null,
+        "name": null,
+        "status": "empty",
+        "device": null,
+        "notes": null
+      },
+      "slot_9": {
+        "type": null,
+        "name": null,
+        "status": "empty",
+        "device": null,
+        "notes": null
+      },
+      "slot_10": {
+        "type": null,
+        "name": null,
+        "status": "empty",
+        "device": null,
+        "notes": null
+      }
+    }
+  },
+  "output": {
+    "description": "Output channels for M.O.L.O.C.H.-to-human communication",
+    "max_slots": 10,
+    "slots": {
+      "slot_1": {
+        "type": "terminal_output",
+        "name": "Console Output",
+        "status": "available",
+        "device": "stdout",
+        "notes": "Primary text output via readiness console"
+      },
+      "slot_2": {
+        "type": "audio_out",
+        "name": "HDMI Audio",
+        "status": "available",
+        "device": "HDMI-2",
+        "via": "Piper TTS",
+        "notes": "Voice output via Text-to-Speech"
+      },
+      "slot_3": {
+        "type": "audio_out",
+        "name": "3.5mm Jack",
+        "status": "available",
+        "device": "analog-out",
+        "via": "Piper TTS",
+        "notes": "Alternative audio output"
+      },
+      "slot_4": {
+        "type": "led_matrix",
+        "name": "8x8 LED Matrix",
+        "status": "available",
+        "device": "SPI",
+        "notes": "Visual status display"
+      },
+      "slot_5": {
+        "type": "oled_display",
+        "name": "OLED Info Screen",
+        "status": "placeholder",
+        "device": null,
+        "notes": "Future: Small status display"
+      },
+      "slot_6": {
+        "type": "mqtt_output",
+        "name": "MQTT Messages",
+        "status": "placeholder",
+        "device": null,
+        "notes": "Future: IoT message bus output"
+      },
+      "slot_7": {
+        "type": "webhook",
+        "name": "Webhook Notifications",
+        "status": "placeholder",
+        "device": null,
+        "notes": "Future: HTTP callbacks"
+      },
+      "slot_8": {
+        "type": null,
+        "name": null,
+        "status": "empty",
+        "device": null,
+        "notes": null
+      },
+      "slot_9": {
+        "type": null,
+        "name": null,
+        "status": "empty",
+        "device": null,
+        "notes": null
+      },
+      "slot_10": {
+        "type": null,
+        "name": null,
+        "status": "empty",
+        "device": null,
+        "notes": null
+      }
+    }
+  },
+  "vision": {
+    "description": "Visual perception channels",
+    "max_slots": 10,
+    "slots": {
+      "slot_1": {
+        "type": "edge_ai_camera",
+        "name": "XIAO Vision AI Camera",
+        "status": "available",
+        "device": "/dev/ttyACM0",
+        "manufacturer": "Seeed Studio",
+        "chip": "ESP32-S3",
+        "article_number": "104990982",
+        "connection_modes": ["USB-Serial", "WiFi-HTTP"],
+        "notes": "Intelligent edge camera with onboard AI. Layer 2 sensor module active."
+      },
+      "slot_2": {
+        "type": "ai_camera",
+        "name": "Pi Camera Module 3",
+        "status": "placeholder",
+        "device": "/dev/video0",
+        "accelerator": "Hailo-10H",
+        "notes": "Future: Primary AI vision via Hailo"
+      },
+      "slot_3": {
+        "type": "thermal_camera",
+        "name": "Thermal Imaging",
+        "status": "placeholder",
+        "device": null,
+        "notes": "Future: Heat detection"
+      },
+      "slot_4": {
+        "type": "depth_camera",
+        "name": "Depth Sensor",
+        "status": "placeholder",
+        "device": null,
+        "notes": "Future: 3D depth perception"
+      },
+      "slot_5": {
+        "type": null,
+        "name": null,
+        "status": "empty",
+        "device": null,
+        "notes": null
+      },
+      "slot_6": {
+        "type": null,
+        "name": null,
+        "status": "empty",
+        "device": null,
+        "notes": null
+      },
+      "slot_7": {
+        "type": null,
+        "name": null,
+        "status": "empty",
+        "device": null,
+        "notes": null
+      },
+      "slot_8": {
+        "type": null,
+        "name": null,
+        "status": "empty",
+        "device": null,
+        "notes": null
+      },
+      "slot_9": {
+        "type": null,
+        "name": null,
+        "status": "empty",
+        "device": null,
+        "notes": null
+      },
+      "slot_10": {
+        "type": null,
+        "name": null,
+        "status": "empty",
+        "device": null,
+        "notes": null
+      }
+    }
+  },
+  "environment": {
+    "description": "Environmental sensing channels",
+    "max_slots": 10,
+    "slots": {
+      "slot_1": {
+        "type": "room_temperature",
+        "name": "Room Temperature Sensor",
+        "status": "placeholder",
+        "device": null,
+        "interface": "I2C",
+        "notes": "Future: DHT22 or similar"
+      },
+      "slot_2": {
+        "type": "humidity_sensor",
+        "name": "Humidity Sensor",
+        "status": "placeholder",
+        "device": null,
+        "interface": "I2C",
+        "notes": "Future: DHT22 or similar"
+      },
+      "slot_3": {
+        "type": "light_sensor",
+        "name": "Ambient Light Sensor",
+        "status": "placeholder",
+        "device": null,
+        "interface": "I2C",
+        "notes": "Future: BH1750 or similar"
+      },
+      "slot_4": {
+        "type": "motion_sensor",
+        "name": "PIR Motion Detector",
+        "status": "placeholder",
+        "device": null,
+        "interface": "GPIO",
+        "notes": "Future: Presence detection"
+      },
+      "slot_5": {
+        "type": "air_quality",
+        "name": "Air Quality Sensor",
+        "status": "placeholder",
+        "device": null,
+        "interface": "I2C",
+        "notes": "Future: CO2, VOC detection"
+      },
+      "slot_6": {
+        "type": "sound_level",
+        "name": "Sound Level Meter",
+        "status": "placeholder",
+        "device": null,
+        "interface": "ADC",
+        "notes": "Future: Ambient noise detection"
+      },
+      "slot_7": {
+        "type": "barometer",
+        "name": "Barometric Pressure",
+        "status": "placeholder",
+        "device": null,
+        "interface": "I2C",
+        "notes": "Future: BMP280 or similar"
+      },
+      "slot_8": {
+        "type": null,
+        "name": null,
+        "status": "empty",
+        "device": null,
+        "notes": null
+      },
+      "slot_9": {
+        "type": null,
+        "name": null,
+        "status": "empty",
+        "device": null,
+        "notes": null
+      },
+      "slot_10": {
+        "type": null,
+        "name": null,
+        "status": "empty",
+        "device": null,
+        "notes": null
+      }
+    }
+  },
+  "compute": {
+    "description": "Processing and acceleration resources",
+    "max_slots": 10,
+    "slots": {
+      "slot_1": {
+        "type": "cpu",
+        "name": "Raspberry Pi 5 CPU",
+        "status": "available",
+        "device": "BCM2712",
+        "cores": 4,
+        "notes": "ARM Cortex-A76 @ 2.4GHz"
+      },
+      "slot_2": {
+        "type": "ai_accelerator",
+        "name": "Hailo-10H NPU",
+        "status": "available",
+        "device": "/dev/hailo0",
+        "tops": 40,
+        "notes": "AI inference accelerator"
+      },
+      "slot_3": {
+        "type": "gpu",
+        "name": "VideoCore VII",
+        "status": "available",
+        "device": "/dev/dri/card0",
+        "notes": "GPU for graphics and video decode"
+      },
+      "slot_4": {
+        "type": "storage",
+        "name": "NVMe SSD",
+        "status": "available",
+        "device": "/dev/sda2",
+        "mount": "/media/molochzuhause/Volume",
+        "capacity_gb": 476,
+        "notes": "Fast storage via USB-3"
+      },
+      "slot_5": {
+        "type": "ram",
+        "name": "System Memory",
+        "status": "available",
+        "device": null,
+        "capacity_gb": 4,
+        "notes": "LPDDR4X"
+      },
+      "slot_6": {
+        "type": null,
+        "name": null,
+        "status": "empty",
+        "device": null,
+        "notes": null
+      },
+      "slot_7": {
+        "type": null,
+        "name": null,
+        "status": "empty",
+        "device": null,
+        "notes": null
+      },
+      "slot_8": {
+        "type": null,
+        "name": null,
+        "status": "empty",
+        "device": null,
+        "notes": null
+      },
+      "slot_9": {
+        "type": null,
+        "name": null,
+        "status": "empty",
+        "device": null,
+        "notes": null
+      },
+      "slot_10": {
+        "type": null,
+        "name": null,
+        "status": "empty",
+        "device": null,
+        "notes": null
+      }
+    }
+  },
+  "network": {
+    "description": "Network connectivity channels",
+    "max_slots": 10,
+    "slots": {
+      "slot_1": {
+        "type": "ethernet",
+        "name": "Gigabit Ethernet",
+        "status": "available",
+        "device": "eth0",
+        "notes": "Primary network connection"
+      },
+      "slot_2": {
+        "type": "wifi",
+        "name": "WiFi 6",
+        "status": "available",
+        "device": "wlan0",
+        "notes": "Wireless network"
+      },
+      "slot_3": {
+        "type": "bluetooth",
+        "name": "Bluetooth 5.0",
+        "status": "placeholder",
+        "device": null,
+        "notes": "Future: BLE devices"
+      },
+      "slot_4": {
+        "type": "zigbee",
+        "name": "Zigbee Coordinator",
+        "status": "placeholder",
+        "device": null,
+        "notes": "Future: Smart home devices"
+      },
+      "slot_5": {
+        "type": "z-wave",
+        "name": "Z-Wave Controller",
+        "status": "placeholder",
+        "device": null,
+        "notes": "Future: Home automation"
+      },
+      "slot_6": {
+        "type": null,
+        "name": null,
+        "status": "empty",
+        "device": null,
+        "notes": null
+      },
+      "slot_7": {
+        "type": null,
+        "name": null,
+        "status": "empty",
+        "device": null,
+        "notes": null
+      },
+      "slot_8": {
+        "type": null,
+        "name": null,
+        "status": "empty",
+        "device": null,
+        "notes": null
+      },
+      "slot_9": {
+        "type": null,
+        "name": null,
+        "status": "empty",
+        "device": null,
+        "notes": null
+      },
+      "slot_10": {
+        "type": null,
+        "name": null,
+        "status": "empty",
+        "device": null,
+        "notes": null
+      }
+    }
+  }
+}

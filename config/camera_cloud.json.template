@@ -1,0 +1,14 @@
+{
+  "cloud_enabled": true,
+  "cloud_config": {
+    "api_base_url": "https://eu-apia.coolkit.cc",
+    "app_id": "YOUR_APP_ID",
+    "app_secret": "YOUR_APP_SECRET",
+    "device_id": "YOUR_DEVICE_ID",
+    "username": "your_email@example.com",
+    "password": "YOUR_PASSWORD",
+    "timeout": 3.0,
+    "retry_count": 1,
+    "token_refresh_margin": 300
+  }
+}

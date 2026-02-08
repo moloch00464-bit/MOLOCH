@@ -1,0 +1,135 @@
+{
+  "meta": {
+    "version": "3.0.0",
+    "created": "2026-01-21",
+    "purpose": "M.O.L.O.C.H. 2.0 Legacy Protection Manifest",
+    "rule": "READ-ONLY - These files must never be modified or deleted by M.O.L.O.C.H. 3.0"
+  },
+  "protected_files": {
+    "core_context": [
+      {
+        "path": "/home/molochzuhause/moloch/moloch_context.json",
+        "type": "identity",
+        "description": "M.O.L.O.C.H. 2.0 project identity and hardware context",
+        "protection": "immutable"
+      },
+      {
+        "path": "/home/molochzuhause/moloch/config/moloch_context.json",
+        "type": "configuration",
+        "description": "Hardware context and safety limits",
+        "protection": "immutable"
+      }
+    ],
+    "state_files": [
+      {
+        "path": "/home/molochzuhause/moloch/state/environment_state.json",
+        "type": "state",
+        "description": "Environment device state snapshot",
+        "protection": "immutable"
+      },
+      {
+        "path": "/home/molochzuhause/moloch/core/world/state/world_inventory.json",
+        "type": "inventory",
+        "description": "World peripheral inventory and slots",
+        "protection": "immutable"
+      },
+      {
+        "path": "/home/molochzuhause/moloch/SYSTEM_STATE.json",
+        "type": "state",
+        "description": "System state file",
+        "protection": "immutable"
+      }
+    ],
+    "core_modules": [
+      {
+        "path": "/home/molochzuhause/moloch/core/tts.py",
+        "type": "module",
+        "description": "Text-to-Speech engine",
+        "protection": "read-reference"
+      },
+      {
+        "path": "/home/molochzuhause/moloch/core/status.py",
+        "type": "module",
+        "description": "Status reporting module",
+        "protection": "read-reference"
+      },
+      {
+        "path": "/home/molochzuhause/moloch/core/environment_watcher.py",
+        "type": "module",
+        "description": "Environment monitoring",
+        "protection": "read-reference"
+      },
+      {
+        "path": "/home/molochzuhause/moloch/core/dashboard.py",
+        "type": "module",
+        "description": "Dashboard interface",
+        "protection": "read-reference"
+      },
+      {
+        "path": "/home/molochzuhause/moloch/core/eye_viewer.py",
+        "type": "module",
+        "description": "Vision camera viewer",
+        "protection": "read-reference"
+      },
+      {
+        "path": "/home/molochzuhause/moloch/core/sensors/vision_sensor.py",
+        "type": "sensor",
+        "description": "Layer-2 Vision sensor module",
+        "protection": "read-reference"
+      },
+      {
+        "path": "/home/molochzuhause/moloch/core/world/world_state.py",
+        "type": "module",
+        "description": "World state management",
+        "protection": "read-reference"
+      },
+      {
+        "path": "/home/molochzuhause/moloch/core/console/moloch_console.py",
+        "type": "interface",
+        "description": "Console interface",
+        "protection": "read-reference"
+      }
+    ],
+    "voice_models": [
+      {
+        "path": "/home/molochzuhause/moloch/models/voices/",
+        "type": "model_directory",
+        "description": "Piper TTS voice models (de_DE)",
+        "protection": "immutable",
+        "files": [
+          "de_DE-thorsten-high.onnx",
+          "de_DE-thorsten-medium.onnx",
+          "de_DE-thorsten-low.onnx",
+          "de_DE-kerstin-low.onnx",
+          "de_DE-ramona-low.onnx",
+          "de_DE-pavoque-low.onnx",
+          "de_DE-eva_k-x_low.onnx",
+          "de_DE-karlsson-low.onnx"
+        ]
+      }
+    ],
+    "user_data": [
+      {
+        "path": "/home/molochzuhause/moloch/snapshots/",
+        "type": "user_directory",
+        "description": "User-captured camera snapshots",
+        "protection": "immutable"
+      },
+      {
+        "path": "/home/molochzuhause/moloch/logs/",
+        "type": "log_directory",
+        "description": "Historical logs",
+        "protection": "append-only"
+      }
+    ]
+  },
+  "protection_rules": {
+    "immutable": "File/directory must never be modified, deleted, or overwritten",
+    "read-reference": "Module may be imported and called, but never modified",
+    "append-only": "New entries may be added, but existing entries must not be changed"
+  },
+  "enforcement": {
+    "on_violation_attempt": "log_and_refuse",
+    "log_path": "/home/molochzuhause/moloch/safeguards/violation_log.json"
+  }
+}

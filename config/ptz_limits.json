@@ -1,0 +1,11 @@
+{
+  "calibrated": true,
+  "calibration_date": "2026-02-04T17:27:18.886513",
+  "limits": {
+    "pan_min": -168.398438,
+    "pan_max": 169.980469,
+    "tilt_min": -77.958984,
+    "tilt_max": 78.75
+  },
+  "notes": "Calibrated via assisted mode on 2026-02-04T17:27:18.886513"
+}

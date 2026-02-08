@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background - dark hexagon -->
+  <polygon points="128,8 232,68 232,188 128,248 24,188 24,68"
+           fill="#0d0d0d" stroke="#1a1a2e" stroke-width="4"/>
+
+  <!-- Inner glow ring -->
+  <circle cx="128" cy="128" r="90" fill="none"
+          stroke="#e94560" stroke-width="2" opacity="0.3"/>
+
+  <!-- Pulsing outer ring -->
+  <circle cx="128" cy="128" r="85" fill="none"
+          stroke="#e94560" stroke-width="1" opacity="0.5">
+    <animate attributeName="r" values="80;90;80" dur="2s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.5;0.2;0.5" dur="2s" repeatCount="indefinite"/>
+  </circle>
+
+  <!-- Eye shape - outer (red glow) -->
+  <ellipse cx="128" cy="128" rx="75" ry="45"
+           fill="none" stroke="#e94560" stroke-width="3" opacity="0.4"/>
+
+  <!-- Eye shape - main -->
+  <ellipse cx="128" cy="128" rx="70" ry="40" fill="#1a0a10"/>
+
+  <!-- Iris - outer glow -->
+  <circle cx="128" cy="128" r="35" fill="#e94560" opacity="0.3"/>
+
+  <!-- Iris - main (deep red) -->
+  <circle cx="128" cy="128" r="32" fill="#8b0000"/>
+
+  <!-- Iris - inner ring -->
+  <circle cx="128" cy="128" r="26" fill="#e94560"/>
+
+  <!-- Iris - detail ring -->
+  <circle cx="128" cy="128" r="20" fill="#cc0000"/>
+
+  <!-- Pupil -->
+  <circle cx="128" cy="128" r="12" fill="#0d0d0d"/>
+
+  <!-- Pupil vertical slit (reptilian) -->
+  <ellipse cx="128" cy="128" rx="4" ry="18" fill="#1a0a10"/>
+
+  <!-- Highlights -->
+  <circle cx="118" cy="118" r="5" fill="#ff6666" opacity="0.6"/>
+  <circle cx="140" cy="135" r="2" fill="#ffffff" opacity="0.4"/>
+
+  <!-- Scan lines (tech look) -->
+  <line x1="53" y1="128" x2="78" y2="128" stroke="#e94560" stroke-width="2" opacity="0.6"/>
+  <line x1="178" y1="128" x2="203" y2="128" stroke="#e94560" stroke-width="2" opacity="0.6"/>
+
+  <!-- Corner indicators -->
+  <path d="M 40 50 L 40 35 L 55 35" fill="none" stroke="#e94560" stroke-width="2"/>
+  <path d="M 201 35 L 216 35 L 216 50" fill="none" stroke="#e94560" stroke-width="2"/>
+  <path d="M 216 206 L 216 221 L 201 221" fill="none" stroke="#e94560" stroke-width="2"/>
+  <path d="M 55 221 L 40 221 L 40 206" fill="none" stroke="#e94560" stroke-width="2"/>
+
+  <!-- Status indicators -->
+  <circle cx="128" cy="45" r="6" fill="#e94560">
+    <animate attributeName="opacity" values="1;0.3;1" dur="1s" repeatCount="indefinite"/>
+  </circle>
+
+  <!-- "CONTROL" text arc (subtle) -->
+  <text x="128" y="235" text-anchor="middle"
+        font-family="monospace" font-size="12" font-weight="bold"
+        fill="#e94560" opacity="0.7">CONTROL</text>
+</svg>

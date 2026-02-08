@@ -1,0 +1,9 @@
+{
+  "version": "1.0",
+  "person_bbox_shrink_factor": 0.2,
+  "face_roi_padding": 0.1,
+  "identity_min_face_size": 80,
+  "max_persons_for_identity": 1,
+  "enable_roi_pipeline": true,
+  "fps_target": 20
+}

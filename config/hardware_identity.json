@@ -1,0 +1,47 @@
+{
+  "_comment": "M.O.L.O.C.H. Hardware Identity - NICHT EDITIEREN ohne Validierung",
+  "_created": "2025-02-01",
+
+  "npu": {
+    "model": "Hailo-10H",
+    "arch": "HAILO10H",
+    "tops": 40,
+    "ram_gb": 8,
+    "device_path": "/dev/hailo0",
+    "forbidden_archs": ["HAILO8", "HAILO8L", "H8L"]
+  },
+
+  "host": {
+    "model": "Raspberry Pi 5",
+    "ram_gb": 4,
+    "cpu": "BCM2712 Cortex-A76"
+  },
+
+  "cameras": {
+    "sonoff_ptz": {
+      "model": "CAM-PT2",
+      "ip": "192.168.178.25",
+      "rtsp_port": 554,
+      "resolution": "1920x1080",
+      "fps": 20
+    },
+    "xiao_vision": {
+      "model": "Seeed XIAO ESP32S3 Sense",
+      "interface": "USB Serial",
+      "device": "/dev/ttyACM0",
+      "baudrate": 921600
+    }
+  },
+
+  "validation": {
+    "strict_mode": true,
+    "fail_on_wrong_arch": true,
+    "log_arch_on_startup": true,
+    "reject_8l_models": true
+  },
+
+  "hef_naming_convention": {
+    "valid_suffix": "_h10.hef",
+    "invalid_suffixes": ["_h8l.hef", "_h8.hef", "_8l.hef"]
+  }
+}

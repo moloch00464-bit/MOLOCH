@@ -1,0 +1,33 @@
+{
+  "camera": {
+    "name": "sonoff_primary_ptz",
+    "enabled": true,
+    "connection": {
+      "protocol": "rtsp",
+      "transport": "tcp",
+      "url": "rtsp://USERNAME:PASSWORD@CAMERA_IP:554/av_stream/ch0",
+      "reconnect": {
+        "enabled": true,
+        "max_retries": -1,
+        "retry_delay_ms": 2000
+      }
+    },
+    "capabilities": {
+      "ptz": true,
+      "pan": true,
+      "tilt": true,
+      "zoom": true,
+      "presets": false
+    }
+  },
+  "health_monitor": {
+    "ping_check": true,
+    "rtsp_probe_on_start": true,
+    "ptz_command_probe": true,
+    "stream_timeout_seconds": 10
+  },
+  "ptz_control": {
+    "enabled": true,
+    "control_protocol": "onvif"
+  }
+}

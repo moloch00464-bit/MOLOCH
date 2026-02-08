@@ -1,0 +1,8 @@
+{
+  "labels": {
+    "person_default": "Unknown Person",
+    "identity_match_prefix": "",
+    "identity_match_suffix": "",
+    "confidence_format": false
+  }
+}
