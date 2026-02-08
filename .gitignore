@@ -3,6 +3,7 @@
 # ===========================
 
 # --- Credentials & Secrets ---
+API KEYS/
 config/api_keys.json
 config/camera_cloud.json
 config/sonoff_camera.json
