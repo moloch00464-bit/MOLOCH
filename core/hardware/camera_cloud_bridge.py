@@ -838,35 +838,172 @@ class CameraCloudBridge:
     # Public API - Microphone Gain
     # =========================================================================
 
-    async def set_mic_gain(self, value: float) -> bool:
+    async def set_mic_volume(self, volume: int) -> bool:
         """
-        Set microphone gain level.
+        Set microphone volume.
 
         Args:
-            value: Gain value (0.0-1.0)
+            volume: Volume level 0-100
 
         Returns:
             True if successful
         """
-        if not 0.0 <= value <= 1.0:
-            self.logger.warning(f"Invalid mic gain: {value} (must be 0.0-1.0)")
-            return False
+        volume = max(0, min(100, volume))
+        self.logger.info(f"Setting mic volume to {volume}...")
+        return await self._set_device_param('microphoneVolume', volume)
 
-        self.logger.info(f"Setting mic gain to {value:.2f} via cloud...")
+    async def set_speaker_volume(self, volume: int) -> bool:
+        """
+        Set speaker volume.
 
-        # TODO: Replace with actual API endpoint and payload
-        success, response, error = await self._request(
-            method='POST',
-            endpoint=f'/device/{self.config.device_id}/mic_gain',
-            data={'gain': value}
-        )
+        Args:
+            volume: Volume level 0-100
 
-        if success:
-            self.logger.info(f"✓ Mic gain set to {value:.2f}")
-            return True
-        else:
-            self.logger.warning(f"Mic gain control failed: {error}")
-            return False
+        Returns:
+            True if successful
+        """
+        volume = max(0, min(100, volume))
+        self.logger.info(f"Setting speaker volume to {volume}...")
+        return await self._set_device_param('speakerVolume', volume)
+
+    async def set_alarm(self, on: bool) -> bool:
+        """
+        Trigger manual alarm on/off.
+
+        Args:
+            on: True = alarm on, False = alarm off
+
+        Returns:
+            True if successful
+        """
+        self.logger.info(f"Setting alarm to {'ON' if on else 'OFF'}...")
+        return await self._set_device_param('manualAlarm', 1 if on else 0)
+
+    async def set_smart_tracking(self, on: bool) -> bool:
+        """
+        Enable/disable firmware-level smart tracking.
+
+        Args:
+            on: True = enable, False = disable
+
+        Returns:
+            True if successful
+        """
+        self.logger.info(f"Setting smart tracking to {'ON' if on else 'OFF'}...")
+        return await self._set_device_param('smartTraceEnable', 1 if on else 0)
+
+    async def set_motion_detection(self, enable: bool, humanoid_only: bool = True, sensitivity: int = 0) -> bool:
+        """
+        Configure motion detection.
+
+        Args:
+            enable: Enable/disable motion detection
+            humanoid_only: True = person detection only, False = all motion
+            sensitivity: Detection sensitivity (0-2)
+
+        Returns:
+            True if successful
+        """
+        config = {
+            'enable': 1 if enable else 0,
+            'type': {'all': 0 if humanoid_only else 1, 'humanoid': 1 if humanoid_only else 0},
+            'sensitivity': max(0, min(2, sensitivity)),
+        }
+        self.logger.info(f"Setting motion detection: enable={enable}, humanoid={humanoid_only}...")
+        return await self._set_device_param('moveDetection', config)
+
+    async def set_screen_flip(self, flip: bool) -> bool:
+        """Flip camera image 180 degrees."""
+        self.logger.info(f"Setting screen flip to {flip}...")
+        return await self._set_device_param('screenFlip', 1 if flip else 0)
+
+    async def set_watermark(self, on: bool) -> bool:
+        """Show/hide timestamp watermark."""
+        self.logger.info(f"Setting watermark to {'ON' if on else 'OFF'}...")
+        return await self._set_device_param('watermarkDisplay', 1 if on else 0)
+
+    async def set_status_led(self, on: bool) -> bool:
+        """
+        Control the blue status LED (sledOnline).
+
+        Args:
+            on: True = LED on, False = LED off
+
+        Returns:
+            True if successful
+        """
+        self.logger.info(f"Setting status LED to {'ON' if on else 'OFF'}...")
+        return await self._set_device_param('sledOnline', 'on' if on else 'off')
+
+    async def set_resolution(self, hd: bool = True) -> bool:
+        """
+        Set video resolution.
+
+        Args:
+            hd: True = 1080P, False = 360P
+
+        Returns:
+            True if successful
+        """
+        res = 'HD' if hd else '360P'
+        self.logger.info(f"Setting resolution to {res}...")
+        return await self._set_device_param('resolution', res)
+
+    async def set_record_audio(self, on: bool) -> bool:
+        """Enable/disable audio recording."""
+        self.logger.info(f"Setting audio recording to {'ON' if on else 'OFF'}...")
+        return await self._set_device_param('recordAudio', 1 if on else 0)
+
+    async def trigger_ptz_calibration(self) -> bool:
+        """
+        Trigger PTZ calibration (same as app calibration).
+        WARNING: Camera will move through full range!
+
+        Returns:
+            True if command accepted
+        """
+        self.logger.warning("Triggering PTZ calibration - camera will move!")
+        return await self._set_device_param('ptzReset', 1)
+
+    async def get_device_params(self) -> dict:
+        """
+        Get all current device parameters from cloud.
+
+        Returns:
+            Dict of all device parameters
+        """
+        if not self.is_connected:
+            connected = await self.connect()
+            if not connected:
+                return {}
+
+        try:
+            import aiohttp as _aiohttp
+            headers = {
+                'Authorization': f'Bearer {self.token.access_token}',
+                'X-CK-Appid': self.config.app_id,
+                'Content-Type': 'application/json'
+            }
+            payload = {
+                'thingList': [{'itemType': 1, 'id': self.config.device_id}]
+            }
+
+            async with _aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{self.config.api_base_url}/v2/device/thing",
+                    headers=headers,
+                    json=payload,
+                    timeout=_aiohttp.ClientTimeout(total=self.config.timeout)
+                ) as resp:
+                    data = await resp.json()
+                    if "data" in data and "thingList" in data["data"]:
+                        for thing in data["data"]["thingList"]:
+                            return thing.get("itemData", {}).get("params", {})
+            return {}
+        except Exception as e:
+            self.logger.error(f"Failed to get device params: {e}")
+            return {}
+
 
     # =========================================================================
     # Status and Statistics
@@ -958,9 +1095,53 @@ class CameraCloudBridgeSync:
         """Set night mode (sync)."""
         return self._run_async(self.bridge.set_night(mode))
 
-    def set_mic_gain(self, value: float) -> bool:
-        """Set mic gain (sync)."""
-        return self._run_async(self.bridge.set_mic_gain(value))
+    def set_mic_volume(self, volume: int) -> bool:
+        """Set mic volume (sync)."""
+        return self._run_async(self.bridge.set_mic_volume(volume))
+
+    def set_speaker_volume(self, volume: int) -> bool:
+        """Set speaker volume (sync)."""
+        return self._run_async(self.bridge.set_speaker_volume(volume))
+
+    def set_alarm(self, on: bool) -> bool:
+        """Set alarm (sync)."""
+        return self._run_async(self.bridge.set_alarm(on))
+
+    def set_smart_tracking(self, on: bool) -> bool:
+        """Set smart tracking (sync)."""
+        return self._run_async(self.bridge.set_smart_tracking(on))
+
+    def set_motion_detection(self, enable: bool, humanoid_only: bool = True, sensitivity: int = 0) -> bool:
+        """Set motion detection (sync)."""
+        return self._run_async(self.bridge.set_motion_detection(enable, humanoid_only, sensitivity))
+
+    def set_screen_flip(self, flip: bool) -> bool:
+        """Set screen flip (sync)."""
+        return self._run_async(self.bridge.set_screen_flip(flip))
+
+    def set_watermark(self, on: bool) -> bool:
+        """Set watermark (sync)."""
+        return self._run_async(self.bridge.set_watermark(on))
+
+    def set_status_led(self, on: bool) -> bool:
+        """Set status LED (sync)."""
+        return self._run_async(self.bridge.set_status_led(on))
+
+    def set_resolution(self, hd: bool = True) -> bool:
+        """Set resolution (sync)."""
+        return self._run_async(self.bridge.set_resolution(hd))
+
+    def set_record_audio(self, on: bool) -> bool:
+        """Set audio recording (sync)."""
+        return self._run_async(self.bridge.set_record_audio(on))
+
+    def trigger_ptz_calibration(self) -> bool:
+        """Trigger PTZ calibration (sync)."""
+        return self._run_async(self.bridge.trigger_ptz_calibration())
+
+    def get_device_params(self) -> dict:
+        """Get all device params (sync)."""
+        return self._run_async(self.bridge.get_device_params())
 
     def get_stats(self) -> Dict[str, Any]:
         """Get statistics (sync)."""
