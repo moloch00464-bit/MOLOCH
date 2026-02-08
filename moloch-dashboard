@@ -1,0 +1,6 @@
+#!/bin/bash
+# M.O.L.O.C.H. Hardware Dashboard Launcher
+# Opens the live hardware monitoring dashboard
+
+cd "$(dirname "$0")"
+exec python3 core/dashboard.py "$@"

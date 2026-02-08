@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "M.O.L.O.C.H. Voice Configuration",
+  "description": "Deutsche Stimmen für kontextuelle TTS-Auswahl. Stimmen sind Ressourcen, keine Persönlichkeiten.",
+  "version": "2.0.0",
+  "voices": [
+    {
+      "voice_id": "kobold_karlsson",
+      "display_name": "Karlsson (Kobold)",
+      "engine": "piper",
+      "model_path": "/home/molochzuhause/moloch/models/voices/de_DE-karlsson-low.onnx",
+      "style_tags": ["frech", "kobold", "humorvoll"],
+      "energy_level": "high",
+      "emotional_range": ["frech", "witzig", "verspielt"],
+      "preferred_contexts": ["humor", "pumuckl", "casual"],
+      "language": "de-DE",
+      "sample_rate": 22050,
+      "description": "Freche Kobold-Stimme für humorvolle Interaktionen",
+      "use_cases": ["Pumuckl-Sprüche", "freche Kommentare", "Wortspiele"]
+    },
+    {
+      "voice_id": "thorsten_professional",
+      "display_name": "Thorsten (Professional)",
+      "engine": "piper",
+      "model_path": "/home/molochzuhause/moloch/models/voices/de_DE-thorsten-high.onnx",
+      "style_tags": ["professional", "klar", "autoritativ"],
+      "energy_level": "medium",
+      "emotional_range": ["neutral", "informativ", "seriös"],
+      "preferred_contexts": ["formal", "technical", "announcements"],
+      "language": "de-DE",
+      "sample_rate": 22050,
+      "description": "Klare, professionelle Stimme für formelle Inhalte",
+      "use_cases": ["System-Ansagen", "technische Erklärungen", "formelle Antworten"]
+    },
+    {
+      "voice_id": "thorsten_casual",
+      "display_name": "Thorsten (Casual)",
+      "engine": "piper",
+      "model_path": "/home/molochzuhause/moloch/models/voices/de_DE-thorsten-medium.onnx",
+      "style_tags": ["casual", "freundlich", "gesprächig"],
+      "energy_level": "medium",
+      "emotional_range": ["freundlich", "entspannt", "gesprächig"],
+      "preferred_contexts": ["afternoon", "casual", "chat"],
+      "language": "de-DE",
+      "sample_rate": 22050,
+      "description": "Entspannte Stimme für alltägliche Gespräche",
+      "use_cases": ["casual Chat", "Brainstorming", "informelle Updates"]
+    },
+    {
+      "voice_id": "kerstin_warm",
+      "display_name": "Kerstin (Warm)",
+      "engine": "piper",
+      "model_path": "/home/molochzuhause/moloch/models/voices/de_DE-kerstin-low.onnx",
+      "style_tags": ["warm", "freundlich", "einladend"],
+      "energy_level": "medium",
+      "emotional_range": ["warm", "empathisch", "einladend"],
+      "preferred_contexts": ["evening", "empathetic", "supportive"],
+      "language": "de-DE",
+      "sample_rate": 22050,
+      "description": "Warme, einladende Stimme für empathische Interaktionen",
+      "use_cases": ["Abend-Zusammenfassungen", "Feedback", "Unterstützung"]
+    },
+    {
+      "voice_id": "ramona_energetic",
+      "display_name": "Ramona (Energetic)",
+      "engine": "piper",
+      "model_path": "/home/molochzuhause/moloch/models/voices/de_DE-ramona-low.onnx",
+      "style_tags": ["energetisch", "aufgeweckt", "motivierend"],
+      "energy_level": "high",
+      "emotional_range": ["fröhlich", "enthusiastisch", "motivierend"],
+      "preferred_contexts": ["morning", "motivation", "positive"],
+      "language": "de-DE",
+      "sample_rate": 22050,
+      "description": "Energetische Stimme für Morgen-Interaktionen",
+      "use_cases": ["Morgen-Grüße", "Erinnerungen", "positives Feedback"]
+    },
+    {
+      "voice_id": "eva_calm",
+      "display_name": "Eva (Calm)",
+      "engine": "piper",
+      "model_path": "/home/molochzuhause/moloch/models/voices/de_DE-eva_k-x_low.onnx",
+      "style_tags": ["ruhig", "beruhigend", "sanft"],
+      "energy_level": "low",
+      "emotional_range": ["entspannt", "ruhig", "gelassen"],
+      "preferred_contexts": ["night", "relaxation", "wind-down"],
+      "language": "de-DE",
+      "sample_rate": 22050,
+      "description": "Ruhige Stimme für abendliche Wind-Down Momente",
+      "use_cases": ["Abend-Routinen", "ruhige Gespräche", "Entspannung"]
+    },
+    {
+      "voice_id": "pavoque_neutral",
+      "display_name": "Pavoque (Neutral)",
+      "engine": "piper",
+      "model_path": "/home/molochzuhause/moloch/models/voices/de_DE-pavoque-low.onnx",
+      "style_tags": ["neutral", "sachlich", "klar"],
+      "energy_level": "medium",
+      "emotional_range": ["neutral", "sachlich", "informativ"],
+      "preferred_contexts": ["informational", "neutral", "fallback"],
+      "language": "de-DE",
+      "sample_rate": 22050,
+      "description": "Neutrale Stimme für sachliche Informationen",
+      "use_cases": ["Status-Updates", "Informationen", "Standard-Antworten"]
+    },
+    {
+      "voice_id": "thorsten_quick",
+      "display_name": "Thorsten (Quick)",
+      "engine": "piper",
+      "model_path": "/home/molochzuhause/moloch/models/voices/de_DE-thorsten-low.onnx",
+      "style_tags": ["schnell", "effizient", "kompakt"],
+      "energy_level": "medium",
+      "emotional_range": ["neutral", "effizient"],
+      "preferred_contexts": ["high_load", "quick_response", "efficiency"],
+      "language": "de-DE",
+      "sample_rate": 22050,
+      "description": "Schnelle Stimme für effiziente Antworten bei hoher Last",
+      "use_cases": ["Kurzantworten", "System unter Last", "schnelle Bestätigungen"]
+    }
+  ],
+  "metadata": {
+    "last_updated": "2026-01-22",
+    "default_voice": "kobold_karlsson",
+    "notes": [
+      "8 deutsche Piper-Stimmen konfiguriert",
+      "Kobold-Stimme (Karlsson) als Default für M.O.L.O.C.H. Charakter",
+      "Alle Modelle lokal vorhanden in /home/molochzuhause/moloch/models/voices/"
+    ]
+  }
+}

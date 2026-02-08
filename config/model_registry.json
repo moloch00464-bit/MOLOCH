@@ -1,0 +1,49 @@
+{
+  "version": "1.0",
+  "models": {
+    "person_detector": {
+      "hef_path": "/mnt/moloch-data/hailo/models/yolov8m_h10.hef",
+      "input_size": [640, 640],
+      "type": "detection",
+      "description": "YOLOv8m Person Detection"
+    },
+    "face_detector": {
+      "hef_path": "/mnt/moloch-data/hailo/models/scrfd_2.5g_h10.hef",
+      "input_size": [320, 320],
+      "type": "detection",
+      "description": "SCRFD Face Detection"
+    },
+    "face_embedding": {
+      "hef_path": "/mnt/moloch-data/hailo/models/arcface_mobilenet_v1_h10.hef",
+      "input_size": [112, 112],
+      "type": "embedding",
+      "embedding_size": 512,
+      "description": "ArcFace MobileNet Face Embedding"
+    },
+    "face_landmarks": {
+      "hef_path": "/mnt/moloch-data/hailo/models/face_landmarks_h10.hef",
+      "input_size": [192, 192],
+      "type": "landmark",
+      "description": "Face Landmarks 68 Points"
+    },
+    "hand_detector": {
+      "hef_path": "/mnt/moloch-data/hailo/models/blazepalm_h10.hef",
+      "input_size": [256, 256],
+      "type": "detection",
+      "description": "BlazePalm Hand Detection"
+    },
+    "hand_landmarks": {
+      "hef_path": "/mnt/moloch-data/hailo/models/hand_landmarks_h10.hef",
+      "input_size": [224, 224],
+      "type": "landmark",
+      "description": "Hand Landmarks 21 Points"
+    },
+    "pose_detector": {
+      "hef_path": "/mnt/moloch-data/hailo/models/yolov8s_pose_h10.hef",
+      "input_size": [640, 640],
+      "type": "pose",
+      "keypoints": 17,
+      "description": "YOLOv8s Pose Detection (COCO 17 Keypoints)"
+    }
+  }
+}

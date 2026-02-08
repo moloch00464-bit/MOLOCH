@@ -1,0 +1,154 @@
+{
+  "_meta": {
+    "file": "moloch_vision_pipeline.json",
+    "version": "1.0",
+    "date": "2026-02-01",
+    "purpose": "Claude Code Kontext: Kamera-Integration, NPU-Pipeline, Face Recognition fuer M.O.L.O.C.H.",
+    "note": "Einige Pakete/Models sind moeglicherweise bereits installiert - pruefe vor Installation!"
+  },
+
+  "cameras": {
+    "sonoff_cam_pt2": {
+      "role": "Primaerkamera - HD Stream + PTZ Tracking",
+      "ip": "192.168.178.25",
+      "streams": {
+        "rtsp_main": "rtsp://USER:PASS@CAMERA_IP:554/av_stream/ch0",
+        "onvif_port": 80,
+        "onvif_user": "CHANGE_ME",
+        "onvif_pass": "CHANGE_ME"
+      },
+      "specs": {
+        "resolution": "1080P Full HD",
+        "sensor": "1/2.9 Zoll",
+        "aperture": "f/2.0",
+        "ptz_horizontal": "340 Grad",
+        "ptz_vertical": "180 Grad",
+        "preset_points": 6,
+        "ir_leds": "2x 940nm (unsichtbar)",
+        "white_leds": "2x (Farbnachtsicht)",
+        "audio": "2-Wege (Mikrofon + Speaker)",
+        "nightvision_range": "8-10m",
+        "power": "5V 2A USB-C",
+        "wifi": "2.4GHz",
+        "onboard_ai": ["Human Detection", "Motion Tracking"],
+        "storage": "MicroSD bis 128GB"
+      },
+      "pipeline_role": "HD-Feed fuer Face Recognition + PTZ Auto-Tracking",
+      "onvif_ptz": {
+        "description": "Kamera unterstuetzt ONVIF PTZ - programmatische Schwenk-/Neige-Steuerung",
+        "python_lib": "onvif-zeep",
+        "use_case": "Auto-Tracking: Person erkannt -> PTZ folgt Person",
+        "example_code": "from onvif import ONVIFCamera; cam = ONVIFCamera('CAMERA_IP', 80, 'CHANGE_ME', 'CHANGE_ME')"
+      }
+    },
+
+    "seeed_xiao_vision_ai": {
+      "role": "Edge-AI Kamera - Vorverarbeitung + Trigger",
+      "ip": "unbekannt - per nmap -sn 192.168.178.0/24 finden",
+      "discovery": {
+        "method": "nmap -sn 192.168.178.0/24",
+        "identifier": "ESP32-C3 WiFi Device",
+        "mac_vendor": "Espressif"
+      },
+      "hardware": {
+        "board": "Seeed Studio XIAO ESP32S3 Sense + Grove Vision AI V2",
+        "soc_vision": "Himax WiseEye2 HX6538",
+        "cpu": "Dual-core Arm Cortex-M55",
+        "npu": "Arm Ethos-U55",
+        "wifi_chip": "ESP32-C3",
+        "camera_sensor": "OV5647 5MP",
+        "resolution_max": "1080p@30fps",
+        "fov": "62 Grad"
+      },
+      "ai_capabilities": {
+        "onboard_npu": "Arm Ethos-U55 - laeuft OHNE Pi5!",
+        "supported_models": ["YOLO v5/v8 nano", "MobileNet", "Person Detection", "Face Detection"],
+        "deployment": "SenseCraft AI (No-Code) oder Edge Impulse"
+      },
+      "stream": {
+        "type": "MJPEG ueber HTTP (kein RTSP!)",
+        "typical_endpoint": "http://<IP>/mjpeg oder http://<IP>:8080/stream"
+      },
+      "pipeline_role": "Edge-Preprocessing: Person Detection -> Trigger an Pi5 -> Hailo macht Face Recognition"
+    }
+  },
+
+  "npu_hailo": {
+    "model": "Hailo-10H",
+    "interface": "PCIe Gen 3 x1",
+    "host": "Raspberry Pi 5 (192.168.178.24)",
+    "performance": "40 TOPS",
+    "driver": "hailo1x",
+    "status": "erkannt und funktionsfaehig",
+    "sdk": {
+      "hailort": {
+        "cli_tool": "hailortcli",
+        "check_command": "hailortcli fw-control identify"
+      },
+      "model_zoo": {
+        "_note": "HAILO-10H Modelle - NICHT h8l verwenden!",
+        "person_detection": "yolov8s_h10.hef",
+        "face_detection": "scrfd_2.5g_h10.hef",
+        "face_recognition": "arcface_mobilefacenet_v1_h10.hef",
+        "pose_estimation": "yolov8s_pose_h10.hef"
+      }
+    },
+    "gstreamer_example": "gst-launch-1.0 rtspsrc location=rtsp://USER:PASS@CAMERA_IP:554/av_stream/ch0 ! decodebin ! videoconvert ! hailonet hef-path=yolov8s_h10.hef ! hailooverlay ! videoconvert ! autovideosink"
+  },
+
+  "distributed_ai_pipeline": {
+    "tier_1_edge": {
+      "device": "Seeed AI Cam (Ethos-U55 NPU)",
+      "task": "Person Detection - schnelle Erkennung ob Mensch im Bild",
+      "latency": "<50ms",
+      "triggers": "Weckt Pi5 Pipeline auf wenn Person erkannt"
+    },
+    "tier_2_processing": {
+      "device": "Pi5 + Hailo-10H (40 TOPS)",
+      "tasks": ["Face Detection", "Face Recognition", "Emotion Detection", "PTZ Auto-Tracking"]
+    },
+    "tier_3_action": {
+      "tasks": ["Signal Messenger Alert", "TTS Ansage", "Dashboard Update", "Logging"]
+    }
+  },
+
+  "face_recognition": {
+    "crew_database": {
+      "directory": "/home/molochzuhause/moloch/faces/",
+      "structure": ["ray", "lilly", "meise", "sven", "franzi", "markus", "unknown"],
+      "note": "Pro Person 3-5 Fotos aus verschiedenen Winkeln"
+    },
+    "libraries": {
+      "primary": "face_recognition (dlib-basiert)",
+      "advanced": "deepface (Emotion Detection)",
+      "hailo_native": "SCRFD + ArcFace als HEF"
+    }
+  },
+
+  "network": {
+    "pi5": {
+      "ip": "192.168.178.24",
+      "ssh_user": "markus",
+      "home": "/home/molochzuhause"
+    },
+    "sonoff_cam": {
+      "ip": "192.168.178.25",
+      "name": "CHANGE_ME"
+    },
+    "subnet": "192.168.178.0/24"
+  },
+
+  "wgt_2026": {
+    "event": "Wave-Gotik-Treffen Leipzig",
+    "crew": ["Ray", "Lilly", "Meise", "Sven", "Franzi", "Markus"],
+    "signal_group": "SNG Crew Signal Gruppe"
+  },
+
+  "coding_rules": {
+    "language": "Python 3",
+    "comments": "Deutsch",
+    "quality": "DGM-Grade - robust, fehlerbehandelt",
+    "priority_1": "Pruefe was schon installiert ist bevor du Pakete installierst",
+    "priority_2": "Erweitere bestehende Code - nicht neu schreiben!"
+  }
+}

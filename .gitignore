@@ -1,3 +1,60 @@
-__pycache__/
-*.pyc
+# ===========================
+# M.O.L.O.C.H. .gitignore
+# ===========================
+
+# --- Credentials & Secrets ---
+config/api_keys.json
+config/camera_cloud.json
+config/sonoff_camera.json
+moloch_context.json
+moloch_context.json.bak
+context/personal_context.json
+SYSTEM_STATE.json
 .env
+*.secret
+
+# --- Models & Large Files ---
+models/
+firmware/
+
+# --- Runtime Data ---
+faces/
+snapshots/
+data/
+logs/
+*.log
+
+# --- Images & Media ---
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.mp4
+*.wav
+*.mp3
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+venv/
+.venv/
+env/
+
+# --- IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+*.bak

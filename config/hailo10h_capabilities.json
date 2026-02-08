@@ -1,0 +1,64 @@
+{
+  "feature": "Hailo-10H_Details_for_M.O.L.O.C.H.",
+  "hardware_identity": {
+    "npu": "Hailo-10H",
+    "npu_ram": "8GB",
+    "tops": 40,
+    "host": "Raspberry Pi 5"
+  },
+  "core_capabilities": {
+    "large_model_support": {
+      "enabled": true,
+      "description": "8GB NPU RAM erlaubt große Modelle für Vision, Audio und LLMs",
+      "benefits": [
+        "größere Whisper-Varianten ohne Chunking",
+        "Vision-Modelle mit höherer Auflösung",
+        "lokale LLM-Inferenz mit längeren Kontexten"
+      ]
+    },
+    "native_targeting": {
+      "enabled": true,
+      "target_flag": "--hw-arch hailo10h",
+      "goal": "HEF-Modelle nativ für 10H erstellen"
+    },
+    "high_efficiency": {
+      "vision": true,
+      "audio": true,
+      "multimodal": true,
+      "description": "Vision und Audio nativ auf die NPU auslagern"
+    },
+    "low_latency_edge": {
+      "enabled": true,
+      "description": "Keine Cloud, lokale Inferenz für Echtzeit"
+    }
+  },
+  "pipeline_recommendations": {
+    "vision_pipeline": [
+      "RTSP -> Hardware Decode -> NPU Inference",
+      "YOLOv8s / Face / Pose für Hailo-10H",
+      "15 FPS als Ziel für Stabilität",
+      "Keine JPG-Dumps"
+    ],
+    "audio_pipeline": [
+      "webrtcvad + Peak Norm -3dB",
+      "Whisper auf Hailo-10H",
+      "Keine CPU-only STT"
+    ]
+  },
+  "system_monitoring": {
+    "npu_temp_limits": [75, 85, 95],
+    "pci_bus_monitor": true,
+    "queue_latency_check": true
+  },
+  "integration_rules": {
+    "no_8l_references": true,
+    "strict_arch_enforcement": true,
+    "verify_hef_architecture": true
+  },
+  "expected_outcomes": {
+    "npu_usage_visible": true,
+    "cpu_load_reduced": true,
+    "stable_inference": true,
+    "real_time_reactions": true
+  }
+}

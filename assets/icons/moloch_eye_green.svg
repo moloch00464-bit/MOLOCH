@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- Background circle -->
+  <circle cx="64" cy="64" r="60" fill="#0a0a12"/>
+  <circle cx="64" cy="64" r="58" fill="none" stroke="#00ff88" stroke-width="2"/>
+
+  <!-- Outer eye shape - almond -->
+  <ellipse cx="64" cy="64" rx="45" ry="28" fill="none" stroke="#00ff88" stroke-width="3"/>
+
+  <!-- Inner glow -->
+  <ellipse cx="64" cy="64" rx="42" ry="25" fill="#001a0d" opacity="0.5"/>
+
+  <!-- Iris -->
+  <circle cx="64" cy="64" r="20" fill="#003d1a"/>
+  <circle cx="64" cy="64" r="20" fill="none" stroke="#00ff88" stroke-width="2"/>
+
+  <!-- Iris pattern - circuits -->
+  <circle cx="64" cy="64" r="15" fill="none" stroke="#00aa55" stroke-width="1" stroke-dasharray="3,3"/>
+  <circle cx="64" cy="64" r="10" fill="none" stroke="#00aa55" stroke-width="1"/>
+
+  <!-- Pupil -->
+  <circle cx="64" cy="64" r="7" fill="#00ff88"/>
+  <circle cx="64" cy="64" r="4" fill="#00ffaa"/>
+
+  <!-- Light reflection -->
+  <circle cx="58" cy="58" r="3" fill="#ffffff" opacity="0.8"/>
+  <circle cx="70" cy="70" r="1.5" fill="#ffffff" opacity="0.4"/>
+
+  <!-- Scanning line effect -->
+  <line x1="20" y1="64" x2="40" y2="64" stroke="#00ff88" stroke-width="1" opacity="0.6"/>
+  <line x1="88" y1="64" x2="108" y2="64" stroke="#00ff88" stroke-width="1" opacity="0.6"/>
+
+  <!-- Corner accents -->
+  <path d="M20 44 L20 34 L30 34" fill="none" stroke="#00ff88" stroke-width="2"/>
+  <path d="M108 44 L108 34 L98 34" fill="none" stroke="#00ff88" stroke-width="2"/>
+  <path d="M20 84 L20 94 L30 94" fill="none" stroke="#00ff88" stroke-width="2"/>
+  <path d="M108 84 L108 94 L98 94" fill="none" stroke="#00ff88" stroke-width="2"/>
+
+  <!-- "LIVE" indicator dot -->
+  <circle cx="100" cy="28" r="5" fill="#00ff88">
+    <animate attributeName="opacity" values="1;0.3;1" dur="1.5s" repeatCount="indefinite"/>
+  </circle>
+</svg>

@@ -1,0 +1,4 @@
+#!/bin/bash
+# M.O.L.O.C.H. Push-to-Talk Launcher
+cd /home/molochzuhause/moloch
+python3 -m core.gui.push_to_talk

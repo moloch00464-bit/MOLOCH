@@ -1,0 +1,10 @@
+# Origin Fragments Directory
+#
+# This directory will contain conversation history fragments from:
+# - chatgpt.json  - OpenAI ChatGPT conversations
+# - claude.json   - Anthropic Claude conversations
+# - gemini.json   - Google Gemini conversations
+#
+# These files are OPTIONAL and user-provided.
+# They are NOT auto-generated or auto-imported.
+# The user decides what history to include.
