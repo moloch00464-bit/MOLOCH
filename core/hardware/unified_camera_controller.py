@@ -364,16 +364,23 @@ class UnifiedCameraController:
                 self.logger.info("Cloud bridge disabled in config")
                 return
 
-            # Parse cloud config
+            # Parse cloud config with env var fallback
             cloud_config_data = config_data.get('cloud_config', {})
+
+            def _cfg(key, env_var=None, default=''):
+                val = cloud_config_data.get(key, default)
+                if env_var and (not val or val == 'CHANGE_ME'):
+                    val = os.environ.get(env_var, default)
+                return val
+
             cloud_config = CloudConfig(
                 enabled=True,
-                api_base_url=cloud_config_data.get('api_base_url', ''),
-                app_id=cloud_config_data.get('app_id', ''),
-                app_secret=cloud_config_data.get('app_secret', ''),
-                device_id=cloud_config_data.get('device_id', ''),
-                username=cloud_config_data.get('username', ''),
-                password=cloud_config_data.get('password', ''),
+                api_base_url=_cfg('api_base_url'),
+                app_id=_cfg('app_id', 'EWELINK_APP_ID_1'),
+                app_secret=_cfg('app_secret', 'EWELINK_APP_SECRET_1'),
+                device_id=_cfg('device_id'),
+                username=_cfg('username', 'EWELINK_USERNAME'),
+                password=_cfg('password', 'EWELINK_PASSWORD'),
                 timeout=cloud_config_data.get('timeout', 3.0),
                 retry_count=cloud_config_data.get('retry_count', 1),
                 token_refresh_margin=cloud_config_data.get('token_refresh_margin', 300)

@@ -1,20 +1,29 @@
 #!/usr/bin/env python3
 """
-M.O.L.O.C.H. Autonomous Tracker
-================================
+M.O.L.O.C.H. Autonomous Tracker v2 - AbsoluteMove
+===================================================
 
-Dedicated 15 Hz tracking thread with ContinuousMove velocity control.
-Implements proportional tracking and search behavior.
+Dedicated 5 Hz tracking thread with AbsoluteMove position control.
+Implements proportional tracking and search behavior using real camera
+position feedback (closed-loop control).
+
+Upgrade from v1 (ContinuousMove):
+- AbsoluteMove replaces ContinuousMove (no 90-degree-per-call limit)
+- Real camera position via get_position() replaces virtual position tracking
+- track_target(error_x, error_y) for proportional position-based tracking
+- move_absolute() for search/patrol movements
+- Full 342.8 degree pan range utilization
 
 Features:
-- 15 Hz tracking loop (66ms cycle)
-- ContinuousMove with proportional velocity (no Stop() during tracking)
-- Search mode: slow pan sweep when target lost
-- Largest bounding box selection
+- 5 Hz tracking loop (200ms cycle)
+- AbsoluteMove with proportional position control
+- Search mode: patrol sweep when target lost
+- Largest bounding box selection with scoring
 - Configurable deadzone and gain
+- State machine: IDLE, TRACKING, SEARCHING, LOCKED, DWELL, FROZEN
 
 Author: M.O.L.O.C.H. System
-Date: 2026-02-04
+Date: 2026-02-08
 """
 
 import time
@@ -39,7 +48,7 @@ except ImportError:
 class TrackerState(Enum):
     """Tracker state machine."""
     IDLE = "idle"           # Tracking disabled
-    TRACKING = "tracking"   # Following target with ContinuousMove
+    TRACKING = "tracking"   # Following target with AbsoluteMove
     SEARCHING = "searching" # Lost target, sweeping
     LOCKED = "locked"       # Target centered in deadzone
     DWELL = "dwell"         # Target acquired, waiting before movement
@@ -57,109 +66,96 @@ class TargetType(Enum):
 class TrackingConfig:
     """Tracking parameters."""
     # === LOCK/FROZEN State Parameters ===
-    lock_threshold_pixels: int = 8      # Enter LOCK when error < this
-    unlock_threshold_pixels: int = 15   # Leave LOCK when error > this (hysteresis)
-    frozen_threshold_pixels: int = 5    # Enter FROZEN when error < this (very stable)
+    lock_threshold_pixels: int = 8
+    unlock_threshold_pixels: int = 15
+    frozen_threshold_pixels: int = 5
 
-    # === Dwell Timer (wait before moving) ===
-    dwell_time_sec: float = 1.5         # Wait this long after target acquired before moving
+    # === Dwell Timer ===
+    dwell_time_sec: float = 1.5
 
-    # Proportional gains for velocity control
-    pan_gain: float = 0.004             # Reduced for stability
-    tilt_gain: float = 0.004
-
-    # Maximum velocity (ONVIF normalized 0-1) - reduced for stability
-    max_velocity: float = 0.35          # Reduced from 0.4
-
-    # Minimum velocity threshold - below this, clamp to zero
-    min_velocity: float = 0.08
-
-    # === Virtual PTZ Position Tracking ===
-    virtual_pan_min: float = -1.0       # Soft limit left
-    virtual_pan_max: float = 1.0        # Soft limit right
-    virtual_tilt_min: float = -0.5      # Soft limit down
-    virtual_tilt_max: float = 0.5       # Soft limit up
-    virtual_position_decay: float = 0.02  # Position integration factor per cycle
+    # === AbsoluteMove Tracking Parameters ===
+    fov_horizontal: float = 110.0
+    fov_vertical: float = 65.0
+    pan_gain: float = 0.7
+    tilt_gain: float = 0.5
+    max_step_pan: float = 30.0
+    max_step_tilt: float = 20.0
+    min_step_deg: float = 0.5
+    tracking_speed: float = 1.0
+    move_cooldown_ms: float = 50.0
 
     # Search mode parameters
-    search_speed: float = 0.10          # Reduced from 0.12
-    search_direction_interval: float = 4.0  # Seconds before switching direction
-    search_reset_to_center: bool = True # Reset to center when starting search
+    search_speed: float = 0.3
+    search_direction_interval: float = 4.0
+    search_reset_to_center: bool = True
+    search_patrol_positions: list = field(default_factory=lambda: [
+        (0.0, 0.0),
+        (-84.0, 0.0),
+        (-168.0, 0.0),
+        (-84.0, 30.0),
+        (0.0, 30.0),
+        (84.0, 30.0),
+        (170.0, 0.0),
+        (84.0, 0.0),
+    ])
 
-    # Target lost timeout before starting search
     target_lost_timeout: float = 2.0
-
-    # Frame dimensions (detection space)
     frame_width: int = 640
     frame_height: int = 640
 
-    # === Detection filtering (STRICT - reject hands, partial bodies) ===
-    min_bbox_height_ratio: float = 0.40   # Increased from 0.25 - reject small detections
-    max_bbox_center_y_ratio: float = 0.75 # Reject detections in bottom 25% of frame
-    min_bbox_area_ratio: float = 0.08     # Increased from 0.05
-    min_confidence: float = 0.50          # Increased from 0.45
-    min_aspect_ratio: float = 0.35        # Min width/height (reject narrow objects)
+    # === Detection filtering ===
+    min_bbox_height_ratio: float = 0.40
+    max_bbox_center_y_ratio: float = 0.75
+    min_bbox_area_ratio: float = 0.08
+    min_confidence: float = 0.50
+    min_aspect_ratio: float = 0.35
 
-    # === Target persistence (stable tracking) ===
-    confidence_hysteresis: float = 0.15   # New target needs +15% confidence to switch
-    stability_frames: int = 7             # Increased from 5 - more frames before switching
-    center_priority_weight: float = 0.4   # Increased bonus for centered detections
+    # === Target persistence ===
+    confidence_hysteresis: float = 0.15
+    stability_frames: int = 7
+    center_priority_weight: float = 0.4
 
     # === ADAPTIVE TARGET STRATEGY ===
-    # Face tracking (preferred)
-    face_min_confidence: float = 0.55     # Min face confidence to track face
-    face_min_stability: int = 4           # Frames before switching to face
-    face_max_bbox_height: float = 0.65    # Max bbox height for face mode (not full body)
-
-    # Body tracking (fallback)
-    body_min_confidence: float = 0.45     # Min confidence for body tracking
-    body_min_bbox_height: float = 0.30    # Min height for valid body
-    body_min_stability: int = 5           # Frames before switching to body
-
-    # Target switching
-    switch_cooldown_sec: float = 1.0      # Min time between target type switches
-    prefer_current_target: bool = True    # Stick with current target if still valid
+    face_min_confidence: float = 0.55
+    face_min_stability: int = 4
+    face_max_bbox_height: float = 0.65
+    body_min_confidence: float = 0.45
+    body_min_bbox_height: float = 0.30
+    body_min_stability: int = 5
+    switch_cooldown_sec: float = 1.0
+    prefer_current_target: bool = True
 
 
 @dataclass
 class DetectionData:
     """Detection data for tracking."""
     detected: bool = False
-    bbox: List[float] = field(default_factory=lambda: [0, 0, 0, 0])  # x1, y1, x2, y2
-    center_x: float = 0.5  # Normalized 0-1
-    center_y: float = 0.5  # Normalized 0-1
+    bbox: list = field(default_factory=lambda: [0, 0, 0, 0])
+    center_x: float = 0.5
+    center_y: float = 0.5
     confidence: float = 0.0
-    target_id: int = 0     # Stable target identifier
+    target_id: int = 0
     timestamp: float = field(default_factory=time.time)
-    # Pose-based tracking
-    is_pose_detection: bool = False   # True if from pose detector
-    has_face: bool = False            # Face keypoints visible
-    has_torso: bool = False           # Torso keypoints visible
-    head_center_x: float = 0.5        # Head keypoint center (for tracking)
-    head_center_y: float = 0.5        # Head keypoint center (for tracking)
+    is_pose_detection: bool = False
+    has_face: bool = False
+    has_torso: bool = False
+    head_center_x: float = 0.5
+    head_center_y: float = 0.5
     validation_reason: str = ""
-    # Adaptive target type
-    target_type: str = "none"         # "face", "body", or "none"
+    target_type: str = "none"
 
 
 class AutonomousTracker:
     """
-    Autonomous person tracking with 15 Hz control loop.
+    Autonomous person tracking with 5 Hz control loop.
 
-    Uses ContinuousMove for smooth proportional velocity control.
-    Does NOT call Stop() during tracking - only sends continuous velocity updates.
+    Uses AbsoluteMove for position-based tracking with real camera feedback.
+    Replaces ContinuousMove (which was limited to 90 degrees per call).
     """
 
-    LOOP_RATE_HZ = 5  # 200ms cycle time (reduced to avoid camera rate-limiting)
+    LOOP_RATE_HZ = 5  # 200ms cycle time
 
     def __init__(self, camera_controller=None, config: TrackingConfig = None):
-        """
-        Initialize tracker.
-
-        Args:
-            camera_controller: SonoffCameraController instance
-            config: Tracking configuration
-        """
         self.camera = camera_controller
         self.config = config or TrackingConfig()
 
@@ -189,14 +185,15 @@ class AutonomousTracker:
         self.last_target_switch_time = 0.0
 
         # Search mode state
-        self.search_direction = 1  # 1 = right, -1 = left
+        self.search_direction = 1
         self.last_direction_switch = 0.0
+        self.search_patrol_index = 0
+        self.search_move_time = 0.0
 
-        # === Virtual PTZ Position Tracking ===
-        self.virtual_pan = 0.0      # Estimated pan position (-1 to 1)
-        self.virtual_tilt = 0.0     # Estimated tilt position (-1 to 1)
-        self.last_velocity_pan = 0.0
-        self.last_velocity_tilt = 0.0
+        # === Real Camera Position (replaces virtual position) ===
+        self.last_known_pan = 0.0
+        self.last_known_tilt = 0.0
+        self.last_position_time = 0.0
         self.last_move_time = 0.0
 
         # === Dwell Timer State ===
@@ -210,23 +207,21 @@ class AutonomousTracker:
             "search_moves": 0,
             "state_changes": 0,
             "detections_filtered": 0,
-            "target_switches": 0
+            "target_switches": 0,
+            "position_reads": 0
         }
 
         # Callbacks
         self.on_state_change: Optional[Callable[[TrackerState], None]] = None
 
-        logger.info(f"AutonomousTracker initialized (rate={self.LOOP_RATE_HZ}Hz)")
+        logger.info(f"AutonomousTracker v2 (AbsoluteMove) initialized (rate={self.LOOP_RATE_HZ}Hz)")
 
     def set_camera(self, camera_controller):
         """Set camera controller."""
         self.camera = camera_controller
-        # Debug: Log object IDs to verify same instance
         logger.info(f"Camera controller connected to AutonomousTracker")
-        logger.info(f"  Controller id: {id(camera_controller)}")
         if camera_controller:
-            logger.info(f"  ptz_service id: {id(camera_controller.ptz_service) if camera_controller.ptz_service else 'None'}")
-            logger.info(f"  profile_token: {camera_controller.profile_token}")
+            logger.info(f"  Controller id: {id(camera_controller)}")
             logger.info(f"  is_connected: {camera_controller.is_connected}")
 
     def start(self) -> bool:
@@ -241,66 +236,45 @@ class AutonomousTracker:
 
         # === VERIFY CONTROLLER INSTANCE ===
         logger.info("=" * 60)
-        logger.info("=== TRACKER START: CONTROLLER VERIFICATION ===")
+        logger.info("=== TRACKER v2 START: CONTROLLER VERIFICATION ===")
         logger.info(f"self.camera:          {self.camera}")
         logger.info(f"self.camera id:       {id(self.camera)}")
         logger.info(f"is_connected:         {self.camera.is_connected}")
-        logger.info(f"ptz_service:          {self.camera.ptz_service}")
-        logger.info(f"ptz_service id:       {id(self.camera.ptz_service) if self.camera.ptz_service else 'None'}")
-        logger.info(f"profile_token:        {self.camera.profile_token}")
         logger.info(f"mode:                 {self.camera.mode}")
         logger.info("=" * 60)
 
-        # === FORCE DIAGNOSTIC PTZ MOVEMENT on start ===
-        logger.info("=" * 60)
-        logger.info("=== PTZ DIAGNOSTIC MOVEMENT TEST ===")
-        logger.info(f"Controller object id: {id(self.camera)}")
-        logger.info(f"ptz_service object id: {id(self.camera.ptz_service) if self.camera.ptz_service else 'None'}")
-        logger.info(f"profile_token: {self.camera.profile_token}")
-
-        # Log ONVIF request details
-        if self.camera.ptz_service:
-            try:
-                logger.info(f"PTZ Service type: {type(self.camera.ptz_service)}")
-            except:
-                pass
-
-        # Execute diagnostic movement: pan RIGHT at 0.3 for 2 seconds
-        logger.info("-" * 40)
-        logger.info("DIAGNOSTIC: Sending continuous_move(pan=0.3, tilt=0.0) for 2 seconds...")
-        logger.info("EXPECTED: Camera should physically pan RIGHT")
-
-        test_start = time.time()
-        test_result = self.camera.continuous_move(0.3, 0.0, timeout_sec=2.0, verbose=True)
-        test_elapsed = time.time() - test_start
-
-        logger.info(f"DIAGNOSTIC: continuous_move returned: {test_result}")
-        logger.info(f"DIAGNOSTIC: Execution time: {test_elapsed:.2f}s")
-
-        if test_result:
-            logger.info("DIAGNOSTIC: Command accepted - camera SHOULD be moving!")
-        else:
-            logger.error("DIAGNOSTIC: Command FAILED - NO MOVEMENT!")
-
-        # After movement, explicitly send Stop and log
-        logger.info("-" * 40)
-        logger.info("DIAGNOSTIC: Sending Stop() command...")
+        # === DIAGNOSTIC: Read initial position ===
+        logger.info("=== READING INITIAL CAMERA POSITION ===")
         try:
-            if self.camera.ptz_service:
-                stop_result = self.camera.ptz_service.Stop({
-                    'ProfileToken': self.camera.profile_token,
-                    'PanTilt': True,
-                    'Zoom': True
-                })
-                logger.info(f"DIAGNOSTIC: Stop() result: {stop_result}")
-            else:
-                self.camera.stop()
-                logger.info("DIAGNOSTIC: stop() called via controller")
+            pos = self.camera.get_position()
+            self.last_known_pan = pos.pan
+            self.last_known_tilt = pos.tilt
+            self.last_position_time = time.time()
+            logger.info(f"Initial position: pan={pos.pan:.1f} deg, tilt={pos.tilt:.1f} deg")
         except Exception as e:
-            logger.error(f"DIAGNOSTIC: Stop() error: {e}")
+            logger.error(f"Failed to read initial position: {e}")
 
+        # === DIAGNOSTIC: Test AbsoluteMove ===
+        logger.info("-" * 40)
+        logger.info("DIAGNOSTIC: Testing AbsoluteMove (small nudge +5 deg pan)...")
+        test_pan = self.last_known_pan + 5.0
+        test_result = self.camera.move_absolute(test_pan, self.last_known_tilt, speed=0.5)
+        logger.info(f"DIAGNOSTIC: move_absolute returned: {test_result}")
+        time.sleep(1.0)
+
+        try:
+            pos = self.camera.get_position()
+            logger.info(f"DIAGNOSTIC: Position after nudge: pan={pos.pan:.1f} deg, tilt={pos.tilt:.1f} deg")
+            self.last_known_pan = pos.pan
+            self.last_known_tilt = pos.tilt
+        except Exception as e:
+            logger.error(f"DIAGNOSTIC: Position read failed: {e}")
+
+        # Move back
+        self.camera.move_absolute(self.last_known_pan - 5.0, self.last_known_tilt, speed=0.5)
+        time.sleep(1.0)
         logger.info("=" * 60)
-        logger.info("PTZ DIAGNOSTIC COMPLETE - Did camera physically move?")
+        logger.info("DIAGNOSTIC COMPLETE")
         logger.info("=" * 60)
 
         self._running = True
@@ -308,7 +282,7 @@ class AutonomousTracker:
         self._thread = threading.Thread(target=self._tracking_loop, daemon=True)
         self._thread.start()
 
-        logger.info("AutonomousTracker started")
+        logger.info("AutonomousTracker v2 started")
         return True
 
     def stop(self):
@@ -320,7 +294,6 @@ class AutonomousTracker:
             self._thread.join(timeout=1.0)
             self._thread = None
 
-        # Stop camera movement
         if self.camera:
             self.camera.stop()
 
@@ -335,11 +308,6 @@ class AutonomousTracker:
         - Filters out hands, partial bodies, low-confidence detections
         - Maintains current target if still valid
         - Requires stability before switching to new target
-
-        Args:
-            detections: List of detection dicts with bbox, confidence, class
-            frame_width: Detection frame width
-            frame_height: Detection frame height
         """
         with self._lock:
             self.config.frame_width = frame_width
@@ -351,10 +319,9 @@ class AutonomousTracker:
                 self.candidate_stability_count = 0
                 return
 
-            # Filter for person detections
             person_dets = [d for d in detections if d.get("class", "") == "person"]
             if not person_dets:
-                person_dets = detections  # Use any if no person class
+                person_dets = detections
 
             # === STAGE 1: Filter out invalid detections ===
             valid_dets = []
@@ -370,30 +337,25 @@ class AutonomousTracker:
                 height = y2 - y1
                 area = width * height
 
-                # Filter 1: Minimum confidence
                 if conf < self.config.min_confidence:
                     self.stats["detections_filtered"] += 1
                     continue
 
-                # Filter 2: Minimum height (reject hands, partial bodies)
                 height_ratio = height / frame_height
                 if height_ratio < self.config.min_bbox_height_ratio:
                     self.stats["detections_filtered"] += 1
                     continue
 
-                # Filter 3: Minimum area
                 area_ratio = area / frame_area
                 if area_ratio < self.config.min_bbox_area_ratio:
                     self.stats["detections_filtered"] += 1
                     continue
 
-                # Filter 4: Aspect ratio (reject narrow objects like hands)
                 aspect_ratio = width / height if height > 0 else 0
                 if aspect_ratio < self.config.min_aspect_ratio:
                     self.stats["detections_filtered"] += 1
                     continue
 
-                # Filter 5: Reject detections in bottom portion of frame (likely feet/floor)
                 center_y_ratio = ((y1 + y2) / 2) / frame_height
                 if center_y_ratio > self.config.max_bbox_center_y_ratio:
                     self.stats["detections_filtered"] += 1
@@ -411,21 +373,14 @@ class AutonomousTracker:
                 bbox = d.get("bbox", [0, 0, 0, 0])
                 conf = d.get("confidence", 0)
                 x1, y1, x2, y2 = bbox
-
-                # Base score: area (larger = closer)
                 area = (x2 - x1) * (y2 - y1)
                 area_score = area / frame_area
-
-                # Center bonus: prioritize detections near frame center
                 center_x = (x1 + x2) / 2 / frame_width
                 center_y = (y1 + y2) / 2 / frame_height
                 dist_from_center = math.sqrt((center_x - 0.5)**2 + (center_y - 0.5)**2)
                 center_score = 1.0 - min(1.0, dist_from_center * 2)
-
-                # Combined score
                 return area_score + (center_score * self.config.center_priority_weight) + (conf * 0.2)
 
-            # Sort by score
             scored_dets = sorted(valid_dets, key=score_detection, reverse=True)
             best_candidate = scored_dets[0]
             best_bbox = best_candidate.get("bbox", [0, 0, 0, 0])
@@ -436,45 +391,36 @@ class AutonomousTracker:
             center_x = (x1 + x2) / 2 / frame_width
             center_y = (y1 + y2) / 2 / frame_height
 
-            # Check if current target is still in the detections
             current_target_still_valid = False
             current_target_detection = None
             if self.current_target_id > 0 and self.current_target_confidence > 0:
-                # Look for a detection overlapping with current target
                 for d in valid_dets:
                     bbox = d.get("bbox", [0, 0, 0, 0])
                     if self._bbox_iou(bbox, self.current_target_bbox) > 0.3:
                         current_target_still_valid = True
                         current_target_detection = d
-                        # Update current target position
                         self.current_target_bbox = bbox
                         self.current_target_confidence = d.get("confidence", 0)
                         break
 
-            # Find highest-confidence detection that is NOT the current target
-            # (Use raw confidence for switch decision, not scored selection)
             best_alternative = None
             best_alternative_conf = 0.0
             for d in valid_dets:
                 conf = d.get("confidence", 0)
                 bbox = d.get("bbox", [0, 0, 0, 0])
-                # Different from current target?
                 if self._bbox_iou(bbox, self.current_target_bbox) < 0.3:
                     if conf > best_alternative_conf:
                         best_alternative_conf = conf
                         best_alternative = d
 
-            # Decide whether to switch targets
             should_switch = False
             switch_to_bbox = best_bbox
             switch_to_conf = best_conf
 
             if not current_target_still_valid:
-                # Current target lost - switch immediately to best scored
                 should_switch = True
                 self.candidate_stability_count = 0
             elif best_alternative and best_alternative_conf > self.current_target_confidence + self.config.confidence_hysteresis:
-                # Higher-confidence alternative found - require stability
                 self.candidate_stability_count += 1
                 logger.debug(f"Stability count: {self.candidate_stability_count}/{self.config.stability_frames} "
                            f"(alt_conf={best_alternative_conf:.2f} vs cur={self.current_target_confidence:.2f})")
@@ -493,7 +439,6 @@ class AutonomousTracker:
                 self.current_target_confidence = switch_to_conf
                 self.stats["target_switches"] += 1
 
-            # Use current target position for tracking
             if self.current_target_id > 0:
                 tx1, ty1, tx2, ty2 = self.current_target_bbox
                 center_x = (tx1 + tx2) / 2 / frame_width
@@ -514,20 +459,16 @@ class AutonomousTracker:
         """Calculate Intersection over Union between two bboxes."""
         if len(bbox1) != 4 or len(bbox2) != 4:
             return 0.0
-
         x1 = max(bbox1[0], bbox2[0])
         y1 = max(bbox1[1], bbox2[1])
         x2 = min(bbox1[2], bbox2[2])
         y2 = min(bbox1[3], bbox2[3])
-
         if x2 <= x1 or y2 <= y1:
             return 0.0
-
         intersection = (x2 - x1) * (y2 - y1)
         area1 = (bbox1[2] - bbox1[0]) * (bbox1[3] - bbox1[1])
         area2 = (bbox2[2] - bbox2[0]) * (bbox2[3] - bbox2[1])
         union = area1 + area2 - intersection
-
         return intersection / union if union > 0 else 0.0
 
     def update_pose_detection(self, poses: List[Dict], frame_width: int = 640, frame_height: int = 640):
@@ -535,14 +476,6 @@ class AutonomousTracker:
         ADAPTIVE pose detection - decides between FACE and BODY tracking.
 
         Priority: FACE > BODY > NONE
-        - Track face if stable face keypoints detected
-        - Fallback to body center if no stable face
-        - Ignore fragments (hands, partial bodies)
-
-        Args:
-            poses: List of pose dicts from GstHailoPoseDetector
-            frame_width: Detection frame width
-            frame_height: Detection frame height
         """
         with self._lock:
             self.config.frame_width = frame_width
@@ -555,9 +488,8 @@ class AutonomousTracker:
                 self.target_type_stability = 0
                 return
 
-            # === STAGE 1: Categorize all detections ===
-            face_candidates = []   # Poses with good face
-            body_candidates = []   # Poses with body but weak/no face
+            face_candidates = []
+            body_candidates = []
 
             for p in poses:
                 bbox = p.get("bbox", [0, 0, 0, 0])
@@ -570,53 +502,42 @@ class AutonomousTracker:
                 area_ratio = (width * height) / (frame_width * frame_height)
                 aspect_ratio = width / height if height > 0 else 0
 
-                # === REJECT FRAGMENTS ===
-                # Too small
                 if area_ratio < self.config.min_bbox_area_ratio:
                     self.stats["detections_filtered"] += 1
                     continue
-                # Too narrow (likely hand/arm)
                 if aspect_ratio < self.config.min_aspect_ratio:
                     self.stats["detections_filtered"] += 1
                     continue
-                # Bottom edge (likely feet)
                 center_y = (bbox[1] + bbox[3]) / 2 / frame_height
                 if center_y > self.config.max_bbox_center_y_ratio:
                     self.stats["detections_filtered"] += 1
                     continue
 
-                # === CATEGORIZE BY FACE QUALITY ===
                 has_face = p.get("has_face", False)
                 face_conf = p.get("face_confidence", 0)
                 face_center = p.get("face_center")
                 has_torso = p.get("has_torso", False)
 
                 if has_face and face_conf >= self.config.face_min_confidence and face_center:
-                    # Good face - FACE candidate
                     if height_ratio <= self.config.face_max_bbox_height:
                         face_candidates.append(p)
                     else:
-                        # Face visible but bbox too large - track as body
                         body_candidates.append(p)
                 elif has_torso and height_ratio >= self.config.body_min_bbox_height:
-                    # Has body but weak/no face - BODY candidate
                     body_candidates.append(p)
                 else:
                     self.stats["detections_filtered"] += 1
 
-            # === STAGE 2: Select target type and best candidate ===
             selected_pose = None
             selected_type = TargetType.NONE
             track_x, track_y = 0.5, 0.5
 
-            # Score function for ranking
             def score_pose(p, for_face: bool):
                 face_conf = p.get("face_confidence", 0)
                 det_conf = p.get("confidence", 0)
                 fc = p.get("face_center", (0.5, 0.5))
                 dist = math.sqrt((fc[0] - 0.5)**2 + (fc[1] - 0.5)**2)
                 center_bonus = 1.0 - min(1.0, dist * 2)
-
                 if for_face:
                     return face_conf * 0.5 + center_bonus * 0.3 + det_conf * 0.2
                 else:
@@ -625,32 +546,23 @@ class AutonomousTracker:
                     area_score = area / (frame_width * frame_height)
                     return area_score * 0.4 + center_bonus * 0.3 + det_conf * 0.3
 
-            # === ADAPTIVE SELECTION ===
-            # Priority: Stick with current type if still valid, else switch
             if self.config.prefer_current_target and self.current_target_type != TargetType.NONE:
                 cooldown_ok = (now - self.last_target_switch_time) > self.config.switch_cooldown_sec
-
                 if self.current_target_type == TargetType.FACE and face_candidates:
-                    # Continue face tracking
                     face_candidates.sort(key=lambda p: score_pose(p, True), reverse=True)
                     selected_pose = face_candidates[0]
                     selected_type = TargetType.FACE
                 elif self.current_target_type == TargetType.BODY and body_candidates:
-                    # Continue body tracking
                     body_candidates.sort(key=lambda p: score_pose(p, False), reverse=True)
                     selected_pose = body_candidates[0]
                     selected_type = TargetType.BODY
                 elif cooldown_ok:
-                    # Current type lost - try to switch
-                    pass  # Fall through to new selection
+                    pass
 
-            # New selection if no current target maintained
             if selected_pose is None:
                 if face_candidates:
-                    # FACE available - check stability
                     self.candidate_target_type = TargetType.FACE
                     self.target_type_stability += 1
-
                     if self.target_type_stability >= self.config.face_min_stability:
                         face_candidates.sort(key=lambda p: score_pose(p, True), reverse=True)
                         selected_pose = face_candidates[0]
@@ -658,12 +570,9 @@ class AutonomousTracker:
                         if self.current_target_type != TargetType.FACE:
                             logger.info(f"[ADAPTIVE] Switching to FACE tracking (stability={self.target_type_stability})")
                             self.last_target_switch_time = now
-
                 elif body_candidates:
-                    # BODY available - check stability
                     self.candidate_target_type = TargetType.BODY
                     self.target_type_stability += 1
-
                     if self.target_type_stability >= self.config.body_min_stability:
                         body_candidates.sort(key=lambda p: score_pose(p, False), reverse=True)
                         selected_pose = body_candidates[0]
@@ -672,33 +581,24 @@ class AutonomousTracker:
                             logger.info(f"[ADAPTIVE] Switching to BODY tracking (stability={self.target_type_stability})")
                             self.last_target_switch_time = now
                 else:
-                    # Nothing valid
                     self.target_type_stability = 0
 
-            # === STAGE 3: Create detection data ===
             if selected_pose is None:
                 self.latest_detection = DetectionData(detected=False, is_pose_detection=True)
                 return
 
-            # Update current target type
             self.current_target_type = selected_type
 
-            # Get tracking point based on type
             bbox = selected_pose.get("bbox", [0, 0, 0, 0])
             if selected_type == TargetType.FACE:
-                # Track FACE center
                 face_center = selected_pose.get("face_center", (0.5, 0.5))
                 track_x, track_y = face_center
             else:
-                # Track BODY center (upper body)
-                # Use torso center (between shoulders and hips)
                 bbox_center_x = (bbox[0] + bbox[2]) / 2 / frame_width
                 bbox_center_y = (bbox[1] + bbox[3]) / 2 / frame_height
-                # Offset slightly up for upper body
                 track_x = bbox_center_x
-                track_y = bbox_center_y * 0.85  # Bias towards upper body
+                track_y = bbox_center_y * 0.85
 
-            # Update target ID
             if self.current_target_id == 0:
                 self.current_target_id = self._next_target_id
                 self._next_target_id += 1
@@ -706,7 +606,6 @@ class AutonomousTracker:
             self.current_target_bbox = bbox
             self.current_target_confidence = selected_pose.get("face_confidence", 0) if selected_type == TargetType.FACE else selected_pose.get("confidence", 0)
 
-            # Create detection data with ADAPTIVE tracking point
             self.latest_detection = DetectionData(
                 detected=True,
                 bbox=bbox,
@@ -725,16 +624,19 @@ class AutonomousTracker:
             )
             self.last_detection_time = time.time()
 
-            # Log adaptive tracking info every 30 cycles
             if self.stats["cycles"] % 30 == 0:
                 logger.info(f"[ADAPTIVE] {selected_type.value.upper()} at ({track_x:.2f},{track_y:.2f}) "
                            f"conf={self.current_target_confidence:.2f} "
                            f"faces={len(face_candidates)} bodies={len(body_candidates)}")
 
+    # =========================================================================
+    # Tracking Loop
+    # =========================================================================
+
     def _tracking_loop(self):
-        """Main 15 Hz tracking loop."""
+        """Main 5 Hz tracking loop."""
         cycle_time = 1.0 / self.LOOP_RATE_HZ
-        logger.info(f"Tracking loop STARTED (rate={self.LOOP_RATE_HZ}Hz, camera={id(self.camera) if self.camera else 'None'})")
+        logger.info(f"Tracking loop STARTED (rate={self.LOOP_RATE_HZ}Hz)")
 
         while self._running:
             loop_start = time.time()
@@ -744,17 +646,16 @@ class AutonomousTracker:
                     self._process_tracking_cycle()
                     self.stats["cycles"] += 1
 
-                    # Log status every 3 seconds (45 cycles at 15Hz)
-                    if self.stats["cycles"] % 45 == 0:
+                    if self.stats["cycles"] % 15 == 0:
                         logger.info(f"Tracker loop: cycles={self.stats['cycles']} state={self.state.value} "
-                                  f"search_moves={self.stats['search_moves']} tracking_moves={self.stats['tracking_moves']}")
+                                  f"pos=({self.last_known_pan:+.1f},{self.last_known_tilt:+.1f})deg "
+                                  f"search={self.stats['search_moves']} track={self.stats['tracking_moves']}")
 
             except Exception as e:
                 logger.error(f"Tracking cycle error: {e}")
                 import traceback
                 logger.error(traceback.format_exc())
 
-            # Maintain loop rate
             elapsed = time.time() - loop_start
             sleep_time = cycle_time - elapsed
             if sleep_time > 0:
@@ -768,53 +669,55 @@ class AutonomousTracker:
         now = time.time()
         time_since_detection = now - self.last_detection_time
 
-        # DEBUG: Log state every 15 cycles (1 second)
         debug_log = (self.stats["cycles"] % 15 == 0)
         if debug_log:
             logger.info(f"[CYCLE] detected={detection.detected} "
                        f"time_since={time_since_detection:.2f}s "
                        f"conf={detection.confidence:.2f} "
-                       f"state={self.state.value}")
+                       f"state={self.state.value} "
+                       f"pos=({self.last_known_pan:+.1f},{self.last_known_tilt:+.1f})deg")
 
         if detection.detected and time_since_detection < 0.5:
-            # We have a recent detection - TRACK
             self._do_tracking(detection)
         else:
-            # No recent detection - check if we should SEARCH
             if time_since_detection > self.config.target_lost_timeout:
                 if debug_log:
-                    logger.info(f"[CYCLE] No detection for {time_since_detection:.1f}s > {self.config.target_lost_timeout}s -> SEARCH")
+                    logger.info(f"[CYCLE] No detection for {time_since_detection:.1f}s -> SEARCH")
                 self._do_search()
             else:
-                # Brief loss - maintain last velocity or slow down
                 if debug_log:
                     logger.info(f"[CYCLE] Brief loss ({time_since_detection:.2f}s) -> COAST")
                 self._do_coast()
 
+    # =========================================================================
+    # Tracking (AbsoluteMove-based)
+    # =========================================================================
+
     def _do_tracking(self, detection: DetectionData):
-        """Execute tracking with dwell timer, proportional velocity, and LOCK/FROZEN states."""
+        """Execute tracking with dwell timer, proportional position control, and LOCK/FROZEN states."""
         now = time.time()
 
         # Calculate error from frame center (pixels)
         center_x_px = detection.center_x * self.config.frame_width
         center_y_px = detection.center_y * self.config.frame_height
-
         frame_center_x = self.config.frame_width / 2
         frame_center_y = self.config.frame_height / 2
 
-        error_x = center_x_px - frame_center_x  # Positive = target is RIGHT of center
-        error_y = center_y_px - frame_center_y  # Positive = target is BELOW center
+        error_x = center_x_px - frame_center_x  # Positive = target RIGHT of center
+        error_y = center_y_px - frame_center_y  # Positive = target BELOW center
         error_magnitude = math.sqrt(error_x**2 + error_y**2)
 
-        # DEBUG: Log every 15 cycles
+        # Normalized error (-0.5 to +0.5)
+        error_x_norm = detection.center_x - 0.5
+        error_y_norm = detection.center_y - 0.5
+
         debug_log = (self.stats["cycles"] % 15 == 0)
         if debug_log:
             logger.info(f"[TRACK] error=({error_x:+.0f},{error_y:+.0f})px mag={error_magnitude:.0f}px "
-                       f"state={self.state.value} vPTZ=({self.virtual_pan:+.2f},{self.virtual_tilt:+.2f})")
+                       f"state={self.state.value} pos=({self.last_known_pan:+.1f},{self.last_known_tilt:+.1f})deg")
 
         # === DWELL STATE: Wait before starting movement ===
         if not self.dwell_target_acquired:
-            # First detection - start dwell timer
             self.dwell_target_acquired = True
             self.dwell_start_time = now
             self._set_state(TrackerState.DWELL)
@@ -824,20 +727,17 @@ class AutonomousTracker:
         if self.state == TrackerState.DWELL:
             dwell_elapsed = now - self.dwell_start_time
             if dwell_elapsed < self.config.dwell_time_sec:
-                # Still waiting - don't move
                 if debug_log:
                     logger.info(f"[DWELL] Waiting... {dwell_elapsed:.1f}s / {self.config.dwell_time_sec}s")
                 return
             else:
-                # Dwell complete - transition to tracking
-                logger.info(f"[DWELL] Complete - starting tracking")
+                logger.info("[DWELL] Complete - starting tracking")
                 self._set_state(TrackerState.TRACKING)
 
         # === FROZEN STATE: Target perfectly centered ===
         if error_magnitude < self.config.frozen_threshold_pixels:
             if self.state != TrackerState.FROZEN:
                 self._set_state(TrackerState.FROZEN)
-                self._send_continuous_move(0.0, 0.0)  # Stop
                 logger.info(f"[FROZEN] Target perfectly centered (error={error_magnitude:.0f}px)")
             return
 
@@ -848,106 +748,112 @@ class AutonomousTracker:
                 if debug_log:
                     logger.info(f"[TRACK] UNLOCK: error {error_magnitude:.0f}px > {self.config.unlock_threshold_pixels}px")
             else:
-                # Stay locked - no movement
                 if debug_log:
                     logger.info(f"[TRACK] LOCKED: error {error_magnitude:.0f}px (no move)")
                 return
         else:
-            # Check if we should enter LOCK
             if error_magnitude < self.config.lock_threshold_pixels:
                 self._set_state(TrackerState.LOCKED)
-                self._send_continuous_move(0.0, 0.0)
                 if debug_log:
                     logger.info(f"[TRACK] LOCK: error {error_magnitude:.0f}px < {self.config.lock_threshold_pixels}px")
                 return
 
-        # === TRACKING MODE ===
+        # === TRACKING MODE: AbsoluteMove ===
         self._set_state(TrackerState.TRACKING)
 
-        # Calculate proportional velocities
-        vel_pan = -error_x * self.config.pan_gain
-        vel_tilt = -error_y * self.config.tilt_gain
-
-        # === SOFT LIMITS: Check virtual position ===
-        # Reduce velocity as we approach limits
-        if self.virtual_pan >= self.config.virtual_pan_max * 0.8 and vel_pan > 0:
-            vel_pan *= 0.5  # Slow down near right limit
-            if debug_log:
-                logger.info(f"[TRACK] Near right limit - reducing pan velocity")
-        elif self.virtual_pan <= self.config.virtual_pan_min * 0.8 and vel_pan < 0:
-            vel_pan *= 0.5  # Slow down near left limit
-            if debug_log:
-                logger.info(f"[TRACK] Near left limit - reducing pan velocity")
-
-        if self.virtual_tilt >= self.config.virtual_tilt_max * 0.8 and vel_tilt > 0:
-            vel_tilt *= 0.5
-        elif self.virtual_tilt <= self.config.virtual_tilt_min * 0.8 and vel_tilt < 0:
-            vel_tilt *= 0.5
-
-        # Hard stop at limits
-        if self.virtual_pan >= self.config.virtual_pan_max and vel_pan > 0:
-            vel_pan = 0.0
-        elif self.virtual_pan <= self.config.virtual_pan_min and vel_pan < 0:
-            vel_pan = 0.0
-
-        if self.virtual_tilt >= self.config.virtual_tilt_max and vel_tilt > 0:
-            vel_tilt = 0.0
-        elif self.virtual_tilt <= self.config.virtual_tilt_min and vel_tilt < 0:
-            vel_tilt = 0.0
-
-        # Clamp to max velocity
-        vel_pan = max(-self.config.max_velocity, min(self.config.max_velocity, vel_pan))
-        vel_tilt = max(-self.config.max_velocity, min(self.config.max_velocity, vel_tilt))
-
-        # Clamp to ZERO if below minimum threshold (avoid oscillation)
-        if abs(vel_pan) < self.config.min_velocity:
-            vel_pan = 0.0
-        if abs(vel_tilt) < self.config.min_velocity:
-            vel_tilt = 0.0
-
-        # If both velocities are zero, don't send command
-        if vel_pan == 0.0 and vel_tilt == 0.0:
-            if debug_log:
-                logger.info(f"[TRACK] vel=0 (below threshold or at limit)")
+        # Cooldown check
+        time_since_move = (now - self.last_move_time) * 1000  # ms
+        if time_since_move < self.config.move_cooldown_ms:
             return
 
-        if debug_log:
-            logger.info(f"[TRACK] vel=({vel_pan:+.3f},{vel_tilt:+.3f}) -> ContinuousMove")
+        # Calculate position delta from error (pre-check for threshold)
+        pan_delta = -error_x_norm * self.config.fov_horizontal * self.config.pan_gain
+        tilt_delta = -error_y_norm * self.config.fov_vertical * self.config.tilt_gain
+        pan_delta = max(-self.config.max_step_pan, min(self.config.max_step_pan, pan_delta))
+        tilt_delta = max(-self.config.max_step_tilt, min(self.config.max_step_tilt, tilt_delta))
 
-        # Send ContinuousMove command
-        result = self._send_continuous_move(vel_pan, vel_tilt)
+        if abs(pan_delta) < self.config.min_step_deg and abs(tilt_delta) < self.config.min_step_deg:
+            if debug_log:
+                logger.info(f"[TRACK] delta below threshold (pan={pan_delta:+.2f}, tilt={tilt_delta:+.2f})")
+            return
+
+        # Execute AbsoluteMove tracking
+        result = self._track_target(error_x_norm, error_y_norm)
+
         if result:
             self.stats["tracking_moves"] += 1
-            # Update virtual position estimate
-            self._update_virtual_position(vel_pan, vel_tilt)
 
         if self.stats["tracking_moves"] % 15 == 0:
-            logger.info(f"TRACK: err=({error_x:+.0f},{error_y:+.0f})px vel=({vel_pan:+.3f},{vel_tilt:+.3f}) "
-                       f"vPTZ=({self.virtual_pan:+.2f},{self.virtual_tilt:+.2f})")
+            logger.info(f"TRACK: err=({error_x:+.0f},{error_y:+.0f})px delta=({pan_delta:+.1f},{tilt_delta:+.1f})deg "
+                       f"pos=({self.last_known_pan:+.1f},{self.last_known_tilt:+.1f})deg")
 
-    def _update_virtual_position(self, vel_pan: float, vel_tilt: float):
-        """Update virtual PTZ position estimate based on velocity commands."""
-        now = time.time()
-        if self.last_move_time > 0:
-            dt = now - self.last_move_time
-            # Integrate velocity to update position estimate
-            self.virtual_pan += vel_pan * dt * self.config.virtual_position_decay
-            self.virtual_tilt += vel_tilt * dt * self.config.virtual_position_decay
-            # Clamp to limits
-            self.virtual_pan = max(self.config.virtual_pan_min, min(self.config.virtual_pan_max, self.virtual_pan))
-            self.virtual_tilt = max(self.config.virtual_tilt_min, min(self.config.virtual_tilt_max, self.virtual_tilt))
+    def _track_target(self, error_x_norm: float, error_y_norm: float) -> bool:
+        """
+        Track target using AbsoluteMove with real position feedback.
 
-        self.last_velocity_pan = vel_pan
-        self.last_velocity_tilt = vel_tilt
-        self.last_move_time = now
+        Converts normalized frame-center error to position delta,
+        reads current position, and sends AbsoluteMove to target position.
+
+        Args:
+            error_x_norm: Normalized horizontal error (-0.5 to +0.5), positive = target right
+            error_y_norm: Normalized vertical error (-0.5 to +0.5), positive = target below
+
+        Returns:
+            True if move command sent successfully
+        """
+        if not self.camera or not self.camera.is_connected:
+            return False
+
+        # Check exclusive PTZ lock
+        if hasattr(self.camera, '_exclusive_owner') and self.camera._exclusive_owner is not None:
+            return False
+
+        # Read real camera position (closed-loop feedback)
+        try:
+            pos = self.camera.get_position()
+            self.last_known_pan = pos.pan
+            self.last_known_tilt = pos.tilt
+            self.last_position_time = time.time()
+            self.stats["position_reads"] += 1
+        except Exception as e:
+            logger.warning(f"[TRACK] Failed to read position: {e}, using last known")
+
+        # Calculate position delta from error
+        # Positive error_x (target right) -> negative pan delta (move right = decrease pan)
+        # Positive error_y (target below) -> negative tilt delta (move down = decrease tilt)
+        pan_delta = -error_x_norm * self.config.fov_horizontal * self.config.pan_gain
+        tilt_delta = -error_y_norm * self.config.fov_vertical * self.config.tilt_gain
+
+        # Limit step size
+        pan_delta = max(-self.config.max_step_pan, min(self.config.max_step_pan, pan_delta))
+        tilt_delta = max(-self.config.max_step_tilt, min(self.config.max_step_tilt, tilt_delta))
+
+        # Calculate target position
+        target_pan = self.last_known_pan + pan_delta
+        target_tilt = self.last_known_tilt + tilt_delta
+
+        # SonoffCameraController.move_absolute() clamps to calibrated limits internally
+        result = self.camera.move_absolute(target_pan, target_tilt, speed=self.config.tracking_speed)
+
+        if result:
+            self.last_move_time = time.time()
+
+            total_moves = self.stats["tracking_moves"] + self.stats["search_moves"]
+            if total_moves % 15 == 0:
+                logger.info(f"[TRACKER] AbsoluteMove: pos=({self.last_known_pan:+.1f},{self.last_known_tilt:+.1f}) "
+                           f"-> target=({target_pan:+.1f},{target_tilt:+.1f})deg")
+
+        return result
+
+    # =========================================================================
+    # Search Mode (AbsoluteMove patrol)
+    # =========================================================================
 
     def _do_search(self):
-        """Execute search mode - slow pan sweep with reset to center."""
-        # Check perception state - don't search if user is visible
+        """Execute search mode - patrol sweep using AbsoluteMove positions."""
         if PERCEPTION_AVAILABLE:
             try:
                 if is_user_visible():
-                    # User is visible in perception - don't search, just coast
                     if self.state == TrackerState.SEARCHING:
                         logger.info("[SEARCH] Aborted: user_visible=True in perception")
                     self._do_coast()
@@ -957,97 +863,79 @@ class AutonomousTracker:
 
         now = time.time()
 
-        # === RESET TO CENTER when starting search ===
+        # === START SEARCH: Reset and begin patrol ===
         if self.state != TrackerState.SEARCHING:
             self._set_state(TrackerState.SEARCHING)
+            self.search_patrol_index = 0
+            self.search_move_time = 0.0
+
             if self.config.search_reset_to_center:
-                logger.info(f"[SEARCH] Starting - resetting to center (vPTZ was {self.virtual_pan:+.2f},{self.virtual_tilt:+.2f})")
-                # Reset virtual position to center
-                self.virtual_pan = 0.0
-                self.virtual_tilt = 0.0
-                # Set search direction based on which side we were on
-                self.search_direction = 1  # Start sweeping right
-                self.last_direction_switch = now
+                logger.info(f"[SEARCH] Starting - moving to center (was pan={self.last_known_pan:+.1f}, tilt={self.last_known_tilt:+.1f})")
+                self._send_search_move(0.0, 0.0)
             # Reset dwell state for next target acquisition
             self.dwell_target_acquired = False
             self.dwell_start_time = 0.0
+            return
 
-        # Switch direction periodically OR when hitting soft limits
-        should_switch = False
-        if now - self.last_direction_switch > self.config.search_direction_interval:
-            should_switch = True
-        elif self.virtual_pan >= self.config.virtual_pan_max * 0.9 and self.search_direction > 0:
-            should_switch = True
-            logger.info(f"[SEARCH] Hit right limit - reversing")
-        elif self.virtual_pan <= self.config.virtual_pan_min * 0.9 and self.search_direction < 0:
-            should_switch = True
-            logger.info(f"[SEARCH] Hit left limit - reversing")
+        # === PATROL: Move through positions ===
+        time_since_search_move = now - self.search_move_time
 
-        if should_switch:
-            self.search_direction *= -1
-            self.last_direction_switch = now
-            logger.info(f"[SEARCH] Direction switch -> {'RIGHT' if self.search_direction > 0 else 'LEFT'}")
+        # Motor speed ~38 deg/s at search_speed, generous wait
+        min_wait = 3.0
+        if time_since_search_move < min_wait:
+            return
 
-        # Pan sweep at search speed
-        vel_pan = self.config.search_speed * self.search_direction
-        vel_tilt = 0.0
+        # Read position to update state
+        try:
+            pos = self.camera.get_position()
+            self.last_known_pan = pos.pan
+            self.last_known_tilt = pos.tilt
+            self.last_position_time = now
+            self.stats["position_reads"] += 1
+        except:
+            pass
 
-        # Log first search move and then every 15 moves
-        if self.stats["search_moves"] == 0:
-            logger.info(f"[SEARCH] Starting pan sweep vel_pan={vel_pan:+.3f}")
+        # Move to next patrol position
+        patrol_positions = self.config.search_patrol_positions
+        if self.search_patrol_index >= len(patrol_positions):
+            self.search_patrol_index = 0
 
-        if self._send_continuous_move(vel_pan, vel_tilt):
-            self.stats["search_moves"] += 1
-            self._update_virtual_position(vel_pan, vel_tilt)
+        target_pan, target_tilt = patrol_positions[self.search_patrol_index]
+        self.search_patrol_index += 1
 
-    def _do_coast(self):
-        """Coast - gradually slow down when target briefly lost."""
-        # Send zero velocity to smoothly stop
-        self._send_continuous_move(0.0, 0.0)
+        logger.info(f"[SEARCH] Patrol position {self.search_patrol_index}/{len(patrol_positions)}: "
+                   f"({target_pan:+.1f},{target_tilt:+.1f})deg")
 
-    def _send_continuous_move(self, vel_pan: float, vel_tilt: float) -> bool:
-        """
-        Send ContinuousMove command to camera.
+        self._send_search_move(target_pan, target_tilt)
 
-        Args:
-            vel_pan: Pan velocity (-1 to 1)
-            vel_tilt: Tilt velocity (-1 to 1)
-
-        Returns:
-            True if command sent successfully
-        """
-        if not self.camera:
-            logger.warning("[TRACKER] ContinuousMove FAILED: no camera controller (self.camera is None)")
+    def _send_search_move(self, pan_deg: float, tilt_deg: float) -> bool:
+        """Send AbsoluteMove for search/patrol."""
+        if not self.camera or not self.camera.is_connected:
             return False
 
-        # Check exclusive PTZ lock
         if hasattr(self.camera, '_exclusive_owner') and self.camera._exclusive_owner is not None:
             return False
 
-        if not self.camera.is_connected:
-            logger.warning(f"[TRACKER] ContinuousMove FAILED: camera not connected (is_connected={self.camera.is_connected})")
-            return False
+        result = self.camera.move_absolute(pan_deg, tilt_deg, speed=self.config.search_speed)
 
-        # Log every 15th call (1 per second at 15Hz) to avoid spam
-        total_moves = self.stats["tracking_moves"] + self.stats["search_moves"]
-
-        # Verbose on first call to log full request
-        verbose = (total_moves == 0)
-
-        if total_moves % 15 == 0:
-            logger.info(f"[TRACKER] ContinuousMove: vel=({vel_pan:+.3f}, {vel_tilt:+.3f})")
-            logger.info(f"[TRACKER]   camera id={id(self.camera)}")
-            logger.info(f"[TRACKER]   ptz_service id={id(self.camera.ptz_service) if self.camera.ptz_service else 'None'}")
-            logger.info(f"[TRACKER]   profile_token={self.camera.profile_token}")
-
-        # Use controller's continuous_move method with 1 second timeout
-        # Timeout ensures camera keeps moving even if next command delayed
-        result = self.camera.continuous_move(vel_pan, vel_tilt, timeout_sec=1.0, verbose=verbose)
-
-        if total_moves % 15 == 0:
-            logger.info(f"[TRACKER] ContinuousMove result: {result}")
+        if result:
+            self.search_move_time = time.time()
+            self.last_move_time = time.time()
+            self.stats["search_moves"] += 1
 
         return result
+
+    def _do_coast(self):
+        """Coast - stop movement when target briefly lost."""
+        # With AbsoluteMove, camera naturally stops at the last commanded position.
+        # Only send explicit stop if transitioning from a search/patrol state.
+        if self.state == TrackerState.SEARCHING:
+            if self.camera:
+                self.camera.stop()
+
+    # =========================================================================
+    # State Management
+    # =========================================================================
 
     def _set_state(self, new_state: TrackerState):
         """Update state with logging."""
@@ -1056,7 +944,6 @@ class AutonomousTracker:
             self.state = new_state
             self.stats["state_changes"] += 1
 
-            # Enhanced logging with perception state
             perception_info = ""
             if PERCEPTION_AVAILABLE:
                 try:
@@ -1081,17 +968,10 @@ class AutonomousTracker:
         self.tracking_active = False
         if self.camera:
             self.camera.stop()
-        # Reset dwell state
         self.dwell_target_acquired = False
         self.dwell_start_time = 0.0
         self._set_state(TrackerState.IDLE)
         logger.info("Tracking DISABLED")
-
-    def reset_virtual_position(self, pan: float = 0.0, tilt: float = 0.0):
-        """Reset virtual PTZ position (e.g., after manual positioning)."""
-        self.virtual_pan = pan
-        self.virtual_tilt = tilt
-        logger.info(f"Virtual position reset to ({pan:.2f}, {tilt:.2f})")
 
     def get_status(self) -> Dict[str, Any]:
         """Get tracker status."""
@@ -1114,9 +994,10 @@ class AutonomousTracker:
                 "target_id": detection.target_id,
                 "age_ms": int((time.time() - detection.timestamp) * 1000)
             },
-            "virtual_position": {
-                "pan": self.virtual_pan,
-                "tilt": self.virtual_tilt
+            "camera_position": {
+                "pan_deg": self.last_known_pan,
+                "tilt_deg": self.last_known_tilt,
+                "position_age_ms": int((time.time() - self.last_position_time) * 1000) if self.last_position_time > 0 else -1
             },
             "dwell": {
                 "target_acquired": self.dwell_target_acquired,
@@ -1129,7 +1010,11 @@ class AutonomousTracker:
                 "dwell_time_sec": self.config.dwell_time_sec,
                 "pan_gain": self.config.pan_gain,
                 "tilt_gain": self.config.tilt_gain,
-                "max_velocity": self.config.max_velocity,
+                "fov_h": self.config.fov_horizontal,
+                "fov_v": self.config.fov_vertical,
+                "max_step_pan": self.config.max_step_pan,
+                "max_step_tilt": self.config.max_step_tilt,
+                "tracking_speed": self.config.tracking_speed,
                 "min_bbox_height": self.config.min_bbox_height_ratio
             }
         }
