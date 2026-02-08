@@ -26,14 +26,22 @@ import asyncio
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-# Env vars must be set in ~/.profile or ~/.bashrc
-# Required: MOLOCH_CAMERA_HOST, MOLOCH_CAMERA_USER, MOLOCH_CAMERA_PASS,
-#           MOLOCH_RTSP_URL, EWELINK_APP_ID_1, EWELINK_APP_SECRET_1,
-#           EWELINK_USERNAME, EWELINK_PASSWORD
-_required_vars = ["MOLOCH_CAMERA_HOST", "EWELINK_APP_ID_1"]
-for _v in _required_vars:
-    if not os.environ.get(_v):
-        print(f"WARNING: Environment variable {_v} not set! Source ~/.profile first.")
+# Auto-source ~/.profile if env vars are missing (desktop launch workaround)
+if not os.environ.get("MOLOCH_CAMERA_HOST"):
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["bash", "-c", "source ~/.profile && env"],
+            capture_output=True, text=True, timeout=5
+        )
+        for line in result.stdout.splitlines():
+            if "=" in line:
+                key, _, value = line.partition("=")
+                if key and not key.startswith((" ", "\t")):
+                    os.environ.setdefault(key, value)
+        print("Auto-sourced ~/.profile for env vars")
+    except Exception as e:
+        print(f"WARNING: Could not auto-source ~/.profile: {e}")
 
 import cv2
 from PIL import Image, ImageTk
@@ -484,37 +492,43 @@ class EyeControlPanel:
     # eWeLink Controls
     # =========================================================================
 
-    def _cloud_call(self, coro):
-        """Run cloud call in background."""
-        if not self.cloud or not self.cloud.connected:
+    def _cloud_run(self, method_name, *args):
+        """Run a cloud bridge method safely in background."""
+        if not self.cloud or not self.cloud.connected or not self.cloud.bridge:
+            logger.warning(f"Cloud not ready for {method_name}")
             return
-        threading.Thread(target=lambda: self.cloud.run(coro), daemon=True).start()
+        method = getattr(self.cloud.bridge, method_name, None)
+        if not method:
+            logger.error(f"Cloud bridge has no method {method_name}")
+            return
+        threading.Thread(
+            target=lambda: self.cloud.run(method(*args)),
+            daemon=True
+        ).start()
 
     def _set_status_led(self):
-        self._cloud_call(self.cloud.bridge.set_status_led(self.status_led_var.get()))
+        self._cloud_run("set_status_led", self.status_led_var.get())
 
     def _set_led(self, level):
         self.led_val_label.configure(text=str(level))
-        self._cloud_call(self.cloud.bridge.set_led(level))
+        self._cloud_run("set_led", level)
 
     def _set_night(self):
         mode_map = {"Aus": "day", "Auto": "auto", "An": "night"}
         mode = mode_map.get(self.night_var.get(), "day")
-        self._cloud_call(self.cloud.bridge.set_night(mode))
+        self._cloud_run("set_night", mode)
 
     def _set_mic_volume(self):
-        vol = self.mic_var.get()
-        self._cloud_call(self.cloud.bridge.set_mic_volume(vol))
+        self._cloud_run("set_mic_volume", self.mic_var.get())
 
     def _set_speaker_volume(self):
-        vol = self.spk_var.get()
-        self._cloud_call(self.cloud.bridge.set_speaker_volume(vol))
+        self._cloud_run("set_speaker_volume", self.spk_var.get())
 
     def _set_smart_tracking(self):
-        self._cloud_call(self.cloud.bridge.set_smart_tracking(self.smart_track_var.get()))
+        self._cloud_run("set_smart_tracking", self.smart_track_var.get())
 
     def _set_screen_flip(self):
-        self._cloud_call(self.cloud.bridge.set_screen_flip(self.flip_var.get()))
+        self._cloud_run("set_screen_flip", self.flip_var.get())
 
     def _trigger_alarm(self):
         """Trigger alarm for 3 seconds."""
@@ -532,7 +546,7 @@ class EyeControlPanel:
         """Trigger PTZ calibration with confirmation."""
         if messagebox.askyesno("PTZ Kalibrierung",
                                "Kamera wird sich durch den vollen Bereich bewegen!\n\nFortfahren?"):
-            self._cloud_call(self.cloud.bridge.trigger_ptz_calibration())
+            self._cloud_run("trigger_ptz_calibration")
 
     def _refresh_params(self):
         """Refresh all params from cloud."""
