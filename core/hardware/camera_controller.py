@@ -78,7 +78,6 @@ class CameraController:
     Verwaltet Sonoff PTZ Kamera und bietet:
     - Frame-Erfassung via RTSP
     - PTZ-Steuerung
-    - Automatisches Tracking
     - Snapshot-Speicherung
     """
 
@@ -97,7 +96,6 @@ class CameraController:
 
         # Status
         self.sonoff_connected = False
-        self.xiao_connected = False  # Legacy, always False
         self._stop_event = threading.Event()
 
         # Frame Caches
@@ -127,10 +125,6 @@ class CameraController:
             self._connect_ptz()
 
         return results
-
-    def connect_xiao(self) -> bool:
-        """Legacy: XIAO no longer supported."""
-        return False
 
     def _connect_sonoff(self) -> bool:
         """Verbinde Sonoff RTSP Stream - optimiert fuer stabile 20+ FPS"""
@@ -249,13 +243,6 @@ class CameraController:
                 return self._sonoff_frame
         return None
 
-    def get_both_frames(self) -> Dict[CameraID, Optional[CameraFrame]]:
-        """Hole Frame (nur Sonoff)"""
-        with self._frame_lock:
-            return {
-                CameraID.SONOFF: self._sonoff_frame
-            }
-
     def take_snapshot(self, camera: CameraID = None) -> Optional[str]:
         """
         Speichere Snapshot.
@@ -278,45 +265,12 @@ class CameraController:
 
         return None
 
-    # === PTZ Steuerung ===
-
-    def ptz_move(self, pan: float = 0, tilt: float = 0, speed: float = 0.5) -> bool:
-        """Bewege Sonoff PTZ Kamera"""
-        if self.ptz:
-            return self.ptz.move(pan=pan, tilt=tilt, speed=speed)
-        logger.warning("PTZ nicht verfuegbar")
-        return False
-
-    def ptz_center(self) -> bool:
-        """Zentriere Sonoff PTZ"""
-        if self.ptz:
-            return self.ptz.center()
-        return False
-
-    def ptz_follow_face(self, face_x: float, face_y: float,
-                        frame_width: int, frame_height: int) -> bool:
-        """Folge einem Gesicht mit PTZ"""
-        if self.ptz:
-            return self.ptz.follow_face(face_x, face_y, frame_width, frame_height)
-        return False
-
-    def ptz_set_mode(self, mode: AutonomyMode):
-        """Setze PTZ Autonomie-Modus"""
-        if self.ptz:
-            self.ptz.set_mode(mode)
-
-    def ptz_stop(self):
-        """Stoppe PTZ und aktiviere Manual Override"""
-        if self.ptz:
-            self.ptz.trigger_manual_override()
-
     # === Status ===
 
     def get_status(self) -> Dict[str, CameraStatus]:
-        """Hole Status beider Kameras"""
+        """Hole Status der Kamera"""
         status = {}
 
-        # Sonoff
         if self.sonoff_connected and self._sonoff_frame:
             status["sonoff"] = CameraStatus(
                 camera_id=CameraID.SONOFF,
@@ -358,37 +312,3 @@ def get_camera_controller() -> CameraController:
     if _camera_controller is None:
         _camera_controller = CameraController()
     return _camera_controller
-
-
-# === Standalone Test ===
-if __name__ == "__main__":
-    import sys
-    logging.basicConfig(level=logging.INFO)
-
-    print("=== CameraController Test ===")
-
-    ctrl = get_camera_controller()
-    results = ctrl.connect_all()
-    print(f"Verbindungen: {results}")
-
-    if any(results.values()):
-        ctrl.start_capture()
-        print("Capture gestartet, warte 3 Sekunden...")
-        time.sleep(3)
-
-        # Teste Frames
-        frames = ctrl.get_both_frames()
-        for cam_id, frame in frames.items():
-            if frame:
-                print(f"{cam_id.value}: {frame.width}x{frame.height}")
-            else:
-                print(f"{cam_id.value}: Kein Frame")
-
-        # Snapshot
-        paths = ctrl.take_snapshot()
-        print(f"Snapshots: {paths}")
-
-        ctrl.stop_capture()
-
-    ctrl.disconnect()
-    print("Test abgeschlossen")

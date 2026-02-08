@@ -220,26 +220,9 @@ class SonoffPTZController:
     def center(self, force: bool = False) -> bool:
         """Fahre zur Mittelposition"""
         log.info("PTZ: Zentriere Kamera")
-        # TODO: GotoHomePosition oder AbsoluteMove zur Mitte
         self.current_pan = 0.5
         self.current_tilt = 0.5
         return True
-
-    def pan_left(self, speed: float = 0.5) -> bool:
-        """Schwenke nach links"""
-        return self.move(pan=-1.0, tilt=0, speed=speed)
-
-    def pan_right(self, speed: float = 0.5) -> bool:
-        """Schwenke nach rechts"""
-        return self.move(pan=1.0, tilt=0, speed=speed)
-
-    def tilt_up(self, speed: float = 0.5) -> bool:
-        """Neige nach oben"""
-        return self.move(pan=0, tilt=1.0, speed=speed)
-
-    def tilt_down(self, speed: float = 0.5) -> bool:
-        """Neige nach unten"""
-        return self.move(pan=0, tilt=-1.0, speed=speed)
 
     # --- Autonomie-Modi ---
 
@@ -296,69 +279,3 @@ class SonoffPTZController:
 
         # Langsame, organische Bewegung
         return self.move(pan=pan, tilt=tilt, speed=0.3)
-
-    def search_scan(self) -> bool:
-        """
-        Langsamer Scan von links nach rechts (SEARCH_MODE).
-        Rufe wiederholt auf fuer kontinuierlichen Scan.
-        """
-        if self.current_mode != AutonomyMode.SEARCH_MODE:
-            return False
-
-        # Einfacher Links-Rechts Scan
-        if self.current_pan < 0.3:
-            return self.pan_right(speed=0.2)
-        elif self.current_pan > 0.7:
-            return self.pan_left(speed=0.2)
-        else:
-            # In der Mitte - zufaellige Richtung
-            return self.pan_right(speed=0.2)
-
-
-
-    # ===== M.O.L.O.C.H. Event-basiertes Tracking =====
-    
-    def move_pan_tilt(self, x_velocity: float, y_velocity: float, duration: float = 0.1) -> bool:
-        """Bewegt Kamera mit Geschwindigkeit fuer bestimmte Dauer, dann Stop."""
-        import time
-        x_velocity = max(-1.0, min(1.0, x_velocity))
-        y_velocity = max(-1.0, min(1.0, y_velocity))
-        success = self.move(pan=x_velocity, tilt=y_velocity)
-        if success:
-            time.sleep(duration)
-            self.stop()
-        return success
-    
-    def track_target(self, target_x: int, frame_width: int = 1920, deadzone: int = 100) -> dict:
-        """Berechnet PTZ-Korrektur (nur Berechnung, keine Bewegung!)."""
-        frame_center = frame_width // 2
-        offset = target_x - frame_center
-        if abs(offset) < deadzone:
-            return {'action': 'none', 'offset': offset, 'velocity': 0.0, 'should_move': False}
-        velocity = min(abs(offset) / frame_center, 1.0) * 0.6
-        action = 'right' if offset > 0 else 'left'
-        return {'action': action, 'offset': offset, 'velocity': velocity, 'should_move': True}
-    
-    def execute_tracking(self, target_x: int, frame_width: int = 1920, deadzone: int = 100, duration: float = 0.1) -> dict:
-        """track_target + move_pan_tilt kombiniert (Event-basiert)."""
-        result = self.track_target(target_x, frame_width, deadzone)
-        result['executed'] = False
-        if result['should_move']:
-            x_vel = result['velocity'] if result['action'] == 'right' else -result['velocity']
-            if self.move_pan_tilt(x_vel, 0, duration):
-                result['executed'] = True
-                logger.info(f"Tracking: {result['action']} vel={result['velocity']:.2f} offset={result['offset']}px")
-        return result
-
-
-if __name__ == "__main__":
-    import time
-    print("=== Sonoff PTZ Controller Test ===")
-    controller = SonoffPTZController()
-    if controller.connect():
-        print("Verbunden! Teste track_target...")
-        r = controller.track_target(1500, 1920, 100)
-        print(f"track_target(1500): {r}")
-        print("Test OK")
-    else:
-        print("Verbindung fehlgeschlagen!")
