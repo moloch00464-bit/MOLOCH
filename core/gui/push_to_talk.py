@@ -162,7 +162,7 @@ class PushToTalkGUI:
 
         # === FALLBACK: OpenCV RTSP capture if Hailo fails ===
         self._sonoff_cap = None
-        self._sonoff_rtsp = "rtsp://Moloch_4.5:Auge666@192.168.178.25:554/av_stream/ch0"
+        self._sonoff_rtsp = os.environ.get("MOLOCH_RTSP_URL", "rtsp://USER:PASS@CAMERA_IP:554/av_stream/ch0")
         self._current_photo = None  # Keep reference to prevent GC
         self._fallback_active = False
         self._fallback_started = False
@@ -854,7 +854,7 @@ class PushToTalkGUI:
 
             # Initialize simple OpenCV capture for Sonoff with LOW LATENCY settings
             self._sonoff_cap = None
-            self._sonoff_rtsp = "rtsp://Moloch_4.5:Auge666@192.168.178.25:554/av_stream/ch0"
+            self._sonoff_rtsp = os.environ.get("MOLOCH_RTSP_URL", "rtsp://USER:PASS@CAMERA_IP:554/av_stream/ch0")
             try:
                 import cv2
                 import os

@@ -1,7 +1,8 @@
+import os
 #!/usr/bin/env python3
 import cv2, os, sys, time
 
-RTSP = "rtsp://Moloch_4.5:Auge666@192.168.178.25:554/av_stream/ch0"
+RTSP = os.environ.get("MOLOCH_RTSP_URL", "rtsp://USER:PASS@CAMERA_IP:554/av_stream/ch0")
 FACES = "/home/molochzuhause/moloch/faces"
 
 def main():

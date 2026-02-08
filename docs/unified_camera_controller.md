@@ -76,8 +76,8 @@ from core.hardware.unified_camera_controller import UnifiedCameraController
 # Create controller
 controller = UnifiedCameraController(
     camera_ip="192.168.178.25",
-    username="Moloch_4.5",
-    password="Auge666"
+    username="CHANGE_ME",
+    password="CHANGE_ME"
 )
 
 # Connect

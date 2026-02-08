@@ -1,3 +1,4 @@
+import os
 #!/usr/bin/env python3
 """
 ONVIF Capability Scanner - Direct Diagnostic Tool
@@ -40,9 +41,9 @@ except ImportError:
     sys.exit(1)
 
 # Camera defaults
-DEFAULT_IP = "192.168.178.25"
-DEFAULT_USERNAME = "Moloch_4.5"
-DEFAULT_PASSWORD = "Auge666"
+DEFAULT_IP = os.environ.get("MOLOCH_CAMERA_HOST", "CAMERA_IP")
+DEFAULT_USERNAME = os.environ.get("MOLOCH_CAMERA_USER", "CHANGE_ME")
+DEFAULT_PASSWORD = os.environ.get("MOLOCH_CAMERA_PASS", "CHANGE_ME")
 DEFAULT_PORT = 80
 
 # Setup logging

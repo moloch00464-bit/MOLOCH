@@ -1,3 +1,4 @@
+import os
 #!/usr/bin/env python3
 """
 Camera Control Panel - Manual Camera Control GUI
@@ -138,7 +139,7 @@ class CameraControlPanel:
 
         # Camera IP
         ttk.Label(conn_frame, text="Camera IP:").grid(row=0, column=0, sticky=tk.W)
-        self.camera_ip_var = tk.StringVar(value="192.168.178.25")
+        self.camera_ip_var = tk.StringVar(value=os.environ.get("MOLOCH_CAMERA_HOST", "CAMERA_IP"))
         ttk.Entry(conn_frame, textvariable=self.camera_ip_var, width=20).grid(
             row=0, column=1, sticky=tk.W, padx=5)
 

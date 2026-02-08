@@ -12,10 +12,10 @@
       "role": "Primaerkamera - HD Stream + PTZ Tracking",
       "ip": "192.168.178.25",
       "streams": {
-        "rtsp_main": "rtsp://Moloch_4.5:Auge666@192.168.178.25:554/av_stream/ch0",
+        "rtsp_main": "rtsp://USER:PASS@CAMERA_IP:554/av_stream/ch0",
         "onvif_port": 80,
-        "onvif_user": "Moloch_4.5",
-        "onvif_pass": "Auge666"
+        "onvif_user": "CHANGE_ME",
+        "onvif_pass": "CHANGE_ME"
       },
       "specs": {
         "resolution": "1080P Full HD",
@@ -38,7 +38,7 @@
         "description": "Kamera unterstuetzt ONVIF PTZ - programmatische Schwenk-/Neige-Steuerung",
         "python_lib": "onvif-zeep",
         "use_case": "Auto-Tracking: Person erkannt -> PTZ folgt Person",
-        "example_code": "from onvif import ONVIFCamera; cam = ONVIFCamera('192.168.178.25', 80, 'Moloch_4.5', 'Auge666')"
+        "example_code": "from onvif import ONVIFCamera; cam = ONVIFCamera('CAMERA_IP', 80, 'CHANGE_ME', 'CHANGE_ME')"
       }
     },
 
@@ -93,7 +93,7 @@
         "pose_estimation": "yolov8s_pose_h10.hef"
       }
     },
-    "gstreamer_example": "gst-launch-1.0 rtspsrc location=rtsp://Moloch_4.5:Auge666@192.168.178.25:554/av_stream/ch0 ! decodebin ! videoconvert ! hailonet hef-path=yolov8s_h10.hef ! hailooverlay ! videoconvert ! autovideosink"
+    "gstreamer_example": "gst-launch-1.0 rtspsrc location=rtsp://USER:PASS@CAMERA_IP:554/av_stream/ch0 ! decodebin ! videoconvert ! hailonet hef-path=yolov8s_h10.hef ! hailooverlay ! videoconvert ! autovideosink"
   },
 
   "distributed_ai_pipeline": {
@@ -133,7 +133,7 @@
     },
     "sonoff_cam": {
       "ip": "192.168.178.25",
-      "name": "Moloch_4.5"
+      "name": "CHANGE_ME"
     },
     "subnet": "192.168.178.0/24"
   },

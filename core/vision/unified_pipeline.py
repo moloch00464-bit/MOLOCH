@@ -99,7 +99,7 @@ class PipelineConfig:
     """Konfiguration der Unified Pipeline."""
 
     # Sonoff RTSP
-    sonoff_url: str = "rtsp://Moloch_4.5:Auge666@192.168.178.25:554/av_stream/ch0"
+    sonoff_url: str = os.environ.get("MOLOCH_RTSP_URL", "rtsp://USER:PASS@CAMERA_IP:554/av_stream/ch0")
     sonoff_transport: str = "udp"  # udp oder tcp
     sonoff_buffer_size: int = 1
 

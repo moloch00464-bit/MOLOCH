@@ -1,3 +1,4 @@
+import os
 #!/usr/bin/env python3
 """
 SonoffCameraController v2 - AbsoluteMove Tracking
@@ -150,9 +151,9 @@ class SonoffCameraController:
 
     def __init__(
         self,
-        camera_ip: str = "192.168.178.25",
-        username: str = "Moloch_4.5",
-        password: str = "Auge666",
+        camera_ip: str = os.environ.get("MOLOCH_CAMERA_HOST", "CAMERA_IP"),
+        username: str = os.environ.get("MOLOCH_CAMERA_USER", "CHANGE_ME"),
+        password: str = os.environ.get("MOLOCH_CAMERA_PASS", "CHANGE_ME"),
         onvif_port: int = 80,
         log_level: int = logging.INFO
     ):
@@ -1013,9 +1014,9 @@ _camera_controller: Optional[SonoffCameraController] = None
 
 
 def get_camera_controller(
-    camera_ip: str = "192.168.178.25",
-    username: str = "Moloch_4.5",
-    password: str = "Auge666",
+    camera_ip: str = os.environ.get("MOLOCH_CAMERA_HOST", "CAMERA_IP"),
+    username: str = os.environ.get("MOLOCH_CAMERA_USER", "CHANGE_ME"),
+    password: str = os.environ.get("MOLOCH_CAMERA_PASS", "CHANGE_ME"),
     auto_connect: bool = True
 ) -> SonoffCameraController:
     """Get or create SonoffCameraController singleton with auto-connect."""

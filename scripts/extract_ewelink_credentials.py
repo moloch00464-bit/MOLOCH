@@ -1,3 +1,4 @@
+import os
 #!/usr/bin/env python3
 """
 eWeLink Credentials Extractor - mitmproxy addon
@@ -143,9 +144,9 @@ class EWeLinkCredentialsExtractor:
         """Schlägt bekannte AppSecrets vor basierend auf AppID."""
 
         known_pairs = {
-            "oeVkj2lYFGnJu5XUtWisfW4utiN4u9Mq": "6Nz4n0LrnJGWLazlWZLd0JmkKYFZ6pNz",
-            "YzfeftUVcZ6twZw1OoVKPRFYTrGEg01Q": "4G91qSoboqYO4Y0XJ0LPPKIsq8reHdfa",
-            "R8Oq3y0eSZSYdKccHlrQzT1ACCOUT9Gv": "1ve5Qk9GXfUhKAn1svnKwpAlxXkMarru",
+            os.environ.get("EWELINK_APP_ID_1", "CHANGE_ME"): os.environ.get("EWELINK_APP_SECRET_1", "CHANGE_ME"),
+            os.environ.get("EWELINK_APP_ID_2", "CHANGE_ME"): os.environ.get("EWELINK_APP_SECRET_2", "CHANGE_ME"),
+            os.environ.get("EWELINK_APP_ID_3", "CHANGE_ME"): os.environ.get("EWELINK_APP_SECRET_3", "CHANGE_ME"),
         }
 
         app_id = self.found_credentials['app_id']

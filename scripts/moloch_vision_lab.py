@@ -71,7 +71,7 @@ VISION_PIPELINE_PATH = CONFIG_DIR / "vision_pipeline.json"
 RUNTIME_CONFIG_PATH = CONFIG_DIR / "vision_runtime_config.json"
 
 # RTSP URL
-RTSP_URL = "rtsp://Moloch_4.5:Auge666@192.168.178.25:554/av_stream/ch0"
+RTSP_URL = os.environ.get("MOLOCH_RTSP_URL", "rtsp://USER:PASS@CAMERA_IP:554/av_stream/ch0")
 
 # Window names
 WIN_MAIN = "M.O.L.O.C.H. Vision Lab"

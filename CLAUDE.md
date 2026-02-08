@@ -39,7 +39,7 @@ Kommunikationsstil: Direkt, Kumpel-Level, Dark Humor. Kein Corporate-Sprech, kei
 ### Sonoff CAM-PT2 (aktiv seit 2026-02-01)
 ```bash
 # RTSP Stream - FUNKTIONIERT
-ffplay rtsp://Moloch_4.5:Auge666@192.168.178.25:554/av_stream/ch0
+ffplay rtsp://USER:PASS@CAMERA_IP:554/av_stream/ch0
 
 # Stream-Info: 1920x1080 @ 20fps, H.264, Audio: PCM A-Law 8kHz
 
@@ -47,7 +47,7 @@ ffplay rtsp://Moloch_4.5:Auge666@192.168.178.25:554/av_stream/ch0
 import cv2
 import os
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
-cap = cv2.VideoCapture("rtsp://Moloch_4.5:Auge666@192.168.178.25:554/av_stream/ch0", cv2.CAP_FFMPEG)
+cap = cv2.VideoCapture("rtsp://USER:PASS@CAMERA_IP:554/av_stream/ch0", cv2.CAP_FFMPEG)
 ```
 
 ## Netzwerk
@@ -120,7 +120,7 @@ Pro Person 3-5 Fotos aus verschiedenen Winkeln hinzufuegen.
 ### ONVIF PTZ Steuerung
 ```python
 from onvif import ONVIFCamera
-cam = ONVIFCamera('192.168.178.25', 80, 'Moloch_4.5', 'Auge666')
+cam = ONVIFCamera('CAMERA_IP', 80, 'CHANGE_ME', 'CHANGE_ME')
 # PTZ: 340 Grad horizontal, 180 Grad vertikal
 ```
 

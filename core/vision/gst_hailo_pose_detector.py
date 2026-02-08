@@ -344,7 +344,7 @@ class GstHailoPoseDetector:
 
     def __init__(self, rtsp_url: str = None):
         """Initialize pose detector."""
-        self.rtsp_url = rtsp_url or "rtsp://Moloch_4.5:Auge666@192.168.178.25:554/av_stream/ch0"
+        self.rtsp_url = rtsp_url or os.environ.get("MOLOCH_RTSP_URL", "rtsp://USER:PASS@CAMERA_IP:554/av_stream/ch0")
 
         self._pipeline = None
         self._bus = None

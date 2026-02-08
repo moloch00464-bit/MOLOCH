@@ -1,3 +1,4 @@
+import os
 #\!/usr/bin/env python3
 import time, logging, threading
 from typing import Optional
@@ -35,7 +36,7 @@ class PTZController:
     MIN_DURATION = 0.1
     COOLDOWN_MS = 300
     
-    def __init__(self, host="192.168.178.25", port=80, user="Moloch_4.5", password="Auge666"):
+    def __init__(self, host=os.environ.get("MOLOCH_CAMERA_HOST", "CAMERA_IP"), port=80, user=os.environ.get("MOLOCH_CAMERA_USER", "CHANGE_ME"), password=os.environ.get("MOLOCH_CAMERA_PASS", "CHANGE_ME")):
         self.host, self.port, self.user, self.password = host, port, user, password
         self._camera = self._ptz = self._token = None
         self._lock = threading.Lock()

@@ -151,7 +151,7 @@ class GstHailoDetector:
             rtsp_url: RTSP URL for camera input
             model: Model name from MODELS dict (default: yolov8m)
         """
-        self.rtsp_url = rtsp_url or "rtsp://Moloch_4.5:Auge666@192.168.178.25:554/av_stream/ch0"
+        self.rtsp_url = rtsp_url or os.environ.get("MOLOCH_RTSP_URL", "rtsp://USER:PASS@CAMERA_IP:554/av_stream/ch0")
 
         # Set model configuration
         self.model_name = model or self.DEFAULT_MODEL

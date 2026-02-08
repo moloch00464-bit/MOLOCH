@@ -220,7 +220,7 @@ class VisionWorker:
     """
 
     # Configuration - Heimnetzwerk
-    SONOFF_RTSP = "rtsp://Moloch_4.5:Auge666@192.168.178.25:554/av_stream/ch0"
+    SONOFF_RTSP = os.environ.get("MOLOCH_RTSP_URL", "rtsp://USER:PASS@CAMERA_IP:554/av_stream/ch0")
     MODEL_PATH = f"{HAILO_MODELS_DIR}/yolov8m_h10.hef"
 
     # Detection settings

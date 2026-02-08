@@ -1,3 +1,4 @@
+import os
 #!/usr/bin/env python3
 """
 eWeLink Credentials Tester
@@ -21,26 +22,26 @@ from core.hardware.camera_cloud_bridge import CameraCloudBridge, CloudConfig
 KNOWN_CREDENTIALS = [
     # Community credentials #1
     {
-        "app_id": "oeVkj2lYFGnJu5XUtWisfW4utiN4u9Mq",
-        "app_secret": "6Nz4n0LrnJGWLazlWZLd0JmkKYFZ6pNz",
+        "app_id": os.environ.get("EWELINK_APP_ID_1", "CHANGE_ME"),
+        "app_secret": os.environ.get("EWELINK_APP_SECRET_1", "CHANGE_ME"),
         "source": "Community #1 (am häufigsten)"
     },
     # Community credentials #2
     {
-        "app_id": "YzfeftUVcZ6twZw1OoVKPRFYTrGEg01Q",
-        "app_secret": "4G91qSoboqYO4Y0XJ0LPPKIsq8reHdfa",
+        "app_id": os.environ.get("EWELINK_APP_ID_2", "CHANGE_ME"),
+        "app_secret": os.environ.get("EWELINK_APP_SECRET_2", "CHANGE_ME"),
         "source": "Community #2"
     },
     # Community credentials #3
     {
-        "app_id": "R8Oq3y0eSZSYdKccHlrQzT1ACCOUT9Gv",
-        "app_secret": "1ve5Qk9GXfUhKAn1svnKwpAlxXkMarru",
+        "app_id": os.environ.get("EWELINK_APP_ID_3", "CHANGE_ME"),
+        "app_secret": os.environ.get("EWELINK_APP_SECRET_3", "CHANGE_ME"),
         "source": "Community #3"
     },
     # eWeLink official app (alt)
     {
-        "app_id": "Uw83EKZFxdif7XFXEsrpduz5YyjP7nTl",
-        "app_secret": "mXLOjea0woSCPKSK3eIcyuMYIpE0vTaL",
+        "app_id": os.environ.get("EWELINK_APP_ID_4", "CHANGE_ME"),
+        "app_secret": os.environ.get("EWELINK_APP_SECRET_4", "CHANGE_ME"),
         "source": "Official App (alt)"
     },
 ]
@@ -61,8 +62,8 @@ async def test_credentials(app_id: str, app_secret: str, source: str) -> bool:
         api_base_url="https://eu-apia.coolkit.cc",  # CORRECTED: with "a"!
         app_id=app_id,
         app_secret=app_secret,
-        username="moloch00464@googlemail.com",
-        password="MolochAuge666",
+        username=os.environ.get("EWELINK_USERNAME", "CHANGE_ME"),
+        password=os.environ.get("EWELINK_PASSWORD", "CHANGE_ME"),
         timeout=5.0
     )
 

@@ -82,10 +82,10 @@ class CameraController:
     """
 
     # Sonoff Konfiguration
-    SONOFF_IP = "192.168.178.25"
-    SONOFF_RTSP = CAMERA_CONFIG["camera"]["connection"]["url"] if CAMERA_CONFIG else "rtsp://Moloch_4.5:Auge666@192.168.178.25:554/av_stream/ch0"
-    SONOFF_ONVIF_USER = "Moloch_4.5"
-    SONOFF_ONVIF_PASS = "Auge666"
+    SONOFF_IP = os.environ.get("MOLOCH_CAMERA_HOST", "CAMERA_IP")
+    SONOFF_RTSP = CAMERA_CONFIG["camera"]["connection"]["url"] if CAMERA_CONFIG else os.environ.get("MOLOCH_RTSP_URL", "rtsp://USER:PASS@CAMERA_IP:554/av_stream/ch0")
+    SONOFF_ONVIF_USER = os.environ.get("MOLOCH_CAMERA_USER", "CHANGE_ME")
+    SONOFF_ONVIF_PASS = os.environ.get("MOLOCH_CAMERA_PASS", "CHANGE_ME")
 
     # Snapshot-Verzeichnis
     SNAPSHOT_DIR = Path("/home/molochzuhause/moloch/snapshots")

@@ -1,3 +1,4 @@
+import os
 #!/usr/bin/env python3
 """
 Unified Camera Controller for Sonoff GK-200MP2-B
@@ -263,9 +264,9 @@ class UnifiedCameraController:
 
     def __init__(
         self,
-        camera_ip: str = "192.168.178.25",
-        username: str = "Moloch_4.5",
-        password: str = "Auge666",
+        camera_ip: str = os.environ.get("MOLOCH_CAMERA_HOST", "CAMERA_IP"),
+        username: str = os.environ.get("MOLOCH_CAMERA_USER", "CHANGE_ME"),
+        password: str = os.environ.get("MOLOCH_CAMERA_PASS", "CHANGE_ME"),
         onvif_port: int = 80,
         rtsp_port: int = 554,
         log_level: int = logging.INFO
@@ -1172,9 +1173,9 @@ _camera_controller: Optional[UnifiedCameraController] = None
 
 
 def get_camera_controller(
-    camera_ip: str = "192.168.178.25",
-    username: str = "Moloch_4.5",
-    password: str = "Auge666",
+    camera_ip: str = os.environ.get("MOLOCH_CAMERA_HOST", "CAMERA_IP"),
+    username: str = os.environ.get("MOLOCH_CAMERA_USER", "CHANGE_ME"),
+    password: str = os.environ.get("MOLOCH_CAMERA_PASS", "CHANGE_ME"),
     auto_connect: bool = True
 ) -> UnifiedCameraController:
     """

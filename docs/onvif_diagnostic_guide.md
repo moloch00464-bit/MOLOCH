@@ -289,7 +289,7 @@ python3 scripts/onvif_capability_scan.py --help
 
 Options:
   --ip IP           Camera IP address (default: 192.168.178.25)
-  --user USER       ONVIF username (default: Moloch_4.5)
+  --user USER       ONVIF username (default: CHANGE_ME)
   --password PASS   ONVIF password
   --port PORT       ONVIF port (default: 80)
 ```

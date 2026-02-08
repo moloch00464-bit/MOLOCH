@@ -1,3 +1,4 @@
+import os
 #!/usr/bin/env python3
 """
 Probe Sonoff Camera ONVIF Capabilities
@@ -21,9 +22,9 @@ from zeep.helpers import serialize_object
 import json
 
 # Camera credentials
-CAMERA_IP = "192.168.178.25"
-USERNAME = "Moloch_4.5"
-PASSWORD = "Auge666"
+CAMERA_IP = os.environ.get("MOLOCH_CAMERA_HOST", "CAMERA_IP")
+USERNAME = os.environ.get("MOLOCH_CAMERA_USER", "CHANGE_ME")
+PASSWORD = os.environ.get("MOLOCH_CAMERA_PASS", "CHANGE_ME")
 ONVIF_PORT = 80
 
 logging.basicConfig(level=logging.INFO)

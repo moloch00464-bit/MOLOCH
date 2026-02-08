@@ -1,3 +1,4 @@
+import os
 #!/usr/bin/env python3
 """
 Sonoff CAM-PT2 PTZ Controller fuer M.O.L.O.C.H.
@@ -51,10 +52,10 @@ class SonoffPTZController:
     """
 
     # Kamera-Credentials (aus moloch_context.json)
-    DEFAULT_IP = "192.168.178.25"
+    DEFAULT_IP = os.environ.get("MOLOCH_CAMERA_HOST", "CAMERA_IP")
     DEFAULT_PORT = 80
-    DEFAULT_USER = "Moloch_4.5"
-    DEFAULT_PASS = "Auge666"
+    DEFAULT_USER = os.environ.get("MOLOCH_CAMERA_USER", "CHANGE_ME")
+    DEFAULT_PASS = os.environ.get("MOLOCH_CAMERA_PASS", "CHANGE_ME")
 
     # Sicherheitslimits
     MAX_MOVEMENTS_PER_MINUTE = 20

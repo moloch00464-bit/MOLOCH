@@ -85,7 +85,7 @@ class SystemHealthChecker:
     ]
 
     # Sonoff camera
-    SONOFF_IP = "192.168.178.25"
+    SONOFF_IP = os.environ.get("MOLOCH_CAMERA_HOST", "CAMERA_IP")
     SONOFF_RTSP_PORT = 554
     SONOFF_ONVIF_PORT = 8899
 

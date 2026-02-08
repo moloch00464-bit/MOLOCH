@@ -1,3 +1,4 @@
+import os
 #!/usr/bin/env python3
 """
 Unified Camera Controller Test Script
@@ -433,7 +434,7 @@ def test_control_modes(controller: UnifiedCameraController) -> bool:
 def run_all_tests(args):
     """Run all tests."""
     print_header("UNIFIED CAMERA CONTROLLER - TEST SUITE")
-    print(f"Camera IP: 192.168.178.25")
+    print(f"Camera IP: {os.environ.get("MOLOCH_CAMERA_HOST", "CAMERA_IP")}")
     print(f"Quick Mode: {args.quick}")
 
     # Create controller
