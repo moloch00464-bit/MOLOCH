@@ -1,0 +1,385 @@
+{
+  "ha_entities": [
+    {
+      "entity_id": "person.molochhome",
+      "state": "unknown",
+      "attributes": {
+        "editable": true,
+        "id": "molochhome",
+        "device_trackers": [
+          "device_tracker.lenovo_yt_x705f",
+          "device_tracker.23090ra98g"
+        ],
+        "user_id": "5de0b2eb770f48339f484238598aff20",
+        "friendly_name": "MolochHome"
+      },
+      "last_changed": "2026-02-08T08:04:55.782956+00:00",
+      "last_updated": "2026-02-08T08:05:22.753037+00:00"
+    },
+    {
+      "entity_id": "button.cam_pt2_reboot",
+      "state": "unknown",
+      "attributes": {
+        "device_class": "restart",
+        "friendly_name": "CAM-PT2 Reboot"
+      },
+      "last_changed": "2026-02-08T09:01:16.134042+00:00",
+      "last_updated": "2026-02-08T09:01:16.134042+00:00"
+    },
+    {
+      "entity_id": "button.cam_pt2_set_system_date_and_time",
+      "state": "unknown",
+      "attributes": {
+        "friendly_name": "CAM-PT2 Set System Date and Time"
+      },
+      "last_changed": "2026-02-08T09:01:16.136161+00:00",
+      "last_updated": "2026-02-08T09:01:16.136161+00:00"
+    },
+    {
+      "entity_id": "binary_sensor.cam_pt2_motion_alarm",
+      "state": "off",
+      "attributes": {
+        "device_class": "motion",
+        "friendly_name": "CAM-PT2 Motion Alarm"
+      },
+      "last_changed": "2026-02-08T09:01:16.171846+00:00",
+      "last_updated": "2026-02-08T09:01:16.171846+00:00"
+    },
+    {
+      "entity_id": "binary_sensor.cam_pt2_person_detection",
+      "state": "off",
+      "attributes": {
+        "device_class": "motion",
+        "friendly_name": "CAM-PT2 Person Detection"
+      },
+      "last_changed": "2026-02-08T09:01:16.173945+00:00",
+      "last_updated": "2026-02-08T09:01:16.173945+00:00"
+    },
+    {
+      "entity_id": "binary_sensor.cam_pt2_cell_motion_detection",
+      "state": "off",
+      "attributes": {
+        "device_class": "motion",
+        "friendly_name": "CAM-PT2 Cell Motion Detection"
+      },
+      "last_changed": "2026-02-08T09:01:16.176408+00:00",
+      "last_updated": "2026-02-08T09:01:16.176408+00:00"
+    },
+    {
+      "entity_id": "camera.cam_pt2_mainstream",
+      "state": "idle",
+      "attributes": {
+        "access_token": "8b67828ebf116e02de39a2ac0945774176ee2fedc66c52118dda30e25c50e29d",
+        "entity_picture": "/api/camera_proxy/camera.cam_pt2_mainstream?token=8b67828ebf116e02de39a2ac0945774176ee2fedc66c52118dda30e25c50e29d",
+        "friendly_name": "CAM-PT2 mainStream",
+        "supported_features": 2
+      },
+      "last_changed": "2026-02-08T09:01:16.266727+00:00",
+      "last_updated": "2026-02-08T09:29:55.225172+00:00"
+    }
+  ],
+  "ha_services": [
+    {
+      "domain": "camera",
+      "services": {
+        "enable_motion_detection": {
+          "fields": {},
+          "target": {
+            "entity": [
+              {
+                "domain": [
+                  "camera"
+                ]
+              }
+            ]
+          }
+        },
+        "disable_motion_detection": {
+          "fields": {},
+          "target": {
+            "entity": [
+              {
+                "domain": [
+                  "camera"
+                ]
+              }
+            ]
+          }
+        },
+        "turn_off": {
+          "fields": {},
+          "target": {
+            "entity": [
+              {
+                "domain": [
+                  "camera"
+                ]
+              }
+            ]
+          }
+        },
+        "turn_on": {
+          "fields": {},
+          "target": {
+            "entity": [
+              {
+                "domain": [
+                  "camera"
+                ]
+              }
+            ]
+          }
+        },
+        "snapshot": {
+          "fields": {
+            "filename": {
+              "required": true,
+              "example": "/tmp/snapshot_{{ entity_id.name }}.jpg",
+              "selector": {
+                "text": {
+                  "multiline": false,
+                  "multiple": false
+                }
+              }
+            }
+          },
+          "target": {
+            "entity": [
+              {
+                "domain": [
+                  "camera"
+                ]
+              }
+            ]
+          }
+        },
+        "play_stream": {
+          "fields": {
+            "media_player": {
+              "required": true,
+              "selector": {
+                "entity": {
+                  "domain": [
+                    "media_player"
+                  ],
+                  "reorder": false,
+                  "multiple": false
+                }
+              }
+            },
+            "format": {
+              "default": "hls",
+              "selector": {
+                "select": {
+                  "options": [
+                    "hls"
+                  ],
+                  "custom_value": false,
+                  "sort": false,
+                  "multiple": false
+                }
+              }
+            }
+          },
+          "target": {
+            "entity": [
+              {
+                "domain": [
+                  "camera"
+                ]
+              }
+            ]
+          }
+        },
+        "record": {
+          "fields": {
+            "filename": {
+              "required": true,
+              "example": "/tmp/snapshot_{{ entity_id.name }}.mp4",
+              "selector": {
+                "text": {
+                  "multiline": false,
+                  "multiple": false
+                }
+              }
+            },
+            "duration": {
+              "default": 30,
+              "selector": {
+                "number": {
+                  "min": 1.0,
+                  "max": 3600.0,
+                  "unit_of_measurement": "seconds",
+                  "step": 1.0,
+                  "mode": "slider"
+                }
+              }
+            },
+            "lookback": {
+              "default": 0,
+              "selector": {
+                "number": {
+                  "min": 0.0,
+                  "max": 300.0,
+                  "unit_of_measurement": "seconds",
+                  "step": 1.0,
+                  "mode": "slider"
+                }
+              }
+            }
+          },
+          "target": {
+            "entity": [
+              {
+                "domain": [
+                  "camera"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "domain": "onvif",
+      "services": {
+        "ptz": {
+          "fields": {
+            "tilt": {
+              "selector": {
+                "select": {
+                  "options": [
+                    "DOWN",
+                    "UP"
+                  ],
+                  "custom_value": false,
+                  "sort": false,
+                  "multiple": false
+                }
+              }
+            },
+            "pan": {
+              "selector": {
+                "select": {
+                  "options": [
+                    "LEFT",
+                    "RIGHT"
+                  ],
+                  "custom_value": false,
+                  "sort": false,
+                  "multiple": false
+                }
+              }
+            },
+            "zoom": {
+              "selector": {
+                "select": {
+                  "options": [
+                    "ZOOM_IN",
+                    "ZOOM_OUT"
+                  ],
+                  "custom_value": false,
+                  "sort": false,
+                  "multiple": false
+                }
+              }
+            },
+            "distance": {
+              "default": 0.1,
+              "selector": {
+                "number": {
+                  "min": 0.0,
+                  "max": 1.0,
+                  "step": 0.01,
+                  "mode": "slider"
+                }
+              }
+            },
+            "speed": {
+              "selector": {
+                "number": {
+                  "min": 0.0,
+                  "max": 1.0,
+                  "step": 0.01,
+                  "mode": "slider"
+                }
+              }
+            },
+            "continuous_duration": {
+              "default": 0.5,
+              "selector": {
+                "number": {
+                  "min": 0.0,
+                  "max": 1.0,
+                  "step": 0.01,
+                  "mode": "slider"
+                }
+              }
+            },
+            "preset": {
+              "example": "1",
+              "default": "0",
+              "selector": {
+                "text": {
+                  "multiline": false,
+                  "multiple": false
+                }
+              }
+            },
+            "move_mode": {
+              "default": "RelativeMove",
+              "selector": {
+                "select": {
+                  "options": [
+                    "AbsoluteMove",
+                    "ContinuousMove",
+                    "GotoPreset",
+                    "RelativeMove",
+                    "Stop"
+                  ],
+                  "custom_value": false,
+                  "sort": false,
+                  "multiple": false
+                }
+              }
+            }
+          },
+          "target": {
+            "entity": [
+              {
+                "integration": "onvif",
+                "domain": [
+                  "camera"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "ha_device_info": null,
+  "ha_config_entries_onvif": [
+    {
+      "created_at": 1770541271.187286,
+      "entry_id": "01KGY7QJ4KH0TZYJ1QEXGPJ3JJ",
+      "domain": "onvif",
+      "modified_at": 1770541271.189071,
+      "title": "CAM-PT2 - 48:d0:1c:c4:cd:f7",
+      "source": "user",
+      "state": "loaded",
+      "supports_options": true,
+      "supports_remove_device": false,
+      "supports_unload": true,
+      "supports_reconfigure": false,
+      "supported_subentry_types": {},
+      "pref_disable_new_entities": false,
+      "pref_disable_polling": false,
+      "disabled_by": null,
+      "reason": null,
+      "error_reason_translation_key": null,
+      "error_reason_translation_placeholders": null,
+      "num_subentries": 0
+    }
+  ]
+}

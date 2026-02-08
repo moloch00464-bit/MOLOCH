@@ -1,0 +1,114 @@
+{
+  "label": "alarm_taste",
+  "timestamp": "2026-02-08T11:56:10.163",
+  "duration_sec": 30,
+  "start_position": {
+    "timestamp": "2026-02-08T11:55:37.607",
+    "pan": 0.0,
+    "tilt": 0.0,
+    "zoom": 1.0
+  },
+  "end_position": {
+    "timestamp": "2026-02-08T11:56:09.162",
+    "pan": 0.0,
+    "tilt": 0.0,
+    "zoom": 1.0,
+    "move_status": "IDLE"
+  },
+  "pan_range": {
+    "min": 0.0,
+    "max": 0.0
+  },
+  "tilt_range": {
+    "min": 0.0,
+    "max": 0.0
+  },
+  "events": [],
+  "positions": [
+    {
+      "timestamp": "2026-02-08T11:55:37.607",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0
+    },
+    {
+      "timestamp": "2026-02-08T11:55:39.136",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:55:42.173",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:55:45.127",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:55:48.163",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:55:51.209",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:55:54.157",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:55:57.095",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:56:00.144",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:56:03.185",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:56:06.113",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:56:09.162",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    }
+  ],
+  "event_count": 0,
+  "position_count": 12
+}

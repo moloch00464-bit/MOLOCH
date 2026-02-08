@@ -1,0 +1,738 @@
+{
+  "scan_timestamp": "2026-02-08T10:28:07.138226",
+  "camera_ip": "192.168.178.25",
+  "camera_port": 80,
+  "device_info": {
+    "Manufacturer": "SONOFF",
+    "Model": "CAM-PT2",
+    "FirmwareVersion": "1.0.8",
+    "SerialNumber": "25370200016333",
+    "HardwareId": "CAM-PT2"
+  },
+  "capabilities": {
+    "Analytics": null,
+    "Device": {
+      "XAddr": "http://192.168.178.25/onvif/device_service",
+      "Network": null,
+      "System": {
+        "DiscoveryResolve": true,
+        "DiscoveryBye": true,
+        "RemoteDiscovery": true,
+        "SystemBackup": false,
+        "SystemLogging": false,
+        "FirmwareUpgrade": false,
+        "SupportedVersions": [
+          {
+            "Major": 17,
+            "Minor": 6
+          },
+          {
+            "Major": 2,
+            "Minor": 6
+          },
+          {
+            "Major": 2,
+            "Minor": 4
+          },
+          {
+            "Major": 2,
+            "Minor": 0
+          }
+        ],
+        "Extension": null,
+        "_attr_1": null
+      },
+      "IO": null,
+      "Security": {
+        "TLS1.1": false,
+        "TLS1.2": false,
+        "OnboardKeyGeneration": false,
+        "AccessPolicyConfig": false,
+        "X.509Token": false,
+        "SAMLToken": false,
+        "KerberosToken": false,
+        "RELToken": false,
+        "_value_1": null,
+        "Extension": null,
+        "_attr_1": null
+      },
+      "Extension": null,
+      "_attr_1": null
+    },
+    "Events": {
+      "XAddr": "http://192.168.178.25/onvif/events_service",
+      "WSSubscriptionPolicySupport": false,
+      "WSPullPointSupport": true,
+      "WSPausableSubscriptionManagerInterfaceSupport": false,
+      "_value_1": null,
+      "_attr_1": null
+    },
+    "Imaging": null,
+    "Media": {
+      "XAddr": "http://192.168.178.25/onvif/media_service",
+      "StreamingCapabilities": {
+        "RTPMulticast": false,
+        "RTP_TCP": true,
+        "RTP_RTSP_TCP": true,
+        "Extension": null,
+        "_attr_1": null
+      },
+      "_value_1": null,
+      "Extension": null,
+      "_attr_1": null
+    },
+    "PTZ": {
+      "XAddr": "http://192.168.178.25/onvif/ptz_service",
+      "_value_1": null,
+      "_attr_1": null
+    },
+    "Extension": {
+      "_value_1": [
+        "<Element {http://www.onvif.org/ver10/schema}DeviceIO at 0x21c2a533080>"
+      ],
+      "DeviceIO": null,
+      "Display": null,
+      "Recording": null,
+      "Search": null,
+      "Replay": null,
+      "Receiver": null,
+      "AnalyticsDevice": null,
+      "Extensions": null
+    },
+    "_attr_1": null
+  },
+  "service_capabilities": {
+    "Network": {
+      "IPFilter": false,
+      "ZeroConfiguration": false,
+      "IPVersion6": false,
+      "DynDNS": false,
+      "Dot11Configuration": false,
+      "Dot1XConfigurations": 0,
+      "HostnameFromDHCP": false,
+      "NTP": 0,
+      "DHCPv6": false,
+      "_attr_1": {}
+    },
+    "Security": {
+      "TLS1.0": false,
+      "TLS1.1": false,
+      "TLS1.2": false,
+      "OnboardKeyGeneration": false,
+      "AccessPolicyConfig": false,
+      "DefaultAccessPolicy": false,
+      "Dot1X": false,
+      "RemoteUserHandling": false,
+      "X.509Token": false,
+      "SAMLToken": false,
+      "KerberosToken": false,
+      "UsernameToken": false,
+      "HttpDigest": false,
+      "RELToken": false,
+      "SupportedEAPMethods": null,
+      "MaxUsers": 0,
+      "_attr_1": {
+        "MaxUserNameLength": "0",
+        "MaxPasswordLength": "0"
+      }
+    },
+    "System": {
+      "DiscoveryResolve": true,
+      "DiscoveryBye": true,
+      "RemoteDiscovery": true,
+      "SystemBackup": false,
+      "SystemLogging": false,
+      "FirmwareUpgrade": false,
+      "HttpFirmwareUpgrade": false,
+      "HttpSystemBackup": false,
+      "HttpSystemLogging": false,
+      "HttpSupportInformation": false,
+      "_attr_1": {
+        "StorageConfiguration": "false",
+        "NetworkConfigNotSupported": "true",
+        "UserConfigNotSupported": "true"
+      }
+    },
+    "Misc": null
+  },
+  "network_interfaces": [
+    {
+      "Enabled": true,
+      "Info": {
+        "Name": "wlan0",
+        "HwAddress": "48:d0:1c:c4:cd:f7",
+        "MTU": 1500
+      },
+      "Link": null,
+      "IPv4": {
+        "Enabled": true,
+        "Config": {
+          "Manual": [
+            {
+              "Address": "192.168.178.25",
+              "PrefixLength": 24
+            }
+          ],
+          "LinkLocal": null,
+          "FromDHCP": null,
+          "DHCP": false,
+          "_value_1": null,
+          "_attr_1": null
+        }
+      },
+      "IPv6": {
+        "Enabled": false,
+        "Config": null
+      },
+      "Extension": null,
+      "token": "NetworkInterfaceToken",
+      "_attr_1": {}
+    }
+  ],
+  "media_profiles": [
+    {
+      "Name": "mainStream",
+      "VideoSourceConfiguration": {
+        "Name": "VideoSourceConfig",
+        "UseCount": 2,
+        "SourceToken": "VideoSourceToken",
+        "Bounds": {
+          "x": 0,
+          "y": 0,
+          "width": 1920,
+          "height": 1080
+        },
+        "_value_1": null,
+        "Extension": null,
+        "token": "VideoSourceConfigToken",
+        "_attr_1": {}
+      },
+      "AudioSourceConfiguration": {
+        "Name": "AudioSourceConfig",
+        "UseCount": 2,
+        "SourceToken": "AudioSourceToken",
+        "_value_1": null,
+        "token": "AudioSourceConfigToken",
+        "_attr_1": {}
+      },
+      "VideoEncoderConfiguration": {
+        "Name": "Profile_0_VideoEncoder",
+        "UseCount": 1,
+        "Encoding": "H264",
+        "Resolution": {
+          "Width": 1920,
+          "Height": 1080
+        },
+        "Quality": 2.0,
+        "RateControl": {
+          "FrameRateLimit": 20,
+          "EncodingInterval": 1,
+          "BitrateLimit": 1500
+        },
+        "MPEG4": null,
+        "H264": {
+          "GovLength": 80,
+          "H264Profile": "Main"
+        },
+        "Multicast": {
+          "Address": {
+            "Type": "IPv4",
+            "IPv4Address": "0.0.0.0",
+            "IPv6Address": null
+          },
+          "Port": 0,
+          "TTL": 0,
+          "AutoStart": false,
+          "_value_1": null,
+          "_attr_1": null
+        },
+        "SessionTimeout": "0:01:05",
+        "_value_1": null,
+        "token": "Profile_0_VideoEncoderToken",
+        "_attr_1": {}
+      },
+      "AudioEncoderConfiguration": {
+        "Name": "Profile_0_AudioEncoder",
+        "UseCount": 1,
+        "Encoding": "G711",
+        "Bitrate": 65536,
+        "SampleRate": 8000,
+        "Multicast": {
+          "Address": {
+            "Type": "IPv4",
+            "IPv4Address": "0.0.0.0",
+            "IPv6Address": null
+          },
+          "Port": 0,
+          "TTL": 0,
+          "AutoStart": false,
+          "_value_1": null,
+          "_attr_1": null
+        },
+        "SessionTimeout": "0:01:05",
+        "_value_1": null,
+        "token": "Profile_0_AudioEncoderToken",
+        "_attr_1": {}
+      },
+      "VideoAnalyticsConfiguration": null,
+      "PTZConfiguration": {
+        "Name": "PTZCfg",
+        "UseCount": 0,
+        "NodeToken": "PTZNodeToken",
+        "DefaultAbsolutePantTiltPositionSpace": "http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace",
+        "DefaultAbsoluteZoomPositionSpace": "http://www.onvif.org/ver10/tptz/ZoomSpaces/PositionGenericSpace",
+        "DefaultRelativePanTiltTranslationSpace": "http://www.onvif.org/ver10/tptz/PanTiltSpaces/TranslationGenericSpace",
+        "DefaultRelativeZoomTranslationSpace": "http://www.onvif.org/ver10/tptz/ZoomSpaces/TranslationGenericSpace",
+        "DefaultContinuousPanTiltVelocitySpace": "http://www.onvif.org/ver10/tptz/PanTiltSpaces/VelocityGenericSpace",
+        "DefaultContinuousZoomVelocitySpace": "http://www.onvif.org/ver10/tptz/ZoomSpaces/VelocityGenericSpace",
+        "DefaultPTZSpeed": {
+          "PanTilt": {
+            "x": 1.0,
+            "y": 1.0,
+            "space": "http://www.onvif.org/ver10/tptz/PanTiltSpaces/GenericSpeedSpace"
+          },
+          "Zoom": {
+            "x": 1.0,
+            "space": "http://www.onvif.org/ver10/tptz/ZoomSpaces/ZoomGenericSpeedSpace"
+          }
+        },
+        "DefaultPTZTimeout": "0:00:05",
+        "PanTiltLimits": {
+          "Range": {
+            "URI": "http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace",
+            "XRange": {
+              "Min": -168.4,
+              "Max": 174.4
+            },
+            "YRange": {
+              "Min": -78.8,
+              "Max": 101.3
+            }
+          }
+        },
+        "ZoomLimits": {
+          "Range": {
+            "URI": "http://www.onvif.org/ver10/tptz/ZoomSpaces/PositionGenericSpace",
+            "XRange": {
+              "Min": 0.0,
+              "Max": 0.0
+            }
+          }
+        },
+        "Extension": {
+          "_value_1": [
+            "<Element {http://www.onvif.org/ver10/schema}PTControlDirection at 0x21c2b836c00>"
+          ],
+          "PTControlDirection": null,
+          "Extension": null
+        },
+        "token": "PTZCfgToken",
+        "_attr_1": {
+          "MoveRamp": "0",
+          "PresetRamp": "0",
+          "PresetTourRamp": "0"
+        }
+      },
+      "MetadataConfiguration": null,
+      "Extension": null,
+      "token": "Profile_0",
+      "fixed": true,
+      "_attr_1": {}
+    },
+    {
+      "Name": "minorStream",
+      "VideoSourceConfiguration": {
+        "Name": "VideoSourceConfig",
+        "UseCount": 2,
+        "SourceToken": "VideoSourceToken",
+        "Bounds": {
+          "x": 0,
+          "y": 0,
+          "width": 1920,
+          "height": 1080
+        },
+        "_value_1": null,
+        "Extension": null,
+        "token": "VideoSourceConfigToken",
+        "_attr_1": {}
+      },
+      "AudioSourceConfiguration": {
+        "Name": "AudioSourceConfig",
+        "UseCount": 2,
+        "SourceToken": "AudioSourceToken",
+        "_value_1": null,
+        "token": "AudioSourceConfigToken",
+        "_attr_1": {}
+      },
+      "VideoEncoderConfiguration": {
+        "Name": "Profile_1_VideoEncoder",
+        "UseCount": 1,
+        "Encoding": "H264",
+        "Resolution": {
+          "Width": 640,
+          "Height": 360
+        },
+        "Quality": 2.0,
+        "RateControl": {
+          "FrameRateLimit": 20,
+          "EncodingInterval": 1,
+          "BitrateLimit": 1500
+        },
+        "MPEG4": null,
+        "H264": {
+          "GovLength": 80,
+          "H264Profile": "Main"
+        },
+        "Multicast": {
+          "Address": {
+            "Type": "IPv4",
+            "IPv4Address": "0.0.0.0",
+            "IPv6Address": null
+          },
+          "Port": 0,
+          "TTL": 0,
+          "AutoStart": false,
+          "_value_1": null,
+          "_attr_1": null
+        },
+        "SessionTimeout": "0:01:05",
+        "_value_1": null,
+        "token": "Profile_1_VideoEncoderToken",
+        "_attr_1": {}
+      },
+      "AudioEncoderConfiguration": {
+        "Name": "Profile_1_AudioEncoder",
+        "UseCount": 1,
+        "Encoding": "G711",
+        "Bitrate": 65536,
+        "SampleRate": 8000,
+        "Multicast": {
+          "Address": {
+            "Type": "IPv4",
+            "IPv4Address": "0.0.0.0",
+            "IPv6Address": null
+          },
+          "Port": 0,
+          "TTL": 0,
+          "AutoStart": false,
+          "_value_1": null,
+          "_attr_1": null
+        },
+        "SessionTimeout": "0:01:05",
+        "_value_1": null,
+        "token": "Profile_1_AudioEncoderToken",
+        "_attr_1": {}
+      },
+      "VideoAnalyticsConfiguration": null,
+      "PTZConfiguration": {
+        "Name": "PTZCfg",
+        "UseCount": 0,
+        "NodeToken": "PTZNodeToken",
+        "DefaultAbsolutePantTiltPositionSpace": "http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace",
+        "DefaultAbsoluteZoomPositionSpace": "http://www.onvif.org/ver10/tptz/ZoomSpaces/PositionGenericSpace",
+        "DefaultRelativePanTiltTranslationSpace": "http://www.onvif.org/ver10/tptz/PanTiltSpaces/TranslationGenericSpace",
+        "DefaultRelativeZoomTranslationSpace": "http://www.onvif.org/ver10/tptz/ZoomSpaces/TranslationGenericSpace",
+        "DefaultContinuousPanTiltVelocitySpace": "http://www.onvif.org/ver10/tptz/PanTiltSpaces/VelocityGenericSpace",
+        "DefaultContinuousZoomVelocitySpace": "http://www.onvif.org/ver10/tptz/ZoomSpaces/VelocityGenericSpace",
+        "DefaultPTZSpeed": {
+          "PanTilt": {
+            "x": 1.0,
+            "y": 1.0,
+            "space": "http://www.onvif.org/ver10/tptz/PanTiltSpaces/GenericSpeedSpace"
+          },
+          "Zoom": {
+            "x": 1.0,
+            "space": "http://www.onvif.org/ver10/tptz/ZoomSpaces/ZoomGenericSpeedSpace"
+          }
+        },
+        "DefaultPTZTimeout": "0:00:05",
+        "PanTiltLimits": {
+          "Range": {
+            "URI": "http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace",
+            "XRange": {
+              "Min": -168.4,
+              "Max": 174.4
+            },
+            "YRange": {
+              "Min": -78.8,
+              "Max": 101.3
+            }
+          }
+        },
+        "ZoomLimits": {
+          "Range": {
+            "URI": "http://www.onvif.org/ver10/tptz/ZoomSpaces/PositionGenericSpace",
+            "XRange": {
+              "Min": 0.0,
+              "Max": 0.0
+            }
+          }
+        },
+        "Extension": {
+          "_value_1": [
+            "<Element {http://www.onvif.org/ver10/schema}PTControlDirection at 0x21c2b837e80>"
+          ],
+          "PTControlDirection": null,
+          "Extension": null
+        },
+        "token": "PTZCfgToken",
+        "_attr_1": {
+          "MoveRamp": "0",
+          "PresetRamp": "0",
+          "PresetTourRamp": "0"
+        }
+      },
+      "MetadataConfiguration": null,
+      "Extension": null,
+      "token": "Profile_1",
+      "fixed": true,
+      "_attr_1": {}
+    }
+  ],
+  "video_sources": [
+    {
+      "Framerate": 20.0,
+      "Resolution": {
+        "Width": 1920,
+        "Height": 1080
+      },
+      "Imaging": null,
+      "Extension": null,
+      "token": "VideoSourceToken",
+      "_attr_1": {}
+    }
+  ],
+  "audio_sources": [
+    {
+      "Channels": 1,
+      "_value_1": null,
+      "token": "AudioSourceToken",
+      "_attr_1": {}
+    }
+  ],
+  "stream_uris": {
+    "Profile_0": {
+      "Uri": "rtsp://192.168.178.25:554/av_stream/ch0",
+      "InvalidAfterConnect": false,
+      "InvalidAfterReboot": false,
+      "Timeout": "0:00:00",
+      "_value_1": null,
+      "_attr_1": null
+    },
+    "Profile_1": {
+      "Uri": "rtsp://Moloch_4.5:554/av_stream/ch0",
+      "InvalidAfterConnect": false,
+      "InvalidAfterReboot": false,
+      "Timeout": "0:00:00",
+      "_value_1": null,
+      "_attr_1": null
+    }
+  },
+  "ptz_nodes": [
+    {
+      "Name": "PTZ",
+      "SupportedPTZSpaces": {
+        "AbsolutePanTiltPositionSpace": [
+          {
+            "URI": "http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace",
+            "XRange": {
+              "Min": -168.4,
+              "Max": 174.4
+            },
+            "YRange": {
+              "Min": -78.8,
+              "Max": 101.3
+            }
+          }
+        ],
+        "AbsoluteZoomPositionSpace": [
+          {
+            "URI": "http://www.onvif.org/ver10/tptz/ZoomSpaces/PositionGenericSpace",
+            "XRange": {
+              "Min": 0.0,
+              "Max": 0.0
+            }
+          }
+        ],
+        "RelativePanTiltTranslationSpace": [
+          {
+            "URI": "http://www.onvif.org/ver10/tptz/PanTiltSpaces/TranslationGenericSpace",
+            "XRange": {
+              "Min": -168.4,
+              "Max": 174.4
+            },
+            "YRange": {
+              "Min": -78.8,
+              "Max": 101.3
+            }
+          },
+          {
+            "URI": "http://www.onvif.org/ver10/tptz/PanTiltSpaces/TranslationSpaceFov",
+            "XRange": {
+              "Min": -100.0,
+              "Max": 100.0
+            },
+            "YRange": {
+              "Min": -100.0,
+              "Max": 100.0
+            }
+          }
+        ],
+        "RelativeZoomTranslationSpace": [
+          {
+            "URI": "http://www.onvif.org/ver10/tptz/ZoomSpaces/TranslationGenericSpace",
+            "XRange": {
+              "Min": 0.0,
+              "Max": 0.0
+            }
+          }
+        ],
+        "ContinuousPanTiltVelocitySpace": [
+          {
+            "URI": "http://www.onvif.org/ver10/tptz/PanTiltSpaces/VelocityGenericSpace",
+            "XRange": {
+              "Min": -1.0,
+              "Max": 1.0
+            },
+            "YRange": {
+              "Min": -1.0,
+              "Max": 1.0
+            }
+          }
+        ],
+        "ContinuousZoomVelocitySpace": [
+          {
+            "URI": "http://www.onvif.org/ver10/tptz/ZoomSpaces/VelocityGenericSpace",
+            "XRange": {
+              "Min": -1.0,
+              "Max": 1.0
+            }
+          }
+        ],
+        "PanTiltSpeedSpace": [
+          {
+            "URI": "http://www.onvif.org/ver10/tptz/PanTiltSpaces/GenericSpeedSpace",
+            "XRange": {
+              "Min": 0.0,
+              "Max": 1.0
+            }
+          }
+        ],
+        "ZoomSpeedSpace": [
+          {
+            "URI": "http://www.onvif.org/ver10/tptz/ZoomSpaces/ZoomGenericSpeedSpace",
+            "XRange": {
+              "Min": 0.0,
+              "Max": 1.0
+            }
+          }
+        ],
+        "Extension": null,
+        "_attr_1": null
+      },
+      "MaximumNumberOfPresets": 0,
+      "HomeSupported": true,
+      "AuxiliaryCommands": [],
+      "Extension": null,
+      "token": "PTZNodeToken",
+      "FixedHomePosition": false,
+      "_attr_1": {}
+    }
+  ],
+  "ptz_configurations": [
+    {
+      "Name": "PTZCfg",
+      "UseCount": 0,
+      "NodeToken": "PTZNodeToken",
+      "DefaultAbsolutePantTiltPositionSpace": "http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace",
+      "DefaultAbsoluteZoomPositionSpace": "http://www.onvif.org/ver10/tptz/ZoomSpaces/PositionGenericSpace",
+      "DefaultRelativePanTiltTranslationSpace": "http://www.onvif.org/ver10/tptz/PanTiltSpaces/TranslationGenericSpace",
+      "DefaultRelativeZoomTranslationSpace": "http://www.onvif.org/ver10/tptz/ZoomSpaces/TranslationGenericSpace",
+      "DefaultContinuousPanTiltVelocitySpace": "http://www.onvif.org/ver10/tptz/PanTiltSpaces/VelocityGenericSpace",
+      "DefaultContinuousZoomVelocitySpace": "http://www.onvif.org/ver10/tptz/ZoomSpaces/VelocityGenericSpace",
+      "DefaultPTZSpeed": {
+        "PanTilt": {
+          "x": 1.0,
+          "y": 1.0,
+          "space": "http://www.onvif.org/ver10/tptz/PanTiltSpaces/GenericSpeedSpace"
+        },
+        "Zoom": {
+          "x": 1.0,
+          "space": "http://www.onvif.org/ver10/tptz/ZoomSpaces/ZoomGenericSpeedSpace"
+        }
+      },
+      "DefaultPTZTimeout": "0:00:05",
+      "PanTiltLimits": {
+        "Range": {
+          "URI": "http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace",
+          "XRange": {
+            "Min": -168.4,
+            "Max": 174.4
+          },
+          "YRange": {
+            "Min": -78.8,
+            "Max": 101.3
+          }
+        }
+      },
+      "ZoomLimits": {
+        "Range": {
+          "URI": "http://www.onvif.org/ver10/tptz/ZoomSpaces/PositionGenericSpace",
+          "XRange": {
+            "Min": 0.0,
+            "Max": 0.0
+          }
+        }
+      },
+      "Extension": {
+        "_value_1": [
+          "<Element {http://www.onvif.org/ver10/schema}PTControlDirection at 0x21c2ba9c980>"
+        ],
+        "PTControlDirection": null,
+        "Extension": null
+      },
+      "token": "PTZCfgToken",
+      "_attr_1": {
+        "MoveRamp": "0",
+        "PresetRamp": "0",
+        "PresetTourRamp": "0"
+      }
+    }
+  ],
+  "ptz_presets": {
+    "Profile_0": [],
+    "Profile_1": []
+  },
+  "imaging_options": null,
+  "imaging_settings": null,
+  "event_properties": {
+    "TopicNamespaceLocation": [
+      "http://www.onvif.org/onvif/ver10/topics/topicns_xml"
+    ],
+    "FixedTopicSet": true,
+    "TopicSet": {
+      "documentation": null,
+      "_value_1": [
+        "<Element {http://www.onvif.org/ver10/topics}VideoSource at 0x21c2bb083c0>",
+        "<Element {http://www.onvif.org/ver10/topics}RuleEngine at 0x21c2bb08400>",
+        "<Element {http://www.onvif.org/ver10/topics}RuleEngine at 0x21c2bb08440>"
+      ],
+      "_attr_1": null
+    },
+    "TopicExpressionDialect": [
+      "http://www.onvif.org/ver10/tev/topicExpression/ConcreteSet",
+      "http://docs.oasis-open.org/wsn/t-1/TopicExpression/Concrete"
+    ],
+    "MessageContentFilterDialect": [
+      "http://www.onvif.org/ver10/tev/messageContentFilter/ItemFilter"
+    ],
+    "ProducerPropertiesFilterDialect": [],
+    "MessageContentSchemaLocation": [
+      "http://www.onvif.org/onvif/ver10/schema/onvif.xsd"
+    ],
+    "_value_1": null
+  },
+  "errors": [
+    "ImagingService: Unknown error: Device doesn`t support service: imaging"
+  ]
+}

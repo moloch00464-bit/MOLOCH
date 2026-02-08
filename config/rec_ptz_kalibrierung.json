@@ -1,0 +1,177 @@
+{
+  "label": "ptz_kalibrierung",
+  "timestamp": "2026-02-08T11:34:46.172",
+  "duration_sec": 60,
+  "start_position": {
+    "timestamp": "2026-02-08T11:33:46.082",
+    "pan": 0.0,
+    "tilt": 0.0,
+    "zoom": 1.0
+  },
+  "end_position": {
+    "timestamp": "2026-02-08T11:34:45.171",
+    "pan": 0.0,
+    "tilt": 0.0,
+    "zoom": 1.0,
+    "move_status": "IDLE"
+  },
+  "pan_range": {
+    "min": 0.0,
+    "max": 0.0
+  },
+  "tilt_range": {
+    "min": 0.0,
+    "max": 0.0
+  },
+  "events": [],
+  "positions": [
+    {
+      "timestamp": "2026-02-08T11:33:46.082",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0
+    },
+    {
+      "timestamp": "2026-02-08T11:33:48.204",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:33:51.151",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:33:54.187",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:33:57.151",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:34:00.182",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:34:03.118",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:34:06.155",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:34:09.179",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:34:12.117",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:34:15.167",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:34:18.109",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:34:21.155",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:34:24.198",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:34:27.145",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:34:30.179",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:34:33.098",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:34:36.138",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:34:39.170",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:34:42.127",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:34:45.171",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    }
+  ],
+  "event_count": 0,
+  "position_count": 21
+}

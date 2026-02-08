@@ -1,0 +1,426 @@
+{
+  "total_streams": 151790,
+  "unique_artists": 3218,
+  "unique_tracks": 16467,
+  "total_listening_hours": 6832.6,
+  "top_artists": [
+    {
+      "name": "Suicide Commando",
+      "plays": 2360
+    },
+    {
+      "name": "SIERRA",
+      "plays": 1752
+    },
+    {
+      "name": "Vomito Negro",
+      "plays": 1733
+    },
+    {
+      "name": "Chainreactor",
+      "plays": 1600
+    },
+    {
+      "name": "ESA (Electronic Substance Abuse)",
+      "plays": 1421
+    },
+    {
+      "name": "Autodafeh",
+      "plays": 1298
+    },
+    {
+      "name": "Portion Control",
+      "plays": 1274
+    },
+    {
+      "name": "VNV Nation",
+      "plays": 1266
+    },
+    {
+      "name": "AC/DC",
+      "plays": 1245
+    },
+    {
+      "name": "Geistform",
+      "plays": 1226
+    },
+    {
+      "name": "Orange Sector",
+      "plays": 1037
+    },
+    {
+      "name": "16Volt",
+      "plays": 986
+    },
+    {
+      "name": "Combichrist",
+      "plays": 975
+    },
+    {
+      "name": "HEALTH",
+      "plays": 965
+    },
+    {
+      "name": ":Wumpscut:",
+      "plays": 912
+    },
+    {
+      "name": "Phase Fatale",
+      "plays": 891
+    },
+    {
+      "name": "Ancient Methods",
+      "plays": 763
+    },
+    {
+      "name": "E-Craft",
+      "plays": 755
+    },
+    {
+      "name": "SAM",
+      "plays": 711
+    },
+    {
+      "name": "Daniel Deluxe",
+      "plays": 673
+    },
+    {
+      "name": "Life Cried",
+      "plays": 669
+    },
+    {
+      "name": "Depeche Mode",
+      "plays": 667
+    },
+    {
+      "name": "Ministry",
+      "plays": 665
+    },
+    {
+      "name": "Schwefelgelb",
+      "plays": 651
+    },
+    {
+      "name": "Xotox",
+      "plays": 640
+    },
+    {
+      "name": "I Hate Models",
+      "plays": 627
+    },
+    {
+      "name": "Alien Vampires",
+      "plays": 626
+    },
+    {
+      "name": "Terrorfakt",
+      "plays": 619
+    },
+    {
+      "name": "Spark!",
+      "plays": 580
+    },
+    {
+      "name": "ALVABEAT",
+      "plays": 551
+    }
+  ],
+  "top_tracks": [
+    {
+      "name": "Ancient Methods - Knights & Bishops",
+      "plays": 255
+    },
+    {
+      "name": "SIERRA - Gone",
+      "plays": 251
+    },
+    {
+      "name": "Tham - The Third Kind",
+      "plays": 234
+    },
+    {
+      "name": "Velvet Acid Christ - Caustic Disco",
+      "plays": 176
+    },
+    {
+      "name": "SAM - 24 Stunden",
+      "plays": 172
+    },
+    {
+      "name": "Autodafeh - No Future",
+      "plays": 168
+    },
+    {
+      "name": "AC/DC - Shoot to Thrill",
+      "plays": 167
+    },
+    {
+      "name": "Perc - Temperature's Rising",
+      "plays": 167
+    },
+    {
+      "name": "SIERRA - Last Breath",
+      "plays": 163
+    },
+    {
+      "name": "VNV Nation - Electronaut",
+      "plays": 162
+    },
+    {
+      "name": "ESA (Electronic Substance Abuse) - Eat Their Young (feat Caitlin Corlyx)",
+      "plays": 161
+    },
+    {
+      "name": "SIERRA - Unbroken - HIPPØ & THE JACKET Remix",
+      "plays": 157
+    },
+    {
+      "name": "Prong - Snap Your Fingers, Snap Your Neck",
+      "plays": 156
+    },
+    {
+      "name": "I Hate Models - Spreading Plague",
+      "plays": 153
+    },
+    {
+      "name": "Combichrist - this s*it will fcuk you up",
+      "plays": 150
+    },
+    {
+      "name": "The Prodigy - The Day Is My Enemy",
+      "plays": 148
+    },
+    {
+      "name": "Vomito Negro - White Lights",
+      "plays": 147
+    },
+    {
+      "name": "HEALTH - HATEFUL [Feat. SIERRA]",
+      "plays": 147
+    },
+    {
+      "name": "Daniel Deluxe - Darkness",
+      "plays": 145
+    },
+    {
+      "name": "Arnaud Rebotini - Pagan Dance Move",
+      "plays": 142
+    },
+    {
+      "name": "Daniel Deluxe - Blood Magic",
+      "plays": 142
+    },
+    {
+      "name": "ALVABEAT - Ignorance & Greed",
+      "plays": 141
+    },
+    {
+      "name": "Geistform - Emisor",
+      "plays": 140
+    },
+    {
+      "name": "SIERRA - Unbroken",
+      "plays": 140
+    },
+    {
+      "name": "AC/DC - Shake Your Foundations",
+      "plays": 138
+    },
+    {
+      "name": "New Frames - Mumiae",
+      "plays": 133
+    },
+    {
+      "name": "Chainreactor - Locked In",
+      "plays": 131
+    },
+    {
+      "name": "Ontal - Jackhammer",
+      "plays": 131
+    },
+    {
+      "name": "Phase Fatale - Under Marble",
+      "plays": 129
+    },
+    {
+      "name": "Townsend - Nobody Likes Townzy",
+      "plays": 128
+    },
+    {
+      "name": "Perturbator - Venger (feat. Greta Link)",
+      "plays": 127
+    },
+    {
+      "name": "F.O.O.L - SaharA",
+      "plays": 125
+    },
+    {
+      "name": "Diva Destruction - The Broken Ones",
+      "plays": 125
+    },
+    {
+      "name": "Spark! - Zombie",
+      "plays": 124
+    },
+    {
+      "name": "Portion Control - Hardman",
+      "plays": 121
+    },
+    {
+      "name": "New Frames - Hitze",
+      "plays": 121
+    },
+    {
+      "name": "Reaper - Robuste Maschine",
+      "plays": 118
+    },
+    {
+      "name": "E-Craft - Electrocution",
+      "plays": 116
+    },
+    {
+      "name": "Cervello Elettronico - Resist",
+      "plays": 116
+    },
+    {
+      "name": "FabrikC - Chinese Food - Iszoloscope Remix",
+      "plays": 116
+    },
+    {
+      "name": "[:SITD:] - The Insanity Of Normality",
+      "plays": 114
+    },
+    {
+      "name": "nin kuji - Daichi No Musuko / Atatori Musuko",
+      "plays": 113
+    },
+    {
+      "name": "Komor Kommando - John the Revelator (Feat. J-L De Meyer from Front 242) - Depeche Mode cover",
+      "plays": 110
+    },
+    {
+      "name": "No More - Suicide Commando",
+      "plays": 108
+    },
+    {
+      "name": "Men Without Hats - The Safety Dance - Extended Club Mix",
+      "plays": 108
+    },
+    {
+      "name": "Front 242 - Headhunter V3.0",
+      "plays": 107
+    },
+    {
+      "name": "The Ðevil & the Uñiverse - The Goat Head - Phase Fatale Remix",
+      "plays": 107
+    },
+    {
+      "name": "Viper Diva - Hold Me Back",
+      "plays": 107
+    },
+    {
+      "name": "I Hate Models - Werewolf Disco Club",
+      "plays": 107
+    },
+    {
+      "name": "Daniel Deluxe - Star Eater",
+      "plays": 106
+    }
+  ],
+  "top_albums": [
+    {
+      "name": "SIERRA - Gone",
+      "plays": 650
+    },
+    {
+      "name": "E-Craft - Re-Arrested",
+      "plays": 585
+    },
+    {
+      "name": "Vomito Negro - Death Sun",
+      "plays": 581
+    },
+    {
+      "name": "Geistform - Transistor Music",
+      "plays": 475
+    },
+    {
+      "name": "Vomito Negro - Skull & Bones",
+      "plays": 438
+    },
+    {
+      "name": "Portion Control - Crop",
+      "plays": 425
+    },
+    {
+      "name": "Life Cried - If I Don't Wake Up",
+      "plays": 416
+    },
+    {
+      "name": "Orange Sector - Night Terrors",
+      "plays": 407
+    },
+    {
+      "name": "Spark! - Maskiner",
+      "plays": 386
+    },
+    {
+      "name": "Geistform - Data Transmission",
+      "plays": 370
+    },
+    {
+      "name": "Chainreactor - Insomniac",
+      "plays": 368
+    },
+    {
+      "name": "Suicide Commando - When Evil Speaks (Deluxe Edition)",
+      "plays": 356
+    },
+    {
+      "name": "Portion Control - Violently Alive",
+      "plays": 355
+    },
+    {
+      "name": "Wynardtage - Evil Mind",
+      "plays": 342
+    },
+    {
+      "name": "Autodafeh - Digital Citizens",
+      "plays": 341
+    },
+    {
+      "name": "Combichrist - Everybody Hates You",
+      "plays": 334
+    },
+    {
+      "name": "SAM - Synthetic Adrenaline Music",
+      "plays": 333
+    },
+    {
+      "name": "nin kuji - Sayonara",
+      "plays": 330
+    },
+    {
+      "name": "KANGA - KANGA",
+      "plays": 329
+    },
+    {
+      "name": "The Prodigy - The Day Is My Enemy",
+      "plays": 317
+    }
+  ],
+  "yearly_plays": {
+    "2015": 9036,
+    "2016": 15187,
+    "2017": 2207,
+    "2018": 3711,
+    "2019": 8717,
+    "2020": 10358,
+    "2021": 9385,
+    "2022": 11691,
+    "2023": 12953,
+    "2024": 9797,
+    "2025": 7794
+  },
+  "analyzed_at": "2025-12-20T21:14:12.520608"
+}

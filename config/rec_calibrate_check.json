@@ -1,0 +1,107 @@
+{
+  "label": "calibrate_check",
+  "timestamp": "2026-02-08T11:40:42.149",
+  "duration_sec": 30,
+  "start_position": {
+    "timestamp": "2026-02-08T11:40:11.977",
+    "pan": 0.0,
+    "tilt": 0.0,
+    "zoom": 1.0
+  },
+  "end_position": {
+    "timestamp": "2026-02-08T11:40:41.148",
+    "pan": 0.0,
+    "tilt": 0.0,
+    "zoom": 1.0,
+    "move_status": "IDLE"
+  },
+  "pan_range": {
+    "min": 0.0,
+    "max": 0.0
+  },
+  "tilt_range": {
+    "min": 0.0,
+    "max": 0.0
+  },
+  "events": [],
+  "positions": [
+    {
+      "timestamp": "2026-02-08T11:40:11.977",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0
+    },
+    {
+      "timestamp": "2026-02-08T11:40:14.118",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:40:17.165",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:40:20.127",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:40:23.182",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:40:26.123",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:40:29.173",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:40:32.121",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:40:35.164",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:40:38.116",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    },
+    {
+      "timestamp": "2026-02-08T11:40:41.148",
+      "pan": 0.0,
+      "tilt": 0.0,
+      "zoom": 1.0,
+      "move_status": "IDLE"
+    }
+  ],
+  "event_count": 0,
+  "position_count": 11
+}

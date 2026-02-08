@@ -1,0 +1,7 @@
+{
+  "personality_mode": "hal9000",
+  "tts_enabled": true,
+  "tts_speed": 150,
+  "hal_eye_size": "small",
+  "max_headroom_intensity": 2
+}

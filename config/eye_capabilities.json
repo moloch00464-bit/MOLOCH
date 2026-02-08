@@ -1,0 +1,503 @@
+{
+  "moloch_eye": {
+    "scan_timestamp": "2026-02-08T10:28:07",
+    "scanner": "M.O.L.O.C.H. Eye Discovery v1.0"
+  },
+  "device": {
+    "manufacturer": "SONOFF",
+    "model": "CAM-PT2",
+    "firmware_version": "1.0.8",
+    "serial_number": "25370200016333",
+    "hardware_id": "CAM-PT2",
+    "mac_address": "48:d0:1c:c4:cd:f7"
+  },
+  "network": {
+    "ip": "192.168.178.25",
+    "onvif_port": 80,
+    "rtsp_port": 554,
+    "interface": "wlan0",
+    "prefix_length": 24,
+    "dhcp": false,
+    "ipv6": false
+  },
+  "onvif": {
+    "supported_versions": [
+      {"major": 17, "minor": 6},
+      {"major": 2, "minor": 6},
+      {"major": 2, "minor": 4},
+      {"major": 2, "minor": 0}
+    ],
+    "services": {
+      "device": {
+        "supported": true,
+        "xaddr": "http://192.168.178.25/onvif/device_service"
+      },
+      "media": {
+        "supported": true,
+        "xaddr": "http://192.168.178.25/onvif/media_service"
+      },
+      "ptz": {
+        "supported": true,
+        "xaddr": "http://192.168.178.25/onvif/ptz_service"
+      },
+      "events": {
+        "supported": true,
+        "xaddr": "http://192.168.178.25/onvif/events_service",
+        "ws_pull_point": true,
+        "ws_subscription_policy": false,
+        "ws_pausable": false
+      },
+      "imaging": {
+        "supported": false,
+        "note": "Device doesn't support imaging service"
+      },
+      "analytics": {
+        "supported": false
+      }
+    },
+    "system_capabilities": {
+      "discovery_resolve": true,
+      "discovery_bye": true,
+      "remote_discovery": true,
+      "system_backup": false,
+      "system_logging": false,
+      "firmware_upgrade": false,
+      "http_firmware_upgrade": false
+    },
+    "security": {
+      "tls_1_0": false,
+      "tls_1_1": false,
+      "tls_1_2": false,
+      "onboard_key_generation": false,
+      "x509_token": false,
+      "saml_token": false,
+      "kerberos_token": false,
+      "username_token": false,
+      "http_digest": false
+    }
+  },
+  "media": {
+    "streaming": {
+      "rtp_multicast": false,
+      "rtp_tcp": true,
+      "rtp_rtsp_tcp": true
+    },
+    "profiles": [
+      {
+        "name": "mainStream",
+        "token": "Profile_0",
+        "fixed": true,
+        "video": {
+          "source_token": "VideoSourceToken",
+          "encoding": "H264",
+          "resolution": {"width": 1920, "height": 1080},
+          "framerate": 20,
+          "quality": 2.0,
+          "bitrate_limit_kbps": 1500,
+          "h264_profile": "Main",
+          "gov_length": 80
+        },
+        "audio": {
+          "source_token": "AudioSourceToken",
+          "encoding": "G711",
+          "bitrate": 65536,
+          "sample_rate": 8000
+        },
+        "stream_uri": "rtsp://192.168.178.25:554/av_stream/ch0"
+      },
+      {
+        "name": "minorStream",
+        "token": "Profile_1",
+        "fixed": true,
+        "video": {
+          "source_token": "VideoSourceToken",
+          "encoding": "H264",
+          "resolution": {"width": 640, "height": 360},
+          "framerate": 20,
+          "quality": 2.0,
+          "bitrate_limit_kbps": 1500,
+          "h264_profile": "Main",
+          "gov_length": 80
+        },
+        "audio": {
+          "source_token": "AudioSourceToken",
+          "encoding": "G711",
+          "bitrate": 65536,
+          "sample_rate": 8000
+        },
+        "stream_uri": "rtsp://192.168.178.25:554/av_stream/ch1"
+      }
+    ],
+    "video_sources": [
+      {
+        "token": "VideoSourceToken",
+        "max_resolution": {"width": 1920, "height": 1080},
+        "max_framerate": 20.0
+      }
+    ],
+    "audio_sources": [
+      {
+        "token": "AudioSourceToken",
+        "channels": 1
+      }
+    ]
+  },
+  "ptz": {
+    "supported": true,
+    "has_optical_zoom": false,
+    "home_supported": true,
+    "home_set_supported": false,
+    "set_home_position_error": "Action failed",
+    "fixed_home_position": false,
+    "max_presets": 0,
+    "preset_tours_available": true,
+    "preset_tour_operations": ["CreatePresetTour", "GetPresetTours", "OperatePresetTour", "ModifyPresetTour", "RemovePresetTour", "GetPresetTourOptions"],
+    "node": {
+      "name": "PTZ",
+      "token": "PTZNodeToken"
+    },
+    "configuration": {
+      "name": "PTZCfg",
+      "token": "PTZCfgToken",
+      "default_timeout_sec": 5,
+      "default_speed": {
+        "pan_tilt": {"x": 1.0, "y": 1.0},
+        "zoom": 1.0
+      }
+    },
+    "pan_tilt_limits": {
+      "onvif_reported": {
+        "pan_min": -168.4,
+        "pan_max": 174.4,
+        "pan_range": 342.8,
+        "tilt_min": -78.8,
+        "tilt_max": 101.3,
+        "tilt_range": 180.1
+      },
+      "calibration_observed": {
+        "pan_min": -166.4,
+        "pan_max": 126.1,
+        "tilt_min": -93.2,
+        "tilt_max": 84.9,
+        "note": "Kalibrierung faehrt ueber ONVIF-Limits hinaus (Tilt -93 vs -78)"
+      }
+    },
+    "zoom_limits": {
+      "min": 0.0,
+      "max": 0.0,
+      "note": "Kein optischer Zoom. Zoom-Wert meldet immer 1.0"
+    },
+    "axis_inversion": {
+      "pan_inverted": true,
+      "tilt_inverted": false,
+      "note": "WICHTIG: ContinuousMove x=+0.5 bewegt nach LINKS (Pan sinkt). x=-0.5 bewegt nach RECHTS (Pan steigt). Tilt ist korrekt (y=+0.5 = hoch).",
+      "moloch_correction": {
+        "move_right": "velocity x NEGATIV (x=-0.5)",
+        "move_left": "velocity x POSITIV (x=+0.5)",
+        "move_up": "velocity y POSITIV (y=+0.5)",
+        "move_down": "velocity y NEGATIV (y=-0.5)"
+      }
+    },
+    "measured_speed": {
+      "at_velocity_0_5": "ca. 37 Grad pro 2 Sekunden (18.5 Grad/s)",
+      "at_velocity_1_0": "geschaetzt ca. 37 Grad/s (Vollgeschwindigkeit)"
+    },
+    "supported_move_modes": {
+      "absolute_pan_tilt": {
+        "supported": true,
+        "space": "http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace",
+        "x_range": [-168.4, 174.4],
+        "y_range": [-78.8, 101.3],
+        "tested": true
+      },
+      "absolute_zoom": {
+        "supported": true,
+        "space": "http://www.onvif.org/ver10/tptz/ZoomSpaces/PositionGenericSpace",
+        "range": [0.0, 0.0]
+      },
+      "relative_pan_tilt": {
+        "supported": true,
+        "tested": true,
+        "spaces": [
+          {
+            "space": "TranslationGenericSpace",
+            "x_range": [-168.4, 174.4],
+            "y_range": [-78.8, 101.3]
+          },
+          {
+            "space": "TranslationSpaceFov",
+            "x_range": [-100.0, 100.0],
+            "y_range": [-100.0, 100.0]
+          }
+        ]
+      },
+      "relative_zoom": {
+        "supported": true,
+        "range": [0.0, 0.0]
+      },
+      "continuous_pan_tilt": {
+        "supported": true,
+        "tested": true,
+        "space": "VelocityGenericSpace",
+        "velocity_x": [-1.0, 1.0],
+        "velocity_y": [-1.0, 1.0],
+        "note": "Pan-Achse invertiert! Siehe axis_inversion"
+      },
+      "continuous_zoom": {
+        "supported": true,
+        "velocity": [-1.0, 1.0]
+      },
+      "goto_home": {
+        "supported": true,
+        "tested": true
+      },
+      "stop": {
+        "supported": true,
+        "tested": true
+      }
+    },
+    "speed_spaces": {
+      "pan_tilt_speed": {"min": 0.0, "max": 1.0},
+      "zoom_speed": {"min": 0.0, "max": 1.0}
+    },
+    "calibration": {
+      "triggerable_via_onvif": false,
+      "only_via_sonoff_app": true,
+      "pattern": "3 Zyklen: Ecke-zu-Ecke, dann Center. Setzt Home-Referenz auf (0,0)",
+      "auxiliary_commands_accepted": ["tt:Wiper|On", "tt:IRLamp|Auto", "tt:IRLamp|On", "Calibrate"],
+      "auxiliary_commands_effect": "Alle akzeptiert (OK) aber keine sichtbare Wirkung"
+    }
+  },
+  "events": {
+    "supported": true,
+    "fixed_topic_set": true,
+    "topics": ["VideoSource", "RuleEngine"],
+    "topic_expression_dialects": [
+      "http://www.onvif.org/ver10/tev/topicExpression/ConcreteSet",
+      "http://docs.oasis-open.org/wsn/t-1/TopicExpression/Concrete"
+    ]
+  },
+  "ha_integration": {
+    "config_entry_id": "01KGY7QJ4KH0TZYJ1QEXGPJ3JJ",
+    "integration": "onvif",
+    "title": "CAM-PT2 - 48:d0:1c:c4:cd:f7",
+    "state": "loaded",
+    "entities": [
+      {
+        "entity_id": "camera.cam_pt2_mainstream",
+        "state": "idle",
+        "friendly_name": "CAM-PT2 mainStream",
+        "supported_features": 2,
+        "type": "camera"
+      },
+      {
+        "entity_id": "button.cam_pt2_reboot",
+        "state": "unknown",
+        "friendly_name": "CAM-PT2 Reboot",
+        "device_class": "restart",
+        "type": "button"
+      },
+      {
+        "entity_id": "button.cam_pt2_set_system_date_and_time",
+        "state": "unknown",
+        "friendly_name": "CAM-PT2 Set System Date and Time",
+        "type": "button"
+      },
+      {
+        "entity_id": "binary_sensor.cam_pt2_motion_alarm",
+        "state": "off",
+        "friendly_name": "CAM-PT2 Motion Alarm",
+        "device_class": "motion",
+        "type": "binary_sensor"
+      },
+      {
+        "entity_id": "binary_sensor.cam_pt2_person_detection",
+        "state": "off",
+        "friendly_name": "CAM-PT2 Person Detection",
+        "device_class": "motion",
+        "type": "binary_sensor"
+      },
+      {
+        "entity_id": "binary_sensor.cam_pt2_cell_motion_detection",
+        "state": "off",
+        "friendly_name": "CAM-PT2 Cell Motion Detection",
+        "device_class": "motion",
+        "type": "binary_sensor"
+      }
+    ],
+    "services": {
+      "camera": [
+        "enable_motion_detection",
+        "disable_motion_detection",
+        "turn_off",
+        "turn_on",
+        "snapshot",
+        "play_stream",
+        "record"
+      ],
+      "onvif_ptz": {
+        "service": "onvif.ptz",
+        "move_modes": ["AbsoluteMove", "ContinuousMove", "GotoPreset", "RelativeMove", "Stop"],
+        "parameters": {
+          "pan": ["LEFT", "RIGHT"],
+          "tilt": ["UP", "DOWN"],
+          "zoom": ["ZOOM_IN", "ZOOM_OUT"],
+          "distance": {"min": 0.0, "max": 1.0, "default": 0.1, "step": 0.01},
+          "speed": {"min": 0.0, "max": 1.0, "step": 0.01},
+          "continuous_duration": {"min": 0.0, "max": 1.0, "default": 0.5, "step": 0.01},
+          "preset": {"type": "text", "default": "0", "example": "1"}
+        }
+      }
+    }
+  },
+  "limitations": {
+    "no_imaging_service": true,
+    "no_analytics": true,
+    "no_optical_zoom": true,
+    "no_tls": true,
+    "no_cloud": true,
+    "internet_blocked": true,
+    "max_presets_reported": 0,
+    "pan_axis_inverted": true,
+    "set_home_position_blocked": true,
+    "calibration_only_via_app": true,
+    "no_ptz_events": true,
+    "indicator_led_only_via_app": true,
+    "alarm_only_via_app": true,
+    "ir_led_only_via_app": true
+  },
+  "alarm_taste": {
+    "steuerbar_onvif": false,
+    "steuerbar_ha": false,
+    "steuerbar_app": true,
+    "events_bei_druecken": false,
+    "aufzeichnungen": 2,
+    "fazit": "Keine ONVIF-Events. Laeuft komplett ueber Sonoff Cloud/App."
+  },
+  "infrarot_led": {
+    "stufen": ["niedrig", "mittel", "hoch"],
+    "steuerbar_onvif": false,
+    "steuerbar_ha": false,
+    "steuerbar_app": true,
+    "events_bei_umschalten": false,
+    "note": "Kein Imaging-Service verfuegbar, daher keine ONVIF-Steuerung der IR-LEDs",
+    "fazit": "Nur ueber Sonoff App steuerbar."
+  },
+  "indicator_led": {
+    "type": "blaue LED ueber der Linse",
+    "steuerbar_onvif": false,
+    "steuerbar_ha": false,
+    "steuerbar_app": true,
+    "events_bei_toggle": false,
+    "aux_commands_getestet": [
+      "tt:LED|On", "tt:LED|Off",
+      "tt:StatusLight|On", "tt:StatusLight|Off",
+      "tt:Indicator|On", "tt:Indicator|Off"
+    ],
+    "aux_commands_wirkung": "keine - alle akzeptiert (OK) aber keine sichtbare Wirkung",
+    "ha_entity": "keine",
+    "fazit": "Nur ueber Sonoff App steuerbar. Kein ONVIF-Zugriff moeglich."
+  },
+  "events_verified": {
+    "tns1:VideoSource/MotionAlarm": {
+      "ha_entity": "binary_sensor.cam_pt2_motion_alarm",
+      "data_field": "State",
+      "values": ["true", "false"],
+      "tested": true
+    },
+    "tns1:RuleEngine/MyRuleDetector/PeopleDetect": {
+      "ha_entity": "binary_sensor.cam_pt2_person_detection",
+      "data_field": "State",
+      "values": ["true", "false"],
+      "tested": true
+    },
+    "tns1:RuleEngine/CellMotionDetector/Motion": {
+      "ha_entity": "binary_sensor.cam_pt2_cell_motion_detection",
+      "data_field": "State",
+      "values": ["true", "false"],
+      "tested": true
+    }
+  },
+  "moloch_kontrolle": {
+    "_beschreibung": "Finale Zusammenfassung: Was kann M.O.L.O.C.H. steuern/nutzen?",
+    "steuerbar": {
+      "ptz_bewegung": {
+        "methoden": ["ContinuousMove", "AbsoluteMove", "RelativeMove", "Stop"],
+        "richtungen": "links, rechts, hoch, runter (Pan invertiert!)",
+        "via": "ONVIF + HA (onvif.ptz)"
+      },
+      "ptz_home": {
+        "methode": "GotoHomePosition",
+        "via": "ONVIF"
+      },
+      "ptz_preset_tours": {
+        "methoden": ["CreatePresetTour", "GetPresetTours", "OperatePresetTour"],
+        "via": "ONVIF",
+        "status": "noch nicht getestet"
+      },
+      "motion_alarm": {
+        "entity": "binary_sensor.cam_pt2_motion_alarm",
+        "event": "tns1:VideoSource/MotionAlarm",
+        "via": "ONVIF Events + HA"
+      },
+      "person_detection": {
+        "entity": "binary_sensor.cam_pt2_person_detection",
+        "event": "tns1:RuleEngine/MyRuleDetector/PeopleDetect",
+        "via": "ONVIF Events + HA"
+      },
+      "cell_motion": {
+        "entity": "binary_sensor.cam_pt2_cell_motion_detection",
+        "event": "tns1:RuleEngine/CellMotionDetector/Motion",
+        "via": "ONVIF Events + HA"
+      },
+      "live_stream_1080p": {
+        "uri": "rtsp://192.168.178.25:554/av_stream/ch0",
+        "via": "RTSP direkt"
+      },
+      "live_stream_360p": {
+        "uri": "rtsp://192.168.178.25:554/av_stream/ch1",
+        "via": "RTSP direkt"
+      },
+      "snapshot": {
+        "via": "HA camera.snapshot"
+      },
+      "motion_detection_toggle": {
+        "via": "HA enable/disable_motion_detection"
+      },
+      "kamera_reboot": {
+        "entity": "button.cam_pt2_reboot",
+        "via": "HA"
+      },
+      "uhrzeit_setzen": {
+        "entity": "button.cam_pt2_set_system_date_and_time",
+        "via": "HA"
+      }
+    },
+    "nicht_steuerbar": {
+      "ptz_kalibrierung": "Nur Sonoff App",
+      "indicator_led": "Nur Sonoff App",
+      "infrarot_led_stufen": "Nur Sonoff App (kein Imaging-Service)",
+      "alarm_taste": "Nur Sonoff App/Cloud",
+      "home_position_setzen": "Firmware blockiert (Action failed)",
+      "presets_speichern": "max_presets = 0",
+      "optischer_zoom": "Hardware nicht vorhanden"
+    }
+  },
+  "test_protocol": {
+    "timestamp": "2026-02-08T12:05:00",
+    "tests_performed": [
+      "PTZ Kalibrierung (App) - 3 Zyklen aufgezeichnet",
+      "PTZ ContinuousMove links/rechts/hoch/runter - Pan-Inversion entdeckt",
+      "Indikator-LED Toggle (App) - 0 Events, kein ONVIF-Zugriff",
+      "PTZ AbsoluteMove + GotoHomePosition - funktioniert",
+      "SendAuxiliaryCommand - akzeptiert aber wirkungslos",
+      "SetHomePosition - blockiert (Action failed)",
+      "Event PullPoint - MotionAlarm, PeopleDetect, CellMotion verifiziert",
+      "HA Entity-States abgefragt",
+      "PresetTour-Operationen entdeckt",
+      "Alarm-Taste (App) - 0 Events, kein ONVIF-Zugriff",
+      "IR-LED Stufen niedrig/mittel/hoch (App) - 0 Events, kein ONVIF-Zugriff"
+    ],
+    "status": "ABGESCHLOSSEN"
+  }
+}

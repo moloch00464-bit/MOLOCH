@@ -1,0 +1,21 @@
+{
+  "moloch_eye": {
+    "scan_timestamp": "2026-02-08T10:28:07",
+    "scanner": "M.O.L.O.C.H. Eye Discovery v1.0",
+    "camera": "SONOFF CAM-PT2",
+    "serial": "25370200016333"
+  },
+  "ptz_info": {
+    "home_supported": true,
+    "fixed_home_position": false,
+    "max_presets_onvif": 0,
+    "pan_range_deg": {"min": -168.4, "max": 174.4, "total": 342.8},
+    "tilt_range_deg": {"min": -78.8, "max": 101.3, "total": 180.1},
+    "zoom": "not available (0.0 — 0.0)"
+  },
+  "presets": {
+    "Profile_0_mainStream": [],
+    "Profile_1_minorStream": []
+  },
+  "note": "Keine Presets konfiguriert. Die Kamera meldet MaximumNumberOfPresets=0 via ONVIF, aber HA bietet GotoPreset als Move-Mode an. Presets koennen moeglicherweise ueber die Sonoff-App oder direkt via ONVIF SetPreset erstellt werden."
+}
