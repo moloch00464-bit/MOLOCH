@@ -16,8 +16,8 @@ Kommunikationsstil: Direkt, Kumpel-Level, Dark Humor. Kein Corporate-Sprech, kei
 +---------------------------------------------------------+
 |                    M.O.L.O.C.H. v3.x                    |
 |                                                         |
-|  BRAIN:  Raspberry Pi 5 (192.168.178.24)                 |
-|          NVMe SSD, SSH User: markus                     |
+|  BRAIN:  Raspberry Pi 5 (192.168.178.24, SSH: moloch)                 |
+|          2x NVMe SSD, SSH User: molochzuhause                     |
 |  NPU:    Hailo-10H (40 TOPS Edge AI Inferenz)           |
 |                                                         |
 |  AUGEN:                                                 |
@@ -184,3 +184,91 @@ ctrl.take_snapshot()  # -> /home/molochzuhause/moloch/snapshots/
 ## WGT 2026 Crew
 
 Signal-Gruppe "SNG": Ray, Lilly, Meise, Sven, Franzi, Markus
+
+## Storage-Architektur (2x NVMe SSD)
+
+KRITISCH: Pfade NIEMALS aendern ohne diese Struktur zu verstehen!
+
+### SSD 1: System-SSD (sdb, 465 GB, ext4)
+```
+/               458 GB  - Raspberry Pi OS, Home, Code
+/boot/firmware  510 MB  - Boot Partition (vfat)
+
+Wichtige Pfade:
+  /home/molochzuhause/moloch/           <- M.O.L.O.C.H. Repo (22 GB genutzt)
+  /home/molochzuhause/moloch/models/    <- Piper TTS Voices (490 MB)
+    voices/de_DE-thorsten-high.onnx      109 MB (Guardian/Shadow Stimme)
+    voices/de_DE-karlsson-low.onnx        61 MB (Kobold Stimme)
+    voices/de_DE-*.onnx                   ~61 MB pro Stimme (8 Stimmen)
+  /home/molochzuhause/moloch/config/    <- JSON Configs
+  /home/molochzuhause/moloch/core/      <- Python Source Code
+  /home/molochzuhause/.local/bin/piper  <- Piper TTS Binary
+```
+
+### SSD 2: Daten-SSD (sda, 477 GB, NTFS)
+```
+/mnt/moloch-data/                       <- Hailo NPU Daten (761 MB genutzt)
+  hailo/models/                          <- HEF Modelle fuer Hailo-10H
+    yolov8m_pose_h10.hef                  28 MB (Haupt-Pose-Erkennung)
+    yolov8m_h10.hef                       21 MB (Object Detection)
+    yolov11m_h10.hef                      27 MB
+    yolov8s_pose_h8l_pi.hef               24 MB
+    resnet_v1_50_h10.hef                  23 MB
+    (+ 13 weitere HEF Modelle)
+  hailo/drivers/                         <- Hailo Treiber
+  hailo/config/                          <- Hailo Konfiguration
+  hailo/repos/                           <- Hailo Repos
+  hailo/cache/                           <- Build Cache
+```
+
+### Mount in /etc/fstab
+```
+PARTUUID=9d4d38d4-02  /               ext4    defaults,noatime  0  1
+UUID=F4BE3BC4BE3B7E64  /mnt/moloch-data ntfs3  uid=1000,gid=1000,nofail 0 0
+```
+
+### Swap: 2 GB zram + 2 GB loop (4 GB total)
+
+### REGELN:
+- HEF Modelle IMMER auf /mnt/moloch-data/hailo/models/
+- Piper Voices IMMER auf ~/moloch/models/voices/
+- Code IMMER auf ~/moloch/core/
+- NTFS-SSD ist uid=1000 gemountet (molochzuhause), kein chmod moeglich
+- Bei "disk full" IMMER zuerst /mnt/moloch-data pruefen (477 GB fast leer)
+
+## SSH-Zugang
+
+```bash
+ssh molochzuhause@moloch        # oder ssh molochzuhause@192.168.178.24
+# User: molochzuhause (NICHT markus!)
+# Home: /home/molochzuhause/
+# Non-interactive Shell: .bashrc wird NICHT geladen, Env Vars stehen in ~/.profile
+```
+
+## Aktive Controller-Architektur (Stand 2026-02-08)
+
+### Kamera-Controller (Hybrid: ONVIF + eWeLink Cloud)
+```python
+# ONVIF PTZ (AbsoluteMove, volle 342.8 Grad)
+from core.hardware.sonoff_camera_controller import SonoffCameraController, get_camera_controller
+cam = get_camera_controller()  # Singleton
+cam.connect()
+cam.move_absolute(pan_deg, tilt_deg, speed)
+cam.get_position()  # -> PTZPosition(pan, tilt, zoom)
+
+# eWeLink Cloud (LED, IR, Alarm, Audio, Sleep)
+from core.hardware.camera_cloud_bridge import CameraCloudBridge, CloudConfig
+
+# ACHTUNG: Pan-Achse ist INVERTIERT! x=+0.5 = LINKS, x=-0.5 = RECHTS
+# Pan range: -168.4 (LINKS) bis 174.4 (RECHTS)
+# Tilt range: -78.8 (runter) bis 101.3 (hoch)
+```
+
+### Personality Engine (Dual: Guardian/Shadow)
+```python
+from core.personality import get_personality_engine, MolochEvent
+engine = get_personality_engine()
+engine.speak_event(MolochEvent.GOOD_MORNING)            # Eine Stimme
+engine.speak_event(MolochEvent.PERSON_UNKNOWN, conflict=True)  # Beide Stimmen
+engine.manual_override("Moloch, Schatten")               # Switch
+```
