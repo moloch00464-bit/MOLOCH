@@ -17,6 +17,7 @@ Author: M.O.L.O.C.H. System
 
 import os
 import sys
+import json
 import time
 import enum
 import logging
@@ -182,11 +183,26 @@ class PersonalityEngine:
         # Emergentis drift state
         self._drift_factors: Dict[str, float] = {}
         self._last_tension = 0.0
+        self._last_drift_time = 0.0
+        self._identity = self._load_identity()
+        emergentis = self._identity.get("emergentis", {})
+        self._drift_cooldown = emergentis.get("cooldown_seconds", 45)
+        self._emergentis_traits = emergentis.get("behaviour_traits", {})
 
         # Event listeners
         self._listeners: List[Callable] = []
 
         logger.info(f"PersonalityEngine initialized. Mode: {self.mode.value}")
+
+    @staticmethod
+    def _load_identity() -> Dict:
+        """Load moloch_identity.json config."""
+        path = os.path.join(os.path.expanduser("~/moloch"), "config", "moloch_identity.json")
+        try:
+            with open(path, "r") as f:
+                return json.load(f)
+        except Exception:
+            return {}
 
     # ---- Properties ----
 
@@ -418,6 +434,11 @@ class PersonalityEngine:
         self._last_tension = tension
         if tension < 0.3:
             return response
+        # Cooldown: don't drift too often
+        now = time.time()
+        if now - self._last_drift_time < self._drift_cooldown:
+            return response
+        self._last_drift_time = now
         # Single LED flicker in existing pattern
         if self._cloud_bridge and self._led_running:
             threading.Thread(target=self._led_flicker, daemon=True).start()
