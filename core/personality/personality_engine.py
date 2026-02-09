@@ -179,6 +179,10 @@ class PersonalityEngine:
         # TTS engine reference
         self._tts_engine = None
 
+        # Emergentis drift state
+        self._drift_factors: Dict[str, float] = {}
+        self._last_tension = 0.0
+
         # Event listeners
         self._listeners: List[Callable] = []
 
@@ -387,6 +391,59 @@ class PersonalityEngine:
         }
         return responses.get(event, "Wie auch immer.")
 
+    # ---- Emergentis Drift-Layer ----
+
+    def _compute_tension(self) -> float:
+        """Tension from real sensor values and state contradictions. No random()."""
+        hour = datetime.now().hour
+        internal = {
+            "night_factor": 1.0 if (hour >= 22 or hour < 6) else 0.0,
+            "guardian_shadow_conflict": 0.6 if (
+                (self.is_guardian and (self.wgt_mode or self.user_laughing))
+                or (self.is_shadow and self.user_stressed)
+            ) else 0.0,
+        }
+        all_factors = {**internal, **self._drift_factors}
+        values = [v for v in all_factors.values() if isinstance(v, (int, float))]
+        if not values:
+            return 0.0
+        tension = max(values) + sum(values) * 0.1
+        return min(tension, 1.0)
+
+    def _apply_drift(self, response: str) -> str:
+        """Post-process response with emergentis drift. After response, before TTS."""
+        if self.alarm_active or not response:
+            return response
+        tension = self._compute_tension()
+        self._last_tension = tension
+        if tension < 0.3:
+            return response
+        # Single LED flicker in existing pattern
+        if self._cloud_bridge and self._led_running:
+            threading.Thread(target=self._led_flicker, daemon=True).start()
+        if tension >= 0.85:
+            return response + " ...Das fuehlt sich nicht richtig an."
+        if tension >= 0.6:
+            if self.is_guardian:
+                return response.rstrip(".") + ". Oder auch nicht."
+            return response.rstrip(".") + ". Analyse laeuft."
+        return response + " Noch."
+
+    def _led_flicker(self):
+        """Single LED flicker during drift - no own pattern."""
+        try:
+            lp = asyncio.new_event_loop()
+            lp.run_until_complete(self._cloud_bridge.set_status_led(False))
+            time.sleep(0.05)
+            lp.run_until_complete(self._cloud_bridge.set_status_led(True))
+            lp.close()
+        except Exception:
+            pass
+
+    def update_drift_factors(self, factors: Dict[str, float]):
+        """Update drift factors from real sensor values. Called externally."""
+        self._drift_factors.update(factors)
+
     # ---- TTS Integration ----
 
     def speak(self, text: str) -> bool:
@@ -396,6 +453,9 @@ class PersonalityEngine:
         """
         if self.muted:
             return False
+
+        # Emergentis drift-layer: post-process before TTS
+        text = self._apply_drift(text)
 
         try:
             # Import the RUNTIME tts.py (not the tts/ package)
@@ -573,6 +633,7 @@ class PersonalityEngine:
             "wgt_mode": self.wgt_mode,
             "voice": self.voice_config.voice_id,
             "led_pattern": self.led_pattern.value,
+            "drift_tension": self._last_tension,
         }
 
     def __repr__(self):
