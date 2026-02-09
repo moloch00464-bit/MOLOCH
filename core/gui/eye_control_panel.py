@@ -8,8 +8,8 @@ Live RTSP preview with full hybrid feature access.
 
 Features:
 - ONVIF: PTZ directional controls, speed slider, home button
-- eWeLink: LED, IR, Mic/Speaker volume, Alarm, Calibration,
-           Smart Tracking, Screen Flip, Status LED
+- eWeLink: Status LED, IR/Nachtsicht, Smart Tracking,
+           Bild spiegeln, Alarm, Kalibrierung
 - Live RTSP stream preview
 - M.O.L.O.C.H. Tracker pause/resume
 
@@ -273,14 +273,6 @@ class EyeControlPanel:
                        selectcolor="#2a2a4e", activebackground="#1a1a2e",
                        command=self._set_status_led).pack(side=tk.RIGHT)
 
-        # LED Brightness (read-only, not settable via cloud API)
-        row = ttk.Frame(parent)
-        row.pack(fill=tk.X, pady=3)
-        ttk.Label(row, text="LED Helligkeit:").pack(side=tk.LEFT)
-        self.led_val_label = ttk.Label(row, text="--", width=8)
-        self.led_val_label.pack(side=tk.RIGHT)
-        ttk.Label(row, text="(nur App)", style="Status.TLabel").pack(side=tk.RIGHT, padx=5)
-
         # IR/Night Mode
         row = ttk.Frame(parent)
         row.pack(fill=tk.X, pady=3)
@@ -290,33 +282,6 @@ class EyeControlPanel:
                                    state="readonly", width=8)
         night_combo.pack(side=tk.RIGHT)
         night_combo.bind("<<ComboboxSelected>>", lambda e: self._set_night())
-
-        # Mic Volume
-        row = ttk.Frame(parent)
-        row.pack(fill=tk.X, pady=3)
-        ttk.Label(row, text="Mikrofon:").pack(side=tk.LEFT)
-        self.mic_val_label = ttk.Label(row, text="84", width=4)
-        self.mic_val_label.pack(side=tk.RIGHT)
-        self.mic_var = tk.IntVar(value=84)
-        ttk.Scale(row, from_=0, to=100, variable=self.mic_var,
-                  command=lambda v: self.mic_val_label.configure(text=f"{int(float(v))}")).pack(
-            side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        self.mic_apply_btn = tk.Button(row, text="Set", bg="#2a2a4e", fg="white", width=4,
-                                       command=self._set_mic_volume)
-        self.mic_apply_btn.pack(side=tk.RIGHT, padx=2)
-
-        # Speaker Volume
-        row = ttk.Frame(parent)
-        row.pack(fill=tk.X, pady=3)
-        ttk.Label(row, text="Speaker:").pack(side=tk.LEFT)
-        self.spk_val_label = ttk.Label(row, text="95", width=4)
-        self.spk_val_label.pack(side=tk.RIGHT)
-        self.spk_var = tk.IntVar(value=95)
-        ttk.Scale(row, from_=0, to=100, variable=self.spk_var,
-                  command=lambda v: self.spk_val_label.configure(text=f"{int(float(v))}")).pack(
-            side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        tk.Button(row, text="Set", bg="#2a2a4e", fg="white", width=4,
-                  command=self._set_speaker_volume).pack(side=tk.RIGHT, padx=2)
 
         # Smart Tracking toggle
         row = ttk.Frame(parent)
@@ -512,12 +477,6 @@ class EyeControlPanel:
         mode = mode_map.get(self.night_var.get(), "day")
         self._cloud_run("set_night", mode)
 
-    def _set_mic_volume(self):
-        self._cloud_run("set_mic_volume", self.mic_var.get())
-
-    def _set_speaker_volume(self):
-        self._cloud_run("set_speaker_volume", self.spk_var.get())
-
     def _set_smart_tracking(self):
         self._cloud_run("set_smart_tracking", self.smart_track_var.get())
 
@@ -557,17 +516,9 @@ class EyeControlPanel:
     def _apply_params(self, params):
         """Apply cloud params to UI widgets."""
         try:
-            if "lightStrength" in params:
-                self.led_val_label.configure(text=str(params["lightStrength"]))
             if "nightVision" in params:
                 nv_map = {0: "Aus", 1: "Auto", 2: "An"}
                 self.night_var.set(nv_map.get(params["nightVision"], "Aus"))
-            if "microphoneVolume" in params:
-                self.mic_var.set(params["microphoneVolume"])
-                self.mic_val_label.configure(text=str(params["microphoneVolume"]))
-            if "speakerVolume" in params:
-                self.spk_var.set(params["speakerVolume"])
-                self.spk_val_label.configure(text=str(params["speakerVolume"]))
             if "smartTraceEnable" in params:
                 self.smart_track_var.set(bool(params["smartTraceEnable"]))
             if "screenFlip" in params:
