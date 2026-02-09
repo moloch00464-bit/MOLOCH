@@ -77,18 +77,27 @@ class VoiceConfig:
     prefix_sound: Optional[str] = None  # Sound before speaking
 
 
+# Piper voice name mapping (short name -> full model name)
+PIPER_VOICE_MAP = {
+    "thorsten_low": "de_DE-thorsten-low",
+    "thorsten": "de_DE-thorsten-high",
+    "thorsten_medium": "de_DE-thorsten-medium",
+    "eva_k": "de_DE-eva_k-x_low",
+    "karlsson": "de_DE-karlsson-low",
+}
+
 VOICE_CONFIGS = {
     PersonalityMode.GUARDIAN: VoiceConfig(
-        voice_id="de_DE-thorsten-high",
-        speed=1.2,          # Langsam, bedächtig
-        pitch_shift=-200,   # Etwas tiefer
+        voice_id="de_DE-thorsten-low",
+        speed=0.95,         # Ruhig, bedaechtig
+        pitch_shift=-200,   # 2 Halbtone tiefer
         prefix_sound=None,
     ),
     PersonalityMode.SHADOW: VoiceConfig(
         voice_id="de_DE-thorsten-high",
-        speed=1.0,          # Schneller, energischer
+        speed=1.1,          # Schneller, energischer
         pitch_shift=0,      # Normal
-        prefix_sound=None,  # Could be "glitch_short.wav"
+        prefix_sound=None,
     ),
 }
 
@@ -223,8 +232,19 @@ class PersonalityEngine:
 
     @property
     def voice_config(self) -> VoiceConfig:
-        """Get current voice configuration."""
-        return VOICE_CONFIGS[self.mode]
+        """Get current voice configuration from identity config."""
+        default = VOICE_CONFIGS[self.mode]
+        key = "guardian" if self.is_guardian else "shadow"
+        profile = self._identity.get("personalities", {}).get(key, {}).get("voice_profile")
+        if not profile:
+            return default
+        voice_name = PIPER_VOICE_MAP.get(profile.get("voice", ""), default.voice_id)
+        return VoiceConfig(
+            voice_id=voice_name,
+            speed=profile.get("speed", default.speed),
+            pitch_shift=int(profile.get("pitch_shift", 0)) * 100,  # semitones -> cents
+            prefix_sound=default.prefix_sound,
+        )
 
     @property
     def led_pattern(self) -> LEDPattern:
