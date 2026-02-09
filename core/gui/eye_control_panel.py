@@ -125,7 +125,7 @@ class EyeControlPanel:
         self.root = tk.Tk()
         self.root.title("M.O.L.O.C.H. Eye Control")
         self.root.configure(bg="#1a1a2e")
-        self.root.resizable(False, False)
+        self.root.resizable(True, True)
 
         # State
         self.camera = None
@@ -192,30 +192,18 @@ class EyeControlPanel:
         self.pos_label = ttk.Label(preview_frame, text="Pan: -- | Tilt: --", style="Status.TLabel")
         self.pos_label.pack()
 
-        # RIGHT: Controls
-        controls = ttk.Frame(middle)
-        controls.pack(side=tk.LEFT, fill=tk.Y)
-
-        # Scrollable controls
-        ctrl_canvas = tk.Canvas(controls, bg="#1a1a2e", highlightthickness=0, width=320)
-        scrollbar = ttk.Scrollbar(controls, orient=tk.VERTICAL, command=ctrl_canvas.yview)
-        ctrl_inner = ttk.Frame(ctrl_canvas)
-
-        ctrl_inner.bind("<Configure>", lambda e: ctrl_canvas.configure(scrollregion=ctrl_canvas.bbox("all")))
-        ctrl_canvas.create_window((0, 0), window=ctrl_inner, anchor="nw")
-        ctrl_canvas.configure(yscrollcommand=scrollbar.set)
-
-        ctrl_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        # RIGHT: Controls (direct frame, no scrolling needed)
+        ctrl_panel = ttk.Frame(middle)
+        ctrl_panel.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 5))
 
         # --- ONVIF Section ---
-        self._build_onvif_section(ctrl_inner)
+        self._build_onvif_section(ctrl_panel)
 
         # Separator
-        ttk.Separator(ctrl_inner, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
+        ttk.Separator(ctrl_panel, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
 
         # --- eWeLink Section ---
-        self._build_ewelink_section(ctrl_inner)
+        self._build_ewelink_section(ctrl_panel)
 
     def _build_onvif_section(self, parent):
         """Build ONVIF PTZ controls."""
