@@ -273,15 +273,13 @@ class EyeControlPanel:
                        selectcolor="#2a2a4e", activebackground="#1a1a2e",
                        command=self._set_status_led).pack(side=tk.RIGHT)
 
-        # LED Brightness
+        # LED Brightness (read-only, not settable via cloud API)
         row = ttk.Frame(parent)
         row.pack(fill=tk.X, pady=3)
         ttk.Label(row, text="LED Helligkeit:").pack(side=tk.LEFT)
-        self.led_val_label = ttk.Label(row, text="2", width=3)
+        self.led_val_label = ttk.Label(row, text="--", width=8)
         self.led_val_label.pack(side=tk.RIGHT)
-        self.led_var = tk.IntVar(value=2)
-        ttk.Scale(row, from_=0, to=3, variable=self.led_var,
-                  command=lambda v: self._set_led(int(float(v)))).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        ttk.Label(row, text="(nur App)", style="Status.TLabel").pack(side=tk.RIGHT, padx=5)
 
         # IR/Night Mode
         row = ttk.Frame(parent)
@@ -509,10 +507,6 @@ class EyeControlPanel:
     def _set_status_led(self):
         self._cloud_run("set_status_led", self.status_led_var.get())
 
-    def _set_led(self, level):
-        self.led_val_label.configure(text=str(level))
-        self._cloud_run("set_led", level)
-
     def _set_night(self):
         mode_map = {"Aus": "day", "Auto": "auto", "An": "night"}
         mode = mode_map.get(self.night_var.get(), "day")
@@ -564,7 +558,6 @@ class EyeControlPanel:
         """Apply cloud params to UI widgets."""
         try:
             if "lightStrength" in params:
-                self.led_var.set(params["lightStrength"])
                 self.led_val_label.configure(text=str(params["lightStrength"]))
             if "nightVision" in params:
                 nv_map = {0: "Aus", 1: "Auto", 2: "An"}

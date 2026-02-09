@@ -577,16 +577,12 @@ class CameraCloudBridge:
             return False
 
         # Build eWeLink API v2 device control request
-        # Using "update" action format with thingList + params at top level
-        endpoint = f"{self.config.api_base_url}/v2/device/thing"
+        # Correct endpoint: /v2/device/thing/status (NOT /v2/device/thing which is for reading)
+        endpoint = f"{self.config.api_base_url}/v2/device/thing/status"
 
         payload = {
-            "thingList": [
-                {
-                    "itemType": 1,
-                    "id": self.config.device_id
-                }
-            ],
+            "type": 1,
+            "id": self.config.device_id,
             "params": {
                 param_name: param_value
             }
@@ -610,10 +606,7 @@ class CameraCloudBridge:
                 status_code = response.status
                 resp_body = await response.json()
 
-                # CRITICAL: eWeLink API returns HTTP 200 but includes error codes in response body
-                # HOWEVER: The commands STILL EXECUTE on the device even with error responses!
-                # User confirmed: LEDs change state despite API returning validation errors
-                # Therefore: Trust HTTP 200 status, ignore response body error codes
+                # eWeLink API returns error=0 on success
                 if status_code == 200:
                     # Log response for debugging but don't fail
                     error_code = resp_body.get('error', 0)
