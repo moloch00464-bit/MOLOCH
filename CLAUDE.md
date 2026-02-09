@@ -207,18 +207,18 @@ Wichtige Pfade:
 
 ### SSD 2: Daten-SSD (sda, 477 GB, NTFS)
 ```
-/mnt/moloch-data/                       <- Hailo NPU Daten (761 MB genutzt)
-  hailo/models/                          <- HEF Modelle fuer Hailo-10H
-    yolov8m_pose_h10.hef                  28 MB (Haupt-Pose-Erkennung)
-    yolov8m_h10.hef                       21 MB (Object Detection)
-    yolov11m_h10.hef                      27 MB
-    yolov8s_pose_h8l_pi.hef               24 MB
-    resnet_v1_50_h10.hef                  23 MB
-    (+ 13 weitere HEF Modelle)
+/mnt/moloch-data/                       <- AI Daten + Modelle
+  hailo/models/                          <- HEF Modelle fuer Hailo-10H (AKTIV)
+    scrfd_10g.hef                         5.8 MB (Face Detection, 47 FPS)
+    arcface_mobilefacenet.hef             2.6 MB (Face Recognition, 498 FPS)
+    yolov8m_h10.hef                      21 MB (Person Detection, 39 FPS)
+    yolov8s_pose_h10.hef                 14 MB (Pose/Keypoints, 36 FPS)
+    (+ weitere HEF Modelle)
   hailo/drivers/                         <- Hailo Treiber
   hailo/config/                          <- Hailo Konfiguration
-  hailo/repos/                           <- Hailo Repos
+  hailo/repos/                           <- Hailo Repos & Referenz-Code
   hailo/cache/                           <- Build Cache
+  qdrant/                                <- Qdrant Vector DB Storage
 ```
 
 ### Mount in /etc/fstab
@@ -229,12 +229,29 @@ UUID=F4BE3BC4BE3B7E64  /mnt/moloch-data ntfs3  uid=1000,gid=1000,nofail 0 0
 
 ### Swap: 2 GB zram + 2 GB loop (4 GB total)
 
+### HAILO MODELLE & AI DATEN:
+SSD2 = /mnt/moloch-data/ (477GB NTFS) ist die EINZIGE Ablage fuer AI-Modelle!
+Hier liegen ALLE Hailo HEF-Modelle, Whisper Modelle, AI Repos, Qdrant DB.
+NIEMALS Modelle auf SSD1 suchen oder dorthin kopieren!
+Vor jedem Modell-Task: `ls /mnt/moloch-data/hailo/models/` checken!
+
+Aktive Hailo-10H Modelle (HailoRT 5.1.1, alle H10-nativ):
+```
+/mnt/moloch-data/hailo/models/
+  scrfd_10g.hef              5.8 MB  Face Detection (640x640, ~47 FPS)
+  arcface_mobilefacenet.hef  2.6 MB  Face Recognition (112x112, ~498 FPS)
+  yolov8m_h10.hef           21 MB    Person Detection (640x640, ~39 FPS)
+  yolov8s_pose_h10.hef      14 MB    Pose/Keypoints (640x640, ~36 FPS)
+```
+
 ### REGELN:
 - HEF Modelle IMMER auf /mnt/moloch-data/hailo/models/
 - Piper Voices IMMER auf ~/moloch/models/voices/
 - Code IMMER auf ~/moloch/core/
 - NTFS-SSD ist uid=1000 gemountet (molochzuhause), kein chmod moeglich
 - Bei "disk full" IMMER zuerst /mnt/moloch-data pruefen (477 GB fast leer)
+- H8L HEF Modelle sind NICHT kompatibel mit Hailo-10H (Error 93)
+- HailoRT 5.1.1 API: `configured.run([bindings], timeout=10000)` - Bindings als LISTE!
 
 ## SSH-Zugang
 
