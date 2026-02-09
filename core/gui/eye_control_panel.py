@@ -268,7 +268,7 @@ class EyeControlPanel:
         row = ttk.Frame(parent)
         row.pack(fill=tk.X, pady=3)
         ttk.Label(row, text="Status LED:").pack(side=tk.LEFT)
-        self.status_led_var = tk.BooleanVar(value=True)
+        self.status_led_var = tk.BooleanVar(value=False)
         tk.Checkbutton(row, variable=self.status_led_var, bg="#1a1a2e", fg="#e0e0e0",
                        selectcolor="#2a2a4e", activebackground="#1a1a2e",
                        command=self._set_status_led).pack(side=tk.RIGHT)
