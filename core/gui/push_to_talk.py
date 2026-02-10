@@ -76,6 +76,9 @@ logger = logging.getLogger(__name__)
 # Audio settings for Pipewire recording
 RATE = 16000  # Whisper expects 16kHz
 
+# ReSpeaker Lite USB Mic (PipeWire node name)
+RESPEAKER_NODE = "alsa_input.usb-Seeed_Studio_ReSpeaker_Lite_0000000001-00.analog-stereo"
+
 
 class PushToTalkGUI:
     """
@@ -1802,20 +1805,21 @@ WICHTIGE VISION-REGEL:
         # Create temp file for recording
         self.temp_audio_path = f"/tmp/moloch_ptt_{os.getpid()}.wav"
 
-        # Start pw-record mit Default Audio-Quelle
-        # (USB Composite Device oder SmartMic - je nach wpctl set-default)
+        # Start pw-record mit ReSpeaker Lite (Fallback: PipeWire Default)
         try:
+            cmd = [
+                "pw-record",
+                "--target", RESPEAKER_NODE,
+                "--channels", "1",
+                "--rate", str(RATE),
+                self.temp_audio_path
+            ]
             self.record_process = subprocess.Popen(
-                [
-                    "pw-record",
-                    "--channels", "1",
-                    "--rate", str(RATE),
-                    self.temp_audio_path
-                ],
+                cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )
-            logger.info(f"Recording started (default source): {self.temp_audio_path}")
+            logger.info(f"Recording started (ReSpeaker Lite): {self.temp_audio_path}")
 
         except Exception as e:
             logger.error(f"Failed to start recording: {e}")

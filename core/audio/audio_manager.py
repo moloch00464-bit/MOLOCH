@@ -86,6 +86,9 @@ class AudioConfig:
     # Fallback
     use_camera_mic_fallback: bool = False  # RTSP Kamera als Fallback
 
+    # ReSpeaker Lite USB Mic (Fallback wenn SmartMic BT nicht verbunden)
+    respeaker_node: str = "alsa_input.usb-Seeed_Studio_ReSpeaker_Lite_0000000001-00.analog-stereo"
+
 
 class AudioManager:
     """
@@ -385,8 +388,13 @@ class AudioManager:
         try:
             self._update_device_info()
 
-            # Find the SmartMic source node name
-            source_name = f"bluez_input.{self.config.smartmic_mac.replace(':', '_')}"
+            # SmartMic BT wenn verbunden, sonst ReSpeaker Lite USB
+            if self.is_connected:
+                source_name = f"bluez_input.{self.config.smartmic_mac.replace(':', '_')}"
+                self.logger.info(f"Recording from SmartMic BT: {source_name}")
+            else:
+                source_name = self.config.respeaker_node
+                self.logger.info(f"Recording from ReSpeaker Lite USB: {source_name}")
 
             cmd = [
                 "pw-record",
