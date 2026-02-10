@@ -129,6 +129,9 @@ class HailoControlPanel:
         self._ctx_lock = threading.Lock()
         self._input_640 = np.empty((640, 640, 3), dtype=np.uint8)  # Pre-allocated
 
+        # TTS Announcement Cooldown
+        self._last_announce = {}   # name -> timestamp
+
         # Frame Locks
         self._latest_frame = None
         self._frame_lock = threading.Lock()
@@ -269,6 +272,16 @@ class HailoControlPanel:
         tk.Button(
             ctrl_frame, text="Alle Modelle AUS", bg="#2a2a4e", fg="white",
             command=self._all_models_off
+        ).pack(fill=tk.X, pady=3)
+
+        tk.Button(
+            ctrl_frame, text="Smart Tracking AUS", bg="#2a2a4e", fg="white",
+            command=self._disable_smart_tracking
+        ).pack(fill=tk.X, pady=3)
+
+        tk.Button(
+            ctrl_frame, text="Face-DB neu laden", bg="#2a2a4e", fg="white",
+            command=self._reload_face_db
         ).pack(fill=tk.X, pady=3)
 
     def _build_model_section(self, parent, title, enabled_var, model_key, sliders):
@@ -575,6 +588,16 @@ class HailoControlPanel:
 
                             draw_name(annotated, box, name, sim, fh, fw)
 
+                            # TTS Ansage (60s Cooldown pro Person)
+                            if name != "Unbekannt" and name != "Keine DB":
+                                now = time.time()
+                                if now - self._last_announce.get(name, 0) > 60:
+                                    self._last_announce[name] = now
+                                    threading.Thread(
+                                        target=self._announce_person,
+                                        args=(name,), daemon=True
+                                    ).start()
+
                     dt = time.perf_counter() - t0
                     with self._fps_lock:
                         self._fps["arcface"] = 1.0 / dt if dt > 0 else 0
@@ -771,6 +794,35 @@ class HailoControlPanel:
         path = os.path.join(snap_dir, f"hailo_{ts}.jpg")
         cv2.imwrite(path, frame)
         self._update_status(f"Snapshot: {path}")
+
+    def _disable_smart_tracking(self):
+        """Smart Tracking auf der Kamera deaktivieren."""
+        def do_disable():
+            try:
+                from core.hardware.camera_cloud_bridge import SyncCloudBridge
+                bridge = SyncCloudBridge()
+                bridge.set_smart_tracking(False)
+                self._update_status("Smart Tracking deaktiviert")
+            except Exception as e:
+                self._update_status(f"Smart Tracking Fehler: {e}")
+                logger.error(f"Smart Tracking deaktivieren: {e}")
+        threading.Thread(target=do_disable, daemon=True).start()
+
+    def _reload_face_db(self):
+        """Face-DB neu laden (nach Enrollment)."""
+        self._face_db = load_face_db(FACE_DB_PATH)
+        n = len(self._face_db)
+        names = ", ".join(self._face_db.keys()) if self._face_db else "leer"
+        self._update_status(f"Face-DB: {n} Personen ({names})")
+
+    def _announce_person(self, name):
+        """TTS-Ansage bei Gesichtserkennung (laeuft in eigenem Thread)."""
+        try:
+            from core.personality import get_personality_engine, MolochEvent
+            engine = get_personality_engine()
+            engine.speak_event(MolochEvent.PERSON_KNOWN, context={"name": name})
+        except Exception as e:
+            logger.error(f"TTS Ansage Fehler: {e}")
 
     def _all_models_off(self):
         """Alle Modelle deaktivieren und unconfigurieren."""
