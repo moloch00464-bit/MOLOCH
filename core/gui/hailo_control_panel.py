@@ -124,6 +124,11 @@ class HailoControlPanel:
         self._output_names = {}    # name -> [output_layer_names]
         self._face_db = {}
 
+        # Persistent Model Contexts (configure einmal, wiederverwenden)
+        self._active_ctx = {}      # name -> _ModelContext
+        self._ctx_lock = threading.Lock()
+        self._input_640 = np.empty((640, 640, 3), dtype=np.uint8)  # Pre-allocated
+
         # Frame Locks
         self._latest_frame = None
         self._frame_lock = threading.Lock()
@@ -416,38 +421,63 @@ class HailoControlPanel:
     # Inference Worker Thread
     # =========================================================================
 
-    def _run_model(self, name, input_data):
-        """Fuehre ein Modell aus, configure-per-call Strategie.
-
-        Returns: Dict mit Output-Name -> numpy array
-        """
-        if name not in self._models:
-            return {}
+    def _configure_model(self, name):
+        """Konfiguriere Modell persistent (einmalig ~400ms, danach 0ms)."""
+        if name in self._active_ctx or name not in self._models:
+            return
 
         infer_model = self._models[name]
         out_names = self._output_names[name]
 
-        with infer_model.configure() as configured:
-            # Output-Buffers vorallocieren
+        try:
+            ctx_mgr = infer_model.configure()
+            configured = ctx_mgr.__enter__()
+
             output_buffers = {
                 oname: np.empty(infer_model.output(oname).shape, dtype=np.float32)
                 for oname in out_names
             }
             bindings = configured.create_bindings(output_buffers=output_buffers)
 
-            # Input setzen
-            input_contig = np.ascontiguousarray(input_data)
-            bindings.input().set_buffer(input_contig)
+            with self._ctx_lock:
+                self._active_ctx[name] = {
+                    "ctx_mgr": ctx_mgr,
+                    "configured": configured,
+                    "bindings": bindings,
+                    "output_buffers": output_buffers,
+                    "out_names": out_names,
+                }
+            logger.info(f"Modell konfiguriert: {name}")
+        except Exception as e:
+            logger.error(f"Configure {name} fehlgeschlagen: {e}")
 
-            # Inference
-            configured.run([bindings], timeout=10000)
+    def _unconfigure_model(self, name):
+        """Gib Modell-Konfiguration frei."""
+        with self._ctx_lock:
+            ctx = self._active_ctx.pop(name, None)
+        if ctx:
+            try:
+                ctx["ctx_mgr"].__exit__(None, None, None)
+            except Exception:
+                pass
+            logger.info(f"Modell freigegeben: {name}")
 
-            # Outputs aus pre-allocated Buffers lesen (wichtig fuer NMS!)
-            results = {}
-            for oname in out_names:
-                results[oname] = output_buffers[oname].copy()
+    def _run_model(self, name, input_data):
+        """Fuehre Modell aus mit persistenter Konfiguration (~21ms statt ~450ms).
 
-        return results
+        Returns: Dict mit Output-Name -> numpy array
+        """
+        with self._ctx_lock:
+            ctx = self._active_ctx.get(name)
+        if not ctx:
+            return {}
+
+        bindings = ctx["bindings"]
+        bindings.input().set_buffer(np.ascontiguousarray(input_data))
+        ctx["configured"].run([bindings], timeout=10000)
+
+        return {oname: ctx["output_buffers"][oname].copy()
+                for oname in ctx["out_names"]}
 
     def _inference_loop(self):
         """Inference Worker: nimmt Frames, fuehrt aktive Modelle aus, zeichnet Overlays."""
@@ -459,9 +489,10 @@ class HailoControlPanel:
                 time.sleep(0.02)
                 continue
 
-            # Kein Modell aktiv -> nur Raw-Frame anzeigen
-            any_active = (self.scrfd_enabled.get() or self.yolo_enabled.get() or
-                          self.pose_enabled.get())
+            # Kein Modell konfiguriert -> nur Raw-Frame anzeigen
+            any_active = bool(self._active_ctx) and (
+                self.scrfd_enabled.get() or self.yolo_enabled.get() or
+                self.pose_enabled.get())
             if not any_active:
                 with self._annotated_lock:
                     self._annotated_frame = frame.copy()
@@ -481,7 +512,7 @@ class HailoControlPanel:
             face_boxes = []
 
             # 1. SCRFD Face Detection
-            if self.scrfd_enabled.get() and "scrfd" in self._models:
+            if self.scrfd_enabled.get() and "scrfd" in self._active_ctx:
                 try:
                     t0 = time.perf_counter()
                     outputs = self._run_model("scrfd", input_rgb)
@@ -502,7 +533,7 @@ class HailoControlPanel:
 
             # 2. ArcFace (nur wenn SCRFD aktiv + Faces gefunden)
             if (self.arcface_enabled.get() and self.scrfd_enabled.get()
-                    and face_boxes and "arcface" in self._models):
+                    and face_boxes and "arcface" in self._active_ctx):
                 try:
                     t0 = time.perf_counter()
                     for box, score, lm in face_boxes:
@@ -551,7 +582,7 @@ class HailoControlPanel:
                     logger.error(f"ArcFace Fehler: {e}")
 
             # 3. YOLOv8m Person Detection
-            if self.yolo_enabled.get() and "yolov8m" in self._models:
+            if self.yolo_enabled.get() and "yolov8m" in self._active_ctx:
                 try:
                     t0 = time.perf_counter()
                     outputs = self._run_model("yolov8m", input_rgb)
@@ -572,7 +603,7 @@ class HailoControlPanel:
                     logger.error(f"YOLOv8m Fehler: {e}")
 
             # 4. YOLOv8s Pose
-            if self.pose_enabled.get() and "pose" in self._models:
+            if self.pose_enabled.get() and "pose" in self._active_ctx:
                 try:
                     t0 = time.perf_counter()
                     outputs = self._run_model("pose", input_rgb)
@@ -667,21 +698,35 @@ class HailoControlPanel:
         if model_key == "arcface" and self.arcface_enabled.get():
             if not self.scrfd_enabled.get():
                 self.scrfd_enabled.set(True)
+                self._on_model_toggle("scrfd")
 
         # SCRFD aus -> ArcFace auch aus
         if model_key == "scrfd" and not self.scrfd_enabled.get():
             self.arcface_enabled.set(False)
 
-        # FPS zuruecksetzen fuer deaktivierte Modelle
-        with self._fps_lock:
-            if not self.scrfd_enabled.get():
-                self._fps["scrfd"] = 0
-            if not self.arcface_enabled.get():
-                self._fps["arcface"] = 0
-            if not self.yolo_enabled.get():
-                self._fps["yolov8m"] = 0
-            if not self.pose_enabled.get():
-                self._fps["pose"] = 0
+        # Mapping model_key -> enabled var
+        toggle_map = {
+            "scrfd": self.scrfd_enabled, "arcface": self.arcface_enabled,
+            "yolov8m": self.yolo_enabled, "pose": self.pose_enabled,
+        }
+
+        enabled = toggle_map.get(model_key, None)
+        if enabled is None:
+            return
+
+        if enabled.get():
+            # Configure im Hintergrund (erster Aufruf ~400ms)
+            self._update_status(f"Konfiguriere {model_key}...")
+            def do_cfg():
+                self._configure_model(model_key)
+                self._update_status("RTSP + NPU aktiv")
+            threading.Thread(target=do_cfg, daemon=True).start()
+        else:
+            # Unconfigure + FPS Reset
+            self._unconfigure_model(model_key)
+            with self._fps_lock:
+                fps_key = model_key if model_key != "yolov8m" else "yolov8m"
+                self._fps[fps_key] = 0
 
     # =========================================================================
     # Aktionen
@@ -728,11 +773,13 @@ class HailoControlPanel:
         self._update_status(f"Snapshot: {path}")
 
     def _all_models_off(self):
-        """Alle Modelle deaktivieren."""
+        """Alle Modelle deaktivieren und unconfigurieren."""
         self.scrfd_enabled.set(False)
         self.arcface_enabled.set(False)
         self.yolo_enabled.set(False)
         self.pose_enabled.set(False)
+        for name in list(self._active_ctx.keys()):
+            self._unconfigure_model(name)
         with self._fps_lock:
             self._fps = {"scrfd": 0, "arcface": 0, "yolov8m": 0, "pose": 0, "total": 0}
 
@@ -752,11 +799,14 @@ class HailoControlPanel:
         if self._display_after_id:
             self.root.after_cancel(self._display_after_id)
 
+        # Alle Modelle unconfigurieren
+        for name in list(self._active_ctx.keys()):
+            self._unconfigure_model(name)
+
         # VDevice schliessen
         if self._vdevice:
             try:
-                del self._models
-                self._models = {}
+                self._models.clear()
                 del self._vdevice
                 self._vdevice = None
             except Exception:
