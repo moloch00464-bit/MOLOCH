@@ -79,6 +79,10 @@ RATE = 16000  # Whisper expects 16kHz
 # ReSpeaker Lite USB Mic (PipeWire node name)
 RESPEAKER_NODE = "alsa_input.usb-Seeed_Studio_ReSpeaker_Lite_0000000001-00.analog-stereo"
 
+# Shared Face State from Hailo Panel (IPC)
+FACE_STATE_PATH = "/tmp/moloch_face_state.json"
+FACE_STATE_MAX_AGE = 10.0  # Sekunden bevor Face-State als veraltet gilt
+
 
 class PushToTalkGUI:
     """
@@ -2029,15 +2033,34 @@ WICHTIGE VISION-REGEL:
             message_content = user_text
             vision_info = None
 
-            # Try VisionContext (from VisionWorker/Hailo)
+            # Try Hailo Panel shared face state (cross-process IPC)
             try:
-                from context.vision_context import get_vision_context
-                ctx = get_vision_context()
-                state = ctx.get_state()
-                if state.camera_connected and state.last_update > 0:
-                    vision_info = ctx.describe()
+                import json as _json
+                if os.path.exists(FACE_STATE_PATH):
+                    with open(FACE_STATE_PATH, "r") as f:
+                        face_state = _json.load(f)
+                    age = time.time() - face_state.get("timestamp", 0)
+                    if age < FACE_STATE_MAX_AGE:
+                        fname = face_state.get("name", "")
+                        fsim = face_state.get("similarity", 0)
+                        if fname and fname not in ("Unbekannt", "Keine DB"):
+                            vision_info = f"Ich sehe {fname} (Sicherheit: {fsim:.0%})"
+                            self.last_recognized_person = fname
+                        elif fname == "Unbekannt":
+                            vision_info = f"Ich sehe eine unbekannte Person"
             except Exception:
                 pass
+
+            # Fallback: Try VisionContext (from VisionWorker/Hailo)
+            if not vision_info:
+                try:
+                    from context.vision_context import get_vision_context
+                    ctx = get_vision_context()
+                    state = ctx.get_state()
+                    if state.camera_connected and state.last_update > 0:
+                        vision_info = ctx.describe()
+                except Exception:
+                    pass
 
             # Fallback to legacy Vision
             if not vision_info and self.vision and self.vision.connected:

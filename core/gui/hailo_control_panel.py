@@ -82,6 +82,9 @@ MODEL_PATHS = {
 # Face-DB Pfad
 FACE_DB_PATH = os.path.expanduser("~/moloch/data/face_embeddings.json")
 
+# Shared Face State (IPC mit push_to_talk)
+FACE_STATE_PATH = "/tmp/moloch_face_state.json"
+
 
 def load_face_db(path: str) -> dict:
     """Lade Face-Embeddings aus JSON."""
@@ -588,6 +591,9 @@ class HailoControlPanel:
 
                             draw_name(annotated, box, name, sim, fh, fw)
 
+                            # Shared State fuer push_to_talk
+                            self._write_face_state(name, sim, len(face_boxes))
+
                             # TTS Ansage (60s Cooldown pro Person)
                             if name != "Unbekannt" and name != "Keine DB":
                                 now = time.time()
@@ -814,6 +820,21 @@ class HailoControlPanel:
         n = len(self._face_db)
         names = ", ".join(self._face_db.keys()) if self._face_db else "leer"
         self._update_status(f"Face-DB: {n} Personen ({names})")
+
+    def _write_face_state(self, name, similarity, person_count):
+        """Schreibe Face-Recognition-State fuer IPC mit push_to_talk."""
+        try:
+            state = {
+                "name": name,
+                "similarity": round(similarity, 3),
+                "person_count": person_count,
+                "timestamp": time.time(),
+                "source": "hailo_panel"
+            }
+            with open(FACE_STATE_PATH, "w") as f:
+                json.dump(state, f)
+        except Exception:
+            pass
 
     def _announce_person(self, name):
         """TTS-Ansage bei Gesichtserkennung (laeuft in eigenem Thread)."""
