@@ -136,6 +136,7 @@ class HailoControlPanel:
 
         # Persistent Model Contexts (configure einmal, wiederverwenden)
         self._active_ctx = {}      # name -> _ModelContext
+        self._model_order = []     # FIFO: Reihenfolge der Aktivierung
         self._ctx_lock = threading.Lock()
         self._input_640 = np.empty((640, 640, 3), dtype=np.uint8)  # Pre-allocated
 
@@ -488,6 +489,8 @@ class HailoControlPanel:
                     "output_buffers": output_buffers,
                     "out_names": out_names,
                 }
+                if name not in self._model_order:
+                    self._model_order.append(name)
             active_after = list(self._active_ctx.keys())
             logger.info(f"[CONFIGURE] {name}: OK. Aktive Modelle NACHHER: {active_after}")
         except Exception as e:
@@ -514,6 +517,8 @@ class HailoControlPanel:
         """Gib Modell-Konfiguration frei."""
         with self._ctx_lock:
             ctx = self._active_ctx.pop(name, None)
+            if name in self._model_order:
+                self._model_order.remove(name)
         if ctx:
             try:
                 ctx["ctx_mgr"].__exit__(None, None, None)
@@ -918,20 +923,27 @@ class HailoControlPanel:
             return
 
         if enabled.get():
-            # Hardware-Limit: max 2 Modelle gleichzeitig
-            active_count = len(self._active_ctx)
-            if active_count >= MAX_CONCURRENT_MODELS:
-                logger.warning(
-                    f"NPU-Limit: {active_count} Modelle aktiv "
-                    f"(max {MAX_CONCURRENT_MODELS}). {model_key} abgelehnt."
-                )
-                self._update_status(
-                    f"NPU-Limit! Erst ein Modell deaktivieren "
-                    f"({active_count}/{MAX_CONCURRENT_MODELS})"
-                )
-                # Checkbox zuruecksetzen
-                enabled.set(False)
-                return
+            # Hardware-Limit: FIFO-Rotation bei max 2 Modellen
+            if len(self._active_ctx) >= MAX_CONCURRENT_MODELS:
+                # Aeltestes Modell rauswerfen (FIFO)
+                oldest = self._model_order[0] if self._model_order else None
+                if oldest:
+                    logger.info(
+                        f"NPU-Limit: {oldest} wird deaktiviert fuer {model_key} (FIFO)"
+                    )
+                    # Checkbox des rausgeworfenen Modells deaktivieren
+                    evict_map = {
+                        "scrfd": self.scrfd_enabled, "arcface": self.arcface_enabled,
+                        "yolov8m": self.yolo_enabled, "pose": self.pose_enabled,
+                    }
+                    evict_var = evict_map.get(oldest)
+                    if evict_var:
+                        evict_var.set(False)
+                    # SCRFD raus -> ArcFace auch raus
+                    if oldest == "scrfd" and self.arcface_enabled.get():
+                        self.arcface_enabled.set(False)
+                        self._unconfigure_model("arcface")
+                    self._unconfigure_model(oldest)
 
             # Configure im Hintergrund (erster Aufruf ~400ms)
             self._update_status(f"Konfiguriere {model_key}...")
