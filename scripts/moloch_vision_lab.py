@@ -48,7 +48,7 @@ import numpy as np
 
 # PTZ control imports (optional - Vision Lab works without PTZ)
 try:
-    from core.hardware.sonoff_camera_controller import get_camera_controller as get_ptz_controller
+    from core.hardware.camera import get_camera_controller as get_ptz_controller
     from core.mpo.autonomous_tracker import get_autonomous_tracker
     PTZ_AVAILABLE = True
 except ImportError:

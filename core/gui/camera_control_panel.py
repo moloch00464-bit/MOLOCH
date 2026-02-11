@@ -47,8 +47,8 @@ logger = logging.getLogger(__name__)
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from core.hardware.unified_camera_controller import (
-    UnifiedCameraController,
+from core.hardware.camera import (
+    SonoffCameraController as UnifiedCameraController,
     ControlMode,
     NightMode,
     LEDLevel

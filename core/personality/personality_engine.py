@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 M.O.L.O.C.H. Personality Engine
 =================================
@@ -208,7 +209,7 @@ class PersonalityEngine:
         """Load moloch_identity.json config."""
         path = os.path.join(os.path.expanduser("~/moloch"), "config", "moloch_identity.json")
         try:
-            with open(path, "r") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             return {}

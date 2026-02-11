@@ -349,8 +349,10 @@ class MolochTTS:
             logger.warning(f"Voice model not found: {model_path}")
             model_path = self.model_path  # Fallback to default
 
-        # Sanitize text for shell
-        safe_text = text.replace('"', '\\"').replace("'", "\\'").replace('`', '\\`')
+        # Write text to temp file with explicit UTF-8 (avoids shell encoding issues)
+        temp_text = f"/tmp/moloch_tts_text_{os.getpid()}.txt"
+        with open(temp_text, 'w', encoding='utf-8') as f:
+            f.write(text)
 
         # Temp files for buffered playback (avoids Bluetooth jitter)
         temp_wav = f"/tmp/moloch_tts_{id(text)}.wav"
@@ -360,33 +362,32 @@ class MolochTTS:
         # 1. Piper generates WAV (buffered, not streaming)
         # 2. Pitch shift with rubberband (best) or sox (fallback)
         # 3. mpv plays the result (good for Bluetooth)
-        # Build Piper command with length-scale for clearer speech
         piper_cmd = f'{self.piper_path} --model {model_path} --length-scale {self.length_scale} --output_file {temp_wav}'
 
         if self.pitch_tool and self.pitch_semitones > 0:
             if self.pitch_tool == "rubberband":
                 # Rubberband: better quality, uses semitones
                 cmd = (
-                    f'echo "{safe_text}" | {piper_cmd} 2>/dev/null && '
+                    f'cat {temp_text} | {piper_cmd} 2>/dev/null && '
                     f'rubberband --pitch {self.pitch_semitones} {temp_wav} {temp_pitched} 2>/dev/null && '
                     f'mpv --no-video --no-terminal --really-quiet {temp_pitched} 2>/dev/null; '
-                    f'rm -f {temp_wav} {temp_pitched}'
+                    f'rm -f {temp_wav} {temp_pitched} {temp_text}'
                 )
             else:
                 # Sox: convert semitones to cents (1 semitone = 100 cents)
                 cents = self.pitch_semitones * 100
                 cmd = (
-                    f'echo "{safe_text}" | {piper_cmd} 2>/dev/null && '
+                    f'cat {temp_text} | {piper_cmd} 2>/dev/null && '
                     f'sox {temp_wav} {temp_pitched} pitch {cents} 2>/dev/null && '
                     f'mpv --no-video --no-terminal --really-quiet {temp_pitched} 2>/dev/null; '
-                    f'rm -f {temp_wav} {temp_pitched}'
+                    f'rm -f {temp_wav} {temp_pitched} {temp_text}'
                 )
         else:
             # Clear speech without pitch shifting
             cmd = (
-                f'echo "{safe_text}" | {piper_cmd} 2>/dev/null && '
+                f'cat {temp_text} | {piper_cmd} 2>/dev/null && '
                 f'mpv --no-video --no-terminal --really-quiet {temp_wav} 2>/dev/null; '
-                f'rm -f {temp_wav}'
+                f'rm -f {temp_wav} {temp_text}'
             )
 
         try:

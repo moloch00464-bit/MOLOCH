@@ -576,8 +576,8 @@ class SonoffCameraController:
 
         except Exception as e:
             if "Invalid position" in str(e):
-                self.last_move_time = time.time()
-                return True
+                self.logger.warning(f"AbsoluteMove: Position out of range (Pan={pan_deg:.1f}, Tilt={tilt_deg:.1f})")
+                return False
             self.logger.error(f"AbsoluteMove failed: {e}")
             return False
 

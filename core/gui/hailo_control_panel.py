@@ -85,13 +85,17 @@ FACE_DB_PATH = os.path.expanduser("~/moloch/data/face_embeddings.json")
 # Shared Face State (IPC mit push_to_talk)
 FACE_STATE_PATH = "/tmp/moloch_face_state.json"
 
+# Cross-process NPU coordination
+NPU_VOICE_REQUEST = "/tmp/moloch_npu_voice_request"
+NPU_VISION_PAUSED = "/tmp/moloch_npu_vision_paused"
+
 
 def load_face_db(path: str) -> dict:
     """Lade Face-Embeddings aus JSON."""
     if not os.path.exists(path):
         return {}
     try:
-        with open(path, "r") as f:
+        with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         db = {}
         for name, emb in data.items():
@@ -134,6 +138,10 @@ class HailoControlPanel:
 
         # TTS Announcement Cooldown
         self._last_announce = {}   # name -> timestamp
+
+        # Cross-process NPU pause state
+        self._paused_models = []   # Models active before voice pause
+        self._npu_paused = False
 
         # Frame Locks
         self._latest_frame = None
@@ -333,10 +341,18 @@ class HailoControlPanel:
             # 1. Hailo Manager
             try:
                 self._hailo_manager = get_hailo_manager()
-                # Device frei machen
+                # Warte auf NPU (NICHT andere Prozesse killen!)
                 if not self._hailo_manager.is_device_free():
-                    self._update_status("NPU belegt - versuche freizugeben...")
-                    self._hailo_manager.ensure_device_free(timeout=5.0)
+                    self._update_status("NPU belegt - warte auf Freigabe...")
+                    for i in range(20):  # Max 10s warten
+                        time.sleep(0.5)
+                        if self._hailo_manager.is_device_free():
+                            break
+                    else:
+                        self._update_status("NPU belegt - starte ohne Inference")
+                        # RTSP trotzdem starten fuer Preview
+                        self.root.after(100, self._start_rtsp)
+                        return
 
                 if not self._hailo_manager.acquire_for_vision(timeout=10.0):
                     self._update_status("FEHLER: NPU nicht verfuegbar!")
@@ -498,6 +514,16 @@ class HailoControlPanel:
     def _inference_loop(self):
         """Inference Worker: nimmt Frames, fuehrt aktive Modelle aus, zeichnet Overlays."""
         while self.running:
+            # Cross-process NPU coordination: Voice hat Vorrang
+            if os.path.exists(NPU_VOICE_REQUEST):
+                if not self._npu_paused:
+                    self._pause_for_voice()
+                time.sleep(0.1)
+                continue
+            if self._npu_paused:
+                self._resume_after_voice()
+                continue
+
             # Frame holen
             with self._frame_lock:
                 frame = self._latest_frame
@@ -657,6 +683,104 @@ class HailoControlPanel:
 
             with self._annotated_lock:
                 self._annotated_frame = annotated
+
+    # =========================================================================
+    # Cross-Process NPU Coordination
+    # =========================================================================
+
+    def _pause_for_voice(self):
+        """Pause inference - release VDevice so voice process can use NPU."""
+        logger.info("[NPU_IPC] Voice requested - pausing vision...")
+        self._update_status("NPU: Pausiert fuer Sprache...")
+
+        # Remember active models
+        self._paused_models = list(self._active_ctx.keys())
+
+        # Unconfigure all models (close context managers)
+        for name in list(self._active_ctx.keys()):
+            self._unconfigure_model(name)
+
+        # Release models and VDevice
+        self._models.clear()
+        if self._vdevice:
+            try:
+                del self._vdevice
+            except Exception:
+                pass
+            self._vdevice = None
+
+        # Release via HailoManager
+        if self._hailo_manager:
+            try:
+                self._hailo_manager.release_vision()
+            except Exception:
+                pass
+
+        import gc
+        gc.collect()
+        time.sleep(0.3)
+
+        # Signal paused
+        try:
+            with open(NPU_VISION_PAUSED, "w") as f:
+                json.dump({"pid": os.getpid(), "timestamp": time.time()}, f)
+        except Exception:
+            pass
+
+        self._npu_paused = True
+        logger.info("[NPU_IPC] Vision paused, VDevice released")
+
+    def _resume_after_voice(self):
+        """Resume inference after voice process released NPU."""
+        logger.info("[NPU_IPC] Voice done - resuming vision...")
+        self._update_status("NPU: Wiederherstellung...")
+
+        # Remove paused signal
+        for path in [NPU_VISION_PAUSED]:
+            try:
+                os.unlink(path)
+            except FileNotFoundError:
+                pass
+
+        # Wait for device to be free
+        time.sleep(0.5)
+
+        # Re-acquire via HailoManager
+        if self._hailo_manager:
+            if not self._hailo_manager.acquire_for_vision(timeout=10.0):
+                self._update_status("NPU nicht verfuegbar nach Voice!")
+                self._npu_paused = False
+                return
+
+        # Recreate VDevice and models
+        try:
+            params = VDevice.create_params()
+            self._vdevice = VDevice(params)
+
+            for name, path in MODEL_PATHS.items():
+                if not os.path.exists(path):
+                    continue
+                hef = HEF(path)
+                infer_model = self._vdevice.create_infer_model(path)
+                infer_model.input().set_format_type(FormatType.UINT8)
+                out_names = [o.name for o in hef.get_output_vstream_infos()]
+                for oname in out_names:
+                    infer_model.output(oname).set_format_type(FormatType.FLOAT32)
+                self._models[name] = infer_model
+                self._output_names[name] = out_names
+
+            # Reconfigure previously active models
+            for name in self._paused_models:
+                if name in self._models:
+                    self._configure_model(name)
+
+            self._npu_paused = False
+            self._update_status("RTSP + NPU aktiv")
+            logger.info("[NPU_IPC] Vision resumed successfully")
+        except Exception as e:
+            self._update_status(f"NPU Resume Fehler: {e}")
+            logger.error(f"[NPU_IPC] Resume failed: {e}")
+            self._npu_paused = False
 
     # =========================================================================
     # Display Loop (Tkinter Main Thread)
@@ -890,6 +1014,13 @@ class HailoControlPanel:
             try:
                 self._hailo_manager.release_vision()
             except Exception:
+                pass
+
+        # IPC cleanup
+        for path in [NPU_VISION_PAUSED]:
+            try:
+                os.unlink(path)
+            except FileNotFoundError:
                 pass
 
         self.root.destroy()

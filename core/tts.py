@@ -60,10 +60,12 @@ class TTSEngine:
         self.piper_bin = PIPER_BIN
         self.available_voices: Dict[str, VoiceModel] = {}
         self.current_voice: Optional[str] = None
+        self.available = False
 
         # Verify Piper is installed
         if not self.piper_bin.exists():
-            raise RuntimeError(f"Piper not found at {self.piper_bin}")
+            logger.warning(f"Piper not found at {self.piper_bin} - TTS disabled")
+            return
 
         # Load available voices
         self._load_voices()
@@ -74,8 +76,10 @@ class TTSEngine:
         elif self.available_voices:
             self.current_voice = list(self.available_voices.keys())[0]
         else:
-            raise RuntimeError("No voice models found!")
+            logger.warning("No voice models found - TTS disabled")
+            return
 
+        self.available = True
         logger.info(f"TTS Engine initialized with {len(self.available_voices)} voices")
         logger.info(f"Current voice: {self.current_voice}")
 
@@ -97,7 +101,7 @@ class TTSEngine:
                 continue
 
             try:
-                with open(json_file, 'r') as f:
+                with open(json_file, 'r', encoding='utf-8') as f:
                     config = json.load(f)
 
                 # Extract voice name from filename (without .onnx)
@@ -145,6 +149,10 @@ class TTSEngine:
         Returns:
             True if successful, False otherwise
         """
+        if not self.available:
+            logger.debug("TTS not available - skipping speak()")
+            return False
+
         # Determine which voice to use
         voice_to_use = voice if voice else self.current_voice
 
@@ -270,11 +278,18 @@ class TTSEngine:
 _tts_engine: Optional[TTSEngine] = None
 
 
-def get_tts_engine() -> TTSEngine:
+def get_tts_engine() -> Optional[TTSEngine]:
     """Get or create the global TTS engine instance."""
     global _tts_engine
     if _tts_engine is None:
-        _tts_engine = TTSEngine()
+        try:
+            _tts_engine = TTSEngine()
+        except Exception as e:
+            logger.error(f"Failed to create TTS engine: {e}")
+            _tts_engine = TTSEngine.__new__(TTSEngine)
+            _tts_engine.available = False
+            _tts_engine.available_voices = {}
+            _tts_engine.current_voice = None
     return _tts_engine
 
 

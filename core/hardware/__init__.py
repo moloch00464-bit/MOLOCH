@@ -1,10 +1,8 @@
-from .sonoff_ptz_controller import SonoffPTZController, AutonomyMode
-from .camera_controller import (
-    CameraController,
-    CameraID,
-    CameraFrame,
+from .camera import (
+    SonoffCameraController,
     CameraStatus,
-    get_camera_controller
+    ControlMode,
+    get_camera_controller,
 )
 from .hailo_manager import (
     HailoManager,

@@ -49,7 +49,7 @@ from PIL import Image, ImageTk
 # Add moloch to path
 sys.path.insert(0, os.path.expanduser("~/moloch"))
 
-from core.hardware.sonoff_camera_controller import SonoffCameraController
+from core.hardware.camera import SonoffCameraController
 from core.hardware.camera_cloud_bridge import CameraCloudBridge, CloudConfig
 
 logging.basicConfig(level=logging.WARNING)

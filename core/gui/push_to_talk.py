@@ -22,6 +22,7 @@ if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 if hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8')
+import json
 import subprocess
 import threading
 import tempfile
@@ -38,9 +39,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from core.timeline import get_timeline
 from core.vision import get_vision, get_hybrid_vision, PersonEvent
 from core.speech.audio_pipeline import get_pipeline as get_audio_pipeline, AudioDiagnostics
-from core.hardware import CameraID
-from core.hardware.camera_controller import CameraController, get_camera_controller
-from core.hardware.sonoff_camera_controller import SonoffCameraController, ControlMode, get_camera_controller as get_ptz_controller
+from core.hardware.camera import ControlMode, get_camera_controller as get_ptz_controller
 from core.mpo.ptz_orchestrator import get_ptz_orchestrator, VisionEvent, TrackingMode
 from core.mpo.autonomous_tracker import get_autonomous_tracker, AutonomousTracker, TrackerState
 from core.perception.perception_manager import get_perception_manager, PerceptionMode
@@ -81,7 +80,11 @@ RESPEAKER_NODE = "alsa_input.usb-Seeed_Studio_ReSpeaker_Lite_0000000001-00.analo
 
 # Shared Face State from Hailo Panel (IPC)
 FACE_STATE_PATH = "/tmp/moloch_face_state.json"
-FACE_STATE_MAX_AGE = 10.0  # Sekunden bevor Face-State als veraltet gilt
+FACE_STATE_MAX_AGE = 30.0  # Sekunden bevor Face-State als veraltet gilt
+
+# Cross-process NPU coordination (shared with hailo_control_panel)
+NPU_VOICE_REQUEST = "/tmp/moloch_npu_voice_request"
+NPU_VISION_PAUSED = "/tmp/moloch_npu_vision_paused"
 
 
 class PushToTalkGUI:
@@ -113,10 +116,12 @@ class PushToTalkGUI:
         self.hybrid_vision = None  # HybridVision pipeline
         self.conversation_history = []
         self.system_prompt = None
+        self.memory = None  # PersistentMemory (Langzeitgedaechtnis)
 
         # Person tracking
         self.last_recognized_person = None
         self.last_recognition_time = 0
+        self._cached_face_state = None  # Face state cached before NPU pause
 
         # Vision worker (background Hailo detection)
         self.vision_worker = None
@@ -1252,11 +1257,11 @@ class PushToTalkGUI:
                 if self.whisper.is_available:
                     logger.info(f"Whisper loaded: {self.whisper}")
                 else:
-                    raise RuntimeError("No Whisper backend available")
+                    logger.warning("No Whisper backend available - STT disabled")
+                    self.whisper = None
             except Exception as e:
                 logger.error(f"Failed to load Whisper: {e}")
-                self._set_status(f"Whisper Fehler: {e}", "#ff0000")
-                return
+                self.whisper = None
 
             # Load audio preprocessing pipeline
             self._set_status("Lade Audio-Pipeline...", "#ffff00")
@@ -1281,6 +1286,40 @@ class PushToTalkGUI:
                     logger.warning("No Claude API key found")
             except Exception as e:
                 logger.error(f"Failed to load Claude: {e}")
+
+            # Persistentes Gedaechtnis laden
+            self._set_status("Lade Gedaechtnis...", "#ffff00")
+            try:
+                from core.memory.persistent_memory import get_memory
+                self.memory = get_memory()
+                logger.info(f"Memory loaded: {self.memory}")
+
+                # Memory in System-Prompt injizieren
+                if self.system_prompt and self.memory:
+                    memory_section = self.memory.to_prompt_section()
+                    memory_instruction = self.memory.get_memory_instruction()
+                    if memory_section:
+                        self.system_prompt += "\n\n" + memory_section
+                    self.system_prompt += "\n\n" + memory_instruction
+
+                # Letzte Konversation als Startkontext laden
+                if self.memory:
+                    recent = self.memory.get_recent_conversation(10)
+                    for turn in recent:
+                        self.conversation_history.append({
+                            "role": turn["role"],
+                            "content": turn["content"]
+                        })
+                    if recent:
+                        logger.info(f"[MEMORY] {len(recent)} Turns aus letzter Session geladen")
+
+                # Qdrant Vector Memory sync (background, non-blocking)
+                try:
+                    threading.Thread(target=self.memory.sync_to_vector, daemon=True).start()
+                except Exception:
+                    pass
+            except Exception as e:
+                logger.error(f"Memory load error: {e}")
 
             self._set_status("Lade TTS...", "#ffff00")
             try:
@@ -1887,8 +1926,32 @@ WICHTIGE VISION-REGEL:
 
             logger.info(f"Processing audio: {self.temp_audio_path} ({file_size} bytes)")
 
-            # 2. NPU exklusiv für Sprache reservieren
+            # Cache face state VOR NPU-Pause (Panel schreibt waehrenddessen noch)
+            try:
+                if os.path.exists(FACE_STATE_PATH):
+                    with open(FACE_STATE_PATH, "r", encoding="utf-8") as f:
+                        self._cached_face_state = json.load(f)
+                    self._cached_face_state["_cached_at"] = time.time()
+                    logger.info(f"[PTT] Face state cached: {self._cached_face_state.get('name', '?')}")
+            except Exception as e:
+                logger.debug(f"[PTT] Face state cache error: {e}")
+
+            # 2. NPU exklusiv fuer Sprache reservieren
             self._set_status("NPU reservieren...", "#ffff00")
+
+            # Cross-process: Signal hailo_control_panel to release NPU
+            try:
+                with open(NPU_VOICE_REQUEST, "w") as f:
+                    json.dump({"pid": os.getpid(), "timestamp": time.time()}, f)
+                # Warte max 3s auf Panel-Pause (falls Panel laeuft)
+                for _ in range(30):
+                    if os.path.exists(NPU_VISION_PAUSED):
+                        logger.info("[PTT] Hailo Panel pausiert - NPU frei")
+                        break
+                    time.sleep(0.1)
+            except Exception:
+                pass
+
             try:
                 hailo_mgr = get_hailo_manager()
                 if hailo_mgr.acquire_for_voice(timeout=10.0):
@@ -1925,7 +1988,7 @@ WICHTIGE VISION-REGEL:
             get_timeline().user_input(len(text), interface="voice")
 
             # 5. NPU freigeben VOR Claude-API (braucht keine NPU mehr!)
-            #    So kann Vision schon während Claude-Request weiterlaufen
+            #    So kann Vision schon waehrend Claude-Request weiterlaufen
             if self._npu_acquired_for_voice:
                 try:
                     hailo_mgr = get_hailo_manager()
@@ -1935,6 +1998,12 @@ WICHTIGE VISION-REGEL:
                     logger.error(f"[PTT] NPU release error: {e}\n{traceback.format_exc()}")
                 finally:
                     self._npu_acquired_for_voice = False
+
+            # Cross-process: Panel kann NPU wieder nutzen
+            try:
+                os.unlink(NPU_VOICE_REQUEST)
+            except FileNotFoundError:
+                pass
 
             # 6. Send to Claude (kein NPU nötig)
             self._set_status("M.O.L.O.C.H. denkt...", "#ffff00")
@@ -1980,6 +2049,12 @@ WICHTIGE VISION-REGEL:
                     logger.error(f"[PTT] NPU release cleanup error: {e}")
                 finally:
                     self._npu_acquired_for_voice = False
+
+            # Cross-process: Signal hailo_control_panel kann NPU wieder nutzen
+            try:
+                os.unlink(NPU_VOICE_REQUEST)
+            except FileNotFoundError:
+                pass
 
             # Update UI
             def update_ui_after_voice():
@@ -2033,23 +2108,33 @@ WICHTIGE VISION-REGEL:
             message_content = user_text
             vision_info = None
 
-            # Try Hailo Panel shared face state (cross-process IPC)
-            try:
-                import json as _json
-                if os.path.exists(FACE_STATE_PATH):
-                    with open(FACE_STATE_PATH, "r") as f:
-                        face_state = _json.load(f)
-                    age = time.time() - face_state.get("timestamp", 0)
-                    if age < FACE_STATE_MAX_AGE:
-                        fname = face_state.get("name", "")
-                        fsim = face_state.get("similarity", 0)
-                        if fname and fname not in ("Unbekannt", "Keine DB"):
-                            vision_info = f"Ich sehe {fname} (Sicherheit: {fsim:.0%})"
-                            self.last_recognized_person = fname
-                        elif fname == "Unbekannt":
-                            vision_info = f"Ich sehe eine unbekannte Person"
-            except Exception:
-                pass
+            # Try cached face state first (cached before NPU pause)
+            face_state = getattr(self, '_cached_face_state', None)
+            if not face_state:
+                # Fallback: read from file directly
+                try:
+                    if os.path.exists(FACE_STATE_PATH):
+                        with open(FACE_STATE_PATH, "r", encoding="utf-8") as f:
+                            face_state = json.load(f)
+                except Exception as e:
+                    logger.debug(f"[PTT] Face state read error: {e}")
+
+            if face_state:
+                age = time.time() - face_state.get("timestamp", 0)
+                if age < FACE_STATE_MAX_AGE:
+                    fname = face_state.get("name", "")
+                    fsim = face_state.get("similarity", 0)
+                    if fname and fname not in ("Unbekannt", "Keine DB"):
+                        vision_info = f"Ich sehe {fname} (Sicherheit: {fsim:.0%})"
+                        self.last_recognized_person = fname
+                        logger.info(f"[PTT] Vision: {fname} ({fsim:.0%})")
+                    elif fname == "Unbekannt":
+                        vision_info = "Ich sehe eine unbekannte Person"
+                else:
+                    logger.debug(f"[PTT] Face state too old: {age:.1f}s")
+
+            # Clear cached state after use
+            self._cached_face_state = None
 
             # Fallback: Try VisionContext (from VisionWorker/Hailo)
             if not vision_info:
@@ -2069,6 +2154,37 @@ WICHTIGE VISION-REGEL:
             if vision_info:
                 message_content = f"[Vision: {vision_info}]\n\nMarkus sagt: {user_text}"
 
+            # Semantische Erinnerungen aus Qdrant
+            try:
+                from core.memory.vector_memory import get_vector_memory
+                vm = get_vector_memory()
+                memory_context = vm.build_context(user_text, limit=5)
+                if memory_context:
+                    message_content = f"{memory_context}\n\n{message_content}"
+            except Exception:
+                pass
+
+            # Selbstdiagnose bei Status-Fragen
+            diag_keywords = ["selbstdiagnose", "diagnose", "was funktioniert", "status check",
+                             "was geht bei dir", "was kannst du", "systemcheck", "health check"]
+            if any(kw in user_text.lower() for kw in diag_keywords):
+                try:
+                    diag_result = subprocess.run(
+                        ["python3", os.path.expanduser("~/moloch/scripts/self_diagnosis.py"), "quick"],
+                        capture_output=True, text=True, timeout=30, cwd=os.path.expanduser("~/moloch")
+                    )
+                    diag_json = os.path.expanduser("~/moloch/data/last_diagnosis.json")
+                    if os.path.exists(diag_json):
+                        with open(diag_json, "r", encoding="utf-8") as f:
+                            diag = json.load(f)
+                        diag_lines = [f"[Diagnose: {t['name']}: {'OK' if t['ok'] else 'FAIL'} - {t['detail']} ({t['ms']}ms)]"
+                                      for t in diag["tests"]]
+                        diag_summary = f"[Diagnose: {diag['passed']} OK / {diag['failed']} FAIL]\n" + "\n".join(diag_lines)
+                        message_content = f"{diag_summary}\n\n{message_content}"
+                        logger.info(f"[PTT] Diagnose injiziert: {diag['passed']}OK/{diag['failed']}FAIL")
+                except Exception as e:
+                    logger.error(f"[PTT] Diagnose-Fehler: {e}")
+
             self.conversation_history.append({
                 "role": "user",
                 "content": message_content
@@ -2083,12 +2199,32 @@ WICHTIGE VISION-REGEL:
 
             assistant_message = response.content[0].text
 
+            # Persistent Memory: [REMEMBER:] Tags extrahieren und speichern
+            display_message = assistant_message
+            if self.memory:
+                display_message = self.memory.extract_memories(assistant_message)
+                # Konversation persistent speichern
+                self.memory.add_turn("user", user_text)
+                self.memory.add_turn("assistant", display_message)
+
+            # Alle 5 Turns: Konversations-Summary in Qdrant
+            if len(self.conversation_history) % 10 == 0 and len(self.conversation_history) > 0:
+                try:
+                    from core.memory.vector_memory import get_vector_memory
+                    vm = get_vector_memory()
+                    recent_user = [m["content"] for m in self.conversation_history[-10:] if m["role"] == "user"]
+                    if recent_user:
+                        summary = " | ".join(recent_user[-3:])
+                        vm.store(summary, category="conversation", key=f"conv_{int(time.time())}")
+                except Exception:
+                    pass
+
             self.conversation_history.append({
                 "role": "assistant",
-                "content": assistant_message
+                "content": display_message
             })
 
-            return assistant_message
+            return display_message
 
         except Exception as e:
             logger.error(f"Claude error: {e}")

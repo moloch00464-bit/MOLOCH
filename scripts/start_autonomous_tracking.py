@@ -14,7 +14,7 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from core.mpo.autonomous_tracker import AutonomousTracker
-from core.hardware.sonoff_camera_controller import get_camera_controller
+from core.hardware.camera import get_camera_controller
 from context.system_autonomy import get_system_autonomy
 
 print("=" * 80)
