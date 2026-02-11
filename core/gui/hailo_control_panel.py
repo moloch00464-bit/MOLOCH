@@ -461,6 +461,10 @@ class HailoControlPanel:
         infer_model = self._models[name]
         out_names = self._output_names[name]
 
+        # Log state BEFORE configure attempt
+        active_before = list(self._active_ctx.keys())
+        logger.info(f"[CONFIGURE] {name}: aktive Modelle VORHER: {active_before}")
+
         try:
             ctx_mgr = infer_model.configure()
             configured = ctx_mgr.__enter__()
@@ -479,9 +483,27 @@ class HailoControlPanel:
                     "output_buffers": output_buffers,
                     "out_names": out_names,
                 }
-            logger.info(f"Modell konfiguriert: {name}")
+            active_after = list(self._active_ctx.keys())
+            logger.info(f"[CONFIGURE] {name}: OK. Aktive Modelle NACHHER: {active_after}")
         except Exception as e:
-            logger.error(f"Configure {name} fehlgeschlagen: {e}")
+            import traceback
+            crash_log = os.path.expanduser("~/moloch/logs/panel_crash.log")
+            crash_info = (
+                f"\n{'='*60}\n"
+                f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] CONFIGURE CRASH: {name}\n"
+                f"Aktive Modelle vorher: {active_before}\n"
+                f"Alle geladenen Modelle: {list(self._models.keys())}\n"
+                f"Exception: {type(e).__name__}: {e}\n"
+                f"Traceback:\n{traceback.format_exc()}\n"
+                f"{'='*60}\n"
+            )
+            logger.error(crash_info)
+            try:
+                with open(crash_log, "a", encoding="utf-8") as f:
+                    f.write(crash_info)
+            except Exception:
+                pass
+            self._update_status(f"CRASH: {name} ({type(e).__name__})")
 
     def _unconfigure_model(self, name):
         """Gib Modell-Konfiguration frei."""
@@ -513,6 +535,29 @@ class HailoControlPanel:
 
     def _inference_loop(self):
         """Inference Worker: nimmt Frames, fuehrt aktive Modelle aus, zeichnet Overlays."""
+        try:
+            self._inference_loop_inner()
+        except Exception as e:
+            import traceback
+            crash_log = os.path.expanduser("~/moloch/logs/panel_crash.log")
+            crash_info = (
+                f"\n{'='*60}\n"
+                f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] INFERENCE LOOP CRASH\n"
+                f"Aktive Modelle: {list(self._active_ctx.keys())}\n"
+                f"Exception: {type(e).__name__}: {e}\n"
+                f"Traceback:\n{traceback.format_exc()}\n"
+                f"{'='*60}\n"
+            )
+            logger.error(crash_info)
+            try:
+                with open(crash_log, "a", encoding="utf-8") as f:
+                    f.write(crash_info)
+            except Exception:
+                pass
+            self._update_status(f"INFERENCE CRASH: {type(e).__name__}")
+
+    def _inference_loop_inner(self):
+        """Eigentliche Inference Loop."""
         while self.running:
             # Cross-process NPU coordination: Voice hat Vorrang
             if os.path.exists(NPU_VOICE_REQUEST):
@@ -870,9 +915,24 @@ class HailoControlPanel:
         if enabled.get():
             # Configure im Hintergrund (erster Aufruf ~400ms)
             self._update_status(f"Konfiguriere {model_key}...")
-            def do_cfg():
-                self._configure_model(model_key)
-                self._update_status("RTSP + NPU aktiv")
+            def do_cfg(mk=model_key):
+                try:
+                    self._configure_model(mk)
+                    self._update_status("RTSP + NPU aktiv")
+                except Exception as e:
+                    import traceback
+                    crash_log = os.path.expanduser("~/moloch/logs/panel_crash.log")
+                    crash_info = (
+                        f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] "
+                        f"TOGGLE THREAD CRASH: {mk}\n{traceback.format_exc()}\n"
+                    )
+                    logger.error(crash_info)
+                    try:
+                        with open(crash_log, "a", encoding="utf-8") as f:
+                            f.write(crash_info)
+                    except Exception:
+                        pass
+                    self._update_status(f"CRASH: {mk}")
             threading.Thread(target=do_cfg, daemon=True).start()
         else:
             # Unconfigure + FPS Reset
