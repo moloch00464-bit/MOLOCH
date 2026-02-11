@@ -288,10 +288,12 @@ class HailoControlPanel:
             command=self._all_models_off
         ).pack(fill=tk.X, pady=3)
 
-        tk.Button(
-            ctrl_frame, text="Smart Tracking AUS", bg="#2a2a4e", fg="white",
-            command=self._disable_smart_tracking
-        ).pack(fill=tk.X, pady=3)
+        self._smart_tracking_on = True  # Kamera-Default: an
+        self._smart_tracking_btn = tk.Button(
+            ctrl_frame, text="Smart Tracking: AN", bg="#884400", fg="white",
+            command=self._toggle_smart_tracking
+        )
+        self._smart_tracking_btn.pack(fill=tk.X, pady=3)
 
         tk.Button(
             ctrl_frame, text="Face-DB neu laden", bg="#2a2a4e", fg="white",
@@ -1003,18 +1005,32 @@ class HailoControlPanel:
         cv2.imwrite(path, frame)
         self._update_status(f"Snapshot: {path}")
 
-    def _disable_smart_tracking(self):
-        """Smart Tracking auf der Kamera deaktivieren."""
-        def do_disable():
+    def _toggle_smart_tracking(self):
+        """Smart Tracking auf der Kamera ein/ausschalten."""
+        new_state = not self._smart_tracking_on
+        self._smart_tracking_btn.config(state=tk.DISABLED)
+        def do_toggle():
             try:
                 from core.hardware.camera_cloud_bridge import SyncCloudBridge
                 bridge = SyncCloudBridge()
-                bridge.set_smart_tracking(False)
-                self._update_status("Smart Tracking deaktiviert")
+                bridge.set_smart_tracking(new_state)
+                self._smart_tracking_on = new_state
+                if new_state:
+                    self._smart_tracking_btn.config(
+                        text="Smart Tracking: AN", bg="#884400"
+                    )
+                    self._update_status("Smart Tracking aktiviert")
+                else:
+                    self._smart_tracking_btn.config(
+                        text="Smart Tracking: AUS", bg="#2a2a4e"
+                    )
+                    self._update_status("Smart Tracking deaktiviert")
             except Exception as e:
                 self._update_status(f"Smart Tracking Fehler: {e}")
-                logger.error(f"Smart Tracking deaktivieren: {e}")
-        threading.Thread(target=do_disable, daemon=True).start()
+                logger.error(f"Smart Tracking toggle: {e}")
+            finally:
+                self._smart_tracking_btn.config(state=tk.NORMAL)
+        threading.Thread(target=do_toggle, daemon=True).start()
 
     def _reload_face_db(self):
         """Face-DB neu laden (nach Enrollment)."""
