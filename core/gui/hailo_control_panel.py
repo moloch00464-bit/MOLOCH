@@ -924,6 +924,7 @@ class HailoControlPanel:
 
         if enabled.get():
             # Hardware-Limit: FIFO-Rotation bei max 2 Modellen
+            evicted = False
             if len(self._active_ctx) >= MAX_CONCURRENT_MODELS:
                 # Aeltestes Modell rauswerfen (FIFO)
                 oldest = self._model_order[0] if self._model_order else None
@@ -931,6 +932,7 @@ class HailoControlPanel:
                     logger.info(
                         f"NPU-Limit: {oldest} wird deaktiviert fuer {model_key} (FIFO)"
                     )
+                    self._update_status(f"Wechsel: {oldest} -> {model_key}...")
                     # Checkbox des rausgeworfenen Modells deaktivieren
                     evict_map = {
                         "scrfd": self.scrfd_enabled, "arcface": self.arcface_enabled,
@@ -944,11 +946,15 @@ class HailoControlPanel:
                         self.arcface_enabled.set(False)
                         self._unconfigure_model("arcface")
                     self._unconfigure_model(oldest)
+                    evicted = True
 
             # Configure im Hintergrund (erster Aufruf ~400ms)
-            self._update_status(f"Konfiguriere {model_key}...")
-            def do_cfg(mk=model_key):
+            if not evicted:
+                self._update_status(f"Konfiguriere {model_key}...")
+            def do_cfg(mk=model_key, need_delay=evicted):
                 try:
+                    if need_delay:
+                        time.sleep(0.2)  # 200ms NPU-Freigabe nach Eviction
                     self._configure_model(mk)
                     self._update_status("RTSP + NPU aktiv")
                 except Exception as e:
