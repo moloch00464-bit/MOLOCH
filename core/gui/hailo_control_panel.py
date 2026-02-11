@@ -150,6 +150,10 @@ class HailoControlPanel:
         # Pause inference during model configure (NPU kann nicht beides gleichzeitig)
         self._configuring = False
 
+        # Autonomes Tracking
+        self._autonomous_mode = False
+        self._tracker = None
+
         # Frame Locks
         self._latest_frame = None
         self._frame_lock = threading.Lock()
@@ -365,6 +369,20 @@ class HailoControlPanel:
         row3.pack()
         tk.Button(row3, text="\u25BC", command=lambda: self._ptz_move("down"),
                   **btn_cfg).pack()
+
+        # AUTONOM / MANUELL Toggle
+        self._auto_btn = tk.Button(
+            ctrl_frame, text="MANUELL", bg="#2a2a4e", fg="white",
+            font=("Helvetica", 11, "bold"),
+            command=self._toggle_autonomous
+        )
+        self._auto_btn.pack(fill=tk.X, pady=5)
+
+        # Tracker State Label
+        self._tracker_state_label = tk.Label(
+            ctrl_frame, text="", font=("Courier", 9), fg="#888888", bg="#1a1a2e"
+        )
+        self._tracker_state_label.pack()
 
         # Kamera-Status Update starten
         self.root.after(1000, self._update_cam_status)
@@ -795,6 +813,19 @@ class HailoControlPanel:
 
                     if persons:
                         draw_persons(annotated, persons, scale_x, scale_y)
+                        # Feed to autonomous tracker
+                        if self._autonomous_mode and self._tracker and persons:
+                            detections = [
+                                {"bbox": p[:4], "confidence": p[4] if len(p) > 4 else 0.8}
+                                for p in persons
+                            ]
+                            try:
+                                self._tracker.update_detection(
+                                    detections=detections,
+                                    frame_width=640, frame_height=640
+                                )
+                            except Exception:
+                                pass
                 except Exception as e:
                     logger.error(f"YOLOv8m Fehler: {e}")
 
@@ -814,6 +845,15 @@ class HailoControlPanel:
 
                     if poses:
                         draw_poses(annotated, poses, scale_x, scale_y)
+                        # Feed to autonomous tracker (pose method)
+                        if self._autonomous_mode and self._tracker:
+                            try:
+                                self._tracker.update_pose_detection(
+                                    poses=poses,
+                                    frame_width=640, frame_height=640
+                                )
+                            except Exception:
+                                pass
                 except Exception as e:
                     logger.error(f"Pose Fehler: {e}")
 
@@ -1264,6 +1304,71 @@ class HailoControlPanel:
         except Exception:
             pass
 
+    def _toggle_autonomous(self):
+        """Zwischen MANUELL und AUTONOM umschalten."""
+        if self._autonomous_mode:
+            # AUTONOM -> MANUELL
+            self._autonomous_mode = False
+            if self._tracker:
+                self._tracker.disable()
+            self._auto_btn.config(text="MANUELL", bg="#2a2a4e")
+            self._tracker_state_label.config(text="", fg="#888888")
+            self._update_status("Modus: MANUELL - PTZ Buttons aktiv")
+            logger.info("Switched to MANUAL mode")
+        else:
+            # MANUELL -> AUTONOM
+            self._auto_btn.config(state=tk.DISABLED, text="Starte...")
+            def do_start():
+                try:
+                    from core.mpo.autonomous_tracker import get_autonomous_tracker
+                    from core.hardware.camera import get_camera_controller, ControlMode
+                    if not self._tracker:
+                        self._tracker = get_autonomous_tracker()
+                    cam = get_camera_controller()
+                    if not cam.is_connected:
+                        cam.connect()
+                    if not cam.is_connected:
+                        self._update_status("AUTONOM fehlgeschlagen: Kamera offline")
+                        self.root.after(0, lambda: self._auto_btn.config(
+                            state=tk.NORMAL, text="MANUELL", bg="#2a2a4e"))
+                        return
+                    self._tracker.set_camera(cam)
+                    cam.set_mode(ControlMode.AUTONOMOUS)
+                    if not self._tracker._running:
+                        self._tracker.start()
+                    self._tracker.enable()
+                    self._autonomous_mode = True
+                    self._update_status("Modus: AUTONOM - MOLOCH sucht...")
+                    logger.info("Switched to AUTONOMOUS mode")
+                    self.root.after(0, lambda: self._auto_btn.config(
+                        state=tk.NORMAL, text="AUTONOM", bg="#006622"))
+                    # Tracker State Updates starten
+                    self.root.after(500, self._update_tracker_state)
+                except Exception as e:
+                    logger.error(f"Autonomous start failed: {e}")
+                    self._update_status(f"AUTONOM Fehler: {e}")
+                    self.root.after(0, lambda: self._auto_btn.config(
+                        state=tk.NORMAL, text="MANUELL", bg="#2a2a4e"))
+            threading.Thread(target=do_start, daemon=True).start()
+
+    def _update_tracker_state(self):
+        """Tracker-State im GUI anzeigen."""
+        if not self.running or not self._autonomous_mode:
+            return
+        if self._tracker:
+            state = self._tracker.state.value.upper()
+            colors = {
+                "TRACKING": "#00ff88",
+                "SEARCHING": "#ffaa00",
+                "LOCKED": "#00ff88",
+                "IDLE": "#888888",
+                "DWELL": "#aaaaff",
+                "FROZEN": "#ff4444",
+            }
+            color = colors.get(state, "#888888")
+            self._tracker_state_label.config(text=f"Tracker: {state}", fg=color)
+        self.root.after(500, self._update_tracker_state)
+
     def _ptz_move(self, direction):
         """Kamera in eine Richtung bewegen (ONVIF AbsoluteMove)."""
         # Step-Groessen in Grad
@@ -1336,6 +1441,13 @@ class HailoControlPanel:
     def _on_close(self):
         """Sauberes Herunterfahren."""
         self.running = False
+
+        # Tracker stoppen
+        if self._tracker:
+            try:
+                self._tracker.stop()
+            except Exception:
+                pass
 
         if self._display_after_id:
             self.root.after_cancel(self._display_after_id)
