@@ -1028,10 +1028,48 @@ class HailoControlPanel:
         new_state = not self._smart_tracking_on
         self._smart_tracking_btn.config(state=tk.DISABLED)
         def do_toggle():
+            import asyncio
             try:
-                from core.hardware.camera_cloud_bridge import SyncCloudBridge
-                bridge = SyncCloudBridge()
-                bridge.set_smart_tracking(new_state)
+                from core.hardware.camera_cloud_bridge import CameraCloudBridge, CloudConfig
+                import aiohttp
+
+                # Env Vars mit Fallback aus ~/.profile (Desktop laedt .profile nicht)
+                def _get_ewelink_var(name):
+                    val = os.environ.get(name, "")
+                    if val:
+                        return val
+                    try:
+                        import re
+                        with open(os.path.expanduser("~/.profile"), "r") as f:
+                            for line in f:
+                                m = re.match(rf'export\s+{name}="([^"]*)"', line)
+                                if m:
+                                    return m.group(1)
+                    except Exception:
+                        pass
+                    return ""
+
+                config = CloudConfig(
+                    enabled=True,
+                    api_base_url="https://eu-apia.coolkit.cc",
+                    app_id=_get_ewelink_var("EWELINK_APP_ID_1"),
+                    app_secret=_get_ewelink_var("EWELINK_APP_SECRET_1"),
+                    device_id="1002817609",
+                    username=_get_ewelink_var("EWELINK_USERNAME"),
+                    password=_get_ewelink_var("EWELINK_PASSWORD"),
+                )
+                bridge = CameraCloudBridge(config)
+
+                async def _do():
+                    bridge.session = aiohttp.ClientSession()
+                    try:
+                        await bridge.connect()
+                        result = await bridge.set_smart_tracking(new_state)
+                        return result
+                    finally:
+                        await bridge.disconnect()
+
+                result = asyncio.run(_do())
                 self._smart_tracking_on = new_state
                 if new_state:
                     self._smart_tracking_btn.config(
