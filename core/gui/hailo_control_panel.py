@@ -85,6 +85,9 @@ FACE_DB_PATH = os.path.expanduser("~/moloch/data/face_embeddings.json")
 # Shared Face State (IPC mit push_to_talk)
 FACE_STATE_PATH = "/tmp/moloch_face_state.json"
 
+# Hailo-10H Hardware-Limit: max 2 Modelle gleichzeitig stabil
+MAX_CONCURRENT_MODELS = 2
+
 # Cross-process NPU coordination
 NPU_VOICE_REQUEST = "/tmp/moloch_npu_voice_request"
 NPU_VISION_PAUSED = "/tmp/moloch_npu_vision_paused"
@@ -913,6 +916,21 @@ class HailoControlPanel:
             return
 
         if enabled.get():
+            # Hardware-Limit: max 2 Modelle gleichzeitig
+            active_count = len(self._active_ctx)
+            if active_count >= MAX_CONCURRENT_MODELS:
+                logger.warning(
+                    f"NPU-Limit: {active_count} Modelle aktiv "
+                    f"(max {MAX_CONCURRENT_MODELS}). {model_key} abgelehnt."
+                )
+                self._update_status(
+                    f"NPU-Limit! Erst ein Modell deaktivieren "
+                    f"({active_count}/{MAX_CONCURRENT_MODELS})"
+                )
+                # Checkbox zuruecksetzen
+                enabled.set(False)
+                return
+
             # Configure im Hintergrund (erster Aufruf ~400ms)
             self._update_status(f"Konfiguriere {model_key}...")
             def do_cfg(mk=model_key):
