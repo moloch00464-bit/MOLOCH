@@ -336,6 +336,36 @@ class HailoControlPanel:
         )
         self._cam_ptz_label.pack()
 
+        # PTZ Steuerung (Pfeiltasten)
+        ptz_frame = tk.Frame(ctrl_frame, bg="#1a1a2e")
+        ptz_frame.pack(fill=tk.X, pady=3)
+
+        btn_cfg = dict(width=3, font=("Helvetica", 12, "bold"),
+                       bg="#2a2a4e", fg="white", activebackground="#4a4a6e")
+
+        # Zeile 1: Hoch
+        row1 = tk.Frame(ptz_frame, bg="#1a1a2e")
+        row1.pack()
+        tk.Button(row1, text="\u25B2", command=lambda: self._ptz_move("up"),
+                  **btn_cfg).pack()
+
+        # Zeile 2: Links | Home | Rechts
+        row2 = tk.Frame(ptz_frame, bg="#1a1a2e")
+        row2.pack()
+        tk.Button(row2, text="\u25C0", command=lambda: self._ptz_move("left"),
+                  **btn_cfg).pack(side=tk.LEFT, padx=1)
+        tk.Button(row2, text="\u25CF", command=lambda: self._ptz_move("home"),
+                  width=3, font=("Helvetica", 10), bg="#444466", fg="white",
+                  activebackground="#666688").pack(side=tk.LEFT, padx=1)
+        tk.Button(row2, text="\u25B6", command=lambda: self._ptz_move("right"),
+                  **btn_cfg).pack(side=tk.LEFT, padx=1)
+
+        # Zeile 3: Runter
+        row3 = tk.Frame(ptz_frame, bg="#1a1a2e")
+        row3.pack()
+        tk.Button(row3, text="\u25BC", command=lambda: self._ptz_move("down"),
+                  **btn_cfg).pack()
+
         # Kamera-Status Update starten
         self.root.after(1000, self._update_cam_status)
 
@@ -1233,6 +1263,55 @@ class HailoControlPanel:
             self._cam_ptz_label.config(text=f"PTZ: {ptz}", bg=bg)
         except Exception:
             pass
+
+    def _ptz_move(self, direction):
+        """Kamera in eine Richtung bewegen (ONVIF AbsoluteMove)."""
+        # Step-Groessen in Grad
+        PAN_STEP = 15.0
+        TILT_STEP = 10.0
+
+        def do_move():
+            try:
+                from core.hardware.camera import get_camera_controller
+                cam = get_camera_controller()
+                if not cam.is_connected:
+                    cam.connect()
+                if not cam.is_connected:
+                    self._update_status("Kamera nicht verbunden!")
+                    return
+
+                pos = cam.get_position()
+                if not pos:
+                    self._update_status("PTZ Position nicht lesbar!")
+                    return
+
+                pan, tilt = pos
+
+                if direction == "left":
+                    # Pan invertiert! +Pan = links
+                    pan += PAN_STEP
+                elif direction == "right":
+                    pan -= PAN_STEP
+                elif direction == "up":
+                    tilt += TILT_STEP
+                elif direction == "down":
+                    tilt -= TILT_STEP
+                elif direction == "home":
+                    pan, tilt = 0.0, 0.0
+
+                # Limits
+                pan = max(-168.4, min(174.4, pan))
+                tilt = max(-78.8, min(101.3, tilt))
+
+                result = cam.move_absolute(pan, tilt)
+                if result:
+                    self._update_status(f"PTZ: {pan:.1f}, {tilt:.1f}")
+                else:
+                    self._update_status("PTZ Bewegung fehlgeschlagen")
+            except Exception as e:
+                self._update_status(f"PTZ Fehler: {e}")
+
+        threading.Thread(target=do_move, daemon=True).start()
 
     def _all_models_off(self):
         """Alle Modelle deaktivieren und unconfigurieren."""
