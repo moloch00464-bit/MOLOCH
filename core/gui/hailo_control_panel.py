@@ -292,9 +292,9 @@ class HailoControlPanel:
             command=self._all_models_off
         ).pack(fill=tk.X, pady=3)
 
-        self._smart_tracking_on = True  # Kamera-Default: an
+        self._smart_tracking_on = False  # MOLOCH kontrolliert - Smart Tracking AUS
         self._smart_tracking_btn = tk.Button(
-            ctrl_frame, text="Smart Tracking: AN", bg="#884400", fg="white",
+            ctrl_frame, text="Smart Tracking: AUS", bg="#2a2a4e", fg="white",
             command=self._toggle_smart_tracking
         )
         self._smart_tracking_btn.pack(fill=tk.X, pady=3)
@@ -303,6 +303,41 @@ class HailoControlPanel:
             ctrl_frame, text="Face-DB neu laden", bg="#2a2a4e", fg="white",
             command=self._reload_face_db
         ).pack(fill=tk.X, pady=3)
+
+        # === KAMERA-KONTROLLE Anzeige ===
+        ttk.Separator(ctrl_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
+        ttk.Label(ctrl_frame, text="KAMERA", style="Header.TLabel").pack(
+            anchor=tk.W, pady=(0, 5))
+
+        # Status-Frame mit Hintergrund
+        self._cam_status_frame = tk.Frame(ctrl_frame, bg="#1a3a1a", padx=8, pady=6,
+                                          highlightbackground="#00ff88",
+                                          highlightthickness=1)
+        self._cam_status_frame.pack(fill=tk.X, pady=3)
+
+        self._cam_control_label = tk.Label(
+            self._cam_status_frame, text="MOLOCH KONTROLLE",
+            font=("Helvetica", 11, "bold"), fg="#00ff88", bg="#1a3a1a"
+        )
+        self._cam_control_label.pack()
+
+        self._cam_detail_label = tk.Label(
+            self._cam_status_frame,
+            text="Smart Tracking: AUS | ONVIF: ...",
+            font=("Helvetica", 8), fg="#aaaaaa", bg="#1a3a1a"
+        )
+        self._cam_detail_label.pack()
+
+        # PTZ Position
+        self._cam_ptz_label = tk.Label(
+            self._cam_status_frame,
+            text="PTZ: --",
+            font=("Courier", 8), fg="#888888", bg="#1a3a1a"
+        )
+        self._cam_ptz_label.pack()
+
+        # Kamera-Status Update starten
+        self.root.after(1000, self._update_cam_status)
 
     def _build_model_section(self, parent, title, enabled_var, model_key, sliders):
         """Baue eine Modell-Section mit Toggle, FPS, Slidern."""
@@ -1139,6 +1174,65 @@ class HailoControlPanel:
             engine.speak_event(MolochEvent.PERSON_KNOWN, context={"name": name})
         except Exception as e:
             logger.error(f"TTS Ansage Fehler: {e}")
+
+    def _update_cam_status(self):
+        """Kamera-Kontrolle Status updaten (alle 3s)."""
+        if not self.running:
+            return
+
+        def do_check():
+            onvif_ok = False
+            ptz_text = "--"
+            try:
+                from core.hardware.camera import get_camera_controller
+                cam = get_camera_controller()
+                if not cam.is_connected:
+                    cam.connect()
+                if cam.is_connected:
+                    onvif_ok = True
+                    pos = cam.get_position()
+                    if pos:
+                        pan, tilt = pos
+                        ptz_text = f"Pan: {pan:.1f}  Tilt: {tilt:.1f}"
+            except Exception:
+                pass
+
+            # UI Update im Main Thread
+            smart = "AUS" if not self._smart_tracking_on else "AN"
+            onvif_str = "OK" if onvif_ok else "---"
+
+            if not self._smart_tracking_on and onvif_ok:
+                ctrl_text = "M.O.L.O.C.H. KONTROLLE"
+                ctrl_color = "#00ff88"
+                bg = "#1a3a1a"
+                border = "#00ff88"
+            elif not self._smart_tracking_on:
+                ctrl_text = "MOLOCH (kein ONVIF)"
+                ctrl_color = "#ffaa00"
+                bg = "#3a3a1a"
+                border = "#ffaa00"
+            else:
+                ctrl_text = "KAMERA AUTONOM"
+                ctrl_color = "#ff4444"
+                bg = "#3a1a1a"
+                border = "#ff4444"
+
+            self.root.after(0, lambda: self._apply_cam_status(
+                ctrl_text, ctrl_color, bg, border, smart, onvif_str, ptz_text))
+
+        threading.Thread(target=do_check, daemon=True).start()
+        self.root.after(3000, self._update_cam_status)
+
+    def _apply_cam_status(self, ctrl_text, ctrl_color, bg, border, smart, onvif, ptz):
+        """Kamera-Status Labels aktualisieren (Main Thread)."""
+        try:
+            self._cam_status_frame.config(bg=bg, highlightbackground=border)
+            self._cam_control_label.config(text=ctrl_text, fg=ctrl_color, bg=bg)
+            self._cam_detail_label.config(
+                text=f"Smart Tracking: {smart} | ONVIF: {onvif}", bg=bg)
+            self._cam_ptz_label.config(text=f"PTZ: {ptz}", bg=bg)
+        except Exception:
+            pass
 
     def _all_models_off(self):
         """Alle Modelle deaktivieren und unconfigurieren."""
