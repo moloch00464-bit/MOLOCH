@@ -147,6 +147,9 @@ class HailoControlPanel:
         self._paused_models = []   # Models active before voice pause
         self._npu_paused = False
 
+        # Pause inference during model configure (NPU kann nicht beides gleichzeitig)
+        self._configuring = False
+
         # Frame Locks
         self._latest_frame = None
         self._frame_lock = threading.Lock()
@@ -471,6 +474,10 @@ class HailoControlPanel:
         active_before = list(self._active_ctx.keys())
         logger.info(f"[CONFIGURE] {name}: aktive Modelle VORHER: {active_before}")
 
+        # Inference pausieren - NPU kann nicht configure + run gleichzeitig
+        self._configuring = True
+        time.sleep(0.15)  # Warten bis laufende Inference fertig
+
         try:
             ctx_mgr = infer_model.configure()
             configured = ctx_mgr.__enter__()
@@ -512,19 +519,26 @@ class HailoControlPanel:
             except Exception:
                 pass
             self._update_status(f"CRASH: {name} ({type(e).__name__})")
+        finally:
+            self._configuring = False
 
     def _unconfigure_model(self, name):
         """Gib Modell-Konfiguration frei."""
-        with self._ctx_lock:
-            ctx = self._active_ctx.pop(name, None)
-            if name in self._model_order:
-                self._model_order.remove(name)
-        if ctx:
-            try:
-                ctx["ctx_mgr"].__exit__(None, None, None)
-            except Exception:
-                pass
-            logger.info(f"Modell freigegeben: {name}")
+        self._configuring = True
+        time.sleep(0.1)  # Warten bis laufende Inference fertig
+        try:
+            with self._ctx_lock:
+                ctx = self._active_ctx.pop(name, None)
+                if name in self._model_order:
+                    self._model_order.remove(name)
+            if ctx:
+                try:
+                    ctx["ctx_mgr"].__exit__(None, None, None)
+                except Exception:
+                    pass
+                logger.info(f"Modell freigegeben: {name}")
+        finally:
+            self._configuring = False
 
     def _run_model(self, name, input_data):
         """Fuehre Modell aus mit persistenter Konfiguration (~21ms statt ~450ms).
@@ -584,6 +598,13 @@ class HailoControlPanel:
                 frame = self._latest_frame
             if frame is None:
                 time.sleep(0.02)
+                continue
+
+            # Pause waehrend Modell-Konfiguration (NPU blockiert)
+            if self._configuring:
+                with self._annotated_lock:
+                    self._annotated_frame = frame.copy()
+                time.sleep(0.05)
                 continue
 
             # Kein Modell konfiguriert -> nur Raw-Frame anzeigen
