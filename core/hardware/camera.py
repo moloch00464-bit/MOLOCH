@@ -562,11 +562,9 @@ class SonoffCameraController:
             request.ProfileToken = self.profile_token
             request.Position = {
                 'PanTilt': {'x': pan_deg, 'y': tilt_deg},
-                'Zoom': {'x': self.current_position.zoom}
             }
             request.Speed = {
                 'PanTilt': {'x': speed, 'y': speed},
-                'Zoom': {'x': speed}
             }
 
             self.ptz_service.AbsoluteMove(request)
@@ -607,7 +605,6 @@ class SonoffCameraController:
             request.ProfileToken = self.profile_token
             request.Velocity = {
                 'PanTilt': {'x': vel_pan, 'y': vel_tilt},
-                'Zoom': {'x': vel_zoom}
             }
             request.Timeout = f'PT{int(timeout_sec)}S'
 

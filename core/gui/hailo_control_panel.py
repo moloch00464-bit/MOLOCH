@@ -25,11 +25,12 @@ import os
 import sys
 import time
 import json
+import asyncio
 import threading
 import logging
 import subprocess
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 
 # Auto-source ~/.profile wenn env vars fehlen (Desktop-Launch)
 if not os.environ.get("MOLOCH_CAMERA_HOST"):
@@ -60,6 +61,7 @@ from core.perception.hailo_postprocess import (
     draw_faces, draw_name, draw_persons, draw_poses,
 )
 from core.hardware.hailo_manager import get_hailo_manager
+from core.hardware.camera_cloud_bridge import CameraCloudBridge, CloudConfig
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger("HailoPanel")
@@ -113,6 +115,55 @@ def load_face_db(path: str) -> dict:
         return {}
 
 
+class CloudController:
+    """Persistent async eWeLink cloud controller."""
+
+    def __init__(self):
+        self.bridge = None
+        self.loop = None
+        self._thread = None
+        self.connected = False
+
+    def start(self):
+        """Start async event loop and connect to eWeLink cloud."""
+        config = CloudConfig(
+            enabled=True,
+            api_base_url="https://eu-apia.coolkit.cc",
+            app_id=os.environ.get("EWELINK_APP_ID_1", ""),
+            app_secret=os.environ.get("EWELINK_APP_SECRET_1", ""),
+            device_id="1002817609",
+            username=os.environ.get("EWELINK_USERNAME", ""),
+            password=os.environ.get("EWELINK_PASSWORD", ""),
+        )
+        self.bridge = CameraCloudBridge(config)
+
+        def run():
+            self.loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self.loop)
+            self.loop.run_forever()
+
+        self._thread = threading.Thread(target=run, daemon=True)
+        self._thread.start()
+        time.sleep(0.2)
+        future = asyncio.run_coroutine_threadsafe(self.bridge.connect(), self.loop)
+        try:
+            self.connected = future.result(timeout=10)
+        except Exception as e:
+            logger.error(f"Cloud connect failed: {e}")
+            self.connected = False
+
+    def run(self, coro):
+        """Run async coroutine and return result."""
+        if not self.loop:
+            return False
+        future = asyncio.run_coroutine_threadsafe(coro, self.loop)
+        try:
+            return future.result(timeout=5)
+        except Exception as e:
+            logger.error(f"Cloud call failed: {e}")
+            return False
+
+
 class HailoControlPanel:
     """M.O.L.O.C.H. Hailo-10H Control Panel GUI."""
 
@@ -148,11 +199,49 @@ class HailoControlPanel:
         self._npu_paused = False
 
         # Pause inference during model configure (NPU kann nicht beides gleichzeitig)
-        self._configuring = False
+        self._configuring = threading.Event()
+        self._configuring.set()  # Startzustand: nicht konfigurierend
+
+        # Dynamischer Modell-Swap: Face erkannt -> ArcFace statt YOLOv8m
+        self._face_mode_active = False   # ArcFace aktiv statt YOLOv8m
+        self._face_seen_count = 0        # Konsekutive Frames mit Face
+        self._face_lost_time = 0         # Timestamp: letzte Face verloren
+        self._swapping_models = False    # Swap laeuft gerade
+        self._swap_lock = threading.Lock()  # Atomisches Check+Set fuer _swapping_models
+        self._FACE_MODE_FRAMES = 3      # Frames bevor Swap zu ArcFace
+        self._FACE_MODE_TIMEOUT = 5.0   # Sekunden ohne Face -> zurueck zu YOLOv8m
+        self._FACE_MODE_STARTUP_DELAY = 5.0  # Sekunden nach Takeover bevor Swap erlaubt
 
         # Autonomes Tracking
         self._autonomous_mode = False
+        self._manual_autonomous = False  # True = User hat manuell AUTONOM gedrueckt
         self._tracker = None
+
+        # Guardian/Tentakel Mode:
+        # Kamera Smart Tracking scannt -> Kamera bewegt sich -> MOLOCH uebernimmt -> NPU an
+        self._guardian_mode = True          # Automatischer Wechsel aktiv
+        self._moloch_has_control = False    # MOLOCH hat gerade Kontrolle
+        self._takeover_reason = ""          # Warum uebernommen
+        self._last_interesting_time = 0     # Letzte interessante Erkennung
+        self._search_start_time = 0         # Seit wann sucht der Tracker
+        self.TAKEOVER_TIMEOUT = 30          # Sekunden ohne Interest -> zurueckgeben
+        self.SEARCH_TIMEOUT = 20            # Sekunden SEARCHING -> zurueckgeben
+        # Kamera-Bewegungserkennung (Smart Tracking hat was gesehen)
+        self._guardian_last_pan = None      # Letzte bekannte Pan-Position
+        self._guardian_last_tilt = None     # Letzte bekannte Tilt-Position
+        self._guardian_move_thresh = 5.0    # Grad Aenderung = Kamera hat sich bewegt
+        self._guardian_move_count = 0       # Aufeinanderfolgende Bewegungen
+        self._guardian_move_required = 2    # 2 Polls noetig (2x3s = 6s, Counter dekrementiert statt Reset)
+        self._takeover_cooldown_until = 0   # Timestamp: kein Takeover bis dahin
+        self.RELEASE_COOLDOWN = 60          # Basis-Sekunden nach Release kein neuer Takeover
+        self.MAX_COOLDOWN = 180             # Max 3 Minuten Cooldown (war 600)
+        self.STARTUP_GRACE = 30             # Sekunden nach Start kein Takeover
+        self._failed_takeovers = 0          # Aufeinanderfolgende leere Takeovers (fuer Backoff)
+        self._takeover_found_something = False  # Wurde im aktuellen Takeover was gefunden?
+        # Kalibrierung nur noch manuell via GUI-Button (nicht bei Takeover)
+        self._takeover_cooldown_until = time.time() + self.STARTUP_GRACE  # Grace Period
+        self._transitioning = False  # Verhindert ueberlappende Takeover/Release
+        self._transition_lock = threading.Lock()  # Atomisches Check+Set fuer _transitioning
 
         # Frame Locks
         self._latest_frame = None
@@ -202,13 +291,13 @@ class HailoControlPanel:
     # =========================================================================
 
     def _build_ui(self):
-        """Baue komplettes UI."""
-        main = ttk.Frame(self.root, padding=10)
+        """Baue komplettes UI - 3-Bereich Layout: Preview+Kamera links, Modelle rechts, Cloud unten."""
+        main = ttk.Frame(self.root, padding=5)
         main.pack(fill=tk.BOTH, expand=True)
 
         # === TOP: Status Bar ===
         top = ttk.Frame(main)
-        top.pack(fill=tk.X, pady=(0, 5))
+        top.pack(fill=tk.X, pady=(0, 3))
 
         self.status_label = ttk.Label(top, text="Initialisierung...", style="Status.TLabel")
         self.status_label.pack(side=tk.LEFT)
@@ -216,43 +305,187 @@ class HailoControlPanel:
         self.total_fps_label = ttk.Label(top, text="FPS: --", style="FPS.TLabel")
         self.total_fps_label.pack(side=tk.RIGHT)
 
-        # === MIDDLE: Preview + Controls ===
+        # === MIDDLE: Preview links + Controls rechts ===
         middle = ttk.Frame(main)
         middle.pack(fill=tk.BOTH, expand=True)
 
-        # LINKS: Live Preview
-        preview_frame = ttk.Frame(middle)
-        preview_frame.pack(side=tk.LEFT, padx=(0, 10))
+        # ---- LINKS: Preview + Kamera-Kontrolle darunter ----
+        left_frame = ttk.Frame(middle)
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, padx=(0, 5))
 
-        ttk.Label(preview_frame, text="LIVE PREVIEW + DETECTIONS",
-                  style="Header.TLabel").pack()
+        # Live Preview
         self.preview_canvas = tk.Canvas(
-            preview_frame, width=self.PREVIEW_W, height=self.PREVIEW_H,
+            left_frame, width=self.PREVIEW_W, height=self.PREVIEW_H,
             bg="#000000", highlightthickness=1, highlightbackground="#333"
         )
-        self.preview_canvas.pack(pady=5)
+        self.preview_canvas.pack(pady=(0, 3))
 
-        # RECHTS: Controls
+        # --- KAMERA + PTZ unter dem Preview (nebeneinander) ---
+        cam_bottom = tk.Frame(left_frame, bg="#1a1a2e")
+        cam_bottom.pack(fill=tk.X)
+
+        # Links: Status + Autonomie
+        cam_left = tk.Frame(cam_bottom, bg="#1a1a2e")
+        cam_left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
+
+        # Status-Frame
+        self._cam_status_frame = tk.Frame(cam_left, bg="#1a3a1a", padx=6, pady=4,
+                                          highlightbackground="#00ff88",
+                                          highlightthickness=1)
+        self._cam_status_frame.pack(fill=tk.X)
+
+        self._cam_control_label = tk.Label(
+            self._cam_status_frame, text="MOLOCH KONTROLLE",
+            font=("Helvetica", 10, "bold"), fg="#00ff88", bg="#1a3a1a")
+        self._cam_control_label.pack()
+
+        self._cam_detail_label = tk.Label(
+            self._cam_status_frame, text="Smart Tracking: AUS | ONVIF: ...",
+            font=("Helvetica", 7), fg="#aaaaaa", bg="#1a3a1a")
+        self._cam_detail_label.pack()
+
+        self._cam_ptz_label = tk.Label(
+            self._cam_status_frame, text="PTZ: --",
+            font=("Courier", 7), fg="#888888", bg="#1a3a1a")
+        self._cam_ptz_label.pack()
+
+        # AUTONOM/MANUELL + Tracker State
+        self._auto_btn = tk.Button(
+            cam_left, text="MANUELL", bg="#2a2a4e", fg="white",
+            font=("Helvetica", 10, "bold"), command=self._toggle_autonomous)
+        self._auto_btn.pack(fill=tk.X, pady=(3, 0))
+
+        self._tracker_state_label = tk.Label(
+            cam_left, text="", font=("Courier", 8), fg="#888888", bg="#1a1a2e")
+        self._tracker_state_label.pack()
+
+        # Smart Tracking Button
+        self._smart_tracking_on = False
+        self._st_lock = threading.Lock()
+        self._smart_tracking_btn = tk.Button(
+            cam_left, text="Smart Tracking: AUS", bg="#2a2a4e", fg="white",
+            font=("Helvetica", 8), command=self._toggle_smart_tracking)
+        self._smart_tracking_btn.pack(fill=tk.X, pady=(2, 0))
+
+        # Cloud Controller starten
+        self._cloud = None
+        threading.Thread(target=self._connect_cloud, daemon=True).start()
+
+        # Mitte: PTZ Steuerkreuz + Speed
+        cam_mid = tk.Frame(cam_bottom, bg="#1a1a2e")
+        cam_mid.pack(side=tk.LEFT, padx=5)
+
+        btn_cfg = dict(width=3, font=("Helvetica", 11, "bold"),
+                       bg="#2a2a4e", fg="white", activebackground="#4a4a6e")
+
+        # PTZ Kreuz kompakt
+        ptz_grid = tk.Frame(cam_mid, bg="#1a1a2e")
+        ptz_grid.pack()
+        tk.Button(ptz_grid, text="\u25B2", command=lambda: self._ptz_move("up"),
+                  **btn_cfg).grid(row=0, column=1)
+        tk.Button(ptz_grid, text="\u25C0", command=lambda: self._ptz_move("left"),
+                  **btn_cfg).grid(row=1, column=0)
+        tk.Button(ptz_grid, text="\u25CF", command=lambda: self._ptz_move("home"),
+                  width=3, font=("Helvetica", 9), bg="#444466", fg="white",
+                  activebackground="#666688").grid(row=1, column=1)
+        tk.Button(ptz_grid, text="\u25B6", command=lambda: self._ptz_move("right"),
+                  **btn_cfg).grid(row=1, column=2)
+        tk.Button(ptz_grid, text="\u25BC", command=lambda: self._ptz_move("down"),
+                  **btn_cfg).grid(row=2, column=1)
+
+        # Speed Slider
+        self._ptz_speed_var = tk.DoubleVar(value=15.0)
+        speed_row = tk.Frame(cam_mid, bg="#1a1a2e")
+        speed_row.pack(fill=tk.X, pady=(2, 0))
+        tk.Label(speed_row, text="Spd:", font=("Helvetica", 7),
+                 fg="#888888", bg="#1a1a2e").pack(side=tk.LEFT)
+        self._ptz_speed_label = tk.Label(speed_row, text="15",
+                                         font=("Courier", 7), fg="#aaaaaa", bg="#1a1a2e")
+        self._ptz_speed_label.pack(side=tk.RIGHT)
+        tk.Scale(speed_row, from_=1, to=50, orient=tk.HORIZONTAL,
+                 variable=self._ptz_speed_var, length=80,
+                 bg="#1a1a2e", fg="#aaaaaa", troughcolor="#2a2a4e",
+                 highlightthickness=0, showvalue=0,
+                 command=lambda v: self._ptz_speed_label.config(
+                     text=f"{float(v):.0f}")).pack(side=tk.LEFT, padx=2)
+
+        # Quick Positions
+        quick_row = tk.Frame(cam_mid, bg="#1a1a2e")
+        quick_row.pack(pady=(2, 0))
+        for name, pan, tilt in [("L", 170, 0), ("M", 0, 0), ("R", -168, 0)]:
+            tk.Button(quick_row, text=name, bg="#2a2a4e", fg="white", width=3,
+                      font=("Helvetica", 8),
+                      command=lambda p=pan, t=tilt: self._ptz_goto(p, t)).pack(
+                side=tk.LEFT, padx=1)
+
+        # Rechts: eWeLink Cloud Controls
+        cam_right = tk.Frame(cam_bottom, bg="#1a1a2e")
+        cam_right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5, 0))
+
+        tk.Label(cam_right, text="eWeLink", font=("Helvetica", 9, "bold"),
+                 fg="#00d4ff", bg="#1a1a2e").pack(anchor=tk.W)
+
+        self._cloud_status_label = tk.Label(
+            cam_right, text="Cloud: ...",
+            font=("Courier", 7), fg="#888888", bg="#1a1a2e")
+        self._cloud_status_label.pack(anchor=tk.W)
+
+        # LED + Flip in einer Zeile
+        toggle_row1 = tk.Frame(cam_right, bg="#1a1a2e")
+        toggle_row1.pack(fill=tk.X, pady=1)
+        self._led_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(toggle_row1, text="LED", variable=self._led_var,
+                       bg="#1a1a2e", fg="#cccccc", selectcolor="#2a2a4e",
+                       activebackground="#1a1a2e", font=("Helvetica", 8),
+                       command=self._set_cloud_led).pack(side=tk.LEFT)
+        self._flip_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(toggle_row1, text="Flip", variable=self._flip_var,
+                       bg="#1a1a2e", fg="#cccccc", selectcolor="#2a2a4e",
+                       activebackground="#1a1a2e", font=("Helvetica", 8),
+                       command=self._set_cloud_flip).pack(side=tk.LEFT, padx=(8, 0))
+
+        # IR/Nachtsicht
+        ir_row = tk.Frame(cam_right, bg="#1a1a2e")
+        ir_row.pack(fill=tk.X, pady=1)
+        tk.Label(ir_row, text="IR:", font=("Helvetica", 8),
+                 fg="#cccccc", bg="#1a1a2e").pack(side=tk.LEFT)
+        self._night_var = tk.StringVar(value="Aus")
+        night_combo = ttk.Combobox(ir_row, textvariable=self._night_var,
+                                   values=["Aus", "Auto", "An"], state="readonly", width=5)
+        night_combo.pack(side=tk.LEFT, padx=3)
+        night_combo.bind("<<ComboboxSelected>>", lambda e: self._set_cloud_night())
+
+        # Alarm + Kalibrierung
+        cloud_btns = tk.Frame(cam_right, bg="#1a1a2e")
+        cloud_btns.pack(fill=tk.X, pady=(2, 0))
+        tk.Button(cloud_btns, text="ALARM", bg="#ff4444", fg="white", width=6,
+                  font=("Helvetica", 8, "bold"),
+                  command=self._trigger_alarm).pack(side=tk.LEFT, padx=(0, 2))
+        tk.Button(cloud_btns, text="Kalib.", bg="#ff8800", fg="white", width=5,
+                  font=("Helvetica", 8),
+                  command=self._trigger_calibration).pack(side=tk.LEFT)
+
+        # ---- RECHTS: Modelle + Aktionen ----
         ctrl_frame = ttk.Frame(middle)
-        ctrl_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 5))
+        ctrl_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 3))
 
         ttk.Label(ctrl_frame, text="MODELLE", style="Header.TLabel").pack(
-            anchor=tk.W, pady=(0, 5))
+            anchor=tk.W, pady=(0, 3))
 
         # -- SCRFD --
         self._build_model_section(
-            ctrl_frame, "SCRFD Face Detection", self.scrfd_enabled,
+            ctrl_frame, "SCRFD Face", self.scrfd_enabled,
             "scrfd", [
-                ("Confidence", self.scrfd_conf, 0.1, 0.9),
-                ("NMS IoU", self.scrfd_nms, 0.1, 0.9),
+                ("Conf", self.scrfd_conf, 0.1, 0.9),
+                ("NMS", self.scrfd_nms, 0.1, 0.9),
             ]
         )
 
         # -- ArcFace --
         self._build_model_section(
-            ctrl_frame, "ArcFace Recognition", self.arcface_enabled,
+            ctrl_frame, "ArcFace", self.arcface_enabled,
             "arcface", [
-                ("Threshold", self.arcface_thresh, 0.3, 0.9),
+                ("Thresh", self.arcface_thresh, 0.3, 0.9),
             ]
         )
 
@@ -260,7 +493,7 @@ class HailoControlPanel:
         self._build_model_section(
             ctrl_frame, "YOLOv8m Person", self.yolo_enabled,
             "yolov8m", [
-                ("Confidence", self.yolo_conf, 0.1, 0.9),
+                ("Conf", self.yolo_conf, 0.1, 0.9),
             ]
         )
 
@@ -268,121 +501,33 @@ class HailoControlPanel:
         self._build_model_section(
             ctrl_frame, "YOLOv8s Pose", self.pose_enabled,
             "pose", [
-                ("Confidence", self.pose_conf, 0.1, 0.9),
-                ("NMS IoU", self.pose_nms, 0.1, 0.9),
+                ("Conf", self.pose_conf, 0.1, 0.9),
+                ("NMS", self.pose_nms, 0.1, 0.9),
             ]
         )
 
         # Separator
-        ttk.Separator(ctrl_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
+        ttk.Separator(ctrl_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=5)
 
-        # Aktionen
-        ttk.Label(ctrl_frame, text="AKTIONEN", style="Header.TLabel").pack(
-            anchor=tk.W, pady=(0, 5))
-
+        # Aktionen als kompakte Button-Reihen
+        act_row1 = tk.Frame(ctrl_frame, bg="#1a1a2e")
+        act_row1.pack(fill=tk.X, pady=1)
         self.kill_btn = tk.Button(
-            ctrl_frame, text="push_to_talk killen", bg="#ff4444", fg="white",
-            font=("Helvetica", 10, "bold"), command=self._kill_push_to_talk
-        )
-        self.kill_btn.pack(fill=tk.X, pady=3)
+            act_row1, text="PTT killen", bg="#ff4444", fg="white",
+            font=("Helvetica", 8, "bold"), command=self._kill_push_to_talk)
+        self.kill_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 1))
+        tk.Button(act_row1, text="Snapshot", bg="#2a2a4e", fg="white",
+                  font=("Helvetica", 8),
+                  command=self._save_snapshot).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(1, 0))
 
-        tk.Button(
-            ctrl_frame, text="Snapshot speichern", bg="#2a2a4e", fg="white",
-            command=self._save_snapshot
-        ).pack(fill=tk.X, pady=3)
-
-        tk.Button(
-            ctrl_frame, text="Alle Modelle AUS", bg="#2a2a4e", fg="white",
-            command=self._all_models_off
-        ).pack(fill=tk.X, pady=3)
-
-        self._smart_tracking_on = False  # MOLOCH kontrolliert - Smart Tracking AUS
-        self._smart_tracking_btn = tk.Button(
-            ctrl_frame, text="Smart Tracking: AUS", bg="#2a2a4e", fg="white",
-            command=self._toggle_smart_tracking
-        )
-        self._smart_tracking_btn.pack(fill=tk.X, pady=3)
-
-        tk.Button(
-            ctrl_frame, text="Face-DB neu laden", bg="#2a2a4e", fg="white",
-            command=self._reload_face_db
-        ).pack(fill=tk.X, pady=3)
-
-        # === KAMERA-KONTROLLE Anzeige ===
-        ttk.Separator(ctrl_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
-        ttk.Label(ctrl_frame, text="KAMERA", style="Header.TLabel").pack(
-            anchor=tk.W, pady=(0, 5))
-
-        # Status-Frame mit Hintergrund
-        self._cam_status_frame = tk.Frame(ctrl_frame, bg="#1a3a1a", padx=8, pady=6,
-                                          highlightbackground="#00ff88",
-                                          highlightthickness=1)
-        self._cam_status_frame.pack(fill=tk.X, pady=3)
-
-        self._cam_control_label = tk.Label(
-            self._cam_status_frame, text="MOLOCH KONTROLLE",
-            font=("Helvetica", 11, "bold"), fg="#00ff88", bg="#1a3a1a"
-        )
-        self._cam_control_label.pack()
-
-        self._cam_detail_label = tk.Label(
-            self._cam_status_frame,
-            text="Smart Tracking: AUS | ONVIF: ...",
-            font=("Helvetica", 8), fg="#aaaaaa", bg="#1a3a1a"
-        )
-        self._cam_detail_label.pack()
-
-        # PTZ Position
-        self._cam_ptz_label = tk.Label(
-            self._cam_status_frame,
-            text="PTZ: --",
-            font=("Courier", 8), fg="#888888", bg="#1a3a1a"
-        )
-        self._cam_ptz_label.pack()
-
-        # PTZ Steuerung (Pfeiltasten)
-        ptz_frame = tk.Frame(ctrl_frame, bg="#1a1a2e")
-        ptz_frame.pack(fill=tk.X, pady=3)
-
-        btn_cfg = dict(width=3, font=("Helvetica", 12, "bold"),
-                       bg="#2a2a4e", fg="white", activebackground="#4a4a6e")
-
-        # Zeile 1: Hoch
-        row1 = tk.Frame(ptz_frame, bg="#1a1a2e")
-        row1.pack()
-        tk.Button(row1, text="\u25B2", command=lambda: self._ptz_move("up"),
-                  **btn_cfg).pack()
-
-        # Zeile 2: Links | Home | Rechts
-        row2 = tk.Frame(ptz_frame, bg="#1a1a2e")
-        row2.pack()
-        tk.Button(row2, text="\u25C0", command=lambda: self._ptz_move("left"),
-                  **btn_cfg).pack(side=tk.LEFT, padx=1)
-        tk.Button(row2, text="\u25CF", command=lambda: self._ptz_move("home"),
-                  width=3, font=("Helvetica", 10), bg="#444466", fg="white",
-                  activebackground="#666688").pack(side=tk.LEFT, padx=1)
-        tk.Button(row2, text="\u25B6", command=lambda: self._ptz_move("right"),
-                  **btn_cfg).pack(side=tk.LEFT, padx=1)
-
-        # Zeile 3: Runter
-        row3 = tk.Frame(ptz_frame, bg="#1a1a2e")
-        row3.pack()
-        tk.Button(row3, text="\u25BC", command=lambda: self._ptz_move("down"),
-                  **btn_cfg).pack()
-
-        # AUTONOM / MANUELL Toggle
-        self._auto_btn = tk.Button(
-            ctrl_frame, text="MANUELL", bg="#2a2a4e", fg="white",
-            font=("Helvetica", 11, "bold"),
-            command=self._toggle_autonomous
-        )
-        self._auto_btn.pack(fill=tk.X, pady=5)
-
-        # Tracker State Label
-        self._tracker_state_label = tk.Label(
-            ctrl_frame, text="", font=("Courier", 9), fg="#888888", bg="#1a1a2e"
-        )
-        self._tracker_state_label.pack()
+        act_row2 = tk.Frame(ctrl_frame, bg="#1a1a2e")
+        act_row2.pack(fill=tk.X, pady=1)
+        tk.Button(act_row2, text="Alle AUS", bg="#2a2a4e", fg="white",
+                  font=("Helvetica", 8),
+                  command=self._all_models_off).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 1))
+        tk.Button(act_row2, text="Face-DB", bg="#2a2a4e", fg="white",
+                  font=("Helvetica", 8),
+                  command=self._reload_face_db).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(1, 0))
 
         # Kamera-Status Update starten
         self.root.after(1000, self._update_cam_status)
@@ -558,7 +703,7 @@ class HailoControlPanel:
         logger.info(f"[CONFIGURE] {name}: aktive Modelle VORHER: {active_before}")
 
         # Inference pausieren - NPU kann nicht configure + run gleichzeitig
-        self._configuring = True
+        self._configuring.clear()
         time.sleep(0.15)  # Warten bis laufende Inference fertig
 
         try:
@@ -603,11 +748,11 @@ class HailoControlPanel:
                 pass
             self._update_status(f"CRASH: {name} ({type(e).__name__})")
         finally:
-            self._configuring = False
+            self._configuring.set()
 
     def _unconfigure_model(self, name):
         """Gib Modell-Konfiguration frei."""
-        self._configuring = True
+        self._configuring.clear()
         time.sleep(0.1)  # Warten bis laufende Inference fertig
         try:
             with self._ctx_lock:
@@ -621,7 +766,7 @@ class HailoControlPanel:
                     pass
                 logger.info(f"Modell freigegeben: {name}")
         finally:
-            self._configuring = False
+            self._configuring.set()
 
     def _run_model(self, name, input_data):
         """Fuehre Modell aus mit persistenter Konfiguration (~21ms statt ~450ms).
@@ -684,10 +829,9 @@ class HailoControlPanel:
                 continue
 
             # Pause waehrend Modell-Konfiguration (NPU blockiert)
-            if self._configuring:
+            if not self._configuring.wait(timeout=0.1):
                 with self._annotated_lock:
                     self._annotated_frame = frame.copy()
-                time.sleep(0.05)
                 continue
 
             # Kein Modell konfiguriert -> nur Raw-Frame anzeigen
@@ -711,6 +855,8 @@ class HailoControlPanel:
             scale_x = fw / 640.0
             scale_y = fh / 640.0
             face_boxes = []
+            face_detected = False        # SCRFD hat Gesicht erkannt (YOLOv8m ueberspringen)
+            face_fed_to_tracker = False  # Face an Tracker gefuettert
 
             # 1. SCRFD Face Detection
             if self.scrfd_enabled.get() and "scrfd" in self._active_ctx:
@@ -729,8 +875,49 @@ class HailoControlPanel:
                     if len(boxes) > 0:
                         draw_faces(annotated, boxes, scores, landmarks, scale_x, scale_y)
                         face_boxes = list(zip(boxes, scores, landmarks))
+                        face_detected = True  # YOLOv8m wird komplett uebersprungen
+                        # Face hat PRIORITAET fuer Tracker (besser als Person-BBox)
+                        if self._autonomous_mode and self._tracker:
+                            try:
+                                face_dets = []
+                                for box, score, _ in face_boxes:
+                                    face_dets.append({
+                                        "bbox": [box[0] * 640, box[1] * 640, box[2] * 640, box[3] * 640],
+                                        "confidence": float(score),
+                                        "class": "face"
+                                    })
+                                self._tracker.update_detection(
+                                    detections=face_dets,
+                                    frame_width=640, frame_height=640
+                                )
+                                face_fed_to_tracker = True
+                            except Exception as e:
+                                logger.debug(f"Tracker face feed: {e}")
+                        # Guardian: Face sichtbar -> Interest
+                        if self._moloch_has_control:
+                            self._last_interesting_time = time.time()
+                            self._takeover_found_something = True
                 except Exception as e:
                     logger.error(f"SCRFD Fehler: {e}")
+
+            # === Dynamischer Modell-Swap: Face -> ArcFace, kein Face -> YOLOv8m ===
+            # Startup-Delay: Tracker braucht Zeit um sich zu stabilisieren
+            _swap_allowed = (self._moloch_has_control and not self._swapping_models
+                             and hasattr(self, '_takeover_time')
+                             and time.time() - self._takeover_time > self._FACE_MODE_STARTUP_DELAY)
+            if _swap_allowed:
+                if face_detected:
+                    self._face_seen_count += 1
+                    self._face_lost_time = 0
+                    if not self._face_mode_active and self._face_seen_count >= self._FACE_MODE_FRAMES:
+                        threading.Thread(target=self._swap_to_arcface, daemon=True).start()
+                else:
+                    self._face_seen_count = 0
+                    if self._face_mode_active:
+                        if self._face_lost_time == 0:
+                            self._face_lost_time = time.time()
+                        elif time.time() - self._face_lost_time > self._FACE_MODE_TIMEOUT:
+                            threading.Thread(target=self._swap_to_yolov8m, daemon=True).start()
 
             # 2. ArcFace (nur wenn SCRFD aktiv + Faces gefunden)
             if (self.arcface_enabled.get() and self.scrfd_enabled.get()
@@ -795,8 +982,8 @@ class HailoControlPanel:
                 except Exception as e:
                     logger.error(f"ArcFace Fehler: {e}")
 
-            # 3. YOLOv8m Person Detection
-            if self.yolo_enabled.get() and "yolov8m" in self._active_ctx:
+            # 3. YOLOv8m Person Detection (komplett uebersprungen wenn Face erkannt)
+            if self.yolo_enabled.get() and "yolov8m" in self._active_ctx and not face_detected:
                 try:
                     t0 = time.perf_counter()
                     outputs = self._run_model("yolov8m", input_rgb)
@@ -813,19 +1000,28 @@ class HailoControlPanel:
 
                     if persons:
                         draw_persons(annotated, persons, scale_x, scale_y)
-                        # Feed to autonomous tracker
-                        if self._autonomous_mode and self._tracker and persons:
-                            detections = [
-                                {"bbox": p[:4], "confidence": p[4] if len(p) > 4 else 0.8}
-                                for p in persons
-                            ]
+                        # Guardian: Person sichtbar -> Interest erneuern + als Fund markieren
+                        if self._moloch_has_control:
+                            self._last_interesting_time = time.time()
+                            self._takeover_found_something = True
+                        # Feed to autonomous tracker (NUR wenn kein Face erkannt!)
+                        # Face hat Prioritaet - Person nur als Fallback
+                        if self._autonomous_mode and self._tracker and not face_fed_to_tracker:
                             try:
+                                pixel_dets = []
+                                for p in persons:
+                                    bx = p["bbox"]  # normalized [0,1]
+                                    pixel_dets.append({
+                                        "bbox": [bx[0] * 640, bx[1] * 640, bx[2] * 640, bx[3] * 640],
+                                        "confidence": p["confidence"],
+                                        "class": "person"
+                                    })
                                 self._tracker.update_detection(
-                                    detections=detections,
+                                    detections=pixel_dets,
                                     frame_width=640, frame_height=640
                                 )
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug(f"Tracker YOLOv8m feed: {e}")
                 except Exception as e:
                     logger.error(f"YOLOv8m Fehler: {e}")
 
@@ -846,14 +1042,38 @@ class HailoControlPanel:
                     if poses:
                         draw_poses(annotated, poses, scale_x, scale_y)
                         # Feed to autonomous tracker (pose method)
+                        # Enrich poses with has_face/has_torso from keypoints
                         if self._autonomous_mode and self._tracker:
                             try:
+                                enriched = []
+                                for p in poses:
+                                    ep = dict(p)
+                                    kpts = p.get("keypoints")
+                                    if kpts is not None and len(kpts) >= 17:
+                                        # Face: nose(0), eyes(1,2)
+                                        face_vis = (float(kpts[0][2]) + float(kpts[1][2]) + float(kpts[2][2])) / 3
+                                        if face_vis > 0.5:
+                                            ep["has_face"] = True
+                                            ep["face_confidence"] = face_vis
+                                            # Face center from nose, normalized to [0,1]
+                                            ep["face_center"] = (float(kpts[0][0]) / 640, float(kpts[0][1]) / 640)
+                                        else:
+                                            ep["has_face"] = False
+                                            ep["face_confidence"] = 0
+                                        # Torso: shoulders(5,6) + hips(11,12)
+                                        torso_vis = (float(kpts[5][2]) + float(kpts[6][2]) + float(kpts[11][2]) + float(kpts[12][2])) / 4
+                                        ep["has_torso"] = torso_vis > 0.3
+                                    else:
+                                        ep["has_face"] = False
+                                        ep["face_confidence"] = 0
+                                        ep["has_torso"] = True
+                                    enriched.append(ep)
                                 self._tracker.update_pose_detection(
-                                    poses=poses,
+                                    poses=enriched,
                                     frame_width=640, frame_height=640
                                 )
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug(f"Tracker pose feed: {e}")
                 except Exception as e:
                     logger.error(f"Pose Fehler: {e}")
 
@@ -1149,70 +1369,141 @@ class HailoControlPanel:
         cv2.imwrite(path, frame)
         self._update_status(f"Snapshot: {path}")
 
+    # =========================================================================
+    # eWeLink Cloud Controls
+    # =========================================================================
+
+    def _connect_cloud(self):
+        """Connect to eWeLink cloud in background."""
+        try:
+            self._cloud = CloudController()
+            self._cloud.start()
+            if self._cloud.connected:
+                logger.info("eWeLink Cloud verbunden")
+                # Smart Tracking beim Start AN - Kamera scannt selbststaendig
+                try:
+                    self._cloud.run(self._cloud.bridge.set_smart_tracking(True))
+                    self._set_smart_tracking_state(True)
+                    logger.info("Smart Tracking aktiviert - Kamera scannt autonom (Tentakel-Modus)")
+                except Exception:
+                    pass
+                self.root.after(0, lambda: self._cloud_status_label.config(
+                    text="Cloud: verbunden", fg="#00ff88"))
+                self.root.after(500, self._refresh_cloud_params)
+            else:
+                logger.warning("eWeLink Cloud nicht erreichbar")
+                self.root.after(0, lambda: self._cloud_status_label.config(
+                    text="Cloud: FEHLER", fg="#ff4444"))
+        except Exception as e:
+            logger.error(f"Cloud connect: {e}")
+            self.root.after(0, lambda: self._cloud_status_label.config(
+                text=f"Cloud: {e}", fg="#ff4444"))
+
+    def _set_smart_tracking_state(self, value: bool):
+        """Einziger Schreibzugriff auf _smart_tracking_on (thread-safe)."""
+        with self._st_lock:
+            self._smart_tracking_on = value
+        btn_text = "Smart Tracking: AN" if value else "Smart Tracking: AUS"
+        btn_bg = "#884400" if value else "#2a2a4e"
+        self.root.after(0, lambda: self._smart_tracking_btn.config(text=btn_text, bg=btn_bg))
+
+    def _cloud_run(self, method_name, *args):
+        """Run cloud bridge method in background."""
+        if not self._cloud or not self._cloud.connected:
+            self._update_status("Cloud nicht verbunden")
+            return
+        method = getattr(self._cloud.bridge, method_name, None)
+        if not method:
+            return
+        threading.Thread(
+            target=lambda: self._cloud.run(method(*args)),
+            daemon=True
+        ).start()
+
+    def _set_cloud_led(self):
+        self._cloud_run("set_status_led", self._led_var.get())
+
+    def _set_cloud_night(self):
+        mode_map = {"Aus": "day", "Auto": "auto", "An": "night"}
+        self._cloud_run("set_night", mode_map.get(self._night_var.get(), "day"))
+
+    def _set_cloud_flip(self):
+        self._cloud_run("set_screen_flip", self._flip_var.get())
+
     def _toggle_smart_tracking(self):
-        """Smart Tracking auf der Kamera ein/ausschalten."""
+        """Smart Tracking toggle via persistent cloud connection."""
         new_state = not self._smart_tracking_on
-        self._smart_tracking_btn.config(state=tk.DISABLED)
+        if not self._cloud or not self._cloud.connected:
+            self._update_status("Cloud nicht verbunden")
+            return
         def do_toggle():
-            import asyncio
             try:
-                from core.hardware.camera_cloud_bridge import CameraCloudBridge, CloudConfig
-                import aiohttp
-
-                # Env Vars mit Fallback aus ~/.profile (Desktop laedt .profile nicht)
-                def _get_ewelink_var(name):
-                    val = os.environ.get(name, "")
-                    if val:
-                        return val
-                    try:
-                        import re
-                        with open(os.path.expanduser("~/.profile"), "r") as f:
-                            for line in f:
-                                m = re.match(rf'export\s+{name}="([^"]*)"', line)
-                                if m:
-                                    return m.group(1)
-                    except Exception:
-                        pass
-                    return ""
-
-                config = CloudConfig(
-                    enabled=True,
-                    api_base_url="https://eu-apia.coolkit.cc",
-                    app_id=_get_ewelink_var("EWELINK_APP_ID_1"),
-                    app_secret=_get_ewelink_var("EWELINK_APP_SECRET_1"),
-                    device_id="1002817609",
-                    username=_get_ewelink_var("EWELINK_USERNAME"),
-                    password=_get_ewelink_var("EWELINK_PASSWORD"),
-                )
-                bridge = CameraCloudBridge(config)
-
-                async def _do():
-                    bridge.session = aiohttp.ClientSession()
-                    try:
-                        await bridge.connect()
-                        result = await bridge.set_smart_tracking(new_state)
-                        return result
-                    finally:
-                        await bridge.disconnect()
-
-                result = asyncio.run(_do())
-                self._smart_tracking_on = new_state
-                if new_state:
-                    self._smart_tracking_btn.config(
-                        text="Smart Tracking: AN", bg="#884400"
-                    )
-                    self._update_status("Smart Tracking aktiviert")
-                else:
-                    self._smart_tracking_btn.config(
-                        text="Smart Tracking: AUS", bg="#2a2a4e"
-                    )
-                    self._update_status("Smart Tracking deaktiviert")
+                self._cloud.run(self._cloud.bridge.set_smart_tracking(new_state))
+                self._set_smart_tracking_state(new_state)
+                self._update_status(f"Smart Tracking {'AN' if new_state else 'AUS'}")
             except Exception as e:
                 self._update_status(f"Smart Tracking Fehler: {e}")
-                logger.error(f"Smart Tracking toggle: {e}")
-            finally:
-                self._smart_tracking_btn.config(state=tk.NORMAL)
         threading.Thread(target=do_toggle, daemon=True).start()
+
+    def _trigger_alarm(self):
+        """3-Sekunden Alarm ausloesen."""
+        if not self._cloud or not self._cloud.connected:
+            self._update_status("Cloud nicht verbunden")
+            return
+        def alarm_cycle():
+            self._cloud.run(self._cloud.bridge.set_alarm(True))
+            time.sleep(3)
+            self._cloud.run(self._cloud.bridge.set_alarm(False))
+            self._update_status("Alarm beendet")
+        self._update_status("ALARM aktiv (3s)")
+        threading.Thread(target=alarm_cycle, daemon=True).start()
+
+    def _trigger_calibration(self):
+        """PTZ Kalibrierung mit Bestaetigung."""
+        if messagebox.askyesno("PTZ Kalibrierung",
+                               "Kamera bewegt sich durch den vollen Bereich!\n\nFortfahren?"):
+            self._cloud_run("trigger_ptz_calibration")
+            self._update_status("Kalibrierung gestartet")
+
+    def _refresh_cloud_params(self):
+        """Cloud-Parameter laden und UI synchronisieren."""
+        if not self._cloud or not self._cloud.connected:
+            return
+        def do_refresh():
+            params = self._cloud.run(self._cloud.bridge.get_device_params())
+            if params:
+                self.root.after(0, lambda: self._apply_cloud_params(params))
+        threading.Thread(target=do_refresh, daemon=True).start()
+
+    def _apply_cloud_params(self, params):
+        """Cloud-Parameter auf UI-Widgets anwenden."""
+        try:
+            if "nightVision" in params:
+                nv_map = {0: "Aus", 1: "Auto", 2: "An"}
+                self._night_var.set(nv_map.get(params["nightVision"], "Aus"))
+            if "smartTraceEnable" in params:
+                self._set_smart_tracking_state(bool(params["smartTraceEnable"]))
+            if "screenFlip" in params:
+                self._flip_var.set(bool(params["screenFlip"]))
+            if "sledOnline" in params:
+                self._led_var.set(params["sledOnline"] == "on")
+            self._cloud_status_label.config(text="Cloud: verbunden", fg="#00ff88")
+        except Exception as e:
+            logger.error(f"Apply cloud params: {e}")
+
+    def _ptz_goto(self, pan, tilt):
+        """PTZ zu bestimmter Position fahren."""
+        def do_move():
+            try:
+                from core.hardware.camera import get_camera_controller
+                cam = get_camera_controller()
+                if not cam.is_connected:
+                    cam.connect()
+                cam.move_absolute(pan, tilt, speed=1.0)
+                self._update_status(f"PTZ -> Pan={pan} Tilt={tilt}")
+            except Exception as e:
+                self._update_status(f"PTZ Fehler: {e}")
+        threading.Thread(target=do_move, daemon=True).start()
 
     def _reload_face_db(self):
         """Face-DB neu laden (nach Enrollment)."""
@@ -1245,8 +1536,163 @@ class HailoControlPanel:
         except Exception as e:
             logger.error(f"TTS Ansage Fehler: {e}")
 
+    # =========================================================================
+    # Guardian Mode: Tentakel-Logik (Smart Tracking <-> MOLOCH Takeover)
+    # =========================================================================
+
+    def _moloch_takeover(self, reason: str):
+        """MOLOCH uebernimmt: ST AUS -> NPU Modelle AN -> AUTONOM Tracker."""
+        with self._transition_lock:
+            if self._moloch_has_control or not self._guardian_mode or self._transitioning:
+                self._last_interesting_time = time.time()
+                return
+            self._transitioning = True
+        logger.info(f"[TENTAKEL] MOLOCH uebernimmt Kamera: {reason}")
+        self._moloch_has_control = True
+        self._takeover_time = time.time()
+        self._takeover_reason = reason
+        self._takeover_found_something = False
+        self._last_interesting_time = time.time()
+        self._search_start_time = 0
+
+        def do_takeover():
+            try:
+                # 1. ST AUS (muss zuerst - kaempft sonst mit Tracker)
+                # Ohne ST AUS kaempfen Tracker und Smart Tracking um die Kamera!
+                self._update_status("Takeover: ST AUS...")
+                st_off = False
+                if self._cloud and self._cloud.connected:
+                    for attempt in range(3):
+                        try:
+                            self._cloud.run(self._cloud.bridge.set_smart_tracking(False))
+                            self._set_smart_tracking_state(False)
+                            st_off = True
+                            break
+                        except Exception as e:
+                            logger.warning(f"[TENTAKEL] ST AUS fehlgeschlagen (Versuch {attempt+1}/3): {e}")
+                            time.sleep(0.5)
+                if not st_off:
+                    logger.error("[TENTAKEL] ST AUS nach 3 Versuchen fehlgeschlagen - Takeover ABBRUCH")
+                    self._moloch_has_control = False
+                    self._update_status("Takeover abgebrochen: ST nicht erreichbar")
+                    return
+
+                # 2. NPU Modelle direkt konfigurieren (kein _on_model_toggle Umweg)
+                self._update_status("Takeover: NPU Modelle...")
+                logger.info("[TENTAKEL] Aktiviere NPU Modelle (SCRFD + YOLOv8m)")
+                self.root.after(0, lambda: self.scrfd_enabled.set(True))
+                self._configure_model("scrfd")
+                time.sleep(0.2)  # Hailo Hardware-Minimum zwischen Konfigurationen
+                self.root.after(0, lambda: self.yolo_enabled.set(True))
+                self._configure_model("yolov8m")
+
+                # 3. Tracker AN
+                self.root.after(0, self._enable_autonomous)
+                self._update_status(f"MOLOCH: {reason}")
+                logger.info(f"[TENTAKEL] Takeover komplett: {reason}")
+            except Exception as e:
+                logger.error(f"[TENTAKEL] Takeover Fehler: {e}")
+                self._moloch_has_control = False
+            finally:
+                self._transitioning = False
+
+        threading.Thread(target=do_takeover, daemon=True).start()
+
+    def _moloch_release(self):
+        """MOLOCH gibt zurueck: Tracker STOP -> ST AN -> Aufraumen."""
+        with self._transition_lock:
+            if not self._moloch_has_control or self._transitioning:
+                return
+            self._transitioning = True
+        try:
+            logger.info("[TENTAKEL] MOLOCH gibt Kamera zurueck an Smart Tracking")
+            self._moloch_has_control = False
+            self._takeover_reason = ""
+            self._search_start_time = 0
+
+            # 1. Tracker SOFORT stoppen (thread-safe, kein root.after noetig)
+            self._autonomous_mode = False
+            if self._tracker:
+                self._tracker.disable()
+            logger.info("[TENTAKEL] Tracker gestoppt")
+
+            # 2. Smart Tracking SOFORT AN (minimaler Gap!)
+            if self._cloud and self._cloud.connected:
+                try:
+                    self._cloud.run(self._cloud.bridge.set_smart_tracking(True))
+                    self._set_smart_tracking_state(True)
+                    logger.info("[TENTAKEL] Smart Tracking wiederhergestellt")
+                except Exception:
+                    pass
+
+            # 3. UI + Models OFF im Main Thread (nicht zeitkritisch)
+            def cleanup():
+                try:
+                    self._auto_btn.config(text="MANUELL", bg="#2a2a4e")
+                    self._tracker_state_label.config(text="", fg="#888888")
+                    self._all_models_off()
+                except Exception as e:
+                    logger.error(f"[TENTAKEL] Cleanup: {e}")
+            self.root.after(0, cleanup)
+
+            # Face mode reset
+            self._face_mode_active = False
+            self._face_seen_count = 0
+            self._face_lost_time = 0
+
+            # Position-Tracking zuruecksetzen
+            self._guardian_last_pan = None
+            self._guardian_last_tilt = None
+            self._guardian_move_count = 0
+
+            # Progressive Backoff (sanfter: 1.5x statt 2x, max 180s statt 600s)
+            if self._takeover_found_something:
+                self._failed_takeovers = 0
+                cooldown = self.RELEASE_COOLDOWN
+            else:
+                self._failed_takeovers += 1
+                cooldown = min(self.RELEASE_COOLDOWN * (1.5 ** self._failed_takeovers), self.MAX_COOLDOWN)
+            self._takeover_found_something = False
+            self._takeover_cooldown_until = time.time() + cooldown
+
+            self._update_status("Tentakel scannt wieder")
+            logger.info(f"[TENTAKEL] Release komplett - Cooldown {cooldown:.0f}s")
+        finally:
+            self._transitioning = False
+
+    def _check_guardian_timeout(self):
+        """Pruefe ob MOLOCH die Kamera zurueckgeben soll (kein Interest mehr)."""
+        if not self._guardian_mode or self._transitioning:
+            return
+        # Safety: verwaister autonomer Modus (Tracker laeuft ohne Moloch-Kontrolle)
+        # NICHT bei manueller Aktivierung (User hat absichtlich AUTONOM gedrueckt)
+        if self._autonomous_mode and not self._moloch_has_control and not self._manual_autonomous:
+            logger.warning("[SAFETY] Orphaned autonomous mode detected - disabling")
+            self.root.after(0, self._disable_autonomous)
+            return
+        if not self._moloch_has_control:
+            return
+        now = time.time()
+        # Timeout: zu lange nichts Interessantes
+        if now - self._last_interesting_time > self.TAKEOVER_TIMEOUT:
+            logger.info(f"[TENTAKEL] Takeover timeout ({self.TAKEOVER_TIMEOUT}s) - zurueckgeben")
+            threading.Thread(target=self._moloch_release, daemon=True).start()
+            return
+        # Tracker sucht zu lange ohne Ergebnis
+        if self._tracker and self._autonomous_mode:
+            from core.mpo.autonomous_tracker import TrackerState
+            if self._tracker.state == TrackerState.SEARCHING:
+                if self._search_start_time == 0:
+                    self._search_start_time = now
+                elif now - self._search_start_time > self.SEARCH_TIMEOUT:
+                    logger.info(f"[TENTAKEL] Search timeout ({self.SEARCH_TIMEOUT}s) - zurueckgeben")
+                    threading.Thread(target=self._moloch_release, daemon=True).start()
+                    return
+            else:
+                self._search_start_time = 0
+
     def _update_cam_status(self):
-        """Kamera-Kontrolle Status updaten (alle 3s)."""
+        """Kamera-Kontrolle Status updaten (alle 3s) + Tentakel-Bewegungserkennung."""
         if not self.running:
             return
 
@@ -1262,8 +1708,45 @@ class HailoControlPanel:
                     onvif_ok = True
                     pos = cam.get_position()
                     if pos:
-                        pan, tilt = pos
+                        pan, tilt = pos.pan, pos.tilt
                         ptz_text = f"Pan: {pan:.1f}  Tilt: {tilt:.1f}"
+
+                        # Tentakel: Kamera-Bewegung erkennen (Smart Tracking hat was gesehen)
+                        if (self._guardian_mode and self._smart_tracking_on
+                                and not self._moloch_has_control
+                                and not self._transitioning):
+                            if self._guardian_last_pan is not None:
+                                delta = abs(pan - self._guardian_last_pan) + abs(tilt - self._guardian_last_tilt)
+                                if delta > self._guardian_move_thresh:
+                                    self._guardian_move_count += 1
+                                    logger.info(f"[TENTAKEL] Bewegung {self._guardian_move_count}/{self._guardian_move_required} delta={delta:.1f}")
+                                    # Pre-Load: Bei erster Bewegung Modelle im Hintergrund laden
+                                    if self._guardian_move_count == 1 and time.time() >= self._takeover_cooldown_until:
+                                        def _preload():
+                                            try:
+                                                logger.info("[TENTAKEL] Pre-Load: SCRFD + YOLOv8m laden...")
+                                                self._configure_model("scrfd")
+                                                time.sleep(0.2)
+                                                self._configure_model("yolov8m")
+                                                logger.info("[TENTAKEL] Pre-Load: Modelle ready!")
+                                            except Exception as e:
+                                                logger.error(f"[TENTAKEL] Pre-Load Fehler: {e}")
+                                        threading.Thread(target=_preload, daemon=True).start()
+                                    if self._guardian_move_count >= self._guardian_move_required:
+                                        # Cooldown pruefen
+                                        if time.time() >= self._takeover_cooldown_until:
+                                            logger.info(f"[TENTAKEL] Sustained movement ({self._guardian_move_count}x) -> MOLOCH uebernimmt")
+                                            self._guardian_move_count = 0
+                                            self._moloch_takeover("Kamera trackt etwas")
+                                        else:
+                                            remaining = self._takeover_cooldown_until - time.time()
+                                            logger.info(f"[TENTAKEL] Cooldown aktiv, noch {remaining:.0f}s")
+                                            self._guardian_move_count = 0
+                                else:
+                                    # Kamera steht kurz still -> Counter dekrementieren (nicht sofort reset)
+                                    self._guardian_move_count = max(0, self._guardian_move_count - 1)
+                            self._guardian_last_pan = pan
+                            self._guardian_last_tilt = tilt
             except Exception:
                 pass
 
@@ -1271,24 +1754,32 @@ class HailoControlPanel:
             smart = "AUS" if not self._smart_tracking_on else "AN"
             onvif_str = "OK" if onvif_ok else "---"
 
-            if not self._smart_tracking_on and onvif_ok:
-                ctrl_text = "M.O.L.O.C.H. KONTROLLE"
-                ctrl_color = "#00ff88"
-                bg = "#1a3a1a"
-                border = "#00ff88"
-            elif not self._smart_tracking_on:
-                ctrl_text = "MOLOCH (kein ONVIF)"
-                ctrl_color = "#ffaa00"
-                bg = "#3a3a1a"
-                border = "#ffaa00"
-            else:
-                ctrl_text = "KAMERA AUTONOM"
+            if self._moloch_has_control:
+                ctrl_text = f"MOLOCH: {self._takeover_reason[:20]}"
                 ctrl_color = "#ff4444"
                 bg = "#3a1a1a"
                 border = "#ff4444"
+            elif self._smart_tracking_on:
+                ctrl_text = "TENTAKEL SCANNT"
+                ctrl_color = "#00d4ff"
+                bg = "#1a2a3a"
+                border = "#00d4ff"
+            elif onvif_ok:
+                ctrl_text = "MANUELL"
+                ctrl_color = "#00ff88"
+                bg = "#1a3a1a"
+                border = "#00ff88"
+            else:
+                ctrl_text = "OFFLINE"
+                ctrl_color = "#ffaa00"
+                bg = "#3a3a1a"
+                border = "#ffaa00"
 
             self.root.after(0, lambda: self._apply_cam_status(
                 ctrl_text, ctrl_color, bg, border, smart, onvif_str, ptz_text))
+
+        # Guardian timeout check
+        self._check_guardian_timeout()
 
         threading.Thread(target=do_check, daemon=True).start()
         self.root.after(3000, self._update_cam_status)
@@ -1304,52 +1795,87 @@ class HailoControlPanel:
         except Exception:
             pass
 
-    def _toggle_autonomous(self):
-        """Zwischen MANUELL und AUTONOM umschalten."""
+    def _enable_autonomous(self):
+        """Explizit AUTONOM aktivieren (idempotent - kein Toggle!)."""
         if self._autonomous_mode:
-            # AUTONOM -> MANUELL
-            self._autonomous_mode = False
-            if self._tracker:
-                self._tracker.disable()
-            self._auto_btn.config(text="MANUELL", bg="#2a2a4e")
-            self._tracker_state_label.config(text="", fg="#888888")
-            self._update_status("Modus: MANUELL - PTZ Buttons aktiv")
-            logger.info("Switched to MANUAL mode")
-        else:
-            # MANUELL -> AUTONOM
-            self._auto_btn.config(state=tk.DISABLED, text="Starte...")
-            def do_start():
-                try:
-                    from core.mpo.autonomous_tracker import get_autonomous_tracker
-                    from core.hardware.camera import get_camera_controller, ControlMode
-                    if not self._tracker:
-                        self._tracker = get_autonomous_tracker()
-                    cam = get_camera_controller()
-                    if not cam.is_connected:
-                        cam.connect()
-                    if not cam.is_connected:
-                        self._update_status("AUTONOM fehlgeschlagen: Kamera offline")
-                        self.root.after(0, lambda: self._auto_btn.config(
-                            state=tk.NORMAL, text="MANUELL", bg="#2a2a4e"))
-                        return
-                    self._tracker.set_camera(cam)
-                    cam.set_mode(ControlMode.AUTONOMOUS)
-                    if not self._tracker._running:
-                        self._tracker.start()
-                    self._tracker.enable()
-                    self._autonomous_mode = True
-                    self._update_status("Modus: AUTONOM - MOLOCH sucht...")
-                    logger.info("Switched to AUTONOMOUS mode")
-                    self.root.after(0, lambda: self._auto_btn.config(
-                        state=tk.NORMAL, text="AUTONOM", bg="#006622"))
-                    # Tracker State Updates starten
-                    self.root.after(500, self._update_tracker_state)
-                except Exception as e:
-                    logger.error(f"Autonomous start failed: {e}")
-                    self._update_status(f"AUTONOM Fehler: {e}")
+            logger.debug("[AUTONOM] Already enabled, skip")
+            return
+        self._auto_btn.config(state=tk.DISABLED, text="Starte...")
+        def do_start():
+            try:
+                from core.mpo.autonomous_tracker import get_autonomous_tracker
+                from core.hardware.camera import get_camera_controller, ControlMode
+                if not self._tracker:
+                    self._tracker = get_autonomous_tracker()
+                cam = get_camera_controller()
+                if not cam.is_connected:
+                    cam.connect()
+                if not cam.is_connected:
+                    self._update_status("AUTONOM fehlgeschlagen: Kamera offline")
                     self.root.after(0, lambda: self._auto_btn.config(
                         state=tk.NORMAL, text="MANUELL", bg="#2a2a4e"))
-            threading.Thread(target=do_start, daemon=True).start()
+                    return
+                self._tracker.set_camera(cam)
+                cam.set_mode(ControlMode.AUTONOMOUS)
+                if not self._tracker._running:
+                    self._tracker.start()
+                self._tracker.enable()
+                self._autonomous_mode = True
+                self._update_status("Modus: AUTONOM - MOLOCH sucht...")
+                logger.info("Switched to AUTONOMOUS mode")
+                self.root.after(0, lambda: self._auto_btn.config(
+                    state=tk.NORMAL, text="AUTONOM", bg="#006622"))
+                # Tracker State Updates starten
+                self.root.after(500, self._update_tracker_state)
+            except Exception as e:
+                logger.error(f"Autonomous start failed: {e}")
+                self._update_status(f"AUTONOM Fehler: {e}")
+                self.root.after(0, lambda: self._auto_btn.config(
+                    state=tk.NORMAL, text="MANUELL", bg="#2a2a4e"))
+        threading.Thread(target=do_start, daemon=True).start()
+
+    def _disable_autonomous(self):
+        """Explizit AUTONOM deaktivieren (idempotent - kein Toggle!)."""
+        if not self._autonomous_mode:
+            logger.debug("[AUTONOM] Already disabled, skip")
+            return
+        self._autonomous_mode = False
+        if self._tracker:
+            self._tracker.disable()
+        self._auto_btn.config(text="MANUELL", bg="#2a2a4e")
+        self._tracker_state_label.config(text="", fg="#888888")
+        self._update_status("Modus: MANUELL")
+        logger.info("Switched to MANUAL mode")
+
+    def _toggle_autonomous(self):
+        """Zwischen MANUELL und AUTONOM umschalten (NUR fuer GUI Button)."""
+        if self._autonomous_mode:
+            self._disable_autonomous()
+            self._moloch_has_control = False
+            self._manual_autonomous = False
+            self._takeover_reason = ""
+            # Guardian: Smart Tracking wieder AN
+            if self._guardian_mode and self._cloud and self._cloud.connected:
+                def restore_st():
+                    try:
+                        self._cloud.run(self._cloud.bridge.set_smart_tracking(True))
+                        self._set_smart_tracking_state(True)
+                        logger.info("[TENTAKEL] Smart Tracking wiederhergestellt")
+                    except Exception:
+                        pass
+                threading.Thread(target=restore_st, daemon=True).start()
+        else:
+            self._manual_autonomous = True  # User hat manuell aktiviert
+            self._enable_autonomous()
+            # Smart Tracking AUS wenn manuell AUTONOM aktiviert
+            if self._cloud and self._cloud.connected:
+                def disable_st():
+                    try:
+                        self._cloud.run(self._cloud.bridge.set_smart_tracking(False))
+                        self._set_smart_tracking_state(False)
+                    except Exception:
+                        pass
+                threading.Thread(target=disable_st, daemon=True).start()
 
     def _update_tracker_state(self):
         """Tracker-State im GUI anzeigen."""
@@ -1371,9 +1897,12 @@ class HailoControlPanel:
 
     def _ptz_move(self, direction):
         """Kamera in eine Richtung bewegen (ONVIF AbsoluteMove)."""
-        # Step-Groessen in Grad
-        PAN_STEP = 15.0
-        TILT_STEP = 10.0
+        if self._autonomous_mode and self._tracker and self._tracker.is_running:
+            return  # Tracker hat Vorrang!
+        # Step-Groesse aus Speed Slider
+        step = self._ptz_speed_var.get() if hasattr(self, '_ptz_speed_var') else 15.0
+        PAN_STEP = step
+        TILT_STEP = step * 0.67  # Tilt etwas langsamer
 
         def do_move():
             try:
@@ -1390,7 +1919,7 @@ class HailoControlPanel:
                     self._update_status("PTZ Position nicht lesbar!")
                     return
 
-                pan, tilt = pos
+                pan, tilt = pos.pan, pos.tilt
 
                 if direction == "left":
                     # Pan invertiert! +Pan = links
@@ -1418,8 +1947,53 @@ class HailoControlPanel:
 
         threading.Thread(target=do_move, daemon=True).start()
 
+    def _swap_to_arcface(self):
+        """YOLOv8m -> ArcFace swap (MOLOCH will wissen WER da ist)."""
+        with self._swap_lock:
+            if self._face_mode_active or self._swapping_models:
+                return
+            self._swapping_models = True
+        try:
+            logger.info("[TENTAKEL] Face erkannt -> Swap YOLOv8m -> ArcFace")
+            self._unconfigure_model("yolov8m")
+            self.root.after(0, lambda: self.yolo_enabled.set(False))
+            time.sleep(0.2)
+            self._configure_model("arcface")
+            self.root.after(0, lambda: self.arcface_enabled.set(True))
+            self._face_mode_active = True
+            logger.info("[TENTAKEL] ArcFace aktiv - Gesichtserkennung laeuft")
+        except Exception as e:
+            logger.error(f"Swap to ArcFace failed: {e}")
+        finally:
+            with self._swap_lock:
+                self._swapping_models = False
+
+    def _swap_to_yolov8m(self):
+        """ArcFace -> YOLOv8m swap (kein Face mehr, braucht Person-Detection)."""
+        with self._swap_lock:
+            if not self._face_mode_active or self._swapping_models:
+                return
+            self._swapping_models = True
+        try:
+            logger.info("[TENTAKEL] Face verloren -> Swap ArcFace -> YOLOv8m")
+            self._unconfigure_model("arcface")
+            self.root.after(0, lambda: self.arcface_enabled.set(False))
+            time.sleep(0.2)
+            self._configure_model("yolov8m")
+            self.root.after(0, lambda: self.yolo_enabled.set(True))
+            self._face_mode_active = False
+            logger.info("[TENTAKEL] YOLOv8m aktiv - Person-Detection laeuft")
+        except Exception as e:
+            logger.error(f"Swap to YOLOv8m failed: {e}")
+        finally:
+            with self._swap_lock:
+                self._swapping_models = False
+
     def _all_models_off(self):
         """Alle Modelle deaktivieren und unconfigurieren."""
+        self._face_mode_active = False
+        self._face_seen_count = 0
+        self._face_lost_time = 0
         self.scrfd_enabled.set(False)
         self.arcface_enabled.set(False)
         self.yolo_enabled.set(False)

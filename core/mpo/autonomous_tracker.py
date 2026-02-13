@@ -36,6 +36,17 @@ from typing import Optional, Dict, Any, List, Callable
 
 logger = logging.getLogger(__name__)
 
+# PTZ Debug Logger - schreibt in ~/moloch/logs/ptz_debug.log
+import os as _os
+_ptz_log_path = _os.path.expanduser("~/moloch/logs/ptz_debug.log")
+_os.makedirs(_os.path.dirname(_ptz_log_path), exist_ok=True)
+ptz_debug = logging.getLogger("ptz_debug")
+ptz_debug.setLevel(logging.DEBUG)
+_ptz_fh = logging.FileHandler(_ptz_log_path, mode="w")
+_ptz_fh.setFormatter(logging.Formatter("%(asctime)s %(message)s", datefmt="%H:%M:%S"))
+ptz_debug.addHandler(_ptz_fh)
+ptz_debug.propagate = False
+
 # Import perception state for user visibility check
 try:
     from context.perception_state import get_perception_state, is_user_visible
@@ -71,23 +82,25 @@ class TrackingConfig:
     frozen_threshold_pixels: int = 5
 
     # === Dwell Timer ===
-    dwell_time_sec: float = 1.5
+    dwell_time_sec: float = 0.5  # schneller starten (war 1.5)
 
     # === AbsoluteMove Tracking Parameters ===
+    # Kamera Motor-Speed: ~30 deg/s (Kalibrierung: 342deg in ~12s)
     fov_horizontal: float = 110.0
     fov_vertical: float = 65.0
-    pan_gain: float = 0.7
-    tilt_gain: float = 0.5
-    max_step_pan: float = 30.0
-    max_step_tilt: float = 20.0
-    min_step_deg: float = 0.5
-    tracking_speed: float = 1.0
-    move_cooldown_ms: float = 50.0
+    pan_gain: float = 0.45          # aggressiver (war 0.25)
+    tilt_gain: float = 0.40         # aggressiver (war 0.25)
+    max_step_pan: float = 12.0      # groessere Schritte (was 3.0)
+    max_step_tilt: float = 8.0      # groessere Schritte (was 2.0)
+    min_step_deg: float = 0.3
+    tracking_speed: float = 1.0     # ONVIF max speed
+    move_cooldown_ms: float = 300.0  # schnellere Moves (was 800)
+    smooth_alpha: float = 0.5       # schnellere EMA-Reaktion (was 0.2)
 
     # Search mode parameters
     search_speed: float = 0.3
     search_direction_interval: float = 4.0
-    search_reset_to_center: bool = True
+    search_reset_to_center: bool = False  # NICHT zurueck auf (0,0) - bleibe wo Tracking war
     search_patrol_positions: list = field(default_factory=lambda: [
         (0.0, 0.0),
         (-84.0, 0.0),
@@ -99,7 +112,7 @@ class TrackingConfig:
         (84.0, 0.0),
     ])
 
-    target_lost_timeout: float = 2.0
+    target_lost_timeout: float = 5.0  # 5s coasting bevor Search (war 2.0)
     frame_width: int = 640
     frame_height: int = 640
 
@@ -195,6 +208,13 @@ class AutonomousTracker:
         self.last_known_tilt = 0.0
         self.last_position_time = 0.0
         self.last_move_time = 0.0
+        # Anti-Overshoot: letztes Ziel tracken
+        self._target_pan = None
+        self._target_tilt = None
+        self._target_arrival_thresh = 3.0  # Grad - Kamera muss so nah am Ziel sein
+        # EMA Glaettung fuer smooth tracking
+        self._smooth_x = None
+        self._smooth_y = None
 
         # === Dwell Timer State ===
         self.dwell_start_time = 0.0
@@ -254,29 +274,8 @@ class AutonomousTracker:
         except Exception as e:
             logger.error(f"Failed to read initial position: {e}")
 
-        # === DIAGNOSTIC: Test AbsoluteMove ===
-        logger.info("-" * 40)
-        logger.info("DIAGNOSTIC: Testing AbsoluteMove (small nudge +5 deg pan)...")
-        test_pan = self.last_known_pan + 5.0
-        test_result = self.camera.move_absolute(test_pan, self.last_known_tilt, speed=0.5)
-        logger.info(f"DIAGNOSTIC: move_absolute returned: {test_result}")
-        time.sleep(1.0)
-
-        try:
-            pos = self.camera.get_position()
-            logger.info(f"DIAGNOSTIC: Position after nudge: pan={pos.pan:.1f} deg, tilt={pos.tilt:.1f} deg")
-            self.last_known_pan = pos.pan
-            self.last_known_tilt = pos.tilt
-        except Exception as e:
-            logger.error(f"DIAGNOSTIC: Position read failed: {e}")
-
-        # Move back
-        self.camera.move_absolute(self.last_known_pan - 5.0, self.last_known_tilt, speed=0.5)
-        time.sleep(1.0)
-        logger.info("=" * 60)
-        logger.info("DIAGNOSTIC COMPLETE")
-        logger.info("=" * 60)
-
+        # Grace Period: 5s bevor SEARCH (Modelle brauchen Zeit fuer erste Detection)
+        self.last_detection_time = time.time()
         self._running = True
         self.tracking_active = True
         self._thread = threading.Thread(target=self._tracking_loop, daemon=True)
@@ -328,6 +327,8 @@ class AutonomousTracker:
             for d in person_dets:
                 bbox = d.get("bbox", [0, 0, 0, 0])
                 conf = d.get("confidence", 0)
+                det_class = d.get("class", "person")
+                is_face = (det_class == "face")
 
                 if len(bbox) != 4:
                     continue
@@ -341,13 +342,17 @@ class AutonomousTracker:
                     self.stats["detections_filtered"] += 1
                     continue
 
+                # Face-BBoxen sind viel kleiner als Person-BBoxen -> relaxed thresholds
+                min_height = 0.08 if is_face else self.config.min_bbox_height_ratio
+                min_area = 0.01 if is_face else self.config.min_bbox_area_ratio
+
                 height_ratio = height / frame_height
-                if height_ratio < self.config.min_bbox_height_ratio:
+                if height_ratio < min_height:
                     self.stats["detections_filtered"] += 1
                     continue
 
                 area_ratio = area / frame_area
-                if area_ratio < self.config.min_bbox_area_ratio:
+                if area_ratio < min_area:
                     self.stats["detections_filtered"] += 1
                     continue
 
@@ -697,9 +702,18 @@ class AutonomousTracker:
         """Execute tracking with dwell timer, proportional position control, and LOCK/FROZEN states."""
         now = time.time()
 
-        # Calculate error from frame center (pixels)
-        center_x_px = detection.center_x * self.config.frame_width
-        center_y_px = detection.center_y * self.config.frame_height
+        # EMA Glaettung: smooth detection center (kein Ruckeln/Springen)
+        alpha = self.config.smooth_alpha
+        if self._smooth_x is None:
+            self._smooth_x = detection.center_x
+            self._smooth_y = detection.center_y
+        else:
+            self._smooth_x = (1 - alpha) * self._smooth_x + alpha * detection.center_x
+            self._smooth_y = (1 - alpha) * self._smooth_y + alpha * detection.center_y
+
+        # Calculate error from frame center (pixels) - mit geglaetteten Werten
+        center_x_px = self._smooth_x * self.config.frame_width
+        center_y_px = self._smooth_y * self.config.frame_height
         frame_center_x = self.config.frame_width / 2
         frame_center_y = self.config.frame_height / 2
 
@@ -707,9 +721,17 @@ class AutonomousTracker:
         error_y = center_y_px - frame_center_y  # Positive = target BELOW center
         error_magnitude = math.sqrt(error_x**2 + error_y**2)
 
-        # Normalized error (-0.5 to +0.5)
-        error_x_norm = detection.center_x - 0.5
-        error_y_norm = detection.center_y - 0.5
+        # Normalized error (-0.5 to +0.5) - geglaettet
+        error_x_norm = self._smooth_x - 0.5
+        error_y_norm = self._smooth_y - 0.5
+
+        # PTZ Debug: raw + smooth Position + Error bei jedem Cycle
+        ptz_debug.debug(
+            f"DETECT raw=({detection.center_x:.3f},{detection.center_y:.3f}) "
+            f"smooth=({self._smooth_x:.3f},{self._smooth_y:.3f}) "
+            f"err=({error_x_norm:+.3f},{error_y_norm:+.3f}) "
+            f"cam=({self.last_known_pan:+.1f},{self.last_known_tilt:+.1f})deg"
+        )
 
         debug_log = (self.stats["cycles"] % 15 == 0)
         if debug_log:
@@ -766,6 +788,31 @@ class AutonomousTracker:
         if time_since_move < self.config.move_cooldown_ms:
             return
 
+        # Anti-Overshoot: warte bis Kamera am letzten Ziel angekommen ist
+        if self._target_pan is not None:
+            # Cache-Position nutzen (kein ONVIF-Call - spart 100-200ms!)
+            dist = abs(self.last_known_pan - self._target_pan) + abs(self.last_known_tilt - self._target_tilt)
+            if dist > self._target_arrival_thresh:
+                # Timeout: nach 5s aufgeben (Kamera hat Ziel nicht erreicht)
+                if not hasattr(self, '_target_wait_start') or self._target_wait_start is None:
+                    self._target_wait_start = time.time()
+                elif time.time() - self._target_wait_start > 5.0:
+                    ptz_debug.warning(
+                        f"WAIT TIMEOUT target=({self._target_pan:+.1f},{self._target_tilt:+.1f}) "
+                        f"pos=({self.last_known_pan:+.1f},{self.last_known_tilt:+.1f}) dist={dist:.1f} - clearing"
+                    )
+                    self._target_pan = None
+                    self._target_tilt = None
+                    self._target_wait_start = None
+                else:
+                    ptz_debug.debug(
+                        f"WAIT target=({self._target_pan:+.1f},{self._target_tilt:+.1f}) "
+                        f"pos=({self.last_known_pan:+.1f},{self.last_known_tilt:+.1f}) dist={dist:.1f}"
+                    )
+                    return
+            else:
+                self._target_wait_start = None
+
         # Calculate position delta from error (pre-check for threshold)
         pan_delta = -error_x_norm * self.config.fov_horizontal * self.config.pan_gain
         tilt_delta = -error_y_norm * self.config.fov_vertical * self.config.tilt_gain
@@ -808,15 +855,8 @@ class AutonomousTracker:
         if hasattr(self.camera, '_exclusive_owner') and self.camera._exclusive_owner is not None:
             return False
 
-        # Read real camera position (closed-loop feedback)
-        try:
-            pos = self.camera.get_position()
-            self.last_known_pan = pos.pan
-            self.last_known_tilt = pos.tilt
-            self.last_position_time = time.time()
-            self.stats["position_reads"] += 1
-        except Exception as e:
-            logger.warning(f"[TRACK] Failed to read position: {e}, using last known")
+        # Cache-Position nutzen (kein ONVIF-Call - spart 100-200ms pro Cycle!)
+        # last_known_pan/tilt wird nach jedem move_absolute() auf target gesetzt
 
         # Calculate position delta from error
         # Positive error_x (target right) -> negative pan delta (move right = decrease pan)
@@ -832,11 +872,29 @@ class AutonomousTracker:
         target_pan = self.last_known_pan + pan_delta
         target_tilt = self.last_known_tilt + tilt_delta
 
+        # PTZ Debug: Vollstaendige Berechnung loggen
+        face_side = "LINKS" if error_x_norm < 0 else "RECHTS"
+        face_vert = "OBEN" if error_y_norm < 0 else "UNTEN"
+        cam_pan_dir = "LINKS(+)" if pan_delta > 0 else "RECHTS(-)"
+        cam_tilt_dir = "HOCH(+)" if tilt_delta > 0 else "RUNTER(-)"
+        ptz_debug.info(
+            f"MOVE err_norm=({error_x_norm:+.3f},{error_y_norm:+.3f}) "
+            f"Gesicht={face_side}/{face_vert} | "
+            f"pan_delta={pan_delta:+.1f} ({cam_pan_dir}) tilt_delta={tilt_delta:+.1f} ({cam_tilt_dir}) | "
+            f"pos=({self.last_known_pan:+.1f},{self.last_known_tilt:+.1f}) -> "
+            f"target=({target_pan:+.1f},{target_tilt:+.1f})deg"
+        )
+
         # SonoffCameraController.move_absolute() clamps to calibrated limits internally
         result = self.camera.move_absolute(target_pan, target_tilt, speed=self.config.tracking_speed)
 
         if result:
             self.last_move_time = time.time()
+            self._target_pan = target_pan
+            self._target_tilt = target_tilt
+            # Cache sofort auf Zielposition setzen (kein ONVIF noetig)
+            self.last_known_pan = target_pan
+            self.last_known_tilt = target_tilt
 
             total_moves = self.stats["tracking_moves"] + self.stats["search_moves"]
             if total_moves % 15 == 0:
@@ -851,6 +909,9 @@ class AutonomousTracker:
 
     def _do_search(self):
         """Execute search mode - patrol sweep using AbsoluteMove positions."""
+        # Smoothing zuruecksetzen wenn Ziel verloren
+        self._smooth_x = None
+        self._smooth_y = None
         if PERCEPTION_AVAILABLE:
             try:
                 if is_user_visible():
@@ -872,41 +933,16 @@ class AutonomousTracker:
             if self.config.search_reset_to_center:
                 logger.info(f"[SEARCH] Starting - moving to center (was pan={self.last_known_pan:+.1f}, tilt={self.last_known_tilt:+.1f})")
                 self._send_search_move(0.0, 0.0)
+            else:
+                logger.info(f"[SEARCH] Starting - staying at last pos ({self.last_known_pan:+.1f},{self.last_known_tilt:+.1f})")
+                self.search_move_time = now  # Timer starten, aber NICHT bewegen
             # Reset dwell state for next target acquisition
             self.dwell_target_acquired = False
             self.dwell_start_time = 0.0
             return
 
-        # === PATROL: Move through positions ===
-        time_since_search_move = now - self.search_move_time
-
-        # Motor speed ~38 deg/s at search_speed, generous wait
-        min_wait = 3.0
-        if time_since_search_move < min_wait:
-            return
-
-        # Read position to update state
-        try:
-            pos = self.camera.get_position()
-            self.last_known_pan = pos.pan
-            self.last_known_tilt = pos.tilt
-            self.last_position_time = now
-            self.stats["position_reads"] += 1
-        except:
-            pass
-
-        # Move to next patrol position
-        patrol_positions = self.config.search_patrol_positions
-        if self.search_patrol_index >= len(patrol_positions):
-            self.search_patrol_index = 0
-
-        target_pan, target_tilt = patrol_positions[self.search_patrol_index]
-        self.search_patrol_index += 1
-
-        logger.info(f"[SEARCH] Patrol position {self.search_patrol_index}/{len(patrol_positions)}: "
-                   f"({target_pan:+.1f},{target_tilt:+.1f})deg")
-
-        self._send_search_move(target_pan, target_tilt)
+        # === KEIN PATROL: Kamera bleibt an letzter Position stehen ===
+        # Smart Tracking uebernimmt nach Release ab dieser Position
 
     def _send_search_move(self, pan_deg: float, tilt_deg: float) -> bool:
         """Send AbsoluteMove for search/patrol."""
