@@ -9023,3 +9023,67 @@
 {"ts": "2026-02-07T20:38:13.647771", "type": "system", "event": "push_to_talk_start"}
 {"ts": "2026-02-08T12:34:16.643419", "type": "system", "event": "moloch_startup", "component": "push_to_talk", "offline_seconds": 57363.0, "offline_minutes": 956.0, "crash_recovery": true, "last_event": "push_to_talk_start"}
 {"ts": "2026-02-08T12:34:16.643523", "type": "system", "event": "push_to_talk_start"}
+{"ts": "2026-02-11T18:09:39.847209", "type": "system", "event": "moloch_startup", "component": "push_to_talk", "offline_seconds": 279323.2, "offline_minutes": 4655.4, "crash_recovery": true, "last_event": "push_to_talk_start"}
+{"ts": "2026-02-11T18:09:39.847337", "type": "system", "event": "push_to_talk_start"}
+{"ts": "2026-02-11T18:24:16.779054", "type": "system", "event": "moloch_startup", "component": "push_to_talk", "offline_seconds": 876.9, "offline_minutes": 14.6, "crash_recovery": true, "last_event": "push_to_talk_start"}
+{"ts": "2026-02-11T18:24:16.779164", "type": "system", "event": "push_to_talk_start"}
+{"ts": "2026-02-11T18:28:04.275629", "type": "system", "event": "moloch_startup", "component": "push_to_talk", "offline_seconds": 227.5, "offline_minutes": 3.8, "crash_recovery": true, "last_event": "push_to_talk_start"}
+{"ts": "2026-02-11T18:28:04.275747", "type": "system", "event": "push_to_talk_start"}
+{"ts": "2026-02-11T18:28:39.976627", "type": "system", "event": "push_to_talk_stop"}
+{"ts": "2026-02-11T18:28:39.976765", "type": "system", "event": "moloch_shutdown", "reason": "manual"}
+{"ts": "2026-02-11T19:16:22.337747", "type": "system", "event": "moloch_startup", "component": "push_to_talk", "offline_seconds": 2862.4, "offline_minutes": 47.7, "clean_boot": true}
+{"ts": "2026-02-11T19:16:22.337870", "type": "system", "event": "push_to_talk_start"}
+{"ts": "2026-02-11T19:30:49.856339", "type": "system", "event": "moloch_startup", "component": "push_to_talk", "offline_seconds": 867.5, "offline_minutes": 14.5, "crash_recovery": true, "last_event": "push_to_talk_start"}
+{"ts": "2026-02-11T19:30:49.856438", "type": "system", "event": "push_to_talk_start"}
+{"ts": "2026-02-11T19:31:42.378374", "type": "interaction", "event": "stt_transcribe", "chars": 4}
+{"ts": "2026-02-11T19:31:42.378596", "type": "interaction", "event": "user_input", "chars": 4, "interface": "voice"}
+{"ts": "2026-02-11T19:31:46.162245", "type": "interaction", "event": "assistant_response", "chars": 44}
+{"ts": "2026-02-11T19:31:52.628949", "type": "state", "event": "tts_speak", "chars": 44, "voice": "de_DE-kerstin-low"}
+{"ts": "2026-02-13T19:57:14.925330", "type": "system", "event": "moloch_startup", "component": "push_to_talk", "offline_seconds": 174322.3, "offline_minutes": 2905.4, "crash_recovery": true, "last_event": "tts_speak"}
+{"ts": "2026-02-13T19:57:14.925492", "type": "system", "event": "push_to_talk_start"}
+{"ts": "2026-02-13T19:57:39.153359", "type": "system", "event": "moloch_startup", "component": "push_to_talk", "offline_seconds": 24.2, "offline_minutes": 0.4, "crash_recovery": true, "last_event": "push_to_talk_start"}
+{"ts": "2026-02-13T19:57:39.153809", "type": "system", "event": "push_to_talk_start"}
+{"ts": "2026-02-13T19:59:00.878615", "type": "system", "event": "moloch_startup", "component": "push_to_talk", "offline_seconds": 81.7, "offline_minutes": 1.4, "crash_recovery": true, "last_event": "push_to_talk_start"}
+{"ts": "2026-02-13T19:59:00.878716", "type": "system", "event": "push_to_talk_start"}
+{"ts": "2026-02-13T20:19:08.636230", "type": "system", "event": "moloch_startup", "component": "push_to_talk", "offline_seconds": 1207.8, "offline_minutes": 20.1, "crash_recovery": true, "last_event": "push_to_talk_start"}
+{"ts": "2026-02-13T20:19:08.636329", "type": "system", "event": "push_to_talk_start"}
+{"ts": "2026-02-13T20:28:23.815648", "type": "system", "event": "moloch_startup", "component": "push_to_talk", "offline_seconds": 555.2, "offline_minutes": 9.3, "crash_recovery": true, "last_event": "push_to_talk_start"}
+{"ts": "2026-02-13T20:28:23.815745", "type": "system", "event": "push_to_talk_start"}
+{"ts": "2026-02-13T20:28:58.652333", "type": "interaction", "event": "stt_transcribe", "chars": 117}
+{"ts": "2026-02-13T20:28:58.652484", "type": "interaction", "event": "user_input", "chars": 117, "interface": "voice"}
+{"ts": "2026-02-14T15:53:24.191862", "type": "system", "event": "moloch_startup", "component": "push_to_talk", "offline_seconds": 69865.5, "offline_minutes": 1164.4, "crash_recovery": true, "last_event": "user_input"}
+{"ts": "2026-02-14T15:53:24.192000", "type": "system", "event": "push_to_talk_start"}
+{"ts": "2026-02-14T16:24:57.571684", "type": "system", "event": "moloch_startup", "component": "push_to_talk", "offline_seconds": 1893.4, "offline_minutes": 31.6, "crash_recovery": true, "last_event": "push_to_talk_start"}
+{"ts": "2026-02-14T16:24:57.571994", "type": "system", "event": "push_to_talk_start"}
+{"ts": "2026-02-14T16:27:37.391216", "type": "system", "event": "moloch_startup", "component": "push_to_talk", "offline_seconds": 159.8, "offline_minutes": 2.7, "crash_recovery": true, "last_event": "push_to_talk_start"}
+{"ts": "2026-02-14T16:27:37.391326", "type": "system", "event": "push_to_talk_start"}
+{"ts": "2026-02-14T16:34:08.457863", "type": "system", "event": "moloch_startup", "component": "push_to_talk", "offline_seconds": 391.1, "offline_minutes": 6.5, "crash_recovery": true, "last_event": "push_to_talk_start"}
+{"ts": "2026-02-14T16:34:08.457970", "type": "system", "event": "push_to_talk_start"}
+{"ts": "2026-02-14T16:40:20.722036", "type": "interaction", "event": "stt_transcribe", "chars": 13}
+{"ts": "2026-02-14T16:40:20.722206", "type": "interaction", "event": "user_input", "chars": 13, "interface": "voice"}
+{"ts": "2026-02-14T16:47:01.819733", "type": "system", "event": "moloch_startup", "component": "push_to_talk", "offline_seconds": 401.1, "offline_minutes": 6.7, "crash_recovery": true, "last_event": "user_input"}
+{"ts": "2026-02-14T16:47:01.819839", "type": "system", "event": "push_to_talk_start"}
+{"ts": "2026-02-14T16:55:38.122129", "type": "interaction", "event": "stt_transcribe", "chars": 58}
+{"ts": "2026-02-14T16:55:38.122865", "type": "interaction", "event": "user_input", "chars": 58, "interface": "voice"}
+{"ts": "2026-02-14T16:59:54.206936", "type": "system", "event": "moloch_startup", "component": "push_to_talk", "offline_seconds": 256.1, "offline_minutes": 4.3, "crash_recovery": true, "last_event": "user_input"}
+{"ts": "2026-02-14T16:59:54.207179", "type": "system", "event": "push_to_talk_start"}
+{"ts": "2026-02-14T17:00:26.156148", "type": "interaction", "event": "stt_transcribe", "chars": 117}
+{"ts": "2026-02-14T17:00:26.156404", "type": "interaction", "event": "user_input", "chars": 117, "interface": "voice"}
+{"ts": "2026-02-14T17:02:18.732547", "type": "system", "event": "moloch_startup", "component": "push_to_talk", "offline_seconds": 112.6, "offline_minutes": 1.9, "crash_recovery": true, "last_event": "user_input"}
+{"ts": "2026-02-14T17:02:18.732655", "type": "system", "event": "push_to_talk_start"}
+{"ts": "2026-02-14T17:03:58.469974", "type": "interaction", "event": "stt_transcribe", "chars": 87}
+{"ts": "2026-02-14T17:03:58.470310", "type": "interaction", "event": "user_input", "chars": 87, "interface": "voice"}
+{"ts": "2026-02-14T17:07:06.171776", "type": "system", "event": "moloch_startup", "component": "push_to_talk", "offline_seconds": 187.7, "offline_minutes": 3.1, "crash_recovery": true, "last_event": "user_input"}
+{"ts": "2026-02-14T17:07:06.171885", "type": "system", "event": "push_to_talk_start"}
+{"ts": "2026-02-14T17:13:30.029261", "type": "system", "event": "moloch_startup", "component": "push_to_talk", "offline_seconds": 383.9, "offline_minutes": 6.4, "crash_recovery": true, "last_event": "push_to_talk_start"}
+{"ts": "2026-02-14T17:13:30.029378", "type": "system", "event": "push_to_talk_start"}
+{"ts": "2026-02-14T17:14:11.573279", "type": "interaction", "event": "stt_transcribe", "chars": 5}
+{"ts": "2026-02-14T17:14:11.574037", "type": "interaction", "event": "user_input", "chars": 5, "interface": "voice"}
+{"ts": "2026-02-14T17:14:29.234370", "type": "interaction", "event": "stt_transcribe", "chars": 44}
+{"ts": "2026-02-14T17:14:29.234974", "type": "interaction", "event": "user_input", "chars": 44, "interface": "voice"}
+{"ts": "2026-02-14T17:17:57.481661", "type": "system", "event": "moloch_startup", "component": "push_to_talk", "offline_seconds": 208.2, "offline_minutes": 3.5, "crash_recovery": true, "last_event": "user_input"}
+{"ts": "2026-02-14T17:17:57.481942", "type": "system", "event": "push_to_talk_start"}
+{"ts": "2026-02-14T17:18:17.058079", "type": "interaction", "event": "stt_transcribe", "chars": 64}
+{"ts": "2026-02-14T17:18:17.058251", "type": "interaction", "event": "user_input", "chars": 64, "interface": "voice"}
+{"ts": "2026-02-14T17:22:01.212185", "type": "system", "event": "moloch_startup", "component": "push_to_talk", "offline_seconds": 224.2, "offline_minutes": 3.7, "crash_recovery": true, "last_event": "user_input"}
+{"ts": "2026-02-14T17:22:01.212303", "type": "system", "event": "push_to_talk_start"}

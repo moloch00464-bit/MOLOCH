@@ -5,11 +5,13 @@ M.O.L.O.C.H. can choose its own voice.
 """
 
 import os
+import re
 import subprocess
 import wave
 import logging
 from pathlib import Path
 from typing import Optional, List, Dict
+from concurrent.futures import ThreadPoolExecutor
 import json
 
 # Setup logging
@@ -33,7 +35,7 @@ PIPER_BIN = Path.home() / ".local" / "bin" / "piper"
 
 # TTS settings for clear speech
 PITCH_SHIFT = 0      # 0=normal, 300=kobold (higher can cause distortion)
-LENGTH_SCALE = 1.15  # >1.0 = slower, clearer speech (1.15 = 15% langsamer)
+LENGTH_SCALE = 1.0   # 1.0 = normal speed, keine kuenstlichen Pausen
 TMP_DIR = Path("/tmp")
 
 
@@ -119,6 +121,39 @@ class TTSEngine:
         """Return list of available voice names."""
         return list(self.available_voices.keys())
 
+    def _split_sentences(self, text: str) -> List[str]:
+        """Split text into speakable sentence chunks."""
+        parts = re.split(r'(?<=[.!?;:])\s+', text.strip())
+        result = []
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            if result and len(result[-1]) < 30:
+                result[-1] += " " + part
+            else:
+                result.append(part)
+        return result if result else [text]
+
+    def _synthesize_raw(self, text: str, voice_model) -> bytes:
+        """Run Piper and return raw PCM audio bytes."""
+        cmd = [
+            str(self.piper_bin),
+            "--model", str(voice_model.path),
+            "--length-scale", str(LENGTH_SCALE),
+            "--output-raw"
+        ]
+        result = subprocess.run(
+            cmd, input=text.encode('utf-8'),
+            capture_output=True, check=True)
+        return result.stdout
+
+    def _play_raw(self, raw_audio: bytes, sample_rate: int):
+        """Play raw PCM directly via aplay (no temp file, no mpv startup)."""
+        subprocess.run(
+            ["aplay", "-r", str(sample_rate), "-f", "S16_LE", "-c", "1", "-q"],
+            input=raw_audio, check=True)
+
     def set_voice(self, voice_name: str) -> bool:
         """
         Set the current voice.
@@ -137,9 +172,13 @@ class TTSEngine:
         logger.info(f"Voice changed to: {voice_name}")
         return True
 
-    def speak(self, text: str, voice: Optional[str] = None, output_file: Optional[Path] = None) -> bool:
+    def speak(self, text: str, voice: Optional[str] = None, output_file: Optional[Path] = None, **kwargs) -> bool:
         """
-        Convert text to speech and play it.
+        Convert text to speech and play it via direct pipe streaming.
+
+        Uses Unix pipe: piper --output-raw | aplay
+        Piper outputs PCM incrementally, aplay plays as data arrives.
+        No temp files, no gaps, truly continuous audio.
 
         Args:
             text: Text to speak
@@ -153,7 +192,6 @@ class TTSEngine:
             logger.debug("TTS not available - skipping speak()")
             return False
 
-        # Determine which voice to use
         voice_to_use = voice if voice else self.current_voice
 
         if voice_to_use not in self.available_voices:
@@ -161,40 +199,67 @@ class TTSEngine:
             return False
 
         voice_model = self.available_voices[voice_to_use]
+        sample_rate = voice_model.config.get("audio", {}).get("sample_rate", 22050)
 
         logger.info(f"Speaking with voice '{voice_to_use}': {text[:50]}...")
 
         try:
-            # Prepare Piper command with length-scale for clearer speech
-            cmd = [
+            # File output: full synthesis (no streaming)
+            if output_file:
+                raw_audio = self._synthesize_raw(text, voice_model)
+                if not raw_audio:
+                    logger.error("Piper generated no audio data")
+                    return False
+                self._save_wav(raw_audio, output_file, voice_model.config)
+                logger.info(f"Audio saved to {output_file}")
+                return True
+
+            # Pitch shift needs temp file path (fallback)
+            if PITCH_SHIFT != 0:
+                raw_audio = self._synthesize_raw(text, voice_model)
+                if raw_audio:
+                    self._play_audio(raw_audio, voice_model.config)
+                return bool(raw_audio)
+
+            # Direct pipe streaming: piper | aplay
+            # Piper outputs raw PCM incrementally, aplay plays as data arrives
+            piper_cmd = [
                 str(self.piper_bin),
                 "--model", str(voice_model.path),
                 "--length-scale", str(LENGTH_SCALE),
                 "--output-raw"
             ]
+            aplay_cmd = [
+                "aplay", "-r", str(sample_rate),
+                "-f", "S16_LE", "-c", "1", "-q"
+            ]
 
-            # Run Piper to generate raw audio
-            result = subprocess.run(
-                cmd,
-                input=text.encode('utf-8'),
-                capture_output=True,
-                check=True
+            logger.info("[TTS] Pipe streaming: piper | aplay")
+
+            piper_proc = subprocess.Popen(
+                piper_cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL
+            )
+            aplay_proc = subprocess.Popen(
+                aplay_cmd,
+                stdin=piper_proc.stdout,
+                stderr=subprocess.DEVNULL
             )
 
-            raw_audio = result.stdout
+            # Close piper stdout in parent so aplay gets EOF when piper finishes
+            piper_proc.stdout.close()
 
-            if not raw_audio:
-                logger.error("Piper generated no audio data")
-                return False
+            # Send text to piper stdin
+            piper_proc.stdin.write(text.encode('utf-8'))
+            piper_proc.stdin.close()
 
-            # If output file specified, save WAV
-            if output_file:
-                self._save_wav(raw_audio, output_file, voice_model.config)
-                logger.info(f"Audio saved to {output_file}")
-            else:
-                # Play audio directly using aplay
-                self._play_audio(raw_audio, voice_model.config)
+            # Wait for playback to complete
+            aplay_proc.wait()
+            piper_proc.wait()
 
+            logger.info("[TTS] Pipe streaming done")
             return True
 
         except subprocess.CalledProcessError as e:

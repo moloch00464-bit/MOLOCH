@@ -808,10 +808,10 @@ class CameraCloudBridge:
 
     async def set_night(self, mode: str) -> bool:
         """
-        Set night/IR mode.
+        Weisse LED Steuerung (nightVision Parameter).
 
         Args:
-            mode: Night mode ('auto', 'day', 'night')
+            mode: Licht-Modus ('auto', 'day', 'night')
 
         Returns:
             True if successful

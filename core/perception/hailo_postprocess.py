@@ -291,6 +291,160 @@ def match_face(embedding: np.ndarray, face_db: Dict[str, np.ndarray],
 
 
 # ============================================================
+# Hand Landmark Lite (MediaPipe 21 Keypoints)
+# ============================================================
+
+# Output-Layer-Namen
+HAND_LM_SCREEN = "hand_landmark_lite/fc1"   # 63 = 21 * (x,y,z) screen-space
+HAND_LM_PRESENCE = "hand_landmark_lite/fc2"  # 1 = presence score
+HAND_LM_WORLD = "hand_landmark_lite/fc3"     # 63 = world-space (nicht fuer Draw)
+HAND_LM_HANDEDNESS = "hand_landmark_lite/fc4" # 1 = handedness
+
+# Skeleton-Verbindungen (MediaPipe Format)
+HAND_SKELETON = [
+    # Daumen
+    (0, 1), (1, 2), (2, 3), (3, 4),
+    # Zeigefinger
+    (0, 5), (5, 6), (6, 7), (7, 8),
+    # Mittelfinger
+    (0, 9), (9, 10), (10, 11), (11, 12),
+    # Ringfinger
+    (0, 13), (13, 14), (14, 15), (15, 16),
+    # Kleiner Finger
+    (0, 17), (17, 18), (18, 19), (19, 20),
+    # Handinnenflaeche
+    (5, 9), (9, 13), (13, 17),
+]
+
+# Farben pro Finger (BGR)
+FINGER_COLORS = {
+    "thumb":  (0, 0, 255),     # Rot
+    "index":  (0, 200, 0),     # Gruen
+    "middle": (255, 150, 0),   # Blau-ish
+    "ring":   (0, 255, 255),   # Gelb
+    "pinky":  (255, 0, 255),   # Magenta
+    "palm":   (200, 200, 200), # Grau
+}
+
+# Welcher Keypoint gehoert zu welchem Finger
+FINGER_MAP = {
+    0: "palm",
+    1: "thumb", 2: "thumb", 3: "thumb", 4: "thumb",
+    5: "index", 6: "index", 7: "index", 8: "index",
+    9: "middle", 10: "middle", 11: "middle", 12: "middle",
+    13: "ring", 14: "ring", 15: "ring", 16: "ring",
+    17: "pinky", 18: "pinky", 19: "pinky", 20: "pinky",
+}
+
+# Fingerspitzen-Indices
+FINGERTIP_INDICES = {4, 8, 12, 16, 20}
+
+
+def decode_hand_landmark(outputs: Dict[str, np.ndarray],
+                         presence_thresh: float = 0.65) -> Optional[Dict]:
+    """Decode hand_landmark_lite Outputs.
+
+    Args:
+        outputs: Dict mit fc1..fc4 Tensoren (FLOAT32 dequantisiert)
+        presence_thresh: Mindest-Praesenz-Score
+
+    Returns:
+        Dict mit landmarks (21,3), handedness (L/R), presence
+        oder None wenn keine Hand erkannt.
+    """
+    lm_raw = outputs.get(HAND_LM_SCREEN, np.zeros(63, dtype=np.float32))
+    presence_raw = outputs.get(HAND_LM_PRESENCE, np.zeros(1, dtype=np.float32))
+    handedness_raw = outputs.get(HAND_LM_HANDEDNESS, np.zeros(1, dtype=np.float32))
+
+    # Presence Score: HEF gibt Logits, IMMER Sigmoid anwenden
+    _raw_presence = float(presence_raw.flatten()[0])
+    presence = 1.0 / (1.0 + np.exp(-np.clip(_raw_presence, -20, 20)))
+
+    if presence < presence_thresh:
+        return None
+
+    # 21 Landmarks (x, y, z) normalisiert auf [0,1] relativ zum 224x224 Crop
+    lm = lm_raw.flatten()
+    if len(lm) < 63:
+        return None
+    landmarks = lm[:63].reshape(21, 3).copy()
+    # Pixel-Koordinaten (0-224) auf [0,1] normalisieren
+    landmarks[:, 0] /= 224.0  # x
+    landmarks[:, 1] /= 224.0  # y
+    # z bleibt unnormalisiert (Tiefe, relativ)
+
+    # Handedness: HEF gibt Logits, IMMER Sigmoid
+    _raw_h = float(handedness_raw.flatten()[0])
+    h_val = 1.0 / (1.0 + np.exp(-np.clip(_raw_h, -20, 20)))
+    handedness = "R" if h_val > 0.5 else "L"
+
+    return {
+        "landmarks": landmarks,   # (21, 3) normalisiert auf Crop
+        "handedness": handedness,  # "L" oder "R"
+        "presence": presence,
+    }
+
+
+def draw_hand_landmarks(frame: np.ndarray, hand_result: Dict,
+                        crop_x: int, crop_y: int,
+                        crop_w: int, crop_h: int,
+                        scale_x: float, scale_y: float):
+    """Zeichne 21 Finger-Landmarks + Skeleton auf Frame.
+
+    Args:
+        frame: BGR Frame (Original-Aufloesung)
+        hand_result: Output von decode_hand_landmark()
+        crop_x, crop_y: Crop-Position in 640x640 Space
+        crop_w, crop_h: Crop-Groesse in 640x640 Space
+        scale_x, scale_y: 640->Frame Skalierung
+    """
+    if hand_result is None:
+        return
+
+    lm = hand_result["landmarks"]  # (21, 3) normalisiert [0,1]
+    handedness = hand_result["handedness"]
+    presence = hand_result["presence"]
+
+    # Landmarks: Crop-Space -> 640-Space -> Frame-Space
+    pts = []
+    for i in range(21):
+        # Crop-normalisiert -> 640-Space
+        px_640 = lm[i, 0] * crop_w + crop_x
+        py_640 = lm[i, 1] * crop_h + crop_y
+        # 640-Space -> Frame-Space
+        px = int(px_640 * scale_x)
+        py = int(py_640 * scale_y)
+        pts.append((px, py))
+
+    # Skeleton-Linien (farbig pro Finger)
+    for j0, j1 in HAND_SKELETON:
+        finger = FINGER_MAP.get(j1, "palm")
+        color = FINGER_COLORS.get(finger, (200, 200, 200))
+        cv2.line(frame, pts[j0], pts[j1], color, 2)
+
+    # Landmark-Punkte
+    for i, (px, py) in enumerate(pts):
+        finger = FINGER_MAP.get(i, "palm")
+        color = FINGER_COLORS.get(finger, (200, 200, 200))
+        if i in FINGERTIP_INDICES:
+            # Fingerspitzen: groesser
+            cv2.circle(frame, (px, py), 7, color, -1)
+            cv2.circle(frame, (px, py), 7, (255, 255, 255), 1)
+        elif i == 0:
+            # Wrist: mittel
+            cv2.circle(frame, (px, py), 5, (255, 255, 255), -1)
+        else:
+            # Gelenke: klein
+            cv2.circle(frame, (px, py), 4, color, -1)
+
+    # Handedness Label am Wrist
+    wx, wy = pts[0]
+    label = f"Hand-{handedness} ({presence:.0%})"
+    cv2.putText(frame, label, (wx - 30, wy + 25),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_HAND, 2)
+
+
+# ============================================================
 # NMS (shared)
 # ============================================================
 
@@ -344,6 +498,24 @@ COLOR_POSE_BOX = (0, 165, 255) # Orange (BGR)
 COLOR_KEYPOINT = (255, 0, 255) # Magenta
 COLOR_SKELETON = (0, 255, 255) # Gelb (BGR)
 COLOR_NAME = (0, 255, 0)       # Gruen
+COLOR_HAND = (255, 255, 0)     # Cyan (BGR) fuer Hand-Keypoints
+
+# Max-2 Draw-Prioritaet: face > pose > hand
+DRAW_PRIORITY = {"face": 3, "pose": 2, "hand": 1}
+MAX_DRAW_TYPES = 2
+
+
+def enforce_draw_priority(active_types: List[str]) -> List[str]:
+    """Enforce max 2 Draw-Typen. Prioritaet: face > pose > hand.
+
+    Args:
+        active_types: Liste der verfuegbaren Draw-Typen
+
+    Returns:
+        Top 2 Typen die gezeichnet werden sollen.
+    """
+    ranked = sorted(active_types, key=lambda t: DRAW_PRIORITY.get(t, 0), reverse=True)
+    return ranked[:MAX_DRAW_TYPES]
 
 
 def draw_faces(frame: np.ndarray, boxes: np.ndarray, scores: np.ndarray,
@@ -356,7 +528,7 @@ def draw_faces(frame: np.ndarray, boxes: np.ndarray, scores: np.ndarray,
         x2 = int(boxes[i, 2] * w)
         y2 = int(boxes[i, 3] * h)
         conf = scores[i]
-        cv2.rectangle(frame, (x1, y1), (x2, y2), COLOR_FACE, 2)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), COLOR_FACE, 3)
         cv2.putText(frame, f"{conf:.2f}", (x1, y1 - 5),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_FACE, 1)
         # 5 Landmarks
@@ -367,12 +539,81 @@ def draw_faces(frame: np.ndarray, boxes: np.ndarray, scores: np.ndarray,
             cv2.circle(frame, (lx, ly), 2, (0, 255, 255), -1)
 
 
+def estimate_head_pose(landmarks_5: np.ndarray, frame_w: int, frame_h: int):
+    """Schaetze Kopf-Pose (Pitch/Yaw/Roll) aus SCRFD 5-Point Landmarks.
+
+    Args:
+        landmarks_5: (10,) = 5 Punkte x (x,y) normalisiert [0,1]
+        frame_w, frame_h: Frame-Dimensionen fuer Kamera-Matrix
+    Returns:
+        (pitch, yaw, roll) in Grad oder None bei Fehler
+    """
+    # 2D Punkte: left_eye, right_eye, nose, left_mouth, right_mouth
+    pts_2d = np.array([
+        [landmarks_5[0] * frame_w, landmarks_5[1] * frame_h],
+        [landmarks_5[2] * frame_w, landmarks_5[3] * frame_h],
+        [landmarks_5[4] * frame_w, landmarks_5[5] * frame_h],
+        [landmarks_5[6] * frame_w, landmarks_5[7] * frame_h],
+        [landmarks_5[8] * frame_w, landmarks_5[9] * frame_h],
+    ], dtype=np.float64)
+
+    # 3D Modell-Punkte (generisches Gesicht, mm)
+    pts_3d = np.array([
+        [-30.0, -30.0, -30.0],   # left eye
+        [ 30.0, -30.0, -30.0],   # right eye
+        [  0.0,   0.0,   0.0],   # nose tip
+        [-25.0,  30.0, -20.0],   # left mouth
+        [ 25.0,  30.0, -20.0],   # right mouth
+    ], dtype=np.float64)
+
+    # Kamera-Matrix (Naeherung: focal_length ~ frame_width)
+    focal = float(frame_w)
+    cx, cy = frame_w / 2.0, frame_h / 2.0
+    cam_matrix = np.array([
+        [focal, 0,     cx],
+        [0,     focal, cy],
+        [0,     0,     1.0],
+    ], dtype=np.float64)
+
+    try:
+        import cv2 as _cv2
+        success, rvec, tvec = _cv2.solvePnP(
+            pts_3d, pts_2d, cam_matrix, None,
+            flags=_cv2.SOLVEPNP_ITERATIVE
+        )
+        if not success:
+            return None
+        rmat, _ = _cv2.Rodrigues(rvec)
+        # Euler-Winkel aus Rotationsmatrix
+        sy = np.sqrt(rmat[0, 0]**2 + rmat[1, 0]**2)
+        if sy > 1e-6:
+            pitch = np.degrees(np.arctan2(rmat[2, 1], rmat[2, 2]))
+            yaw = np.degrees(np.arctan2(-rmat[2, 0], sy))
+            roll = np.degrees(np.arctan2(rmat[1, 0], rmat[0, 0]))
+        else:
+            pitch = np.degrees(np.arctan2(-rmat[1, 2], rmat[1, 1]))
+            yaw = np.degrees(np.arctan2(-rmat[2, 0], sy))
+            roll = 0.0
+        return (round(pitch, 1), round(yaw, 1), round(roll, 1))
+    except Exception:
+        return None
+
+
 def draw_name(frame: np.ndarray, box: np.ndarray, name: str,
-              similarity: float, h: int, w: int):
-    """Zeichne Namen unter Face-Box."""
+              similarity: float, h: int, w: int, emotion: str = None,
+              gender: str = None, age_range: str = None,
+              head_pose: tuple = None):
+    """Zeichne Namen + Emotion + Age/Gender unter Face-Box."""
     x1 = int(box[0] * w)
     y2 = int(box[3] * h)
     label = f"{name} ({similarity:.0%})" if name != "Unbekannt" else "Unbekannt"
+    if emotion:
+        label += f" [{emotion}]"
+    if gender and age_range:
+        label += f" {gender}/{age_range}"
+    if head_pose:
+        _p, _y, _r = head_pose
+        label += f" P{_p:.0f}/Y{_y:.0f}/R{_r:.0f}"
     color = COLOR_NAME if name != "Unbekannt" else (0, 0, 255)
     cv2.putText(frame, label, (x1, y2 + 18),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
@@ -389,14 +630,14 @@ def draw_persons(frame: np.ndarray, detections: List[Dict],
         x2 = int(bx[2] * w)
         y2 = int(bx[3] * h)
         conf = det["confidence"]
-        cv2.rectangle(frame, (x1, y1), (x2, y2), COLOR_PERSON, 2)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), COLOR_PERSON, 3)
         cv2.putText(frame, f"Person {conf:.2f}", (x1, y1 - 5),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_PERSON, 1)
 
 
 def draw_poses(frame: np.ndarray, poses: List[Dict],
                scale_x: float, scale_y: float, joint_thresh: float = 0.3):
-    """Zeichne Pose-Boxen + Skeleton + Keypoints."""
+    """Zeichne NUR Body-Pose: Box + Skeleton + Keypoints (OHNE Hand-Specials)."""
     h, w = frame.shape[:2]
     for pose in poses:
         # Box (in model pixels 640x640 -> frame pixels)
@@ -405,7 +646,7 @@ def draw_poses(frame: np.ndarray, poses: List[Dict],
         y1 = int(bx[1] * scale_y)
         x2 = int(bx[2] * scale_x)
         y2 = int(bx[3] * scale_y)
-        cv2.rectangle(frame, (x1, y1), (x2, y2), COLOR_POSE_BOX, 2)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), COLOR_POSE_BOX, 3)
         cv2.putText(frame, f"Pose {pose['score']:.2f}", (x1, y1 - 5),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_POSE_BOX, 1)
 
@@ -420,8 +661,29 @@ def draw_poses(frame: np.ndarray, poses: List[Dict],
             if vis > joint_thresh:
                 cv2.circle(frame, (kx, ky), 4, COLOR_KEYPOINT, -1)
 
-        # Skeleton
+        # Skeleton-Linien
         for j0, j1 in SKELETON_PAIRS:
             if pts[j0][2] > joint_thresh and pts[j1][2] > joint_thresh:
                 cv2.line(frame, (pts[j0][0], pts[j0][1]),
                          (pts[j1][0], pts[j1][1]), COLOR_SKELETON, 2)
+
+
+def draw_hands(frame: np.ndarray, poses: List[Dict],
+               scale_x: float, scale_y: float, joint_thresh: float = 0.3):
+    """Zeichne NUR Hand/Wrist-Keypoints aus Pose-Daten.
+
+    Wrist-Indices: 9 (links), 10 (rechts) aus COCO-17.
+    Grosse Kreise + HAND-L/R Label.
+    """
+    WRIST_INDICES = (9, 10)
+    for pose in poses:
+        kpts = pose["keypoints"]  # (17, 3) in model pixels
+        for ki in WRIST_INDICES:
+            kx = int(kpts[ki, 0] * scale_x)
+            ky = int(kpts[ki, 1] * scale_y)
+            vis = kpts[ki, 2]
+            if vis > joint_thresh:
+                cv2.circle(frame, (kx, ky), 12, COLOR_HAND, 3)
+                side = "L" if ki == 9 else "R"
+                cv2.putText(frame, f"HAND-{side}", (kx + 14, ky + 5),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_HAND, 2)

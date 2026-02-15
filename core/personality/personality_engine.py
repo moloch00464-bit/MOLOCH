@@ -482,6 +482,10 @@ class PersonalityEngine:
         except Exception:
             pass
 
+    def get_tension(self) -> float:
+        """Public API: Aktuelle Tension (0.0-1.0)."""
+        return self._compute_tension()
+
     def update_drift_factors(self, factors: Dict[str, float]):
         """Update drift factors from real sensor values. Called externally."""
         self._drift_factors.update(factors)

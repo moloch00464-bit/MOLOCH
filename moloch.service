@@ -1,0 +1,17 @@
+[Unit]
+Description=M.O.L.O.C.H. Service (Headless)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=molochzuhause
+WorkingDirectory=/home/molochzuhause/moloch
+Environment=HOME=/home/molochzuhause
+ExecStartPre=/bin/bash -c 'source /home/molochzuhause/.profile && env | grep -E "^EWELINK_|^MOLOCH_" > /tmp/moloch_env'
+ExecStart=/bin/bash -c 'set -a; source /home/molochzuhause/.profile; set +a; exec /usr/bin/python3 -c "from core.moloch_service import MolochService; s = MolochService(); s.init(); s.start(blocking=True)"'
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

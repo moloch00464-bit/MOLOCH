@@ -143,8 +143,29 @@ class HailoManager:
             logger.error(f"[HAILO_MGR] Error checking device: {e}")
             return True, []  # Assume free on error
 
+    def _is_moloch_process(self, pid: int) -> bool:
+        """Check if PID belongs to a M.O.L.O.C.H. process.
+
+        Reads /proc/{pid}/cmdline to detect friendly processes
+        (moloch_service, moloch_unified_panel, etc.)
+        so we don't accidentally kill our own service or GUI.
+        """
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                cmdline = f.read().decode("utf-8", errors="replace").lower()
+            # cmdline uses \x00 as separator
+            return any(marker in cmdline for marker in [
+                "moloch", "unified_panel",
+            ])
+        except (FileNotFoundError, PermissionError, OSError):
+            return False
+
     def _force_release_device(self, exclude_pid: int = None) -> bool:
         """Force release Hailo device by killing processes holding it.
+
+        IMPORTANT: Never kills M.O.L.O.C.H. own processes (PTT, Panel).
+        For friendly processes, waits for fd to close naturally.
+        Only kills truly foreign/unknown processes.
 
         Args:
             exclude_pid: PID to exclude from killing (usually current process)
@@ -161,15 +182,22 @@ class HailoManager:
 
         current_pid = os.getpid()
         killed = []
+        friendly_pids = []
 
         for pid in pids:
             if pid == current_pid or pid == exclude_pid:
                 logger.info(f"[HAILO_MGR] Skipping own/excluded PID {pid}")
                 continue
 
+            # Don't kill MOLOCH's own processes!
+            if self._is_moloch_process(pid):
+                logger.info(f"[HAILO_MGR] Skipping friendly MOLOCH process PID {pid}")
+                friendly_pids.append(pid)
+                continue
+
             try:
-                # Try SIGTERM first
-                logger.warning(f"[HAILO_MGR] Sending SIGTERM to PID {pid}")
+                # Only kill truly foreign processes
+                logger.warning(f"[HAILO_MGR] Sending SIGTERM to foreign PID {pid}")
                 os.kill(pid, 15)  # SIGTERM
                 killed.append(pid)
             except ProcessLookupError:
@@ -179,20 +207,34 @@ class HailoManager:
             except Exception as e:
                 logger.error(f"[HAILO_MGR] Error killing PID {pid}: {e}")
 
-        # Wait a moment for processes to terminate
+        # Wait for killed processes to terminate
         if killed:
             time.sleep(0.5)
+
+        # If only friendly processes remain, wait longer for natural fd release
+        if friendly_pids and not killed:
+            logger.info(f"[HAILO_MGR] Waiting for {len(friendly_pids)} friendly process(es) to release fd...")
+            for _ in range(25):  # 5s max (25 * 0.2)
+                time.sleep(0.2)
+                device_free, _ = self._check_device_free()
+                if device_free:
+                    logger.info("[HAILO_MGR] Device freed by friendly process (natural release)")
+                    return True
+            logger.warning("[HAILO_MGR] Friendly process(es) still holding device after 5s - NOT killing")
+            return False
 
         # Check again
         device_free, remaining_pids = self._check_device_free()
 
         if not device_free and remaining_pids:
-            # Force kill remaining
+            # Force kill remaining FOREIGN processes only
             for pid in remaining_pids:
                 if pid == current_pid or pid == exclude_pid:
                     continue
+                if self._is_moloch_process(pid):
+                    continue
                 try:
-                    logger.warning(f"[HAILO_MGR] Sending SIGKILL to PID {pid}")
+                    logger.warning(f"[HAILO_MGR] Sending SIGKILL to foreign PID {pid}")
                     os.kill(pid, 9)  # SIGKILL
                 except Exception:
                     pass
@@ -212,8 +254,11 @@ class HailoManager:
         free, _ = self._check_device_free()
         return free
 
-    def ensure_device_free(self, timeout: float = 3.0) -> bool:
+    def ensure_device_free(self, timeout: float = 5.0) -> bool:
         """Ensure device is free, waiting or forcing if necessary.
+
+        Waits up to timeout seconds for natural release before forcing.
+        Force release will NOT kill MOLOCH-owned processes (PTT, Panel).
 
         Args:
             timeout: Max time to wait before forcing
@@ -228,8 +273,8 @@ class HailoManager:
                 return True
             time.sleep(0.2)
 
-        # Timeout - try force release
-        logger.warning("[HAILO_MGR] Device not free after timeout, forcing release")
+        # Timeout - try force release (safe: won't kill MOLOCH processes)
+        logger.warning(f"[HAILO_MGR] Device not free after {timeout:.1f}s, forcing release")
         return self._force_release_device()
 
     @property
