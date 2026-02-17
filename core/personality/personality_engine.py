@@ -530,9 +530,9 @@ class PersonalityEngine:
 
             success = engine.speak(text)
 
-            # Restore defaults
+            # Restore defaults (1.0 = neutrale Geschwindigkeit)
             tts_module.PITCH_SHIFT = 0
-            tts_module.LENGTH_SCALE = 1.15
+            tts_module.LENGTH_SCALE = 1.0
 
             return success
 

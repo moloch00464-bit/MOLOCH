@@ -579,7 +579,7 @@ def estimate_head_pose(landmarks_5: np.ndarray, frame_w: int, frame_h: int):
         import cv2 as _cv2
         success, rvec, tvec = _cv2.solvePnP(
             pts_3d, pts_2d, cam_matrix, None,
-            flags=_cv2.SOLVEPNP_ITERATIVE
+            flags=_cv2.SOLVEPNP_SQPNP
         )
         if not success:
             return None

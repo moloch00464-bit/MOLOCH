@@ -58,7 +58,7 @@ class EmotionDetector:
 
         try:
             gray = cv2.cvtColor(face_crop_bgr, cv2.COLOR_BGR2GRAY)
-            resized = cv2.resize(gray, (64, 64)).astype(np.float32) / 255.0
+            resized = cv2.resize(gray, (64, 64)).astype(np.float32)
             blob = resized.reshape(1, 1, 64, 64)
 
             logits = self.session.run(None, {self.input_name: blob})[0][0]

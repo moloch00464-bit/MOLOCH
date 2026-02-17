@@ -154,6 +154,13 @@ class TTSEngine:
             ["aplay", "-r", str(sample_rate), "-f", "S16_LE", "-c", "1", "-q"],
             input=raw_audio, check=True)
 
+    def set_speed(self, speed: float):
+        """TTS Geschwindigkeit aendern. 0.8=schnell, 1.0=normal, 1.2=langsam."""
+        global LENGTH_SCALE
+        speed = max(0.6, min(1.5, speed))
+        LENGTH_SCALE = speed
+        logger.info(f"[TTS] Speed: {speed}")
+
     def set_voice(self, voice_name: str) -> bool:
         """
         Set the current voice.

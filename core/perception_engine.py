@@ -11,7 +11,16 @@ tick(context) -> Optional[List[str]]: Neue Modell-Kombination oder None.
 Nur Entscheidung. Kein Hardware-Zugriff. Kein Threading. Kein Random.
 """
 import time
+import json
+import os
+import logging
 from typing import Dict, List, Optional, Tuple
+
+_logger = logging.getLogger("PerceptionEngine")
+_HISTORY_PATH = os.path.expanduser("~/moloch/data/perception_history.json")
+_WEIGHTS_PATH = os.path.expanduser("~/moloch/config/perception_weights.json")
+_LEARN_EVERY = 100  # Alle 100 Entscheidungen lernen
+_MAX_ADJUST = 0.10  # Max 10% Aenderung pro Lernzyklus
 
 
 class PerceptionEngine:
@@ -52,6 +61,16 @@ class PerceptionEngine:
         self._FACE_RECENCY = 2.0
         self._MIN_FACE_STREAK = 3
 
+        # Lernfaehigkeit
+        self._history: list = []
+        self._learned_weights: Dict[str, float] = {}
+        self._last_context: Dict = {}
+        self._last_chosen: List[str] = []
+        self._decision_count = 0
+        self._log_skip_counter = 0
+        self._LOG_SAMPLE_RATE = 15  # Nur jeden 15. Frame loggen (1/s bei 15fps)
+        self._load_weights()
+
     # =========================================================================
     # Public API
     # =========================================================================
@@ -75,6 +94,11 @@ class PerceptionEngine:
         self._update_face_tracking(context)
         self._update_hand_occlusion(context)
 
+        # Log previous decision utility
+        if self._last_chosen and self.slots:
+            utility = self._check_utility(self._last_chosen, context)
+            self._log_decision(self._last_chosen, context, utility)
+
         # Manueller Override
         if self._forced:
             if set(self._forced) != set(self.slots):
@@ -87,8 +111,11 @@ class PerceptionEngine:
         self._scores = scores
         self._last_scores = scores
 
-        # Top 2 waehlen
-        new_slots = self._select_top2(scores)
+        # Context merken fuer log_result()
+        self._last_context = dict(context)
+
+        # Top 2 waehlen (Context fuer Hard Rules)
+        new_slots = self._select_top2(scores, context)
 
         # Erster tick: sofort setzen
         if not self.slots:
@@ -120,13 +147,14 @@ class PerceptionEngine:
 
         # Swap!
         leaving = set(self.slots) - set(new_slots)
+        entering = set(new_slots) - set(self.slots)
         for m in leaving:
             self._last_active[m] = now
         self._last_rotation = now
         self.slots = new_slots
-        import logging
-        logging.getLogger("PerceptionEngine").info(
-            f"[SWAP] {list(leaving)} -> {list(set(new_slots) - set(self.slots) if hasattr(self, '_prev_slots') else new_slots)} "
+        self._last_chosen = list(new_slots)
+        _logger.info(
+            f"[SWAP] -{list(leaving)} +{list(entering)} "
             f"occlusion={self._hand_occlusion} scores={{{', '.join(f'{k}:{v:.2f}' for k,v in scores.items())}}}")
         return list(new_slots)
 
@@ -154,14 +182,21 @@ class PerceptionEngine:
             "hand_timeout": self._HAND_TIMEOUT,
             "hand_streak_min": self._MIN_FACE_STREAK,
             "hand_recency": self._FACE_RECENCY,
+            "learned_weights": dict(self._learned_weights),
+            "decision_count": self._decision_count,
         }
 
     # =========================================================================
     # Top-2 Selection
     # =========================================================================
 
-    def _select_top2(self, scores: Dict[str, float]) -> List[str]:
-        """Top 2 Modelle waehlen, Dependencies beachten."""
+    def _select_top2(self, scores: Dict[str, float], context: Dict = None) -> List[str]:
+        """Top 2 Modelle waehlen, Dependencies + Hard Rules beachten."""
+        # HARD RULE: Face erkannt -> SCRFD + ArcFace, IMMER.
+        # Einzige Ausnahme: Hand-Occlusion (Face gerade verdeckt)
+        if context and context.get("face_detected", False) and not self._hand_occlusion:
+            return ["scrfd", "arcface"]
+
         ranked = sorted(self.ALL_MODELS, key=lambda m: scores.get(m, 0), reverse=True)
         s1, s2 = ranked[0], ranked[1]
 
@@ -242,6 +277,11 @@ class PerceptionEngine:
         """Scores fuer alle Modelle berechnen."""
         scores = dict(self.BASE_SCORES)
 
+        # Gelernte Gewichte anwenden (addiert auf Base)
+        for model, adj in self._learned_weights.items():
+            if model in scores:
+                scores[model] += adj
+
         face = ctx.get("face_detected", False)
         person = ctx.get("person_detected", False)
         unknown = ctx.get("unknown_person", False)
@@ -315,3 +355,282 @@ class PerceptionEngine:
             scores[model] += min(idle_mins * 0.1, 0.3)
 
         return scores
+
+    # =========================================================================
+    # Lernfaehigkeit
+    # =========================================================================
+
+    def log_result(self, results: Dict):
+        """Ergebnis der letzten Inference loggen (1x pro Sekunde).
+
+        Args:
+            results: {
+                "face_identified": bool,  # ArcFace hat Name geliefert
+                "person_count": int,      # YOLO Person-Count
+                "pose_useful": bool,      # Pose hat Keypoints erkannt
+                "hand_detected": bool,    # Hand Landmark erkannt
+                "face_detected": bool,    # SCRFD hat Face gefunden
+            }
+        """
+        # Throttle: nur jeden N-ten Frame loggen
+        self._log_skip_counter += 1
+        if self._log_skip_counter < self._LOG_SAMPLE_RATE:
+            return
+        self._log_skip_counter = 0
+
+        if not self._last_chosen:
+            self._last_chosen = list(self.slots)
+
+        entry = {
+            "ts": round(time.time(), 1),
+            "models": list(self._last_chosen),
+            "ctx": {
+                "face": self._last_context.get("face_detected", False),
+                "person": self._last_context.get("person_detected", False),
+                "unknown": self._last_context.get("unknown_person", False),
+                "occlusion": self._hand_occlusion,
+            },
+            "results": results,
+        }
+
+        self._history.append(entry)
+        self._decision_count += 1
+
+        # Alle _LEARN_EVERY Entscheidungen: lernen + speichern
+        if len(self._history) >= _LEARN_EVERY:
+            self._learn_from_history()
+
+    def _learn_from_history(self):
+        """Aus History lernen: Gewichte anpassen (max 10% pro Zyklus)."""
+        if not self._history:
+            return
+
+        # Pro Modell zaehlen: aktiv, nuetzlich
+        model_active = {m: 0 for m in self.ALL_MODELS}
+        model_useful = {m: 0 for m in self.ALL_MODELS}
+
+        for entry in self._history:
+            models = entry.get("models", [])
+            results = entry.get("results", {})
+            ctx = entry.get("ctx", {})
+
+            for m in models:
+                if m in model_active:
+                    model_active[m] += 1
+
+            # Nuetzlichkeit bewerten
+            if "scrfd" in models and results.get("face_detected", False):
+                model_useful["scrfd"] += 1
+            if "arcface" in models and results.get("face_identified", False):
+                model_useful["arcface"] += 1
+            if "yolov8m" in models and results.get("person_count", 0) > 0:
+                model_useful["yolov8m"] += 1
+            if "pose" in models and results.get("pose_useful", False):
+                model_useful["pose"] += 1
+            if "hand_landmark" in models and results.get("hand_detected", False):
+                model_useful["hand_landmark"] += 1
+
+        # Gewichtung anpassen
+        adjustments = {}
+        for model in self.ALL_MODELS:
+            active = model_active[model]
+            if active < 5:
+                continue  # Zu wenig Daten
+
+            useful = model_useful[model]
+            ratio = useful / active  # 0.0 - 1.0
+
+            # Ziel: 50% Nuetzlichkeit = neutral. Darueber = Score rauf, darunter = runter.
+            delta = (ratio - 0.5) * _MAX_ADJUST  # Max +/- 0.05 pro Zyklus
+            adjustments[model] = round(delta, 4)
+
+        # Auf bestehende Gewichte addieren (kumulativ, max +/- 0.3 gesamt)
+        for model, delta in adjustments.items():
+            current = self._learned_weights.get(model, 0.0)
+            new_val = max(-0.3, min(0.3, current + delta))
+            self._learned_weights[model] = round(new_val, 4)
+
+        _logger.info(
+            f"[LEARN] {len(self._history)} Entscheidungen analysiert. "
+            f"Active: {model_active}, Useful: {model_useful}, "
+            f"Adjustments: {adjustments}, Weights: {self._learned_weights}")
+
+        # Speichern
+        self._save_weights()
+        self._save_history()
+
+        # History zuruecksetzen
+        self._history = []
+
+    def _load_weights(self):
+        """Gelernte Gewichte aus perception_weights.json laden."""
+        if os.path.exists(_WEIGHTS_PATH):
+            try:
+                with open(_WEIGHTS_PATH, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                self._learned_weights = data.get("weights", {})
+                self._decision_count = data.get("total_decisions", 0)
+                _logger.info(f"[LEARN] Weights geladen: {self._learned_weights} "
+                             f"(nach {self._decision_count} Entscheidungen)")
+            except Exception as e:
+                _logger.warning(f"[LEARN] Weights laden fehlgeschlagen: {e}")
+
+    def _save_weights(self):
+        """Gelernte Gewichte in perception_weights.json speichern."""
+        try:
+            data = {
+                "version": 1,
+                "total_decisions": self._decision_count,
+                "weights": self._learned_weights,
+                "base_scores": dict(self.BASE_SCORES),
+                "effective_scores": {
+                    m: round(self.BASE_SCORES.get(m, 0) + self._learned_weights.get(m, 0), 4)
+                    for m in self.ALL_MODELS
+                },
+            }
+            os.makedirs(os.path.dirname(_WEIGHTS_PATH), exist_ok=True)
+            _tmp = _WEIGHTS_PATH + ".tmp"
+            with open(_tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+            os.replace(_tmp, _WEIGHTS_PATH)
+        except Exception as e:
+            _logger.warning(f"[LEARN] Weights speichern fehlgeschlagen: {e}")
+
+    def _save_history(self):
+        """History in perception_history.json speichern (letzte 200 Eintraege)."""
+        try:
+            existing = []
+            if os.path.exists(_HISTORY_PATH):
+                try:
+                    with open(_HISTORY_PATH, "r", encoding="utf-8") as f:
+                        existing = json.load(f)
+                except Exception:
+                    existing = []
+
+            # Neue Eintraege anhaengen, max 200 behalten
+            combined = existing + self._history
+            combined = combined[-200:]
+
+            os.makedirs(os.path.dirname(_HISTORY_PATH), exist_ok=True)
+            _tmp = _HISTORY_PATH + ".tmp"
+            with open(_tmp, "w", encoding="utf-8") as f:
+                json.dump(combined, f, indent=1, ensure_ascii=False)
+            os.replace(_tmp, _HISTORY_PATH)
+        except Exception as e:
+            _logger.warning(f"[LEARN] History speichern fehlgeschlagen: {e}")
+
+    def _check_utility(self, chosen_models: List[str], context: Dict) -> Dict[str, bool]:
+        """Check if chosen models were useful based on what was detected."""
+        utility = {}
+        face_detected = context.get("face_detected", False)
+        person_detected = context.get("person_detected", False)
+        unknown_person = context.get("unknown_person", False)
+
+        for model in chosen_models:
+            if model == "scrfd":
+                utility[model] = face_detected
+            elif model == "arcface":
+                # Nuetzlich wenn Face UND bekannte Person
+                utility[model] = face_detected and not unknown_person
+            elif model == "yolov8m":
+                utility[model] = person_detected
+            elif model == "pose":
+                utility[model] = person_detected
+            elif model == "hand_landmark":
+                # Nuetzlich wenn Person detected
+                utility[model] = person_detected
+            else:
+                utility[model] = False
+
+        return utility
+
+    def _log_decision(self, models: List[str], context: Dict, utility: Dict[str, bool]):
+        """Log decision to history."""
+        self._log_skip_counter += 1
+        if self._log_skip_counter < self._LOG_SAMPLE_RATE:
+            return  # Only log every Nth frame
+        self._log_skip_counter = 0
+
+        entry = {
+            "timestamp": time.time(),
+            "models": models,
+            "detected": {
+                "face": context.get("face_detected", False),
+                "person": context.get("person_detected", False),
+                "unknown": context.get("unknown_person", False),
+            },
+            "utility": utility,
+            "useful_count": sum(1 for u in utility.values() if u),
+        }
+        self._history.append(entry)
+        self._decision_count += 1
+
+        # Save every 20 entries
+        if len(self._history) >= 20:
+            self._save_history()
+            self._history = []
+
+        # Auto-adjust after 100 decisions
+        if self._decision_count % 100 == 0:
+            self._auto_adjust_weights()
+
+    def _auto_adjust_weights(self):
+        """Auto-adjust weights based on utility stats from last 100 decisions."""
+        try:
+            # Load full history
+            history = []
+            if os.path.exists(_HISTORY_PATH):
+                with open(_HISTORY_PATH, "r") as f:
+                    history = json.load(f)
+
+            # Take last 100 entries
+            recent = history[-100:]
+            if len(recent) < 50:
+                return  # Not enough data
+
+            # Calculate utility rate per model
+            stats = {m: {"used": 0, "useful": 0} for m in self.ALL_MODELS}
+            for entry in recent:
+                util = entry.get("utility", {})
+                for model, was_useful in util.items():
+                    if model in stats:
+                        stats[model]["used"] += 1
+                        if was_useful:
+                            stats[model]["useful"] += 1
+
+            # Adjust weights
+            MINIMUMS = {"scrfd": 0.5, "arcface": 0.4}
+            DEFAULT_MIN = 0.2
+            adjustments = {}
+
+            for model, data in stats.items():
+                if data["used"] < 10:
+                    continue  # Not enough samples
+
+                rate = data["useful"] / data["used"]
+                base = self.BASE_SCORES.get(model, 0.3)
+                current_adj = self._learned_weights.get(model, 0.0)
+                new_adj = current_adj
+
+                if rate > 0.7:  # >70% useful
+                    new_adj = min(current_adj + 0.05, 0.10)  # Max +10%
+                elif rate < 0.4:  # <40% useful
+                    new_adj = max(current_adj - 0.05, -0.10)  # Max -10%
+
+                # Apply minimum
+                min_score = MINIMUMS.get(model, DEFAULT_MIN)
+                effective = base + new_adj
+                if effective < min_score:
+                    new_adj = min_score - base
+
+                if abs(new_adj - current_adj) > 0.001:
+                    adjustments[model] = new_adj
+
+            # Apply adjustments
+            if adjustments:
+                self._learned_weights.update(adjustments)
+                self._save_weights()
+                _logger.info(f"[LEARN] Auto-adjust: {adjustments} (nach {self._decision_count} Entscheidungen)")
+
+        except Exception as e:
+            _logger.warning(f"[LEARN] Auto-adjust failed: {e}")

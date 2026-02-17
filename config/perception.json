@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "face": {
+    "confidence_threshold": 0.5733727810650888,
+    "nms_threshold": 0.5682926829268292,
+    "recognition_threshold": 0.5855421686746988,
+    "min_size": 0.1547027027027027,
+    "max_size": 0.673076923076923,
+    "position_smoothing": 0.6046242774566474,
+    "landmarks_enabled": true,
+    "head_pose_enabled": true
+  },
+  "hand": {
+    "confidence_threshold": 0.36171693735498844,
+    "position_smoothing": 0.49724137931034484,
+    "min_crop_size": 129,
+    "max_crop_size": 290,
+    "max_hands": 2,
+    "landmarks_enabled": false,
+    "occlusion_timeout": 8.0,
+    "occlusion_streak": 4,
+    "occlusion_recency": 3.4103260869565215
+  },
+  "pose": {
+    "confidence_threshold": 0.10185614849187935,
+    "nms_threshold": 0.14796573875802999,
+    "position_smoothing": 0.20758620689655172,
+    "motion_sensitivity": 0.1893617021276596,
+    "max_detections": 2,
+    "landmarks_enabled": true
+  },
+  "global": {
+    "min_confidence": 0.4166666666666667,
+    "position_smoothing": 0.1,
+    "max_tracked_objects": 2,
+    "min_bbox_area": 0.1491256830601093,
+    "filter_jitter": true,
+    "filter_small_objects": true,
+    "filter_outliers": true
+  },
+  "npu": {
+    "max_fps": 16,
+    "power_mode": "performance",
+    "perception_enabled": true,
+    "swap_interval": 21.11392405063291,
+    "swap_hysteresis": 0.3277142857142857,
+    "base_scrfd": 0.6289308176100629,
+    "base_arcface": 0.7692307692307693,
+    "base_yolov8m": 0.7321428571428571,
+    "base_pose": 0.6069364161849711,
+    "base_hand": 0.5497076023391813
+  },
+  "debug": {
+    "show_bboxes": true,
+    "show_landmarks": true,
+    "show_names": true,
+    "show_fps": true,
+    "show_confidence": true,
+    "show_head_pose": true,
+    "show_skeleton": true,
+    "show_hand_crop": true,
+    "display_flip_h": false,
+    "display_flip_v": false,
+    "display_rotation": 90
+  }
+}
