@@ -698,7 +698,7 @@ class MolochService:
                         face_boxes = list(zip(boxes, scores, landmarks))
                         face_detected = True
                         # Head Pose fuer erstes Gesicht (CPU, ~5ms)
-                        _head_pose = estimate_head_pose(landmarks[0], frame_w, frame_h)
+                        _head_pose = estimate_head_pose(landmarks[0], fw, fh)
                         # Face hat PRIORITAET fuer Tracker
                         if self._autonomous_mode and self._tracker:
                             try:
