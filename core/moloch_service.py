@@ -282,6 +282,10 @@ class MolochService:
         self._annotated_frame = None
         self._annotated_lock = threading.Lock()
 
+        # Frozen Frame Watchdog
+        self._last_frame_write = time.time()
+        self._frozen_restart_count = 0
+
         # Model enable flags (plain bools, NOT tk.BooleanVar)
         self.scrfd_active = False
         self.arcface_active = False
@@ -354,6 +358,7 @@ class MolochService:
                 "rtsp_transport;udp|fflags;nobuffer|flags;low_delay"
             )
             cap = cv2.VideoCapture(RTSP_URL, cv2.CAP_FFMPEG)
+            self._rtsp_cap = cap  # Fuer Watchdog-Zugriff
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
             if not cap.isOpened():
@@ -1520,8 +1525,50 @@ class MolochService:
 
         self._notify("cam_status", {
             "mode": mode, "ctrl_text": ctrl_text,
-            "smart": smart, "onvif": onvif_str, "ptz": ptz_text
+            "smart": smart, "onvif": onvif_str, "ptz": ptz_text,
+            "frame_age": round(time.time() - self._last_frame_write, 1),
         })
+
+    # =========================================================================
+    # Frozen Frame Watchdog
+    # =========================================================================
+
+    def _frozen_frame_watchdog(self):
+        """Erkennt eingefrorene Frames und startet RTSP Stream neu."""
+        while self.running:
+            try:
+                time.sleep(10)  # Alle 10 Sekunden pruefen
+
+                frame_age = time.time() - self._last_frame_write
+
+                if frame_age > 30:  # Frame aelter als 30 Sekunden
+                    self._frozen_restart_count += 1
+                    logger.warning(
+                        f"[WATCHDOG] Frame eingefroren seit {frame_age:.0f}s! "
+                        f"Restart #{self._frozen_restart_count}"
+                    )
+
+                    # RTSP Stream neu verbinden
+                    try:
+                        if hasattr(self, '_rtsp_cap') and self._rtsp_cap is not None:
+                            try:
+                                self._rtsp_cap.release()
+                            except Exception:
+                                pass
+                        self._start_rtsp()
+                        logger.info("[WATCHDOG] RTSP Stream neu gestartet")
+                        self._last_frame_write = time.time()
+                    except Exception as e:
+                        logger.error(f"[WATCHDOG] RTSP Reconnect Error: {e}")
+
+                    # Max 5 Versuche, danach loggen und warten
+                    if self._frozen_restart_count >= 5:
+                        logger.error("[WATCHDOG] 5 Reconnects fehlgeschlagen, warte 60s")
+                        time.sleep(60)
+                        self._frozen_restart_count = 0
+
+            except Exception as e:
+                logger.error(f"[WATCHDOG] Error: {e}")
 
     # =========================================================================
     # Autonomous Mode
@@ -1799,6 +1846,9 @@ class MolochService:
         # Panel IPC Command Polling
         threading.Thread(target=self._poll_panel_cmds, daemon=True, name="PanelCmdPoll").start()
 
+        # Frozen Frame Watchdog
+        threading.Thread(target=self._frozen_frame_watchdog, daemon=True, name="FrozenWatchdog").start()
+
         if not blocking:
             return
 
@@ -1985,6 +2035,7 @@ class MolochService:
 
     def _write_shm(self, frame):
         """Write frame + status to /dev/shm for Panel IPC."""
+        self._last_frame_write = time.time()
         try:
             MolochService._shm_seq = (MolochService._shm_seq + 1) & 0xFFFFFFFF
             h, w = frame.shape[:2]
@@ -2010,6 +2061,8 @@ class MolochService:
                 "moloch_has_control": self._moloch_has_control,
                 "tentakel_enabled": getattr(self, '_tentakel_enabled', False),
                 "daily_learner_enabled": self._daily_learner.enabled if self._daily_learner else False,
+                "frame_age": round(time.time() - self._last_frame_write, 1),
+                "frozen_restarts": self._frozen_restart_count,
                 "fps": {k: round(v, 1) for k, v in self._fps.items()},
                 "thresholds": {
                     "scrfd_conf": self.scrfd_conf_val,

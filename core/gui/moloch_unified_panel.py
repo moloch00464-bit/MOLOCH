@@ -1380,11 +1380,20 @@ class MolochUnifiedPanel:
         ctrl = data.get("ctrl_text", "")
         smart = data.get("smart", "--")
         ptz = data.get("ptz", "--")
+        frame_age = data.get("frame_age", 0)
 
         colors = {"moloch": "#00ff88", "tentakel": "#00d4ff",
                   "manual": "#aaaaaa", "offline": "#ff4444"}
-        self.mode_label.config(text=ctrl or mode.upper(),
-                               fg=colors.get(mode, "#888888"))
+
+        # Frozen Frame Indikator
+        if frame_age > 30:
+            self.mode_label.config(text="FROZEN", fg="#ff0000")
+        elif frame_age > 10:
+            self.mode_label.config(text=ctrl or mode.upper(),
+                                   fg="#ffaa00")
+        else:
+            self.mode_label.config(text=ctrl or mode.upper(),
+                                   fg=colors.get(mode, "#888888"))
 
         st_color = "#00ff88" if smart == "AN" else "#ff4444"
         self.st_label.config(text=f"ST: {smart}", fg=st_color)
