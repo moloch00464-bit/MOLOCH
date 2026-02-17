@@ -2164,6 +2164,19 @@ class MolochService:
                 self._saved_ptz_speed = float(_cam.get('ptz_speed', 15.0))
                 self._saved_led = bool(_cam.get('led_enabled', False))
                 self._saved_ir = str(_cam.get('ir_mode', 'Aus'))
+            _th = cmd.get('thresholds')
+            if _th:
+                self.scrfd_conf_val = float(_th.get('scrfd_conf', self.scrfd_conf_val))
+                self.scrfd_nms_val = float(_th.get('scrfd_nms', self.scrfd_nms_val))
+                self.arcface_thresh_val = float(_th.get('arcface_thresh', self.arcface_thresh_val))
+                self.yolo_conf_val = float(_th.get('yolo_conf', self.yolo_conf_val))
+                self.pose_conf_val = float(_th.get('pose_conf', self.pose_conf_val))
+                self.pose_nms_val = float(_th.get('pose_nms', self.pose_nms_val))
+            _ho = cmd.get('hand_occlusion')
+            if _ho and self._perception:
+                self._perception._HAND_TIMEOUT = float(_ho.get('timeout', 5.0))
+                self._perception._MIN_FACE_STREAK = int(_ho.get('streak', 3))
+                self._perception._FACE_RECENCY = float(_ho.get('recency', 2.0))
             self._save_settings()
         elif action == 'toggle_daily_learner':
             if self._daily_learner:

@@ -69,6 +69,7 @@ if not os.environ.get("EWELINK_APP_ID_1"):
 NPU_VOICE_REQUEST = "/tmp/moloch_npu_voice_request"
 NPU_VISION_PAUSED = "/tmp/moloch_npu_vision_paused"
 FACE_STATE_PATH = "/tmp/moloch_face_state.json"
+SETTINGS_PATH = os.path.join(os.path.expanduser("~/moloch"), "config", "settings.json")
 RESPEAKER_NODE = "alsa_input.usb-Seeed_Studio_ReSpeaker_Lite_0000000001-00.analog-stereo"
 
 
@@ -461,6 +462,9 @@ class MolochUnifiedPanel:
 
         # --- Build Layout ---
         self._build_layout()
+
+        # --- Load saved settings from config/settings.json ---
+        self._load_saved_settings()
 
         # --- Start Service Connection ---
         self.root.after(100, self._init_service)
@@ -1167,10 +1171,66 @@ class MolochUnifiedPanel:
                 "led_enabled": self.led_var.get(),
                 "ir_mode": self.ir_var.get(),
             },
+            "thresholds": {
+                "scrfd_conf": self.scrfd_conf_var.get(),
+                "scrfd_nms": self.scrfd_nms_var.get(),
+                "arcface_thresh": self.arcface_thresh_var.get(),
+                "yolo_conf": self.yolo_conf_var.get(),
+                "pose_conf": self.pose_conf_var.get(),
+                "pose_nms": self.pose_nms_var.get(),
+            },
+            "hand_occlusion": {
+                "timeout": self.hand_timeout_var.get(),
+                "streak": int(self.hand_streak_var.get()),
+                "recency": self.hand_recency_var.get(),
+            },
         })
         # Visuelles Feedback
         self._save_btn.config(text="SAVED!", bg="#006622")
         self.after(2000, lambda: self._save_btn.config(text="SAVE SETTINGS", bg="#00aa44"))
+
+    def _load_saved_settings(self):
+        """Lade Settings aus config/settings.json."""
+        if not os.path.exists(SETTINGS_PATH):
+            return
+        try:
+            with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+
+            # Audio
+            au = cfg.get("audio", {})
+            if au:
+                self._mic_gain_var.set(float(au.get("mic_gain", 1.0)))
+                self._agc_var.set(bool(au.get("agc_enabled", False)))
+                self._noise_gate_var.set(float(au.get("noise_gate_db", -60.0)))
+
+            # Camera
+            cam = cfg.get("camera", {})
+            if cam:
+                self.speed_var.set(float(cam.get("ptz_speed", 15.0)))
+                self.led_var.set(bool(cam.get("led_enabled", False)))
+                self.ir_var.set(str(cam.get("ir_mode", "Aus")))
+
+            # Thresholds
+            th = cfg.get("thresholds", {})
+            if th:
+                self.scrfd_conf_var.set(float(th.get("scrfd_conf", 0.40)))
+                self.scrfd_nms_var.set(float(th.get("scrfd_nms", 0.40)))
+                self.arcface_thresh_var.set(float(th.get("arcface_thresh", 0.60)))
+                self.yolo_conf_var.set(float(th.get("yolo_conf", 0.50)))
+                self.pose_conf_var.set(float(th.get("pose_conf", 0.50)))
+                self.pose_nms_var.set(float(th.get("pose_nms", 0.70)))
+
+            # Hand-Occlusion
+            ho = cfg.get("hand_occlusion", {})
+            if ho:
+                self.hand_timeout_var.set(float(ho.get("timeout", 5.0)))
+                self.hand_streak_var.set(float(ho.get("streak", 3.0)))
+                self.hand_recency_var.set(float(ho.get("recency", 2.0)))
+
+            logger.info(f"[SETTINGS] Panel-Settings geladen aus {SETTINGS_PATH}")
+        except Exception as e:
+            logger.warning(f"[SETTINGS] Laden fehlgeschlagen: {e}")
 
     def _on_hand_toggle(self):
         """Toggle Hand-Occlusion Erkennung (via IPC bei Proxy)."""
