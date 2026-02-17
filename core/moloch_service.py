@@ -252,6 +252,7 @@ class MolochService:
 
         # Guardian/Tentakel Mode
         self._guardian_mode = True
+        self._tentakel_enabled = True  # Tentakel-Modus aktiv (Status-Flag)
         self._moloch_has_control = False
         self._takeover_reason = ""
         self._takeover_time = 0
@@ -1934,6 +1935,7 @@ class MolochService:
             # -> MANUELL: Kamera-Kontrolle sperren
             logger.info("[MODUS] Wechsel zu MANUELL - Kamera-Kontrolle gesperrt")
             self._manual_mode = True
+            self._tentakel_enabled = False
 
             # Tracker stoppen (falls aktiv)
             if self._autonomous_mode:
@@ -1962,6 +1964,7 @@ class MolochService:
             # -> AUTONOM: Kamera-Kontrolle freigeben
             logger.info("[MODUS] Wechsel zu AUTONOM - Kamera-Kontrolle freigegeben")
             self._manual_mode = False
+            self._tentakel_enabled = True
 
             # Smart Tracking AN (Tentakel-Default)
             def start_cam_control():
@@ -2060,7 +2063,7 @@ class MolochService:
                 "autonomous_mode": self._autonomous_mode,
                 "manual_mode": self._manual_mode,
                 "moloch_has_control": self._moloch_has_control,
-                "tentakel_enabled": getattr(self, '_tentakel_enabled', False),
+                "tentakel_enabled": self._tentakel_enabled,
                 "daily_learner_enabled": self._daily_learner.enabled if self._daily_learner else False,
                 "frame_age": round(time.time() - self._last_frame_write, 1),
                 "frozen_restarts": self._frozen_restart_count,
@@ -2127,6 +2130,7 @@ class MolochService:
             self._toggle_smart_tracking()
         elif action == 'toggle_autonomous':
             self.toggle_autonomous_manual()
+            logger.info(f"[IPC] autonomous={self._autonomous_mode} tentakel={self._tentakel_enabled}")
         elif action == 'reload_face_db':
             self._reload_face_db()
         elif action == 'set_threshold':
