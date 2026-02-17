@@ -1290,13 +1290,18 @@ class MolochUnifiedPanel:
         if not self.service:
             return
 
+        # Sofortiges visuelles Feedback
+        cur = self.daily_btn.cget("bg")
+        if cur == "#006622":
+            self.daily_btn.config(bg="#1a1a3e", text="ALLTAG")
+        else:
+            self.daily_btn.config(bg="#006622", text="ALLTAG AN")
+
         if isinstance(self.service, ServiceProxy):
             self.service._send_cmd({"action": "toggle_daily_learner"})
         else:
             if hasattr(self.service, '_daily_learner') and self.service._daily_learner:
                 self.service._daily_learner.toggle()
-            else:
-                return
 
     def _set_status_led(self):
         """Set camera status LED via cloud."""
