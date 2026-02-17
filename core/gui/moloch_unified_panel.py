@@ -343,6 +343,16 @@ class ServiceProxy:
                     pass
         self._npu_paused = s.get('npu_paused', False)
         self._autonomous_mode = s.get('autonomous_mode', False)
+        # Autonomie-Button aus manual_mode synchronisieren
+        _is_manual = s.get('manual_mode', False)
+        _prev_manual = getattr(self, '_manual_mode', None)
+        self._manual_mode = _is_manual
+        if _is_manual != _prev_manual:
+            for cb in self._observers:
+                try:
+                    cb("auto_mode", {"state": "manual" if _is_manual else "autonomous"})
+                except Exception:
+                    pass
         self._moloch_has_control = s.get('moloch_has_control', False)
         self._tentakel_enabled = s.get('tentakel_enabled', False)
         self._daily_learner_enabled = s.get('daily_learner_enabled', False)
@@ -575,11 +585,7 @@ class MolochUnifiedPanel:
         # ST + Auto + Kalibr buttons
         brow = ttk.Frame(extras)
         brow.pack(fill=tk.X, pady=1)
-        self.st_btn = tk.Button(brow, text="ST", bg="#1a1a3e", fg="white", width=5,
-                                font=("Helvetica", 11, "bold"),
-                                command=self._toggle_smart_tracking)
-        self.st_btn.pack(side=tk.LEFT, padx=1)
-        self.auto_btn = tk.Button(brow, text="MANUELL", bg="#1a1a3e", fg="white", width=9,
+        self.auto_btn = tk.Button(brow, text="AUTONOM", bg="#006622", fg="white", width=9,
                                   font=("Helvetica", 11, "bold"),
                                   command=self._toggle_autonomous)
         self.auto_btn.pack(side=tk.LEFT, padx=1)
@@ -1366,9 +1372,10 @@ class MolochUnifiedPanel:
                 self.ir_var.set(nv_map.get(params["nightVision"], "Aus"))
             if "smartTraceEnable" in params:
                 st_on = bool(params["smartTraceEnable"])
-                self.st_btn.config(
-                    text=f"ST:{'AN' if st_on else 'AUS'}",
-                    bg="#884400" if st_on else "#2a2a4e")
+                if hasattr(self, 'st_btn'):
+                    self.st_btn.config(
+                        text=f"ST:{'AN' if st_on else 'AUS'}",
+                        bg="#884400" if st_on else "#2a2a4e")
             if "sledOnline" in params:
                 self.led_var.set(params["sledOnline"] == "on")
         except Exception as e:
@@ -1397,26 +1404,22 @@ class MolochUnifiedPanel:
 
         st_color = "#00ff88" if smart == "AN" else "#ff4444"
         self.st_label.config(text=f"ST: {smart}", fg=st_color)
-        self.st_btn.config(text=f"ST:{'AN' if smart == 'AN' else 'AUS'}",
-                           bg="#884400" if smart == "AN" else "#2a2a4e")
 
         self.ptz_label.config(text=ptz)
 
     def _update_auto_mode(self, data):
         """Update AUTONOM/MANUELL button from auto_mode event."""
         state = data.get("state", "")
-        if state == "active":
+        if state in ("active", "autonomous"):
             self.auto_btn.config(text="AUTONOM", bg="#006622")
-        elif state == "disabled" or state == "manual":
-            self.auto_btn.config(text="MANUELL", bg="#1a1a3e")
+        elif state in ("disabled", "manual"):
+            self.auto_btn.config(text="MANUELL", bg="#aa0000")
         elif state == "starting":
             self.auto_btn.config(text="START...", bg="#884400")
 
     def _update_st_display(self, data):
         """Update Smart Tracking display from smart_tracking event."""
         on = data.get("on", False)
-        self.st_btn.config(text=f"ST:{'AN' if on else 'AUS'}",
-                           bg="#884400" if on else "#2a2a4e")
         self.st_label.config(text=f"ST: {'AN' if on else 'AUS'}",
                              fg="#00ff88" if on else "#ff4444")
 

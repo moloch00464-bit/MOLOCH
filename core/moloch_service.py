@@ -2058,6 +2058,7 @@ class MolochService:
                 "npu_paused": self._npu_paused,
                 "active_models": list(self._active_ctx.keys()),
                 "autonomous_mode": self._autonomous_mode,
+                "manual_mode": self._manual_mode,
                 "moloch_has_control": self._moloch_has_control,
                 "tentakel_enabled": getattr(self, '_tentakel_enabled', False),
                 "daily_learner_enabled": self._daily_learner.enabled if self._daily_learner else False,
