@@ -345,6 +345,7 @@ class ServiceProxy:
         self._autonomous_mode = s.get('autonomous_mode', False)
         self._moloch_has_control = s.get('moloch_has_control', False)
         self._tentakel_enabled = s.get('tentakel_enabled', False)
+        self._daily_learner_enabled = s.get('daily_learner_enabled', False)
 
         self._active_ctx = {m: True for m in s.get('active_models', [])}
 
@@ -1132,17 +1133,8 @@ class MolochUnifiedPanel:
         # Daily Learner Button Update
         if hasattr(self, "daily_btn"):
             try:
-                s = {}
-                if hasattr(self.service, "_remote_mode") and self.service._remote_mode:
-                    import os, json as _j
-                    if os.path.exists(self.SHM_STATUS):
-                        with open(self.SHM_STATUS, "r") as _f:
-                            s = _j.load(_f)
-                else:
-                    if hasattr(self.service, "_daily_learner") and self.service._daily_learner:
-                        s = {"daily_learner_enabled": self.service._daily_learner.enabled}
-                dl_enabled = s.get("daily_learner_enabled", False)
-                if dl_enabled:
+                dl_on = getattr(self.service, '_daily_learner_enabled', False)
+                if dl_on:
                     self.daily_btn.config(bg="#006622", text="ALLTAG AN")
                 else:
                     self.daily_btn.config(bg="#1a1a3e", text="ALLTAG")

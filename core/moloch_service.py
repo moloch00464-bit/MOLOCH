@@ -216,6 +216,15 @@ class MolochService:
         except Exception as e:
             logger.warning(f"[INIT] Perception Engine nicht verfuegbar: {e}")
 
+        # Daily Learner
+        self._daily_learner = None
+        try:
+            from core.daily_learner import get_daily_learner
+            self._daily_learner = get_daily_learner()
+            logger.info("[INIT] DailyLearner bereit")
+        except Exception as e:
+            logger.warning(f"[INIT] DailyLearner nicht verfuegbar: {e}")
+
         # Persistent Model Contexts
         self._active_ctx = {}
         self._ctx_lock = threading.Lock()
@@ -2000,6 +2009,7 @@ class MolochService:
                 "autonomous_mode": self._autonomous_mode,
                 "moloch_has_control": self._moloch_has_control,
                 "tentakel_enabled": getattr(self, '_tentakel_enabled', False),
+                "daily_learner_enabled": self._daily_learner.enabled if self._daily_learner else False,
                 "fps": {k: round(v, 1) for k, v in self._fps.items()},
                 "thresholds": {
                     "scrfd_conf": self.scrfd_conf_val,
@@ -2097,7 +2107,10 @@ class MolochService:
                 self._saved_led = bool(_cam.get('led_enabled', False))
                 self._saved_ir = str(_cam.get('ir_mode', 'Aus'))
             self._save_settings()
-
+        elif action == 'toggle_daily_learner':
+            if self._daily_learner:
+                enabled = self._daily_learner.toggle()
+                logger.info(f"[IPC] DailyLearner: {'AN' if enabled else 'AUS'}")
 
     # ----------------------------------------------------------------
     # Settings Persistence
