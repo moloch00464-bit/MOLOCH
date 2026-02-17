@@ -585,6 +585,10 @@ class MolochUnifiedPanel:
         tk.Button(brow, text="CAL", bg="#ff8800", fg="white", width=5,
                   font=("Helvetica", 11, "bold"),
                   command=self._trigger_calibration).pack(side=tk.LEFT, padx=1)
+        self.daily_btn = tk.Button(brow, text="ALLTAG", bg="#1a1a3e", fg="white", width=7,
+                                   font=("Helvetica", 11, "bold"),
+                                   command=self._toggle_daily_learner)
+        self.daily_btn.pack(side=tk.LEFT, padx=1)
 
         # --- eWeLink controls (right) ---
         ew = ttk.Frame(frame)
@@ -1125,6 +1129,26 @@ class MolochUnifiedPanel:
         except Exception:
             pass
 
+        # Daily Learner Button Update
+        if hasattr(self, "daily_btn"):
+            try:
+                s = {}
+                if hasattr(self.service, "_remote_mode") and self.service._remote_mode:
+                    import os, json as _j
+                    if os.path.exists(self.SHM_STATUS):
+                        with open(self.SHM_STATUS, "r") as _f:
+                            s = _j.load(_f)
+                else:
+                    if hasattr(self.service, "_daily_learner") and self.service._daily_learner:
+                        s = {"daily_learner_enabled": self.service._daily_learner.enabled}
+                dl_enabled = s.get("daily_learner_enabled", False)
+                if dl_enabled:
+                    self.daily_btn.config(bg="#006622", text="ALLTAG AN")
+                else:
+                    self.daily_btn.config(bg="#1a1a3e", text="ALLTAG")
+            except Exception:
+                pass
+
         self.root.after(1000, self._update_npu_status)
 
     # =========================================================================
@@ -1268,6 +1292,19 @@ class MolochUnifiedPanel:
         """Toggle AUTONOM/MANUELL via service."""
         if self.service:
             self.service.toggle_autonomous_manual()
+
+    def _toggle_daily_learner(self):
+        """Toggle Daily Learner (Alltag-Modus) via IPC."""
+        if not self.service:
+            return
+
+        if isinstance(self.service, ServiceProxy):
+            self.service._send_cmd({"action": "toggle_daily_learner"})
+        else:
+            if hasattr(self.service, '_daily_learner') and self.service._daily_learner:
+                self.service._daily_learner.toggle()
+            else:
+                return
 
     def _set_status_led(self):
         """Set camera status LED via cloud."""
