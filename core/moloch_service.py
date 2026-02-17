@@ -277,6 +277,17 @@ class MolochService:
         self._waiting_for_first_detection = False
         self._first_detection_event = threading.Event()
 
+        # Home Position (fuer Release -> Home -> ST)
+        self._home_position = {"pan": 0.0, "tilt": -15.0}
+        try:
+            _home_cfg = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config", "camera_home.json")
+            if os.path.exists(_home_cfg):
+                with open(_home_cfg) as f:
+                    self._home_position = json.load(f)
+                logger.info(f"[INIT] Home Position geladen: {self._home_position}")
+        except Exception as e:
+            logger.debug(f"[INIT] camera_home.json nicht geladen: {e}")
+
         # Frame Locks
         self._latest_frame = None
         self._frame_lock = threading.Lock()
@@ -1330,6 +1341,19 @@ class MolochService:
             self._first_detection_event.set()
 
             logger.info("[TENTAKEL] MOLOCH gibt Kamera zurueck an Smart Tracking")
+
+            # VOR dem Release: Kamera auf Home Position fahren
+            try:
+                from core.hardware.camera import get_camera_controller
+                cam = get_camera_controller()
+                if cam.is_connected:
+                    home_pan = self._home_position.get("pan", 0.0)
+                    home_tilt = self._home_position.get("tilt", -15.0)
+                    cam.move_absolute(home_pan, home_tilt, speed=15.0)
+                    logger.info(f"[RELEASE] Home Position: pan={home_pan}, tilt={home_tilt}")
+            except Exception as e:
+                logger.debug(f"[RELEASE] Home move failed: {e}")
+
             self._moloch_has_control = False
             self._takeover_reason = ""
             self._search_start_time = 0
