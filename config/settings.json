@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "thresholds": {
+    "scrfd_conf": 0.4,
+    "scrfd_nms": 0.4,
+    "arcface_thresh": 0.6,
+    "yolo_conf": 0.5,
+    "pose_conf": 0.5,
+    "pose_nms": 0.7
+  },
+  "hand_occlusion": {
+    "timeout": 5.0,
+    "streak": 3,
+    "recency": 2.0
+  },
+  "audio": {
+    "mic_gain": 1.0,
+    "agc_enabled": false,
+    "noise_gate_db": -60.0
+  },
+  "camera": {
+    "ptz_speed": 15.0,
+    "led_enabled": false,
+    "ir_mode": "Aus"
+  }
+}

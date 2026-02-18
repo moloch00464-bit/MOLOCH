@@ -42,9 +42,9 @@ sys.path.insert(0, os.path.expanduser("~/moloch"))
 
 from hailo_platform import HEF, VDevice, FormatType
 from core.perception.hailo_postprocess import (
-    decode_scrfd, decode_yolov8_nms, decode_yolov8_pose,
+    decode_scrfd, decode_yolov8_nms,
     normalize_arcface, match_face,
-    draw_faces, draw_name, draw_persons, draw_poses, draw_hands, enforce_draw_priority,
+    draw_faces, draw_name, draw_persons, draw_hands, enforce_draw_priority,
     decode_hand_landmark, draw_hand_landmarks,
     estimate_head_pose,
 )
@@ -69,7 +69,6 @@ MODEL_PATHS = {
     "scrfd": f"{MODEL_DIR}/scrfd_10g.hef",
     "arcface": f"{MODEL_DIR}/arcface_mobilefacenet.hef",
     "yolov8m": f"{MODEL_DIR}/yolov8m_h10.hef",
-    "pose": f"{MODEL_DIR}/yolov8s_pose_h10.hef",
     "hand_landmark": f"{MODEL_DIR}/hand_landmark_lite.hef",
 }
 
@@ -297,12 +296,15 @@ class MolochService:
         # Frozen Frame Watchdog
         self._last_frame_write = time.time()
         self._frozen_restart_count = 0
+        self._rtsp_frame_hash = None
+        self._rtsp_identical_count = 0
+        self._rtsp_stop_reader = threading.Event()
+        self._rtsp_thread = None
 
         # Model enable flags (plain bools, NOT tk.BooleanVar)
         self.scrfd_active = False
         self.arcface_active = False
         self.yolo_active = False
-        self.pose_active = False
         self.hand_active = False
 
         # Watchdog: Anti-Oszillation Swap-Log
@@ -316,14 +318,12 @@ class MolochService:
         self.scrfd_nms_val = 0.40
         self.arcface_thresh_val = 0.60
         self.yolo_conf_val = 0.50
-        self.pose_conf_val = 0.50
-        self.pose_nms_val = 0.70
 
         # Settings aus config/settings.json laden (ueberschreibt Defaults)
         self._load_settings()
 
         # FPS Tracking
-        self._fps = {"scrfd": 0, "arcface": 0, "yolov8m": 0, "pose": 0, "hand_landmark": 0, "total": 0}
+        self._fps = {"scrfd": 0, "arcface": 0, "yolov8m": 0, "hand_landmark": 0, "total": 0}
         self._fps_lock = threading.Lock()
 
         # Smart Tracking State
@@ -364,35 +364,122 @@ class MolochService:
     # =========================================================================
 
     def _start_rtsp(self):
-        """Starte RTSP Background Reader."""
-        def rtsp_reader():
+        """Starte RTSP Background Reader (mit Frozen-Frame-Detection + Auto-Reconnect)."""
+        # Alten Reader-Thread SAUBER beenden
+        if hasattr(self, '_rtsp_stop_reader'):
+            self._rtsp_stop_reader.set()
+
+        # Auf alten Thread warten (max 5s)
+        if hasattr(self, '_rtsp_thread') and self._rtsp_thread is not None:
+            self._rtsp_thread.join(timeout=5)
+            if self._rtsp_thread.is_alive():
+                logger.warning("[RTSP] Alter Reader-Thread lebt noch nach 5s join")
+            self._rtsp_thread = None
+
+        # Alten Cap freigeben
+        if hasattr(self, '_rtsp_cap') and self._rtsp_cap is not None:
+            try:
+                self._rtsp_cap.release()
+            except Exception:
+                pass
+            self._rtsp_cap = None
+
+        # Frische State-Variablen
+        self._rtsp_stop_reader = threading.Event()
+        self._rtsp_frame_hash = None
+        self._rtsp_identical_count = 0
+        stop_event = self._rtsp_stop_reader
+
+        def _rtsp_connect():
+            """Neuen RTSP VideoCapture erstellen."""
             os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
                 "rtsp_transport;udp|fflags;nobuffer|flags;low_delay"
             )
             cap = cv2.VideoCapture(RTSP_URL, cv2.CAP_FFMPEG)
-            self._rtsp_cap = cap  # Fuer Watchdog-Zugriff
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            return cap
+
+        def rtsp_reader():
+            cap = _rtsp_connect()
+            self._rtsp_cap = cap
 
             if not cap.isOpened():
                 self._update_status(f"RTSP FEHLER: {RTSP_URL}")
                 return
 
             self._update_status("RTSP aktiv")
+            self._last_frame_write = time.time()
+            identical_count = 0
+            prev_hash = None
 
-            while self.running:
+            while self.running and not stop_event.is_set():
                 grabbed = cap.grab()
                 if grabbed:
                     ret, frame = cap.retrieve()
                     if ret and frame is not None:
                         frame = cv2.resize(frame, (self.PREVIEW_W, self.PREVIEW_H))
+
+                        # Frozen Frame Detection via Hash (jeden 20. Pixel samplen)
+                        frame_hash = hash(frame[::20, ::20].tobytes())
+                        if frame_hash == prev_hash:
+                            identical_count += 1
+                            if identical_count >= 10:
+                                self._frozen_restart_count += 1
+                                logger.warning(
+                                    f"[WATCHDOG] RTSP reconnect — "
+                                    f"{identical_count} identical frames detected"
+                                )
+                                cap.release()
+                                if stop_event.wait(2):
+                                    break
+                                cap = _rtsp_connect()
+                                self._rtsp_cap = cap
+                                identical_count = 0
+                                prev_hash = None
+                                if cap.isOpened():
+                                    logger.info("[RTSP] Stream wiederhergestellt (frozen-detect)")
+                                    self._last_frame_write = time.time()
+                                else:
+                                    logger.warning("[RTSP] Reconnect fehlgeschlagen, retry...")
+                                continue
+                        else:
+                            prev_hash = frame_hash
+                            identical_count = 0
+
                         with self._frame_lock:
                             self._latest_frame = frame
+                        self._last_frame_write = time.time()
+                    else:
+                        if stop_event.wait(0.05):
+                            break
                 else:
-                    time.sleep(0.1)
+                    # grab() fehlgeschlagen - Stream offline
+                    self._frozen_restart_count += 1
+                    logger.warning(
+                        f"[RTSP] grab() fehlgeschlagen - Reconnect "
+                        f"#{self._frozen_restart_count} in 2s..."
+                    )
+                    cap.release()
+                    if stop_event.wait(2):
+                        break
+                    cap = _rtsp_connect()
+                    self._rtsp_cap = cap
+                    identical_count = 0
+                    prev_hash = None
+                    if cap.isOpened():
+                        logger.info("[RTSP] Stream wiederhergestellt (grab-fail)")
+                        self._last_frame_write = time.time()
+                    else:
+                        logger.warning("[RTSP] Reconnect fehlgeschlagen, retry in 5s...")
+                        if stop_event.wait(5):
+                            break
 
             cap.release()
+            logger.info("[RTSP] Reader-Thread beendet")
 
-        threading.Thread(target=rtsp_reader, daemon=True, name="RTSPReader").start()
+        t = threading.Thread(target=rtsp_reader, daemon=True, name="RTSPReader")
+        t.start()
+        self._rtsp_thread = t
 
     # =========================================================================
     # NPU Pipeline
@@ -626,7 +713,7 @@ class MolochService:
 
             # Kein Modell konfiguriert ODER Inference pausiert -> Raw-Frame
             any_active = bool(self._active_ctx) and (
-                self.scrfd_active or self.yolo_active or self.pose_active or self.hand_active)
+                self.scrfd_active or self.yolo_active or self.hand_active)
             if not any_active:
                 # Perception tick auch ohne aktive Modelle (forced/initial swap)
                 if self._perception:
@@ -655,7 +742,7 @@ class MolochService:
                             self._swap_log.append(time.time())
                             self._notify("model_toggle", {
                                 "scrfd": self.scrfd_active, "arcface": self.arcface_active,
-                                "yolov8m": self.yolo_active, "pose": self.pose_active,
+                                "yolov8m": self.yolo_active,
                                 "hand_landmark": self.hand_active})
                             continue
                 with self._annotated_lock:
@@ -675,13 +762,11 @@ class MolochService:
             scale_x = fw / 640.0
             scale_y = fh / 640.0
 
-            # Max-2 Draw-Priority: face > pose > hand
+            # Max-2 Draw-Priority: face > hand
             _draw_candidates = []
             if self.scrfd_active:
                 _draw_candidates.append("face")
-            if self.pose_active:
-                _draw_candidates.append("pose")
-            if self.hand_active or self.pose_active:
+            if self.hand_active:
                 _draw_candidates.append("hand")
             _allowed_draws = set(enforce_draw_priority(_draw_candidates))
 
@@ -858,138 +943,6 @@ class MolochService:
                 except Exception as e:
                     logger.error(f"YOLOv8m Fehler: {e}")
 
-            # 4. YOLOv8s Pose
-            if self.pose_active and "pose" in self._active_ctx:
-                try:
-                    t0 = time.perf_counter()
-                    outputs = self._run_model("pose", input_rgb)
-                    poses = decode_yolov8_pose(
-                        outputs, img_h=640, img_w=640,
-                        conf_thresh=self.pose_conf_val,
-                        iou_thresh=self.pose_nms_val
-                    )
-                    dt = time.perf_counter() - t0
-                    with self._fps_lock:
-                        self._fps["pose"] = 1.0 / dt if dt > 0 else 0
-
-                    if poses:
-                        if "pose" in _allowed_draws:
-                            draw_poses(annotated, poses, scale_x, scale_y)
-                        if "hand" in _allowed_draws:
-                            draw_hands(annotated, poses, scale_x, scale_y)
-
-                        # === Hand Landmark: Crop um Wrists, 21 Finger-Landmarks ===
-                        if self.hand_active and "hand_landmark" in self._active_ctx:
-                            for _pose in poses[:1]:
-                                _kpts = _pose["keypoints"]  # (17, 3) in 640-Space
-                                for _wi in (9, 10):  # left/right wrist
-                                    _wx = _kpts[_wi, 0]
-                                    _wy = _kpts[_wi, 1]
-                                    _wvis = _kpts[_wi, 2]
-                                    if _wvis < 0.3:
-                                        continue
-
-                                    # Elbow-Index: wrist 9->elbow 7, wrist 10->elbow 8
-                                    _ei = _wi - 2
-                                    _ex = _kpts[_ei, 0]
-                                    _ey = _kpts[_ei, 1]
-                                    _evis = _kpts[_ei, 2]
-
-                                    # Crop-Groesse: kompakt um Hand (nicht zu gross -> Kopf!)
-                                    _pbx = _pose["bbox"]
-                                    _pw = _pbx[2] - _pbx[0]
-                                    _ph = _pbx[3] - _pbx[1]
-                                    _csz = max(int(max(_pw, _ph) * 0.35), 120)
-                                    _csz = min(_csz, 220)
-
-                                    # Crop-Zentrum: Wrist + 25% Offset in Fingerrichtung
-                                    _ccx = _wx
-                                    _ccy = _wy
-                                    if _evis > 0.2:
-                                        _dx = _wx - _ex
-                                        _dy = _wy - _ey
-                                        _dist = max((_dx**2 + _dy**2)**0.5, 1.0)
-                                        _off = _csz * 0.25
-                                        _ccx = _wx + (_dx / _dist) * _off
-                                        _ccy = _wy + (_dy / _dist) * _off
-
-                                    # Crop-Region (640x640 Space)
-                                    _cx1 = max(0, int(_ccx - _csz // 2))
-                                    _cy1 = max(0, int(_ccy - _csz // 2))
-                                    _cx2 = min(640, _cx1 + _csz)
-                                    _cy2 = min(640, _cy1 + _csz)
-                                    _cw = _cx2 - _cx1
-                                    _ch = _cy2 - _cy1
-                                    if _cw < 30 or _ch < 30:
-                                        continue
-                                    # Crop + Resize fuer hand_landmark_lite (224x224 RGB)
-                                    _hand_crop = cv2.resize(
-                                        input_rgb[_cy1:_cy2, _cx1:_cx2], (224, 224))
-                                    _hand_out = self._run_model("hand_landmark", _hand_crop)
-                                    _hand_res = decode_hand_landmark(_hand_out)
-                                    if _hand_res:
-                                        self._last_hand_detected = True
-                                    if _hand_res and "hand" in _allowed_draws:
-                                        draw_hand_landmarks(
-                                            annotated, _hand_res,
-                                            _cx1, _cy1, _cw, _ch,
-                                            scale_x, scale_y)
-
-
-                        # Gesten-Erkennung aus Pose-Keypoints
-                        if self._gesture_detector:
-                            try:
-                                best_pose = poses[0]
-                                kpts = best_pose.get("keypoints")
-                                if kpts is not None and len(kpts) >= 17:
-                                    kp_list = [
-                                        KeypointPosition(
-                                            x=float(kpts[i][0]) / 640.0,
-                                            y=float(kpts[i][1]) / 640.0,
-                                            confidence=float(kpts[i][2])
-                                        )
-                                        for i in range(17)
-                                    ]
-                                    gesture = self._gesture_detector.detect(kp_list)
-                                    self._current_gesture = gesture
-                                    if gesture and gesture.type.value != "none":
-                                        label = f"GESTE: {gesture.type.value} ({gesture.confidence:.0%})"
-                                        cv2.putText(annotated, label, (10, fh - 30),
-                                                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
-                            except Exception as e:
-                                logger.debug(f"Gesture detection: {e}")
-
-                        if self._autonomous_mode and self._tracker:
-                            try:
-                                enriched = []
-                                for p in poses:
-                                    ep = dict(p)
-                                    kpts = p.get("keypoints")
-                                    if kpts is not None and len(kpts) >= 17:
-                                        face_vis = (float(kpts[0][2]) + float(kpts[1][2]) + float(kpts[2][2])) / 3
-                                        if face_vis > 0.5:
-                                            ep["has_face"] = True
-                                            ep["face_confidence"] = face_vis
-                                            ep["face_center"] = (float(kpts[0][0]) / 640, float(kpts[0][1]) / 640)
-                                        else:
-                                            ep["has_face"] = False
-                                            ep["face_confidence"] = 0
-                                        torso_vis = (float(kpts[5][2]) + float(kpts[6][2]) + float(kpts[11][2]) + float(kpts[12][2])) / 4
-                                        ep["has_torso"] = torso_vis > 0.3
-                                    else:
-                                        ep["has_face"] = False
-                                        ep["face_confidence"] = 0
-                                        ep["has_torso"] = True
-                                    enriched.append(ep)
-                                self._tracker.update_pose_detection(
-                                    poses=enriched,
-                                    frame_width=640, frame_height=640
-                                )
-                            except Exception as e:
-                                logger.debug(f"Tracker pose feed: {e}")
-                except Exception as e:
-                    logger.error(f"Pose Fehler: {e}")
-
             # ===== Perception Engine: Dual-Slot Empfehlung (nach allen Detektionen) =====
             if self._perception:
                 _perc_face_bbox = None
@@ -1039,7 +992,7 @@ class MolochService:
                         self._swap_log.append(time.time())
                         self._notify("model_toggle", {
                             "scrfd": self.scrfd_active, "arcface": self.arcface_active,
-                            "yolov8m": self.yolo_active, "pose": self.pose_active,
+                            "yolov8m": self.yolo_active,
                             "hand_landmark": self.hand_active})
 
             # Auto-Switch: Hand-Forced zurueck zu Auto wenn keine Hand
@@ -1259,7 +1212,7 @@ class MolochService:
                 self._sync_flags_from_npu()
                 self._notify("model_toggle", {
                     "scrfd": self.scrfd_active, "arcface": self.arcface_active,
-                    "yolov8m": self.yolo_active, "pose": self.pose_active,
+                    "yolov8m": self.yolo_active,
                     "hand_landmark": self.hand_active})
 
                 # 3. Warte auf erste Detection (max 10s, ST laeuft weiter)
@@ -1385,14 +1338,13 @@ class MolochService:
                 self.scrfd_active = False
                 self.arcface_active = False
                 self.yolo_active = False
-                self.pose_active = False
                 self.hand_active = False
             self._notify("model_toggle", {
                 "scrfd": self.scrfd_active, "arcface": self.arcface_active,
-                "yolov8m": self.yolo_active, "pose": self.pose_active,
+                "yolov8m": self.yolo_active,
                 "hand_landmark": self.hand_active})
             with self._fps_lock:
-                self._fps = {"scrfd": 0, "arcface": 0, "yolov8m": 0, "pose": 0, "hand_landmark": 0, "total": 0}
+                self._fps = {"scrfd": 0, "arcface": 0, "yolov8m": 0, "hand_landmark": 0, "total": 0}
             logger.info(f"[TENTAKEL] Inference gestoppt, Modelle auf NPU: {list(self._active_ctx.keys())}")
 
             # Position-Tracking zuruecksetzen
@@ -1559,30 +1511,27 @@ class MolochService:
     # =========================================================================
 
     def _frozen_frame_watchdog(self):
-        """Erkennt eingefrorene Frames und startet RTSP Stream neu."""
+        """Backup-Watchdog: Erkennt wenn Reader-Thread kein Frame mehr liefert.
+
+        Primaere Detection ist jetzt Hash-basiert im Reader selbst (10 identische
+        Frames -> Reconnect). Dieser Watchdog ist Fallback fuer den Fall dass
+        der Reader-Thread komplett haengt oder crashed.
+        """
         while self.running:
             try:
-                time.sleep(10)  # Alle 10 Sekunden pruefen
+                time.sleep(10)
 
                 frame_age = time.time() - self._last_frame_write
 
-                if frame_age > 30:  # Frame aelter als 30 Sekunden
-                    self._frozen_restart_count += 1
+                if frame_age > 30:
                     logger.warning(
-                        f"[WATCHDOG] Frame eingefroren seit {frame_age:.0f}s! "
-                        f"Restart #{self._frozen_restart_count}"
+                        f"[WATCHDOG] RTSP reconnect — "
+                        f"kein Frame seit {frame_age:.0f}s (Reader haengt)"
                     )
 
-                    # RTSP Stream neu verbinden
                     try:
-                        if hasattr(self, '_rtsp_cap') and self._rtsp_cap is not None:
-                            try:
-                                self._rtsp_cap.release()
-                            except Exception:
-                                pass
                         self._start_rtsp()
                         logger.info("[WATCHDOG] RTSP Stream neu gestartet")
-                        self._last_frame_write = time.time()
                     except Exception as e:
                         logger.error(f"[WATCHDOG] RTSP Reconnect Error: {e}")
 
@@ -1654,13 +1603,12 @@ class MolochService:
         self.scrfd_active = False
         self.arcface_active = False
         self.yolo_active = False
-        self.pose_active = False
         self.hand_active = False
-        self._notify("model_toggle", {"scrfd": False, "arcface": False, "yolov8m": False, "pose": False, "hand_landmark": False})
+        self._notify("model_toggle", {"scrfd": False, "arcface": False, "yolov8m": False, "hand_landmark": False})
         for name in list(self._active_ctx.keys()):
             self._unconfigure_model(name)
         with self._fps_lock:
-            self._fps = {"scrfd": 0, "arcface": 0, "yolov8m": 0, "pose": 0, "hand_landmark": 0, "total": 0}
+            self._fps = {"scrfd": 0, "arcface": 0, "yolov8m": 0, "hand_landmark": 0, "total": 0}
 
     # =========================================================================
     # Cloud / Camera
@@ -1826,7 +1774,6 @@ class MolochService:
         self.scrfd_active = "scrfd" in self._active_ctx
         self.arcface_active = "arcface" in self._active_ctx
         self.yolo_active = "yolov8m" in self._active_ctx
-        self.pose_active = "pose" in self._active_ctx
         self.hand_active = "hand_landmark" in self._active_ctx
 
     def _npu_watchdog(self):
@@ -1835,7 +1782,7 @@ class MolochService:
         _count = len(self._active_ctx)
         if _count > 2:
             logger.warning(f"[WATCHDOG] VIOLATION: {_count} Modelle aktiv! {list(self._active_ctx.keys())}")
-            _prio = ["hand_landmark", "pose", "yolov8m", "arcface", "scrfd"]
+            _prio = ["hand_landmark", "yolov8m", "arcface", "scrfd"]
             _victims = sorted(self._active_ctx.keys(),
                               key=lambda m: _prio.index(m) if m in _prio else 99)
             while len(self._active_ctx) > 2:
@@ -1896,7 +1843,7 @@ class MolochService:
             return
 
         active_map = {"scrfd": "scrfd_active", "arcface": "arcface_active",
-                      "yolov8m": "yolo_active", "pose": "pose_active",
+                      "yolov8m": "yolo_active",
                       "hand_landmark": "hand_active"}
         if model_key not in active_map:
             return
@@ -1908,13 +1855,10 @@ class MolochService:
             # ArcFace braucht SCRFD
             if "arcface" in wanted and "scrfd" not in wanted:
                 wanted.add("scrfd")
-            # Hand Landmark braucht Pose
-            if "hand_landmark" in wanted and "pose" not in wanted:
-                wanted.add("pose")
             # Max 2 Modelle: neues Modell + Dependencies behalten, Rest weg
             keep = {model_key}
             # Dependencies in keep aufnehmen
-            DEPS = {"arcface": "scrfd", "hand_landmark": "pose"}
+            DEPS = {"arcface": "scrfd"}
             if model_key in DEPS:
                 keep.add(DEPS[model_key])
             while len(wanted) > 2:
@@ -1927,18 +1871,12 @@ class MolochService:
             if "arcface" in wanted and "scrfd" not in wanted:
                 wanted.discard("arcface")
                 logger.info(f"[TOGGLE] arcface ohne scrfd entfernt -> wanted={wanted}")
-            if "hand_landmark" in wanted and "pose" not in wanted:
-                wanted.discard("hand_landmark")
-                logger.info(f"[TOGGLE] hand_landmark ohne pose entfernt -> wanted={wanted}")
             logger.info(f"[TOGGLE] wanted={wanted} (max 2 enforced)")
         else:
             wanted = current - {model_key}
             # SCRFD weg -> ArcFace auch weg
             if model_key == "scrfd":
                 wanted.discard("arcface")
-            # Pose weg -> Hand Landmark auch weg
-            if model_key == "pose":
-                wanted.discard("hand_landmark")
 
         if wanted:
             self._perception.force_models(list(wanted))
@@ -2080,7 +2018,6 @@ class MolochService:
                 "scrfd_active": self.scrfd_active,
                 "arcface_active": self.arcface_active,
                 "yolo_active": self.yolo_active,
-                "pose_active": self.pose_active,
                 "hand_active": self.hand_active,
                 "npu_paused": self._npu_paused,
                 "active_models": list(self._active_ctx.keys()),
@@ -2097,8 +2034,6 @@ class MolochService:
                     "scrfd_nms": self.scrfd_nms_val,
                     "arcface_thresh": self.arcface_thresh_val,
                     "yolo_conf": self.yolo_conf_val,
-                    "pose_conf": self.pose_conf_val,
-                    "pose_nms": self.pose_nms_val,
                 },
             }
             if self._perception:
@@ -2194,8 +2129,6 @@ class MolochService:
                 self.scrfd_nms_val = float(_th.get('scrfd_nms', self.scrfd_nms_val))
                 self.arcface_thresh_val = float(_th.get('arcface_thresh', self.arcface_thresh_val))
                 self.yolo_conf_val = float(_th.get('yolo_conf', self.yolo_conf_val))
-                self.pose_conf_val = float(_th.get('pose_conf', self.pose_conf_val))
-                self.pose_nms_val = float(_th.get('pose_nms', self.pose_nms_val))
             _ho = cmd.get('hand_occlusion')
             if _ho and self._perception:
                 self._perception._HAND_TIMEOUT = float(_ho.get('timeout', 5.0))
@@ -2234,13 +2167,8 @@ class MolochService:
                 self.arcface_thresh_val = float(th["arcface_thresh"])
             if "yolo_conf" in th:
                 self.yolo_conf_val = float(th["yolo_conf"])
-            if "pose_conf" in th:
-                self.pose_conf_val = float(th["pose_conf"])
-            if "pose_nms" in th:
-                self.pose_nms_val = float(th["pose_nms"])
             logger.info(f"[SETTINGS] Thresholds: scrfd={self.scrfd_conf_val}/{self.scrfd_nms_val} "
-                        f"arc={self.arcface_thresh_val} yolo={self.yolo_conf_val} "
-                        f"pose={self.pose_conf_val}/{self.pose_nms_val}")
+                        f"arc={self.arcface_thresh_val} yolo={self.yolo_conf_val}")
         except Exception as e:
             logger.warning(f"[SETTINGS] Thresholds-Fehler: {e}")
 
@@ -2290,8 +2218,6 @@ class MolochService:
             "scrfd_nms": round(self.scrfd_nms_val, 3),
             "arcface_thresh": round(self.arcface_thresh_val, 3),
             "yolo_conf": round(self.yolo_conf_val, 3),
-            "pose_conf": round(self.pose_conf_val, 3),
-            "pose_nms": round(self.pose_nms_val, 3),
         }
 
         # Hand-Occlusion

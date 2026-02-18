@@ -115,7 +115,6 @@ class ServiceProxy:
         self.scrfd_active = False
         self.arcface_active = False
         self.yolo_active = False
-        self.pose_active = False
         self.hand_active = False
 
         # Thresholds (read from status)
@@ -123,8 +122,6 @@ class ServiceProxy:
         self.scrfd_nms_val = 0.4
         self.arcface_thresh_val = 0.6
         self.yolo_conf_val = 0.5
-        self.pose_conf_val = 0.5
-        self.pose_nms_val = 0.5
 
         # FPS
         self._fps = {}
@@ -320,20 +317,17 @@ class ServiceProxy:
             "scrfd": self.scrfd_active,
             "arcface": self.arcface_active,
             "yolov8m": self.yolo_active,
-            "pose": self.pose_active,
             "hand_landmark": getattr(self, 'hand_active', False),
         }
         self.scrfd_active = s.get('scrfd_active', False)
         self.arcface_active = s.get('arcface_active', False)
         self.yolo_active = s.get('yolo_active', False)
-        self.pose_active = s.get('pose_active', False)
         self.hand_active = s.get('hand_active', False)
         # Bei Aenderung -> Checkboxen synchronisieren
         _curr = {
             "scrfd": self.scrfd_active,
             "arcface": self.arcface_active,
             "yolov8m": self.yolo_active,
-            "pose": self.pose_active,
             "hand_landmark": self.hand_active,
         }
         if _curr != _prev:
@@ -369,8 +363,6 @@ class ServiceProxy:
             self.scrfd_nms_val = thresholds.get('scrfd_nms', self.scrfd_nms_val)
             self.arcface_thresh_val = thresholds.get('arcface_thresh', self.arcface_thresh_val)
             self.yolo_conf_val = thresholds.get('yolo_conf', self.yolo_conf_val)
-            self.pose_conf_val = thresholds.get('pose_conf', self.pose_conf_val)
-            self.pose_nms_val = thresholds.get('pose_nms', self.pose_nms_val)
 
         pe = s.get('perception', {})
         if pe and self._perception:
@@ -649,15 +641,12 @@ class MolochUnifiedPanel:
         self.scrfd_var = tk.BooleanVar(value=False)
         self.arcface_var = tk.BooleanVar(value=False)
         self.yolo_var = tk.BooleanVar(value=False)
-        self.pose_var = tk.BooleanVar(value=False)
 
         # Threshold variables
         self.scrfd_conf_var = tk.DoubleVar(value=0.40)
         self.scrfd_nms_var = tk.DoubleVar(value=0.40)
         self.arcface_thresh_var = tk.DoubleVar(value=0.60)
         self.yolo_conf_var = tk.DoubleVar(value=0.50)
-        self.pose_conf_var = tk.DoubleVar(value=0.50)
-        self.pose_nms_var = tk.DoubleVar(value=0.70)
 
         # SCRFD
         self._scrfd_fps = self._build_model_section(
@@ -675,13 +664,7 @@ class MolochUnifiedPanel:
             model_frame, "YOLOv8m", self.yolo_var, "yolov8m",
             [("Conf", self.yolo_conf_var, 0.1, 0.9)])
 
-        # Pose
-        self._pose_fps = self._build_model_section(
-            model_frame, "Pose", self.pose_var, "pose",
-            [("Conf", self.pose_conf_var, 0.1, 0.9),
-             ("NMS", self.pose_nms_var, 0.1, 0.9)])
-
-        # Hand Landmark (braucht Pose als Dependency)
+        # Hand Landmark
         self.hand_lm_var = tk.BooleanVar(value=False)
         self._hand_lm_fps = self._build_model_section(
             model_frame, "Hand LM", self.hand_lm_var, "hand_landmark", [])
@@ -934,7 +917,6 @@ class MolochUnifiedPanel:
         self.scrfd_var.set(self.service.scrfd_active)
         self.arcface_var.set(self.service.arcface_active)
         self.yolo_var.set(self.service.yolo_active)
-        self.pose_var.set(self.service.pose_active)
         self.hand_lm_var.set(getattr(self.service, 'hand_active', False))
         self._syncing = False
 
@@ -943,8 +925,6 @@ class MolochUnifiedPanel:
         self.scrfd_nms_var.set(self.service.scrfd_nms_val)
         self.arcface_thresh_var.set(self.service.arcface_thresh_val)
         self.yolo_conf_var.set(self.service.yolo_conf_val)
-        self.pose_conf_var.set(self.service.pose_conf_val)
-        self.pose_nms_var.set(self.service.pose_nms_val)
 
         # Setup threshold bindings (GUI -> Service)
         self._setup_threshold_bindings()
@@ -992,8 +972,6 @@ class MolochUnifiedPanel:
             (self.scrfd_nms_var, "scrfd_nms_val"),
             (self.arcface_thresh_var, "arcface_thresh_val"),
             (self.yolo_conf_var, "yolo_conf_val"),
-            (self.pose_conf_var, "pose_conf_val"),
-            (self.pose_nms_var, "pose_nms_val"),
         ]
         for var, attr in bindings:
             def on_change(*_, a=attr, v=var):
@@ -1054,7 +1032,6 @@ class MolochUnifiedPanel:
             "scrfd": self.scrfd_var,
             "arcface": self.arcface_var,
             "yolov8m": self.yolo_var,
-            "pose": self.pose_var,
             "hand_landmark": self.hand_lm_var,
         }
         var = var_map.get(model_key)
@@ -1072,7 +1049,6 @@ class MolochUnifiedPanel:
                 "scrfd": self.scrfd_var,
                 "arcface": self.arcface_var,
                 "yolov8m": self.yolo_var,
-                "pose": self.pose_var,
                 "hand_landmark": self.hand_lm_var,
             }
             for key, val in data.items():
@@ -1100,7 +1076,6 @@ class MolochUnifiedPanel:
             for key, label in [("scrfd", self._scrfd_fps),
                                 ("arcface", self._arcface_fps),
                                 ("yolov8m", self._yolov8m_fps),
-                                ("pose", self._pose_fps),
                                 ("hand_landmark", self._hand_lm_fps)]:
                 v = fps.get(key, 0)
                 label.config(text=f"{v:.0f}" if v > 0 else "---")
@@ -1176,8 +1151,6 @@ class MolochUnifiedPanel:
                 "scrfd_nms": self.scrfd_nms_var.get(),
                 "arcface_thresh": self.arcface_thresh_var.get(),
                 "yolo_conf": self.yolo_conf_var.get(),
-                "pose_conf": self.pose_conf_var.get(),
-                "pose_nms": self.pose_nms_var.get(),
             },
             "hand_occlusion": {
                 "timeout": self.hand_timeout_var.get(),
@@ -1218,8 +1191,6 @@ class MolochUnifiedPanel:
                 self.scrfd_nms_var.set(float(th.get("scrfd_nms", 0.40)))
                 self.arcface_thresh_var.set(float(th.get("arcface_thresh", 0.60)))
                 self.yolo_conf_var.set(float(th.get("yolo_conf", 0.50)))
-                self.pose_conf_var.set(float(th.get("pose_conf", 0.50)))
-                self.pose_nms_var.set(float(th.get("pose_nms", 0.70)))
 
             # Hand-Occlusion
             ho = cfg.get("hand_occlusion", {})

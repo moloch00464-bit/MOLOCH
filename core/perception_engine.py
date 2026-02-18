@@ -26,18 +26,17 @@ _MAX_ADJUST = 0.10  # Max 10% Aenderung pro Lernzyklus
 class PerceptionEngine:
     """Dual-Slot NPU Management mit Scoring."""
 
-    ALL_MODELS = ["scrfd", "arcface", "yolov8m", "pose", "hand_landmark"]
+    ALL_MODELS = ["scrfd", "arcface", "yolov8m", "hand_landmark"]
 
     BASE_SCORES = {
         "scrfd": 0.6,
         "arcface": 0.5,
         "yolov8m": 0.4,
-        "pose": 0.3,
         "hand_landmark": 0.2,
     }
 
     # ArcFace ohne SCRFD ist nutzlos (braucht Face-Crops)
-    DEPENDENCIES = {"arcface": "scrfd", "hand_landmark": "pose"}
+    DEPENDENCIES = {"arcface": "scrfd"}
 
     def __init__(self, personality_engine=None):
         self._personality = personality_engine
@@ -200,7 +199,7 @@ class PerceptionEngine:
         ranked = sorted(self.ALL_MODELS, key=lambda m: scores.get(m, 0), reverse=True)
         s1, s2 = ranked[0], ranked[1]
 
-        # Dependencies erzwingen (arcface->scrfd, hand_landmark->pose)
+        # Dependencies erzwingen (arcface->scrfd)
         for _dep, _req in self.DEPENDENCIES.items():
             if _dep in (s1, s2) and _req not in (s1, s2):
                 if s1 == _dep:
@@ -295,7 +294,6 @@ class PerceptionEngine:
 
         if person:
             scores["yolov8m"] += 0.2
-            scores["pose"] += 0.15
 
         if unknown:
             scores["arcface"] += 0.5
@@ -303,10 +301,9 @@ class PerceptionEngine:
         if motion > 0.5:
             scores["yolov8m"] += 0.2
 
-        # Face bekannt -> ArcFace weniger dringend, Pose interessanter
+        # Face bekannt -> ArcFace weniger dringend
         if face and not unknown:
             scores["arcface"] -= 0.15
-            scores["pose"] += 0.15
 
         # Nichts erkannt -> Waechter-Modus (scannen)
         if not face and not person:
@@ -318,11 +315,9 @@ class PerceptionEngine:
         _face_count = ctx.get("face_count", 0)
         if _person_count >= 2 and _face_count <= 1:
             scores["hand_landmark"] += 0.5
-            scores["pose"] += 0.4
 
-        # Hand Occlusion -> pose + hand_landmark boosten
+        # Hand Occlusion -> hand_landmark boosten
         if self._hand_occlusion:
-            scores["pose"] += 1.2
             scores["hand_landmark"] += 1.5
             scores["scrfd"] += 0.2
 
@@ -332,9 +327,7 @@ class PerceptionEngine:
             if self._personality.is_guardian:
                 scores["scrfd"] *= 1.1
                 scores["arcface"] *= 1.3
-                scores["pose"] *= 0.7
             elif self._personality.is_shadow:
-                scores["pose"] *= 1.3
                 scores["arcface"] *= 0.9
 
             tension = self._personality.get_tension() if hasattr(self._personality, "get_tension") else 0.0
@@ -367,7 +360,6 @@ class PerceptionEngine:
             results: {
                 "face_identified": bool,  # ArcFace hat Name geliefert
                 "person_count": int,      # YOLO Person-Count
-                "pose_useful": bool,      # Pose hat Keypoints erkannt
                 "hand_detected": bool,    # Hand Landmark erkannt
                 "face_detected": bool,    # SCRFD hat Face gefunden
             }
@@ -425,8 +417,6 @@ class PerceptionEngine:
                 model_useful["arcface"] += 1
             if "yolov8m" in models and results.get("person_count", 0) > 0:
                 model_useful["yolov8m"] += 1
-            if "pose" in models and results.get("pose_useful", False):
-                model_useful["pose"] += 1
             if "hand_landmark" in models and results.get("hand_detected", False):
                 model_useful["hand_landmark"] += 1
 
@@ -533,8 +523,6 @@ class PerceptionEngine:
                 # Nuetzlich wenn Face UND bekannte Person
                 utility[model] = face_detected and not unknown_person
             elif model == "yolov8m":
-                utility[model] = person_detected
-            elif model == "pose":
                 utility[model] = person_detected
             elif model == "hand_landmark":
                 # Nuetzlich wenn Person detected
