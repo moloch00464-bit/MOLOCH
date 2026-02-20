@@ -289,3 +289,37 @@ engine.speak_event(MolochEvent.GOOD_MORNING)            # Eine Stimme
 engine.speak_event(MolochEvent.PERSON_UNKNOWN, conflict=True)  # Beide Stimmen
 engine.manual_override("Moloch, Schatten")               # Switch
 ```
+
+## REGEL 10 — MODULARES PANEL
+
+Das Panel ist MODULAR aufgebaut. Jedes Modul und jedes Popup ist eine eigene Datei unter `core/gui/`.
+
+### Struktur:
+```
+core/gui/
+├── panel_main.py          # Hauptfenster, Layout, Service-Verbindung
+├── panel_preview.py       # Kamera Preview (640x360, 15 FPS)
+├── panel_ptz.py           # PTZ D-Pad, Quick Positions, AUTONOM/CAL/ALLTAG/ST
+├── panel_ewelink.py       # LED, IR, Alarm, Sync, SNAP, White LED
+├── panel_models.py        # Model Checkboxes, FPS, SAVE SETTINGS, Popup-Buttons
+├── panel_talk_chat.py     # Push-to-Talk, Whisper, Claude API, Chat
+├── panel_voice.py         # Voice Dropdown, Test, M.O.L.O.C.H. Voice Autonomy
+├── panel_styles.py        # Farben, Fonts, Konstanten (importiert von ALLEN)
+├── popups/
+│   ├── popup_audio.py     # Gain, Noise Gate, AGC, VU Meter, MIC TEST
+│   ├── popup_hardware.py  # CPU, RAM, SSD1/SSD2, NPU Monitor, 5s Refresh
+│   ├── popup_npu.py       # SCRFD/ArcFace/YOLOv8m Threshold Sliders
+│   └── popup_settings.py  # Save/Load settings.json
+```
+
+### REGELN:
+
+1. Du fasst NUR die Datei an die im Auftrag steht.
+2. Wenn dein Auftrag `popup_audio.py` ist, existiert `panel_main.py` fuer dich NICHT.
+3. Keine Datei darf eine andere Datei veraendern als Seiteneffekt.
+4. `panel_styles.py` wird NUR importiert, NIEMALS veraendert (ausser der Auftrag sagt explizit "aendere panel_styles.py").
+5. Jedes Modul bekommt seinen Frame/Container von `panel_main.py` uebergeben.
+6. Jedes Modul kommuniziert mit dem Service NUR ueber die ServiceProxy Klasse.
+7. Popups sind eigenstaendige TopLevel-Fenster. Wenn ein Popup crasht, bleibt das Hauptpanel stabil.
+8. KEIN Modul importiert ein anderes Modul direkt (ausser panel_styles.py).
+9. Vor JEDER Aenderung: `git add -A && git commit -m "BACKUP vor [was du vorhast]"`
