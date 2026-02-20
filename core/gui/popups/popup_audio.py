@@ -8,13 +8,14 @@ ReSpeaker Lite Voice Assistant Kit per USB am Pi5.
 Audio laeuft ueber PipeWire/WirePlumber.
 
 Features:
-- ReSpeaker Source ID via wpctl status
-- Mic Gain Slider (0.0 - 3.0) mit wpctl set-volume
-- Noise Gate Slider (-80 bis -20 dB)
-- AGC Checkbox
+- ReSpeaker Source ID via wpctl status (Sources-Sektion, aktive * bevorzugt)
+- Status-Label: "ReSpeaker Lite (Node XX)" gruen / "Kein Mikrofon" rot
+- Mic Gain Slider (0.0 - 3.0) mit wpctl set-volume — sofort aktiv
+- Noise Gate Slider (-80 bis -20 dB) — sofort via _write_command
+- AGC Checkbox — sofort via _write_command
 - VU Meter (200px Canvas, 100ms Update, pw-record PCM)
 - MIC TEST (3s Aufnahme + Wiedergabe mit Countdown)
-- SAVE Button (settings persistent speichern)
+- KEIN Save Button — alle Aenderungen gelten sofort
 
 Importiert NUR panel_styles und tkinter.
 """
@@ -71,15 +72,11 @@ class AudioPopup:
         self._mic_test_running = False
         self._countdown_after_id = None
 
-        # Flag: User hat Slider angefasst -> poll_status darf nicht ueberschreiben
-        self._user_touched_gain = False
-        self._user_touched_gate = False
-
         # Toplevel erstellen
         self.win = tk.Toplevel(parent)
         self.win.title("Audio \u2014 ReSpeaker Lite")
         self.win.configure(bg=BG_DARK)
-        self.win.geometry("400x520")
+        self.win.geometry("400x470")
         self.win.resizable(False, False)
         self.win.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -89,16 +86,18 @@ class AudioPopup:
         self._agc_var = tk.BooleanVar(value=False)
 
         # GUI aufbauen
-        self._build_title()
+        self._build_status_label()
         self._build_gain_slider()
         self._build_agc_checkbox()
         self._build_noise_gate_slider()
         self._build_vu_meter()
         self._build_mic_test()
-        self._build_save_button()
 
-        # ReSpeaker suchen und aktuelle Werte laden
+        # ReSpeaker suchen und Status-Label updaten
         self._find_respeaker_source_id()
+        self._update_status_label()
+
+        # Aktuelle Werte laden
         self._load_current_values()
 
         # VU Monitor starten
@@ -109,42 +108,106 @@ class AudioPopup:
     # =========================================================================
 
     def _find_respeaker_source_id(self):
-        """ReSpeaker PipeWire Source Node-ID via wpctl status finden."""
+        """ReSpeaker PipeWire Source Node-ID via wpctl status finden.
+
+        Parst die Sources-Sektion und bevorzugt die aktive (*) Source.
+        Format: "  *   59. ReSpeaker Lite Analog Stereo  [vol: 1.00]"
+        """
         if self._respeaker_source_id:
             return self._respeaker_source_id
         try:
             result = subprocess.run(
                 ["wpctl", "status"], capture_output=True, text=True, timeout=5)
+            if result.returncode != 0:
+                logger.error("[AUDIO] wpctl status returncode != 0")
+                return None
+
             in_sources = False
+            active_id = None
+            fallback_id = None
+
+            # Sektions-Keywords die Sources beenden
+            section_ends = (
+                "endpoints:", "Sinks:", "Senken:", "Streams:",
+                "Filters:", "Devices:", "Ger\u00e4te:",
+            )
+
             for line in result.stdout.splitlines():
-                if "Sources:" in line or "Quellen:" in line:
+                # Tree-Zeichen entfernen fuer sauberes Parsen
+                clean = line.replace("\u2502", "").replace("\u251c", "") \
+                            .replace("\u2500", "").replace("\u2514", "") \
+                            .replace("│", "").replace("├", "") \
+                            .replace("─", "").replace("└", "")
+
+                stripped = clean.strip()
+
+                # Sources-Sektion erkennen
+                if "Sources:" in stripped or "Quellen:" in stripped:
                     in_sources = True
                     continue
-                if in_sources and ("Sinks:" in line or "Senken:" in line):
-                    break
-                if in_sources and "ReSpeaker" in line and "Analog" in line:
-                    # Format: "  *   59. ReSpeaker Lite Analog Stereo"
-                    parts = line.strip().lstrip("*").strip().split(".")
-                    if parts:
-                        node_id = parts[0].strip()
-                        if node_id.isdigit():
-                            self._respeaker_source_id = node_id
-                            logger.info(f"[AUDIO] ReSpeaker source ID: {node_id}")
-                            return node_id
+
+                # Ende der Sources-Sektion
+                if in_sources and stripped:
+                    if any(kw in stripped for kw in section_ends):
+                        break
+
+                if not in_sources:
+                    continue
+
+                if "ReSpeaker" not in line:
+                    continue
+
+                # Aktive Source hat * vor der Node-ID
+                is_active = "*" in line.split("ReSpeaker")[0]
+
+                # Node-ID: Zahl vor dem ersten Punkt
+                # "  *   59. ReSpeaker Lite Analog Stereo" -> 59
+                parts = stripped.lstrip("*").strip().split(".")
+                if parts and parts[0].strip().isdigit():
+                    node_id = parts[0].strip()
+                    if is_active:
+                        active_id = node_id
+                    elif fallback_id is None:
+                        fallback_id = node_id
+
+            # Aktive Source bevorzugen
+            chosen = active_id or fallback_id
+            if chosen:
+                self._respeaker_source_id = chosen
+                logger.info(
+                    f"[AUDIO] ReSpeaker source ID: {chosen}"
+                    f" (aktiv={'ja' if active_id else 'nein'})")
+                return chosen
+
+            logger.warning("[AUDIO] ReSpeaker in wpctl status nicht gefunden")
         except Exception as e:
             logger.error(f"[AUDIO] wpctl status failed: {e}")
         return None
 
     # =========================================================================
-    # Titel
+    # Status-Label
     # =========================================================================
 
-    def _build_title(self):
-        """Titel-Label oben."""
-        tk.Label(
-            self.win, text="Audio \u2014 ReSpeaker Lite",
-            bg=BG_DARK, fg=FG_WHITE, font=FONT_TITLE,
-        ).pack(pady=(10, 5))
+    def _build_status_label(self):
+        """Status-Label oben: zeigt ReSpeaker Node oder Fehler."""
+        self._status_label = tk.Label(
+            self.win, text="Suche ReSpeaker...",
+            bg=BG_DARK, fg=FG_DIM, font=FONT_TITLE,
+        )
+        self._status_label.pack(pady=(10, 5))
+
+    def _update_status_label(self):
+        """Status-Label nach Erkennung updaten."""
+        if self._respeaker_source_id:
+            self._status_label.config(
+                text=f"ReSpeaker Lite (Node {self._respeaker_source_id})",
+                fg=STATUS_GREEN,
+            )
+        else:
+            self._status_label.config(
+                text="Kein Mikrofon",
+                fg=STATUS_RED,
+            )
 
     # =========================================================================
     # Mic Gain Slider (0.0 - 3.0)
@@ -179,10 +242,9 @@ class AudioPopup:
         self._gain_slider.pack(fill=tk.X)
 
     def _on_gain_changed(self, value):
-        """Gain geaendert — Label updaten und via wpctl setzen."""
+        """Gain geaendert — Label updaten und sofort via wpctl setzen."""
         val = float(value)
         self._gain_label.config(text=f"{val:.2f}")
-        self._user_touched_gain = True
 
         def apply():
             node_id = self._find_respeaker_source_id()
@@ -218,7 +280,7 @@ class AudioPopup:
         self._agc_cb.pack(anchor=tk.W)
 
     def _on_agc_changed(self):
-        """AGC geaendert — an Service senden."""
+        """AGC geaendert — sofort an Service senden."""
         self.service._write_command("action", {
             "action": "set_audio",
             "agc_enabled": self._agc_var.get(),
@@ -257,10 +319,9 @@ class AudioPopup:
         self._noise_gate_slider.pack(fill=tk.X)
 
     def _on_noise_gate_changed(self, value):
-        """Noise Gate geaendert — Label updaten und an Service senden."""
+        """Noise Gate geaendert — Label updaten und sofort an Service senden."""
         val = float(value)
         self._noise_gate_label.config(text=f"{val:.0f} dB")
-        self._user_touched_gate = True
         self.service._write_command("action", {
             "action": "set_audio",
             "noise_gate_db": val,
@@ -396,7 +457,7 @@ class AudioPopup:
     def _build_mic_test(self):
         """MIC TEST Button mit Status-Label."""
         frame = tk.Frame(self.win, bg=BG_DARK)
-        frame.pack(fill=tk.X, padx=15, pady=(10, 5))
+        frame.pack(fill=tk.X, padx=15, pady=(10, 15))
 
         self._btn_mic_test = tk.Button(
             frame, text="MIC TEST", width=14,
@@ -505,41 +566,6 @@ class AudioPopup:
         self._btn_mic_test.config(state=tk.NORMAL, text="MIC TEST")
         self._lbl_mic_status.config(text=msg, fg=STATUS_RED)
         self.win.after(4000, lambda: self._lbl_mic_status.config(text="", fg=FG_DIM))
-
-    # =========================================================================
-    # SAVE Button
-    # =========================================================================
-
-    def _build_save_button(self):
-        """SAVE Button — speichert Audio-Einstellungen persistent."""
-        frame = tk.Frame(self.win, bg=BG_DARK)
-        frame.pack(fill=tk.X, padx=15, pady=(10, 15))
-
-        self._btn_save = tk.Button(
-            frame, text="SAVE", width=14,
-            bg=BG_BUTTON, fg=FG_WHITE, font=FONT_BUTTON,
-            activebackground=BG_FRAME,
-            command=self._on_save,
-        )
-        self._btn_save.pack()
-
-        self._lbl_save = tk.Label(
-            frame, text="", bg=BG_DARK, fg=FG_DIM, font=FONT_SMALL,
-        )
-        self._lbl_save.pack(pady=(3, 0))
-
-    def _on_save(self):
-        """Audio-Einstellungen persistent speichern."""
-        self.service._write_command("action", {
-            "action": "save_settings",
-            "audio": {
-                "mic_gain": self._gain_var.get(),
-                "noise_gate_db": self._noise_gate_var.get(),
-                "agc_enabled": self._agc_var.get(),
-            },
-        })
-        self._lbl_save.config(text="Gespeichert!", fg=ACCENT_GREEN)
-        self.win.after(2000, lambda: self._lbl_save.config(text="", fg=FG_DIM))
 
     # =========================================================================
     # Werte laden (einmalig beim Oeffnen)
