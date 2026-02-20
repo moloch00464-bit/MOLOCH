@@ -45,6 +45,12 @@ try:
 except ImportError:
     NpuThreshPopup = None
 
+# Settings Popup importieren (optional)
+try:
+    from core.gui.popups.popup_settings import SettingsPopup
+except ImportError:
+    SettingsPopup = None
+
 
 class ModelsModule:
     """Model Controls und Popup-Buttons im uebergebenen LabelFrame."""
@@ -76,7 +82,7 @@ class ModelsModule:
         self.on_popup_audio = self._open_audio_popup
         self.on_popup_hardware = self._open_hardware_popup
         self.on_popup_npu = self._open_npu_popup
-        self.on_popup_settings = lambda: print("TODO: popup_settings")
+        self.on_popup_settings = self._open_settings_popup
 
         # GUI aufbauen
         self._build_model_checkboxes()
@@ -119,6 +125,17 @@ class ModelsModule:
             NpuThreshPopup(self._parent, self._service)
         else:
             print("FEHLER: popup_npu.py konnte nicht importiert werden")
+
+    # =========================================================================
+    # Settings Popup oeffnen
+    # =========================================================================
+
+    def _open_settings_popup(self):
+        """Settings Popup oeffnen."""
+        if SettingsPopup is not None:
+            SettingsPopup(self._parent, self._service)
+        else:
+            print("FEHLER: popup_settings.py konnte nicht importiert werden")
 
     # =========================================================================
     # Model Checkboxen
