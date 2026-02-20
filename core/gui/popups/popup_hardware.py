@@ -301,17 +301,48 @@ class HardwarePopup:
             logger.debug(f"[HW] CPU freq lesen failed: {e}")
         return None
 
-    def _read_fan_rpm(self):
-        """Fan-Drehzahl des Pi5 Active Cooler aus sysfs lesen."""
+    # Luefter-Stufen: (Label, Farbe)
+    _FAN_STAGES = {
+        0: ("AUS", FG_DIM),
+        1: ("Leise", STATUS_GREEN),
+        2: ("Mittel", STATUS_GREEN),
+        3: ("Schnell", STATUS_YELLOW),
+        4: ("Voll", STATUS_RED),
+    }
+
+    def _read_fan_state(self):
+        """Fan PWM-Stufe und Prozent des Pi5 Active Cooler lesen.
+
+        Returns:
+            (cur_state, max_state, pwm_percent) oder (None, None, None)
+        """
         try:
-            matches = glob.glob(
-                "/sys/devices/platform/cooling_fan/hwmon/hwmon*/fan1_input")
-            if matches:
-                with open(matches[0], "r") as f:
-                    return int(f.read().strip())
+            # PWM Wert (0-255) aus hwmon
+            pwm_matches = glob.glob(
+                "/sys/devices/platform/cooling_fan/hwmon/hwmon*/pwm1")
+            pwm_pct = None
+            if pwm_matches:
+                with open(pwm_matches[0], "r") as f:
+                    pwm_val = int(f.read().strip())
+                pwm_pct = round(pwm_val / 255 * 100)
+
+            # Cooling State (0-4)
+            cur_state = None
+            max_state = None
+            cs_path = "/sys/class/thermal/cooling_device0/cur_state"
+            ms_path = "/sys/class/thermal/cooling_device0/max_state"
+            if os.path.exists(cs_path):
+                with open(cs_path, "r") as f:
+                    cur_state = int(f.read().strip())
+            if os.path.exists(ms_path):
+                with open(ms_path, "r") as f:
+                    max_state = int(f.read().strip())
+
+            if cur_state is not None:
+                return cur_state, max_state, pwm_pct
         except Exception as e:
-            logger.debug(f"[HW] Fan RPM lesen failed: {e}")
-        return None
+            logger.debug(f"[HW] Fan State lesen failed: {e}")
+        return None, None, None
 
     def _read_ram(self):
         """RAM benutzt/gesamt in MB. psutil bevorzugt, Fallback /proc/meminfo."""
@@ -444,10 +475,14 @@ class HardwarePopup:
         else:
             self._lbl_freq.config(text="n/a", fg=FG_DIM)
 
-        # Luefter RPM
-        fan_rpm = self._read_fan_rpm()
-        if fan_rpm is not None:
-            self._lbl_fan.config(text=f"{fan_rpm} RPM", fg=FG_WHITE)
+        # Luefter PWM-Stufe
+        cur_st, max_st, pwm_pct = self._read_fan_state()
+        if cur_st is not None:
+            label, color = self._FAN_STAGES.get(cur_st, (f"Stufe {cur_st}", FG_WHITE))
+            max_str = str(max_st) if max_st is not None else "?"
+            pct_str = f" ({pwm_pct}%)" if pwm_pct is not None else ""
+            self._lbl_fan.config(
+                text=f"Stufe {cur_st}/{max_str}{pct_str} {label}", fg=color)
         else:
             self._lbl_fan.config(text="---", fg=FG_DIM)
 
