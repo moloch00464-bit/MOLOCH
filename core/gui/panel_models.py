@@ -27,6 +27,12 @@ from core.gui.panel_styles import (
     STATUS_UPDATE_MS,
 )
 
+# Audio Popup importieren (optional, Fehler faengt Panel nicht ab)
+try:
+    from core.gui.popups.popup_audio import AudioPopup
+except ImportError:
+    AudioPopup = None
+
 
 class ModelsModule:
     """Model Controls und Popup-Buttons im uebergebenen LabelFrame."""
@@ -55,7 +61,7 @@ class ModelsModule:
             self._model_vars[key] = tk.BooleanVar(value=False)
 
         # Popup-Callbacks (werden von panel_main spaeter gesetzt)
-        self.on_popup_audio = lambda: print("TODO: popup_audio")
+        self.on_popup_audio = self._open_audio_popup
         self.on_popup_hardware = lambda: print("TODO: popup_hardware")
         self.on_popup_npu = lambda: print("TODO: popup_npu")
         self.on_popup_settings = lambda: print("TODO: popup_settings")
@@ -68,6 +74,17 @@ class ModelsModule:
 
         # Status-Polling starten
         self._poll_status()
+
+    # =========================================================================
+    # Audio Popup oeffnen
+    # =========================================================================
+
+    def _open_audio_popup(self):
+        """Audio Settings Popup oeffnen."""
+        if AudioPopup is not None:
+            AudioPopup(self._parent, self._service)
+        else:
+            print("FEHLER: popup_audio.py konnte nicht importiert werden")
 
     # =========================================================================
     # Model Checkboxen
