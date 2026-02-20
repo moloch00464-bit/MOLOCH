@@ -31,6 +31,37 @@ from core.gui.panel_styles import (
     SHM_FRAME, SHM_STATUS,
 )
 
+# --- Modul-Imports (graceful fallback) ---
+try:
+    from core.gui.panel_preview import PreviewModule
+    _PREVIEW_OK = True
+except Exception:
+    _PREVIEW_OK = False
+
+try:
+    from core.gui.panel_ptz import PtzModule
+    _PTZ_OK = True
+except Exception:
+    _PTZ_OK = False
+
+try:
+    from core.gui.panel_ewelink import EwelinkModule
+    _EWELINK_OK = True
+except Exception:
+    _EWELINK_OK = False
+
+try:
+    from core.gui.panel_models import ModelsModule
+    _MODELS_OK = True
+except Exception:
+    _MODELS_OK = False
+
+try:
+    from core.gui.panel_talk_chat import TalkChatModule
+    _TALKCHAT_OK = True
+except Exception:
+    _TALKCHAT_OK = False
+
 
 # =============================================================================
 # ServiceProxy — IPC zum M.O.L.O.C.H. Backend
@@ -229,6 +260,12 @@ class MolochPanel:
         # Layout aufbauen
         self._build_layout()
 
+        # Module laden
+        self._load_modules()
+
+        # Fenster-Schliessen abfangen
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
         # Status-Polling starten
         self._poll_status()
 
@@ -315,6 +352,90 @@ class MolochPanel:
             anchor="w",
         )
         self.status_bar.pack(fill=tk.X, padx=5, pady=(0, 3))
+
+    def _load_modules(self):
+        """Module in die Frames einstecken. Fallback-Label bei Fehler."""
+
+        # Platzhalter entfernen
+        self._preview_placeholder.destroy()
+        for w in self.frame_steuerung.winfo_children():
+            w.destroy()
+        for w in self.frame_chat.winfo_children():
+            w.destroy()
+
+        # (A) Preview -> frame_kamera
+        self._preview = None
+        if _PREVIEW_OK:
+            try:
+                self._preview = PreviewModule(self.frame_kamera, self.service)
+                self._preview.start()
+                self.logger.info("Modul geladen: Preview")
+            except Exception as e:
+                self.logger.error(f"Preview fehlgeschlagen: {e}")
+        if self._preview is None:
+            tk.Label(self.frame_kamera, text="Modul nicht geladen: Preview",
+                     bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL).pack(pady=20)
+
+        # (B) PTZ -> frame_steuerung (oben)
+        if _PTZ_OK:
+            try:
+                PtzModule(self.frame_steuerung, self.service)
+                self.logger.info("Modul geladen: PTZ")
+            except Exception as e:
+                self.logger.error(f"PTZ fehlgeschlagen: {e}")
+                tk.Label(self.frame_steuerung, text="Modul nicht geladen: PTZ",
+                         bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL).pack(pady=5)
+        else:
+            tk.Label(self.frame_steuerung, text="Modul nicht geladen: PTZ",
+                     bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL).pack(pady=5)
+
+        # (C) eWeLink -> frame_steuerung (unter PTZ)
+        if _EWELINK_OK:
+            try:
+                EwelinkModule(self.frame_steuerung, self.service)
+                self.logger.info("Modul geladen: eWeLink")
+            except Exception as e:
+                self.logger.error(f"eWeLink fehlgeschlagen: {e}")
+                tk.Label(self.frame_steuerung, text="Modul nicht geladen: eWeLink",
+                         bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL).pack(pady=5)
+        else:
+            tk.Label(self.frame_steuerung, text="Modul nicht geladen: eWeLink",
+                     bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL).pack(pady=5)
+
+        # (D) Models -> frame_steuerung (unter eWeLink)
+        if _MODELS_OK:
+            try:
+                ModelsModule(self.frame_steuerung, self.service)
+                self.logger.info("Modul geladen: Models")
+            except Exception as e:
+                self.logger.error(f"Models fehlgeschlagen: {e}")
+                tk.Label(self.frame_steuerung, text="Modul nicht geladen: Models",
+                         bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL).pack(pady=5)
+        else:
+            tk.Label(self.frame_steuerung, text="Modul nicht geladen: Models",
+                     bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL).pack(pady=5)
+
+        # (E) TalkChat -> frame_chat
+        if _TALKCHAT_OK:
+            try:
+                TalkChatModule(self.frame_chat, self.service)
+                self.logger.info("Modul geladen: TalkChat")
+            except Exception as e:
+                self.logger.error(f"TalkChat fehlgeschlagen: {e}")
+                tk.Label(self.frame_chat, text="Modul nicht geladen: TalkChat",
+                         bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL).pack(pady=20)
+        else:
+            tk.Label(self.frame_chat, text="Modul nicht geladen: TalkChat",
+                     bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL).pack(pady=20)
+
+    def _on_close(self):
+        """Fenster schliessen: Preview stoppen, dann beenden."""
+        if self._preview is not None:
+            try:
+                self._preview.stop()
+            except Exception:
+                pass
+        self.root.destroy()
 
     def _poll_status(self):
         """Status vom Service pollen (alle STATUS_UPDATE_MS Millisekunden)."""
