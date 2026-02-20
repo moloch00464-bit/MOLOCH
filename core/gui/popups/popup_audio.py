@@ -51,7 +51,7 @@ class AudioPopup:
         self.win = tk.Toplevel(parent)
         self.win.title("Audio Settings")
         self.win.configure(bg=BG_DARK)
-        self.win.geometry("380x420")
+        self.win.geometry("380x470")
         self.win.resizable(False, False)
         self.win.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -67,6 +67,7 @@ class AudioPopup:
         self._build_agc_checkbox()
         self._build_vu_meter()
         self._build_mic_test()
+        self._build_save_button()
 
         # Aktuelle Werte vom Service laden
         self._load_current_values()
@@ -291,6 +292,41 @@ class AudioPopup:
         self._btn_mic_test.config(state=tk.NORMAL, text="MIC TEST")
         self._lbl_mic_status.config(text="Test abgeschlossen", fg=ACCENT_GREEN)
         self.win.after(3000, lambda: self._lbl_mic_status.config(text="", fg=FG_DIM))
+
+    # =========================================================================
+    # SAVE Button
+    # =========================================================================
+
+    def _build_save_button(self):
+        """SAVE Button - speichert Audio-Einstellungen persistent."""
+        frame = tk.Frame(self.win, bg=BG_DARK)
+        frame.pack(fill=tk.X, padx=15, pady=(5, 15))
+
+        self._btn_save = tk.Button(
+            frame, text="SAVE", width=14,
+            bg=BG_BUTTON, fg=FG_WHITE, font=FONT_BUTTON,
+            activebackground=BG_FRAME,
+            command=self._on_save,
+        )
+        self._btn_save.pack(side=tk.LEFT)
+
+        self._lbl_save = tk.Label(
+            frame, text="", bg=BG_DARK, fg=FG_DIM, font=FONT_SMALL,
+        )
+        self._lbl_save.pack(side=tk.LEFT, padx=(8, 0))
+
+    def _on_save(self):
+        """Audio-Einstellungen persistent speichern."""
+        self.service._write_command("action", {
+            "action": "save_settings",
+            "audio": {
+                "gain": self._gain_var.get(),
+                "noise_gate": self._noise_gate_var.get(),
+                "agc": self._agc_var.get(),
+            },
+        })
+        self._lbl_save.config(text="Gespeichert!", fg=ACCENT_GREEN)
+        self.win.after(2000, lambda: self._lbl_save.config(text="", fg=FG_DIM))
 
     # =========================================================================
     # Audio Settings senden
