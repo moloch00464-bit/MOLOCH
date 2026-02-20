@@ -200,19 +200,24 @@ class ModelsModule:
         status = self._service.read_status()
 
         if status:
-            # FPS aktualisieren
-            fps = status.get("fps")
-            if fps is not None:
+            # FPS sicher extrahieren (kann dict/list/None sein)
+            try:
+                raw = status.get("fps")
+                fps = float(raw) if not isinstance(raw, (dict, list)) and raw is not None else 0.0
                 self._lbl_fps.config(text=f"{fps:.1f}")
-            else:
+            except (TypeError, ValueError):
                 self._lbl_fps.config(text="--")
 
-            # Model-Checkboxen aktualisieren
-            models = status.get("models", {})
+            # Model-Checkboxen aktualisieren (models muss dict sein)
+            raw_models = status.get("models")
+            models = raw_models if isinstance(raw_models, dict) else {}
             for _, key in self.MODELS:
-                active = models.get(key, False)
-                if self._model_vars[key].get() != active:
-                    self._model_vars[key].set(active)
+                try:
+                    active = bool(models.get(key, False))
+                    if self._model_vars[key].get() != active:
+                        self._model_vars[key].set(active)
+                except (TypeError, ValueError):
+                    pass
 
         # Naechster Poll
         self._after_id = self._parent.after(STATUS_UPDATE_MS, self._poll_status)
