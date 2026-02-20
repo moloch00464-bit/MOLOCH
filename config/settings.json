@@ -12,9 +12,9 @@
     "recency": 2.0
   },
   "audio": {
-    "mic_gain": 1.0,
-    "agc_enabled": false,
-    "noise_gate_db": -60.0
+    "mic_gain": 1.08,
+    "noise_gate_db": -36.0,
+    "agc_enabled": true
   },
   "camera": {
     "ptz_speed": 15.0,
