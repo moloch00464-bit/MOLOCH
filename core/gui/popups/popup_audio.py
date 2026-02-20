@@ -15,17 +15,19 @@ Features:
 - AGC Checkbox — sofort via _write_command
 - VU Meter (200px Canvas, 100ms Update, pw-record PCM)
 - MIC TEST (3s Aufnahme + Wiedergabe mit Countdown)
-- KEIN Save Button — alle Aenderungen gelten sofort
+- Aenderungen gelten sofort und werden in settings.json persistiert
 
 Importiert NUR panel_styles und tkinter.
 """
 
+import json
 import logging
 import math
 import os
 import signal
 import struct
 import subprocess
+import tempfile
 import threading
 import time
 import tkinter as tk
@@ -45,6 +47,9 @@ VU_UPDATE_MS = 100
 VU_WIDTH = 200
 VU_HEIGHT = 18
 VU_CHUNK_SIZE = 3200  # 100ms @ 16kHz 16bit mono
+
+# Settings-Pfad
+SETTINGS_PATH = os.path.expanduser("~/moloch/config/settings.json")
 
 
 class AudioPopup:
@@ -71,6 +76,9 @@ class AudioPopup:
         # Mic Test State
         self._mic_test_running = False
         self._countdown_after_id = None
+
+        # Debounced Save Timer
+        self._save_after_id = None
 
         # Toplevel erstellen
         self.win = tk.Toplevel(parent)
@@ -241,10 +249,18 @@ class AudioPopup:
         )
         self._gain_slider.pack(fill=tk.X)
 
+        # Hinweis falls wpctl-Wert abweicht
+        self._wpctl_hint = tk.Label(
+            frame, text="", bg=BG_DARK, fg=FG_DIM, font=FONT_SMALL,
+        )
+        self._wpctl_hint.pack(anchor=tk.W)
+
     def _on_gain_changed(self, value):
-        """Gain geaendert — Label updaten und sofort via wpctl setzen."""
+        """Gain geaendert — Label updaten, wpctl setzen, persistent speichern."""
         val = float(value)
         self._gain_label.config(text=f"{val:.2f}")
+        # wpctl-Hinweis zuruecksetzen wenn User Slider bewegt
+        self._wpctl_hint.config(text="")
 
         def apply():
             node_id = self._find_respeaker_source_id()
@@ -257,6 +273,7 @@ class AudioPopup:
                     logger.error(f"[AUDIO] Set gain failed: {e}")
 
         threading.Thread(target=apply, daemon=True).start()
+        self._save_audio_settings()
 
     # =========================================================================
     # AGC Checkbox
@@ -280,11 +297,12 @@ class AudioPopup:
         self._agc_cb.pack(anchor=tk.W)
 
     def _on_agc_changed(self):
-        """AGC geaendert — sofort an Service senden."""
+        """AGC geaendert — sofort an Service senden und persistent speichern."""
         self.service._write_command("action", {
             "action": "set_audio",
             "agc_enabled": self._agc_var.get(),
         })
+        self._save_audio_settings()
 
     # =========================================================================
     # Noise Gate Slider (-80 bis -20 dB)
@@ -319,13 +337,14 @@ class AudioPopup:
         self._noise_gate_slider.pack(fill=tk.X)
 
     def _on_noise_gate_changed(self, value):
-        """Noise Gate geaendert — Label updaten und sofort an Service senden."""
+        """Noise Gate geaendert — Label updaten, Service senden, persistent speichern."""
         val = float(value)
         self._noise_gate_label.config(text=f"{val:.0f} dB")
         self.service._write_command("action", {
             "action": "set_audio",
             "noise_gate_db": val,
         })
+        self._save_audio_settings()
 
     # =========================================================================
     # VU Meter (200px Canvas, 100ms Update, pw-record PCM)
@@ -572,22 +591,28 @@ class AudioPopup:
     # =========================================================================
 
     def _load_current_values(self):
-        """Aktuelle Werte vom Service lesen und Slider/Checkbox setzen."""
-        status = self.service.read_status()
-        if not status:
-            return
+        """Gespeicherte Werte aus settings.json laden, wpctl-Gain vergleichen."""
+        audio = {}
 
-        audio = status.get("audio")
-        if not isinstance(audio, dict):
-            return
+        # Aus settings.json lesen
+        try:
+            if os.path.exists(SETTINGS_PATH):
+                with open(SETTINGS_PATH, "r") as f:
+                    data = json.load(f)
+                audio = data.get("audio", {})
+                if not isinstance(audio, dict):
+                    audio = {}
+        except Exception as e:
+            logger.error(f"[AUDIO] settings.json lesen failed: {e}")
 
         # Gain (0.0 - 3.0)
+        saved_gain = None
         raw_gain = audio.get("mic_gain")
         if raw_gain is not None and not isinstance(raw_gain, (dict, list)):
             try:
-                gain = max(0.0, min(3.0, float(raw_gain)))
-                self._gain_var.set(gain)
-                self._gain_label.config(text=f"{gain:.2f}")
+                saved_gain = max(0.0, min(3.0, float(raw_gain)))
+                self._gain_var.set(saved_gain)
+                self._gain_label.config(text=f"{saved_gain:.2f}")
             except (TypeError, ValueError):
                 pass
 
@@ -609,12 +634,102 @@ class AudioPopup:
             except (TypeError, ValueError):
                 pass
 
+        # wpctl-Gain lesen und vergleichen
+        wpctl_gain = self._read_wpctl_gain()
+        if wpctl_gain is not None and saved_gain is not None:
+            if abs(wpctl_gain - saved_gain) > 0.02:
+                self._wpctl_hint.config(
+                    text=f"wpctl aktuell: {wpctl_gain:.2f}"
+                         f" (Config: {saved_gain:.2f})",
+                    fg=STATUS_YELLOW,
+                )
+                logger.info(
+                    f"[AUDIO] wpctl Gain {wpctl_gain:.2f} weicht von "
+                    f"Config {saved_gain:.2f} ab")
+
+    # =========================================================================
+    # wpctl Gain lesen
+    # =========================================================================
+
+    def _read_wpctl_gain(self):
+        """Aktuellen Gain-Wert via wpctl get-volume lesen."""
+        node_id = self._find_respeaker_source_id()
+        if not node_id:
+            return None
+        try:
+            result = subprocess.run(
+                ["wpctl", "get-volume", node_id],
+                capture_output=True, text=True, timeout=3)
+            if result.returncode != 0:
+                return None
+            # Format: "Volume: 1.00" oder "Volume: 1.00 [MUTED]"
+            for part in result.stdout.strip().split():
+                try:
+                    return float(part)
+                except ValueError:
+                    continue
+        except Exception as e:
+            logger.error(f"[AUDIO] wpctl get-volume failed: {e}")
+        return None
+
+    # =========================================================================
+    # Settings persistent speichern (debounced 300ms)
+    # =========================================================================
+
+    def _save_audio_settings(self):
+        """Save nach 300ms Debounce ausloesen (verhindert Schreibflut bei Slider)."""
+        if self._save_after_id is not None:
+            self.win.after_cancel(self._save_after_id)
+        self._save_after_id = self.win.after(300, self._do_save_audio_settings)
+
+    def _do_save_audio_settings(self):
+        """Audio-Sektion in settings.json atomar schreiben (tmp + rename)."""
+        self._save_after_id = None
+        try:
+            # Bestehende settings.json lesen
+            data = {}
+            if os.path.exists(SETTINGS_PATH):
+                with open(SETTINGS_PATH, "r") as f:
+                    data = json.load(f)
+
+            # Nur audio-Sektion updaten
+            data["audio"] = {
+                "mic_gain": round(self._gain_var.get(), 2),
+                "noise_gate_db": round(self._noise_gate_var.get(), 1),
+                "agc_enabled": self._agc_var.get(),
+            }
+
+            # Atomar schreiben: tmp + rename
+            dir_path = os.path.dirname(SETTINGS_PATH)
+            fd, tmp_path = tempfile.mkstemp(dir=dir_path, suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w") as f:
+                    json.dump(data, f, indent=2)
+                    f.write("\n")
+                os.replace(tmp_path, SETTINGS_PATH)
+            except Exception:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
+
+            logger.debug("[AUDIO] Audio-Settings in settings.json gespeichert")
+        except Exception as e:
+            logger.error(f"[AUDIO] settings.json speichern failed: {e}")
+
     # =========================================================================
     # Schliessen
     # =========================================================================
 
     def _on_close(self):
         """Fenster sauber schliessen — Timer und VU Monitor stoppen."""
+        # Ausstehende Settings sofort speichern
+        if self._save_after_id is not None:
+            self.win.after_cancel(self._save_after_id)
+            self._save_after_id = None
+            self._do_save_audio_settings()
+
         # VU Canvas Timer stoppen
         if self._vu_after_id is not None:
             self.win.after_cancel(self._vu_after_id)
