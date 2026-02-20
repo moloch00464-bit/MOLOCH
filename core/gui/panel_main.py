@@ -441,11 +441,31 @@ class MolochPanel:
         """Status vom Service pollen (alle STATUS_UPDATE_MS Millisekunden)."""
         status = self.service.read_status()
         if status:
-            # Service laeuft
-            fps = status.get("fps", 0)
-            persons = status.get("persons", 0)
-            faces = status.get("faces_recognized", 0)
-            mode = status.get("mode", "?")
+            # Werte sicher extrahieren (koennen dict/list/None sein)
+            try:
+                raw = status.get("fps")
+                fps = float(raw) if not isinstance(raw, (dict, list)) and raw is not None else 0.0
+            except (TypeError, ValueError):
+                fps = 0.0
+
+            try:
+                raw = status.get("persons")
+                persons = int(raw) if not isinstance(raw, (dict, list)) and raw is not None else 0
+            except (TypeError, ValueError):
+                persons = 0
+
+            try:
+                raw = status.get("faces_recognized")
+                faces = str(raw) if not isinstance(raw, (dict, list)) and raw is not None else "---"
+            except (TypeError, ValueError):
+                faces = "---"
+
+            try:
+                raw = status.get("mode")
+                mode = str(raw) if not isinstance(raw, (dict, list)) and raw is not None else "---"
+            except (TypeError, ValueError):
+                mode = "---"
+
             self.status_bar.config(
                 text=f"Service: aktiv | FPS: {fps:.1f} | Personen: {persons} | Erkannt: {faces} | Modus: {mode}",
                 fg=STATUS_GREEN,
