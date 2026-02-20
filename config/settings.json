@@ -4,9 +4,7 @@
     "scrfd_conf": 0.4,
     "scrfd_nms": 0.4,
     "arcface_thresh": 0.6,
-    "yolo_conf": 0.5,
-    "pose_conf": 0.5,
-    "pose_nms": 0.7
+    "yolo_conf": 0.5
   },
   "hand_occlusion": {
     "timeout": 5.0,
