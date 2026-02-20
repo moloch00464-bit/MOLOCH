@@ -18,6 +18,7 @@ Balken: gruen <60%, gelb 60-80%, rot >80%.
 Importiert NUR panel_styles und tkinter.
 """
 
+import glob
 import logging
 import os
 import shutil
@@ -79,7 +80,7 @@ class HardwarePopup:
         self.win = tk.Toplevel(parent)
         self.win.title("Hardware Monitor \u2014 Pi5")
         self.win.configure(bg=BG_DARK)
-        self.win.geometry("380x480")
+        self.win.geometry("380x510")
         self.win.resizable(False, False)
         self.win.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -124,12 +125,21 @@ class HardwarePopup:
 
         # Frequenz
         row_freq = tk.Frame(section, bg=BG_FRAME)
-        row_freq.pack(fill=tk.X, padx=8, pady=(2, 5))
+        row_freq.pack(fill=tk.X, padx=8, pady=2)
         tk.Label(row_freq, text="Frequenz:", bg=BG_FRAME, fg=FG_LABEL,
                  font=FONT_LABEL).pack(side=tk.LEFT)
         self._lbl_freq = tk.Label(row_freq, text="--", bg=BG_FRAME,
                                   fg=FG_WHITE, font=FONT_MONO)
         self._lbl_freq.pack(side=tk.RIGHT)
+
+        # Luefter (Active Cooler)
+        row_fan = tk.Frame(section, bg=BG_FRAME)
+        row_fan.pack(fill=tk.X, padx=8, pady=(2, 5))
+        tk.Label(row_fan, text="L\u00fcfter:", bg=BG_FRAME, fg=FG_LABEL,
+                 font=FONT_LABEL).pack(side=tk.LEFT)
+        self._lbl_fan = tk.Label(row_fan, text="---", bg=BG_FRAME,
+                                 fg=FG_WHITE, font=FONT_MONO)
+        self._lbl_fan.pack(side=tk.RIGHT)
 
     # =========================================================================
     # RAM Section
@@ -291,6 +301,18 @@ class HardwarePopup:
             logger.debug(f"[HW] CPU freq lesen failed: {e}")
         return None
 
+    def _read_fan_rpm(self):
+        """Fan-Drehzahl des Pi5 Active Cooler aus sysfs lesen."""
+        try:
+            matches = glob.glob(
+                "/sys/devices/platform/cooling_fan/hwmon/hwmon*/fan1_input")
+            if matches:
+                with open(matches[0], "r") as f:
+                    return int(f.read().strip())
+        except Exception as e:
+            logger.debug(f"[HW] Fan RPM lesen failed: {e}")
+        return None
+
     def _read_ram(self):
         """RAM benutzt/gesamt in MB. psutil bevorzugt, Fallback /proc/meminfo."""
         if HAS_PSUTIL:
@@ -421,6 +443,13 @@ class HardwarePopup:
             self._lbl_freq.config(text=f"{freq:.0f} MHz")
         else:
             self._lbl_freq.config(text="n/a", fg=FG_DIM)
+
+        # Luefter RPM
+        fan_rpm = self._read_fan_rpm()
+        if fan_rpm is not None:
+            self._lbl_fan.config(text=f"{fan_rpm} RPM", fg=FG_WHITE)
+        else:
+            self._lbl_fan.config(text="---", fg=FG_DIM)
 
         # RAM
         ram_used, ram_total = self._read_ram()
