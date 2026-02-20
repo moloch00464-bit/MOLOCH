@@ -200,9 +200,9 @@ class PreviewModule:
             b, g, r = img.split()
             img = Image.merge('RGB', (r, g, b))
 
-            # Auf gewaehlte Preview-Aufloesung resizen (NEAREST = schnellste Methode)
+            # Auf gewaehlte Preview-Aufloesung resizen
             if img.size != (self._preview_w, self._preview_h):
-                img = img.resize((self._preview_w, self._preview_h), Image.NEAREST)
+                img = img.resize((self._preview_w, self._preview_h), Image.BILINEAR)
 
             # Anzeigen
             self._photo = ImageTk.PhotoImage(img)
