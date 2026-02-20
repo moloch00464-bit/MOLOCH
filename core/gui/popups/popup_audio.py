@@ -320,9 +320,9 @@ class AudioPopup:
         self.service._write_command("action", {
             "action": "save_settings",
             "audio": {
-                "gain": self._gain_var.get(),
-                "noise_gate": self._noise_gate_var.get(),
-                "agc": self._agc_var.get(),
+                "mic_gain": self._gain_var.get() / 100.0,
+                "noise_gate_db": float(self._noise_gate_var.get()),
+                "agc_enabled": self._agc_var.get(),
             },
         })
         self._lbl_save.config(text="Gespeichert!", fg=ACCENT_GREEN)
@@ -336,9 +336,9 @@ class AudioPopup:
         """Aktuelle Audio-Einstellungen sofort an den Service senden."""
         self.service._write_command("action", {
             "action": "set_audio",
-            "gain": self._gain_var.get(),
-            "noise_gate": self._noise_gate_var.get(),
-            "agc": self._agc_var.get(),
+            "mic_gain": self._gain_var.get() / 100.0,
+            "noise_gate_db": float(self._noise_gate_var.get()),
+            "agc_enabled": self._agc_var.get(),
         })
 
     def _load_current_values(self):
@@ -351,11 +351,11 @@ class AudioPopup:
         if not isinstance(audio, dict):
             return
 
-        # Gain
-        raw_gain = audio.get("gain")
+        # Gain (Service: 0.0-1.0 Float → Slider: 0-100 Int)
+        raw_gain = audio.get("mic_gain")
         if raw_gain is not None and not isinstance(raw_gain, (dict, list)):
             try:
-                gain = int(float(raw_gain))
+                gain = int(float(raw_gain) * 100)
                 gain = max(0, min(100, gain))
                 self._gain_var.set(gain)
                 self._gain_label.config(text=str(gain))
@@ -363,7 +363,7 @@ class AudioPopup:
                 pass
 
         # Noise Gate
-        raw_ng = audio.get("noise_gate")
+        raw_ng = audio.get("noise_gate_db")
         if raw_ng is not None and not isinstance(raw_ng, (dict, list)):
             try:
                 ng = int(float(raw_ng))
@@ -374,7 +374,7 @@ class AudioPopup:
                 pass
 
         # AGC
-        raw_agc = audio.get("agc")
+        raw_agc = audio.get("agc_enabled")
         if raw_agc is not None:
             try:
                 self._agc_var.set(bool(raw_agc))

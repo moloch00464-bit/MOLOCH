@@ -2035,6 +2035,12 @@ class MolochService:
                     "arcface_thresh": self.arcface_thresh_val,
                     "yolo_conf": self.yolo_conf_val,
                 },
+                "audio": {
+                    "mic_gain": getattr(self, '_saved_mic_gain', 1.0),
+                    "noise_gate_db": getattr(self, '_saved_noise_gate', -60.0),
+                    "agc_enabled": getattr(self, '_saved_agc', False),
+                    "level": getattr(self, '_audio_level', 0.0),
+                },
             }
             if self._perception:
                 status["perception"] = self._perception.get_state()
@@ -2111,6 +2117,15 @@ class MolochService:
                     logger.info(f"[IPC] Hand params: timeout={self._perception._HAND_TIMEOUT}, "
                                 f"streak={self._perception._MIN_FACE_STREAK}, "
                                 f"recency={self._perception._FACE_RECENCY}")
+        elif action == 'set_audio':
+            # Audio-Parameter sofort uebernehmen (Slider-Aenderungen)
+            self._saved_mic_gain = float(cmd.get('mic_gain', self._saved_mic_gain))
+            self._saved_agc = bool(cmd.get('agc_enabled', self._saved_agc))
+            self._saved_noise_gate = float(cmd.get('noise_gate_db', self._saved_noise_gate))
+            logger.info(f"[IPC] Audio: gain={self._saved_mic_gain:.2f}, "
+                        f"gate={self._saved_noise_gate:.0f}dB, agc={self._saved_agc}")
+        elif action == 'mic_test':
+            logger.info("[IPC] Mic Test angefordert (noch nicht implementiert)")
         elif action == 'save_settings':
             # Audio + Camera Werte aus Panel uebernehmen
             _au = cmd.get('audio')
