@@ -6,8 +6,9 @@ M.O.L.O.C.H. Panel Preview
 Kamera-Preview Modul. Zeigt den Live-Stream im Canvas an.
 Bekommt parent_frame (LabelFrame) und ServiceProxy von panel_main.
 
-- Aufloesung waehlbar: 640x360, 800x450, 960x540, 1280x720
-- 28ms Update-Intervall (35 FPS Ziel), NEAREST Resize
+- Aufloesung waehlbar: SD 640x360, HD 800x450, HD+ 960x540, Full (960 fit)
+- Max Canvas-Groesse 960x540, groessere Aufloesungen werden eingepasst
+- 28ms Update-Intervall (35 FPS Ziel), BILINEAR Resize
 - Frame-Skip wenn Verarbeitung laenger als 28ms dauert
 - BGR->RGB Konvertierung, Resize auf gewaehlte Preview-Groesse
 - FPS-Zaehler oben rechts als gelbes Overlay
@@ -26,13 +27,17 @@ from core.gui.panel_styles import (
     SHM_FRAME,
 )
 
-# Verfuegbare Aufloesungen (Label -> (width, height))
+# Verfuegbare Aufloesungen (Label, Resize-Breite, Resize-Hoehe)
 RESOLUTIONS = [
-    ("640x360", 640, 360),
-    ("800x450", 800, 450),
-    ("960x540", 960, 540),
-    ("1280x720", 1280, 720),
+    ("SD 640x360", 640, 360),
+    ("HD 800x450", 800, 450),
+    ("HD+ 960x540", 960, 540),
+    ("Full (960 fit)", 1280, 720),
 ]
+
+# Maximale Canvas-Groesse (Fenster darf nicht groesser als Bildschirm werden)
+MAX_CANVAS_W = 960
+MAX_CANVAS_H = 540
 
 # Festes Update-Intervall: 28ms = ~35 FPS Ziel
 UPDATE_INTERVAL_MS = 28
@@ -52,9 +57,13 @@ class PreviewModule:
         self._running = False
         self._after_id = None
 
-        # Aktuelle Preview-Groesse (Standard: 640x360)
-        self._preview_w = RESOLUTIONS[0][1]
-        self._preview_h = RESOLUTIONS[0][2]
+        # Resize-Ziel (Aufloesung aus Dropdown)
+        self._resize_w = RESOLUTIONS[0][1]
+        self._resize_h = RESOLUTIONS[0][2]
+
+        # Canvas-Groesse (gekappt auf MAX_CANVAS)
+        self._canvas_w = min(self._resize_w, MAX_CANVAS_W)
+        self._canvas_h = min(self._resize_h, MAX_CANVAS_H)
 
         # FPS-Zaehler
         self._frame_times = []
@@ -88,8 +97,8 @@ class PreviewModule:
         # --- Canvas ---
         self._canvas = tk.Canvas(
             parent_frame,
-            width=self._preview_w,
-            height=self._preview_h,
+            width=self._canvas_w,
+            height=self._canvas_h,
             bg=BG_INPUT,
             highlightthickness=0,
         )
@@ -97,7 +106,7 @@ class PreviewModule:
 
         # Schwarzes Startbild
         self._photo = ImageTk.PhotoImage(
-            Image.new('RGB', (self._preview_w, self._preview_h), (0, 0, 0))
+            Image.new('RGB', (self._canvas_w, self._canvas_h), (0, 0, 0))
         )
 
         # Canvas-Items (Reihenfolge = Z-Order)
@@ -105,13 +114,13 @@ class PreviewModule:
             0, 0, anchor=tk.NW, image=self._photo
         )
         self._nosignal_id = self._canvas.create_text(
-            self._preview_w // 2, self._preview_h // 2,
+            self._canvas_w // 2, self._canvas_h // 2,
             text="Kein Signal",
             fill=FG_DIM,
             font=FONT_MONO,
         )
         self._fps_id = self._canvas.create_text(
-            self._preview_w - 5, 5,
+            self._canvas_w - 5, 5,
             anchor=tk.NE,
             text="0.0 FPS",
             fill=STATUS_YELLOW,
@@ -155,21 +164,25 @@ class PreviewModule:
         """Aufloesung gewechselt — Canvas und Overlay-Positionen anpassen."""
         for label, w, h in RESOLUTIONS:
             if label == selection:
-                self._preview_w = w
-                self._preview_h = h
+                self._resize_w = w
+                self._resize_h = h
                 break
 
+        # Canvas-Groesse gekappt auf Maximum
+        self._canvas_w = min(self._resize_w, MAX_CANVAS_W)
+        self._canvas_h = min(self._resize_h, MAX_CANVAS_H)
+
         # Canvas-Groesse anpassen
-        self._canvas.config(width=self._preview_w, height=self._preview_h)
+        self._canvas.config(width=self._canvas_w, height=self._canvas_h)
 
         # Overlay-Positionen neu setzen
         self._canvas.coords(
             self._nosignal_id,
-            self._preview_w // 2, self._preview_h // 2,
+            self._canvas_w // 2, self._canvas_h // 2,
         )
         self._canvas.coords(
             self._fps_id,
-            self._preview_w - 5, 5,
+            self._canvas_w - 5, 5,
         )
 
     def _update(self):
@@ -200,9 +213,9 @@ class PreviewModule:
             b, g, r = img.split()
             img = Image.merge('RGB', (r, g, b))
 
-            # Auf gewaehlte Preview-Aufloesung resizen
-            if img.size != (self._preview_w, self._preview_h):
-                img = img.resize((self._preview_w, self._preview_h), Image.BILINEAR)
+            # Auf Canvas-Groesse resizen (gekappt auf MAX_CANVAS)
+            if img.size != (self._canvas_w, self._canvas_h):
+                img = img.resize((self._canvas_w, self._canvas_h), Image.BILINEAR)
 
             # Anzeigen
             self._photo = ImageTk.PhotoImage(img)
