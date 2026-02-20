@@ -15,12 +15,15 @@ Bekommt parent_frame (LabelFrame) und ServiceProxy von panel_main.
 """
 
 import tkinter as tk
+import struct
 import time
+import os
 
 from PIL import Image, ImageTk
 
 from core.gui.panel_styles import (
     BG_INPUT, BG_DARK, FG_DIM, FG_TEXT, STATUS_YELLOW, FONT_MONO, FONT_SMALL,
+    SHM_FRAME,
 )
 
 # Verfuegbare Aufloesungen (Label -> (width, height))
@@ -115,6 +118,39 @@ class PreviewModule:
             font=FONT_MONO,
         )
 
+    def _read_shm_frame(self):
+        """
+        Frame direkt aus SHM lesen mit korrektem Header-Parsing.
+
+        SHM-Format (geschrieben von moloch_service._write_shm):
+          16 Byte Header:
+            h   (uint32 LE) = Bildhoehe (numpy rows)
+            w   (uint32 LE) = Bildbreite (numpy cols)
+            c   (uint32 LE) = Kanaele (3 = BGR)
+            seq (uint32 LE) = Sequenznummer
+          Danach: h * w * c Bytes BGR Pixeldaten
+
+        Returns:
+            (width, height, raw_bytes) oder None bei Fehler
+        """
+        try:
+            if not os.path.exists(SHM_FRAME):
+                return None
+            with open(SHM_FRAME, "rb") as f:
+                header = f.read(16)
+                if len(header) < 16:
+                    return None
+                h, w, c, _seq = struct.unpack("<IIII", header)
+                expected = w * h * c
+                if expected == 0 or expected > 10_000_000:
+                    return None
+                raw = f.read(expected)
+                if len(raw) < expected:
+                    return None
+            return (w, h, raw)
+        except OSError:
+            return None
+
     def _on_resolution_changed(self, selection):
         """Aufloesung gewechselt — Canvas und Overlay-Positionen anpassen."""
         for label, w, h in RESOLUTIONS:
@@ -153,18 +189,18 @@ class PreviewModule:
 
         self._last_update_start = now_start
 
-        result = self._service.read_frame()
+        result = self._read_shm_frame()
 
         if result is not None:
-            width, height, channels, raw = result
+            shm_w, shm_h, raw = result
 
-            # BGR raw -> PIL Image (wird als RGB interpretiert, Kanaele sind aber BGR)
-            img = Image.frombytes('RGB', (width, height), raw)
-            # B und R tauschen
+            # Bild mit Originalgroesse aus SHM rekonstruieren (BGR raw)
+            img = Image.frombytes('RGB', (shm_w, shm_h), raw)
+            # B und R tauschen (BGR -> RGB)
             b, g, r = img.split()
             img = Image.merge('RGB', (r, g, b))
 
-            # Resize auf aktuelle Preview-Groesse (NEAREST = schnellste Methode)
+            # Auf gewaehlte Preview-Aufloesung resizen (NEAREST = schnellste Methode)
             if img.size != (self._preview_w, self._preview_h):
                 img = img.resize((self._preview_w, self._preview_h), Image.NEAREST)
 
