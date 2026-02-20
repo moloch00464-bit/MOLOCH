@@ -39,6 +39,12 @@ try:
 except ImportError:
     HardwarePopup = None
 
+# NPU Thresh Popup importieren (optional)
+try:
+    from core.gui.popups.popup_npu import NpuThreshPopup
+except ImportError:
+    NpuThreshPopup = None
+
 
 class ModelsModule:
     """Model Controls und Popup-Buttons im uebergebenen LabelFrame."""
@@ -69,7 +75,7 @@ class ModelsModule:
         # Popup-Callbacks (werden von panel_main spaeter gesetzt)
         self.on_popup_audio = self._open_audio_popup
         self.on_popup_hardware = self._open_hardware_popup
-        self.on_popup_npu = lambda: print("TODO: popup_npu")
+        self.on_popup_npu = self._open_npu_popup
         self.on_popup_settings = lambda: print("TODO: popup_settings")
 
         # GUI aufbauen
@@ -102,6 +108,17 @@ class ModelsModule:
             HardwarePopup(self._parent, self._service)
         else:
             print("FEHLER: popup_hardware.py konnte nicht importiert werden")
+
+    # =========================================================================
+    # NPU Thresh Popup oeffnen
+    # =========================================================================
+
+    def _open_npu_popup(self):
+        """NPU Thresholds Popup oeffnen."""
+        if NpuThreshPopup is not None:
+            NpuThreshPopup(self._parent, self._service)
+        else:
+            print("FEHLER: popup_npu.py konnte nicht importiert werden")
 
     # =========================================================================
     # Model Checkboxen
