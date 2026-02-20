@@ -33,6 +33,12 @@ try:
 except ImportError:
     AudioPopup = None
 
+# Hardware Popup importieren (optional)
+try:
+    from core.gui.popups.popup_hardware import HardwarePopup
+except ImportError:
+    HardwarePopup = None
+
 
 class ModelsModule:
     """Model Controls und Popup-Buttons im uebergebenen LabelFrame."""
@@ -62,7 +68,7 @@ class ModelsModule:
 
         # Popup-Callbacks (werden von panel_main spaeter gesetzt)
         self.on_popup_audio = self._open_audio_popup
-        self.on_popup_hardware = lambda: print("TODO: popup_hardware")
+        self.on_popup_hardware = self._open_hardware_popup
         self.on_popup_npu = lambda: print("TODO: popup_npu")
         self.on_popup_settings = lambda: print("TODO: popup_settings")
 
@@ -85,6 +91,17 @@ class ModelsModule:
             AudioPopup(self._parent, self._service)
         else:
             print("FEHLER: popup_audio.py konnte nicht importiert werden")
+
+    # =========================================================================
+    # Hardware Popup oeffnen
+    # =========================================================================
+
+    def _open_hardware_popup(self):
+        """Hardware Monitor Popup oeffnen."""
+        if HardwarePopup is not None:
+            HardwarePopup(self._parent, self._service)
+        else:
+            print("FEHLER: popup_hardware.py konnte nicht importiert werden")
 
     # =========================================================================
     # Model Checkboxen
