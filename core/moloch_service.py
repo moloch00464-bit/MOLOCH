@@ -2219,12 +2219,23 @@ class MolochService:
 
         elif action == 'snapshot':
             try:
-                # Snapshot ueber lokale Kamera, nicht Cloud
-                from core.hardware.camera import get_camera_controller
-                cam = get_camera_controller()
-                if cam.is_connected:
-                    cam.take_snapshot()
-                    logger.info("[IPC] Snapshot taken")
+                frame = None
+                with self._annotated_lock:
+                    if self._annotated_frame is not None:
+                        frame = self._annotated_frame.copy()
+                if frame is None:
+                    with self._frame_lock:
+                        if self._latest_frame is not None:
+                            frame = self._latest_frame.copy()
+                if frame is None:
+                    logger.warning("[IPC] Snapshot: Kein Frame verfuegbar")
+                else:
+                    snap_dir = os.path.expanduser("~/moloch/snapshots")
+                    os.makedirs(snap_dir, exist_ok=True)
+                    ts = time.strftime("%Y%m%d_%H%M%S")
+                    path = os.path.join(snap_dir, f"moloch_{ts}.jpg")
+                    cv2.imwrite(path, frame)
+                    logger.info(f"[IPC] Snapshot gespeichert: {path}")
             except Exception as e:
                 logger.error(f"[IPC] Snapshot failed: {e}")
 
