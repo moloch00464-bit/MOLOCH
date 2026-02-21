@@ -8,7 +8,7 @@ Bekommt parent_frame (LabelFrame) und ServiceProxy von panel_main.
 
 - D-Pad: 5 Buttons in Kreuzform (Hoch/Runter/Links/Rechts/Home)
 - Quick Positions: Schreibtisch, Tuer, Fenster, Bett
-- Toggle-Buttons: AUTONOM, ST, TEACHEN, CAL
+- Toggle-Buttons: AUTONOM, TEACHEN
 - Status-Labels mit 500ms Update via ServiceProxy
 
 Importiert NUR panel_styles und tkinter.
@@ -18,7 +18,7 @@ import tkinter as tk
 
 from core.gui.panel_styles import (
     BG_FRAME, BG_BUTTON,
-    BTN_ON_GREEN, BTN_OFF_DARK, BTN_OFF_RED, BTN_ON_ORANGE,
+    BTN_ON_GREEN, BTN_OFF_DARK, BTN_OFF_RED,
     FG_WHITE, FG_LABEL, FG_DIM,
     FONT_BUTTON, FONT_LABEL, FONT_SMALL,
     STATUS_UPDATE_MS,
@@ -48,7 +48,6 @@ class PtzModule:
 
         # Toggle-Zustaende (vom Service-Status aktualisiert)
         self._autonomous = False
-        self._smart_tracking = False
         self._daily_learner = False
 
         # GUI aufbauen
@@ -156,7 +155,7 @@ class PtzModule:
     # =========================================================================
 
     def _build_toggles(self):
-        """Toggle-Buttons: AUTONOM, ST, TEACHEN, CAL mit Status-Labels."""
+        """Toggle-Buttons: AUTONOM und TEACHEN mit Status-Labels."""
         section = tk.LabelFrame(
             self._parent,
             text="Modi",
@@ -171,78 +170,40 @@ class PtzModule:
 
         # AUTONOM
         self._btn_autonom = tk.Button(
-            grid, text="AUTONOM", width=10,
+            grid, text="AUTONOM", width=12,
             bg=BTN_OFF_RED, fg=FG_WHITE, font=FONT_BUTTON,
             activebackground=BG_FRAME,
             command=self._toggle_autonomous,
         )
         self._btn_autonom.grid(row=0, column=0, padx=3, pady=2)
 
-        # ST (Smart Tracking)
-        self._btn_st = tk.Button(
-            grid, text="ST", width=6,
-            bg=BTN_OFF_DARK, fg=FG_WHITE, font=FONT_BUTTON,
-            activebackground=BG_FRAME,
-            command=self._toggle_smart_tracking,
-        )
-        self._btn_st.grid(row=0, column=1, padx=3, pady=2)
-
         # TEACHEN (Daily Learner)
         self._btn_alltag = tk.Button(
-            grid, text="TEACHEN", width=8,
+            grid, text="TEACHEN", width=10,
             bg=BTN_OFF_DARK, fg=FG_WHITE, font=FONT_BUTTON,
             activebackground=BG_FRAME,
             command=self._toggle_daily_learner,
         )
-        self._btn_alltag.grid(row=0, column=2, padx=3, pady=2)
-
-        # CAL (Calibration)
-        self._btn_cal = tk.Button(
-            grid, text="CAL", width=6,
-            bg=BTN_OFF_DARK, fg=FG_WHITE, font=FONT_BUTTON,
-            activebackground=BG_FRAME,
-            command=self._trigger_calibration,
-        )
-        self._btn_cal.grid(row=0, column=3, padx=3, pady=2)
+        self._btn_alltag.grid(row=0, column=1, padx=3, pady=2)
 
         # Status-Labels unter den Buttons
         self._lbl_autonom = tk.Label(
-            grid, text="AUS", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
+            grid, text="Manuell", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
         )
         self._lbl_autonom.grid(row=1, column=0, pady=(0, 5))
-
-        self._lbl_st = tk.Label(
-            grid, text="AUS", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
-        )
-        self._lbl_st.grid(row=1, column=1, pady=(0, 5))
 
         self._lbl_alltag = tk.Label(
             grid, text="Bereit", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
         )
-        self._lbl_alltag.grid(row=1, column=2, pady=(0, 5))
-
-        self._lbl_cal = tk.Label(
-            grid, text="bereit", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
-        )
-        self._lbl_cal.grid(row=1, column=3, pady=(0, 5))
+        self._lbl_alltag.grid(row=1, column=1, pady=(0, 5))
 
     def _toggle_autonomous(self):
         """Autonomen Modus umschalten."""
         self._service.toggle_autonomous()
 
-    def _toggle_smart_tracking(self):
-        """Smart Tracking umschalten."""
-        self._service.toggle_smart_tracking()
-
     def _toggle_daily_learner(self):
         """Daily Learner umschalten."""
         self._service.toggle_daily_learner()
-
-    def _trigger_calibration(self):
-        """PTZ Kalibrierung starten."""
-        self._service._write_command("ptz_calibrate")
-        self._btn_cal.config(bg=BTN_ON_ORANGE)
-        self._lbl_cal.config(text="laeuft...", fg=BTN_ON_ORANGE)
 
     # =========================================================================
     # Status-Polling
@@ -261,20 +222,8 @@ class PtzModule:
                     bg=BTN_ON_GREEN if auto else BTN_OFF_RED
                 )
                 self._lbl_autonom.config(
-                    text="AN" if auto else "AUS",
+                    text="Autonom" if auto else "Manuell",
                     fg=BTN_ON_GREEN if auto else FG_DIM,
-                )
-
-            # Smart Tracking (tentakel_enabled im Service)
-            st = status.get("tentakel_enabled", False)
-            if st != self._smart_tracking:
-                self._smart_tracking = st
-                self._btn_st.config(
-                    bg=BTN_ON_ORANGE if st else BTN_OFF_DARK
-                )
-                self._lbl_st.config(
-                    text="AN" if st else "AUS",
-                    fg=BTN_ON_ORANGE if st else FG_DIM,
                 )
 
             # Daily Learner
@@ -289,11 +238,6 @@ class PtzModule:
                     fg=BTN_ON_GREEN if dl else FG_DIM,
                 )
 
-            # CAL: kein calibrating Key im Service-Status vorhanden
-            # Button reset auf default (spaeter erweiterbar)
-            self._btn_cal.config(bg=BTN_OFF_DARK)
-            self._lbl_cal.config(text="bereit", fg=FG_DIM)
-
         # Widgets sofort neu zeichnen
         self._parent.update_idletasks()
 
@@ -307,23 +251,14 @@ class PtzModule:
             return
 
         self._autonomous = status.get("autonomous_mode", False)
-        self._smart_tracking = status.get("tentakel_enabled", False)
         self._daily_learner = status.get("daily_learner_enabled", False)
 
         self._btn_autonom.config(
             bg=BTN_ON_GREEN if self._autonomous else BTN_OFF_RED
         )
         self._lbl_autonom.config(
-            text="AN" if self._autonomous else "AUS",
+            text="Autonom" if self._autonomous else "Manuell",
             fg=BTN_ON_GREEN if self._autonomous else FG_DIM,
-        )
-
-        self._btn_st.config(
-            bg=BTN_ON_ORANGE if self._smart_tracking else BTN_OFF_DARK
-        )
-        self._lbl_st.config(
-            text="AN" if self._smart_tracking else "AUS",
-            fg=BTN_ON_ORANGE if self._smart_tracking else FG_DIM,
         )
 
         self._btn_alltag.config(
