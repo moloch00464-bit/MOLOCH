@@ -235,6 +235,13 @@ class MolochService:
         # Alarm State
         self._alarm_on = False
 
+        # LED Erkennungs-Indikator State
+        self._led_indicator_state = False  # Aktueller Zustand (vermeidet doppelte API-Calls)
+        self._led_blinking = False  # True waehrend Blink-Sequenz laeuft
+        self._led_blink_lock = threading.Lock()
+        self._led_markus_last_blink = 0  # Cooldown-Timestamp
+        self._LED_BLINK_COOLDOWN = 10  # Sekunden zwischen Blink-Events
+
         # Cross-process NPU pause
         self._paused_models = []
         self._npu_paused = False
@@ -776,6 +783,8 @@ class MolochService:
             face_boxes = []
             face_detected = False
             face_fed_to_tracker = False
+            _markus_recognized = False
+            _persons_detected = False
 
             # 1. SCRFD Face Detection
             if self.scrfd_active and "scrfd" in self._active_ctx:
@@ -865,6 +874,10 @@ class MolochService:
                             else:
                                 name, sim = "Keine DB", 0.0
 
+                            # LED Indikator: Markus erkannt?
+                            if name.lower() == "markus":
+                                _markus_recognized = True
+
                             # Emotion Detection (CPU)
                             emotion = None
                             if self._emotion_detector and crop is not None:
@@ -937,6 +950,7 @@ class MolochService:
                         self._fps["yolov8m"] = 1.0 / dt if dt > 0 else 0
 
                     if persons:
+                        _persons_detected = True
                         draw_persons(annotated, persons, scale_x, scale_y)
                         if self._moloch_has_control:
                             self._last_interesting_time = time.time()
@@ -1014,6 +1028,15 @@ class MolochService:
                             "scrfd": self.scrfd_active, "arcface": self.arcface_active,
                             "yolov8m": self.yolo_active,
                             "hand_landmark": self.hand_active})
+
+            # === LED Erkennungs-Indikator ===
+            if _markus_recognized:
+                self._led_indicator_blink_markus()
+            elif face_detected or _persons_detected:
+                self._led_indicator_set(True)
+            elif not self._moloch_has_control:
+                # LED nur AUS wenn MOLOCH nicht aktiv (Tentakel steuert eigene LED)
+                self._led_indicator_set(False)
 
             # Auto-Switch: Hand-Forced zurueck zu Auto wenn keine Hand
             if self.hand_active and self._perception and self._perception._forced:
@@ -1726,6 +1749,46 @@ class MolochService:
                 time.sleep(interval)
         threading.Thread(target=do_blink, daemon=True).start()
 
+    def _led_indicator_set(self, on: bool):
+        """LED Indikator: Setzt LED nur bei State-Aenderung (vermeidet API-Spam)."""
+        if self._led_blinking:
+            return
+        if on == self._led_indicator_state:
+            return
+        self._led_indicator_state = on
+        if on:
+            self._led_on()
+        else:
+            self._led_off()
+
+    def _led_indicator_blink_markus(self):
+        """3x Blink fuer Markus-Erkennung (eigener Thread, 10s Cooldown)."""
+        now = time.time()
+        if now - self._led_markus_last_blink < self._LED_BLINK_COOLDOWN:
+            return
+        with self._led_blink_lock:
+            if self._led_blinking:
+                return
+            self._led_blinking = True
+        self._led_markus_last_blink = now
+        logger.info("[LED] Markus erkannt -> 3x Blink")
+
+        def do_blink():
+            try:
+                # AN-AUS-AN-AUS-AN (3 Flashes, endet AN = Standlicht)
+                for _ in range(2):
+                    self._led_on()
+                    time.sleep(0.3)
+                    self._led_off()
+                    time.sleep(0.3)
+                self._led_on()
+                self._led_indicator_state = True
+            finally:
+                with self._led_blink_lock:
+                    self._led_blinking = False
+
+        threading.Thread(target=do_blink, daemon=True, name="LEDBlinkMarkus").start()
+
     # =========================================================================
     # Face Recognition
     # =========================================================================
@@ -1757,9 +1820,8 @@ class MolochService:
             pass
 
     def _announce_person(self, name):
-        """LED-Signal bei Gesichtserkennung (6x Blink, endet AN)."""
-        logger.info(f"[LED] Person erkannt: {name}")
-        self._led_blink(6, 0.3)
+        """Person erkannt - Log (LED wird vom Indikator gesteuert)."""
+        logger.info(f"[FACE] Person erkannt: {name}")
 
     # =========================================================================
     # Lifecycle
