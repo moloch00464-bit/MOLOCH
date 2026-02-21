@@ -195,21 +195,17 @@ class DailyLearner:
         distance = self._estimate_distance(bbox_height, frame_height)
         angle = self._estimate_angle(head_pose)
 
-        # Nur speichern wenn:
-        # 1. Markus mit neuer Bedingung
-        # 2. ODER Unbekannt (könnte Markus sein)
+        # Nur speichern bei echtem Match (kein unknown_maybe, Unbekannt, Keine DB)
+        _SKIP_NAMES = {"unknown_maybe", "Unbekannt", "Keine DB"}
+        if name in _SKIP_NAMES or confidence <= 0.5:
+            return
+
         save_it = False
         reason = ""
 
-        if name == "Markus":
-            if self._is_new_condition(angle, light, distance):
-                save_it = True
-                reason = "neue Bedingung"
-        elif confidence < 0.5:  # Unbekannt (kein Match)
-            # Speichere als "vielleicht Markus"
+        if self._is_new_condition(angle, light, distance):
             save_it = True
-            reason = "unbekannt (vielleicht Markus)"
-            name = "unknown_maybe"
+            reason = f"neue Bedingung fuer {name}"
 
         if save_it:
             self._save_snapshot(face_crop, name, confidence, angle, light, distance, head_pose)
