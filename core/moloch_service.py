@@ -2155,6 +2155,53 @@ class MolochService:
                 enabled = self._daily_learner.toggle()
                 logger.info(f"[IPC] DailyLearner: {'AN' if enabled else 'AUS'}")
 
+        elif action == 'ptz_move':
+            direction = cmd.get('direction', '')
+            try:
+                from core.hardware.camera import get_camera_controller
+                cam = get_camera_controller()
+                if not cam.is_connected:
+                    cam.connect()
+                if direction == 'home':
+                    cam.goto_home()
+                    logger.info("[IPC] PTZ: goto home")
+                elif direction in ('up', 'down', 'left', 'right'):
+                    cam.move_manual(direction, speed=0.3)
+                    logger.info(f"[IPC] PTZ: move {direction}")
+            except Exception as e:
+                logger.error(f"[IPC] PTZ move failed: {e}")
+
+        elif action == 'ptz_goto':
+            position = cmd.get('position', '')
+            positions = {
+                'schreibtisch': (0.0, -20.0),
+                'tuer': (-90.0, 0.0),
+                'fenster': (90.0, 10.0),
+                'bett': (170.0, -10.0),
+            }
+            try:
+                from core.hardware.camera import get_camera_controller
+                cam = get_camera_controller()
+                if not cam.is_connected:
+                    cam.connect()
+                if position in positions:
+                    pan, tilt = positions[position]
+                    cam.move_absolute(pan=pan, tilt=tilt)
+                    logger.info(f"[IPC] PTZ: goto {position} ({pan}, {tilt})")
+                else:
+                    logger.warning(f"[IPC] PTZ: unknown position '{position}'")
+            except Exception as e:
+                logger.error(f"[IPC] PTZ goto failed: {e}")
+
+        elif action == 'ptz_calibrate':
+            try:
+                from core.hardware.camera_cloud_bridge import CameraCloudBridgeSync
+                bridge = CameraCloudBridgeSync()
+                bridge.trigger_ptz_calibration()
+                logger.info("[IPC] PTZ: calibration triggered")
+            except Exception as e:
+                logger.error(f"[IPC] PTZ calibrate failed: {e}")
+
     # ----------------------------------------------------------------
     # Settings Persistence
     # ----------------------------------------------------------------
