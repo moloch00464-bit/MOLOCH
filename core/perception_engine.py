@@ -310,6 +310,10 @@ class PerceptionEngine:
             scores["yolov8m"] += 0.3
             scores["scrfd"] += 0.2
 
+        # Person da aber kein Gesicht -> Hand pruefen (Gesten-Modus)
+        if person and not face:
+            scores["hand_landmark"] += 0.4
+
         # person_count_jump: YOLO 2+ Personen aber <=1 Gesicht -> Anomalie
         _person_count = ctx.get("person_count", 0)
         _face_count = ctx.get("face_count", 0)
