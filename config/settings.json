@@ -1,9 +1,9 @@
 {
   "version": 1,
   "thresholds": {
-    "scrfd_conf": 0.55,
+    "scrfd_conf": 0.45,
     "scrfd_nms": 0.6,
-    "arcface_thresh": 0.7,
+    "arcface_thresh": 0.6,
     "yolo_conf": 0.5
   },
   "hand_occlusion": {
