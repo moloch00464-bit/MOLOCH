@@ -153,6 +153,14 @@ class EwelinkModule:
             command=self._sync_cloud_status,
         ).grid(row=0, column=3, padx=3, pady=2)
 
+        # GALERIE Button
+        tk.Button(
+            row, text="GALERIE", width=8,
+            bg=BG_BUTTON, fg=FG_LABEL, font=FONT_BUTTON,
+            activebackground=BG_FRAME,
+            command=self._open_gallery,
+        ).grid(row=0, column=4, padx=3, pady=2)
+
         # Status-Labels
         self._lbl_alarm = tk.Label(
             row, text="AUS", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
@@ -251,3 +259,8 @@ class EwelinkModule:
         self._parent.after(3000, lambda: self._lbl_sync.config(
             text="", fg=FG_DIM
         ))
+
+    def _open_gallery(self):
+        """Snapshot Galerie Popup oeffnen."""
+        from core.gui.popups.popup_gallery import SnapshotGallery
+        SnapshotGallery(self._parent)
