@@ -7,7 +7,6 @@ eWeLink Cloud Controls fuer Sonoff CAM-PT2.
 Bekommt parent_frame (LabelFrame) und ServiceProxy von panel_main.
 
 - LED Section: AUS/LOW/MED/HIGH (4 Buttons, aktiver Level cyan)
-- IR/Nacht Section: Auto/Tag/Nacht (3 Buttons, aktiver Modus cyan)
 - Einzel-Buttons: ALARM (rot toggle), SNAP (cyan einmal), White LED (toggle)
 - SYNC Button: Holt Cloud-Status, aktualisiert Button-Farben
 
@@ -37,13 +36,6 @@ class EwelinkModule:
         ("HIGH", 3),
     ]
 
-    # IR/Nacht Modi
-    NIGHT_MODES = [
-        ("Auto", "auto"),
-        ("Tag", "day"),
-        ("Nacht", "night"),
-    ]
-
     def __init__(self, parent_frame, service_proxy):
         """
         Args:
@@ -55,19 +47,16 @@ class EwelinkModule:
 
         # Zustaende (vom Cloud-Sync aktualisiert)
         self._led_level = 0
-        self._night_mode = "auto"
         self._alarm_active = False
         self._white_led_on = False
 
         # Button-Referenzen
         self._led_btns = []
-        self._night_btns = []
         self._btn_alarm = None
         self._btn_white_led = None
 
         # GUI aufbauen
         self._build_led_section()
-        self._build_night_section()
         self._build_action_buttons()
 
     # =========================================================================
@@ -111,48 +100,6 @@ class EwelinkModule:
         for i, (_, level) in enumerate(self.LED_LEVELS):
             bg = ACCENT_CYAN if level == self._led_level else BTN_OFF_DARK
             self._led_btns[i].config(bg=bg)
-
-    # =========================================================================
-    # IR/Nacht Section
-    # =========================================================================
-
-    def _build_night_section(self):
-        """3 Buttons: Auto/Tag/Nacht."""
-        section = tk.LabelFrame(
-            self._parent,
-            text="IR / Nacht",
-            bg=BG_FRAME,
-            fg=FG_LABEL,
-            font=FONT_LABEL,
-        )
-        section.pack(fill=tk.X, padx=5, pady=2)
-
-        row = tk.Frame(section, bg=BG_FRAME)
-        row.pack(pady=5, padx=5)
-
-        self._night_btns = []
-        for i, (label, mode) in enumerate(self.NIGHT_MODES):
-            btn = tk.Button(
-                row, text=label, width=9,
-                bg=ACCENT_CYAN if mode == self._night_mode else BTN_OFF_DARK,
-                fg=FG_WHITE, font=FONT_BUTTON,
-                activebackground=BG_FRAME,
-                command=lambda m=mode: self._set_night(m),
-            )
-            btn.grid(row=0, column=i, padx=2, pady=2)
-            self._night_btns.append(btn)
-
-    def _set_night(self, mode):
-        """Nacht-Modus setzen und Buttons aktualisieren."""
-        self._night_mode = mode
-        self._update_night_buttons()
-        self._service._write_command("cloud_night", {"mode": mode})
-
-    def _update_night_buttons(self):
-        """Nacht-Buttons farblich aktualisieren."""
-        for i, (_, mode) in enumerate(self.NIGHT_MODES):
-            bg = ACCENT_CYAN if mode == self._night_mode else BTN_OFF_DARK
-            self._night_btns[i].config(bg=bg)
 
     # =========================================================================
     # Einzel-Buttons: ALARM, SNAP, White LED, SYNC
@@ -281,12 +228,6 @@ class EwelinkModule:
                 if led is not None:
                     self._led_level = led
                     self._update_led_buttons()
-
-                # Nacht-Modus
-                night = cloud.get("night_mode")
-                if night is not None:
-                    self._night_mode = night
-                    self._update_night_buttons()
 
                 # Alarm
                 alarm = cloud.get("alarm_active")

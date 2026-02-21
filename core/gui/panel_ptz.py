@@ -8,7 +8,7 @@ Bekommt parent_frame (LabelFrame) und ServiceProxy von panel_main.
 
 - D-Pad: 5 Buttons in Kreuzform (Hoch/Runter/Links/Rechts/Home)
 - Quick Positions: Schreibtisch, Tuer, Fenster, Bett
-- Toggle-Buttons: AUTONOM, ST, ALLTAG, CAL
+- Toggle-Buttons: AUTONOM, ST, TEACHEN, CAL
 - Status-Labels mit 500ms Update via ServiceProxy
 
 Importiert NUR panel_styles und tkinter.
@@ -156,7 +156,7 @@ class PtzModule:
     # =========================================================================
 
     def _build_toggles(self):
-        """Toggle-Buttons: AUTONOM, ST, ALLTAG, CAL mit Status-Labels."""
+        """Toggle-Buttons: AUTONOM, ST, TEACHEN, CAL mit Status-Labels."""
         section = tk.LabelFrame(
             self._parent,
             text="Modi",
@@ -187,9 +187,9 @@ class PtzModule:
         )
         self._btn_st.grid(row=0, column=1, padx=3, pady=2)
 
-        # ALLTAG (Daily Learner)
+        # TEACHEN (Daily Learner)
         self._btn_alltag = tk.Button(
-            grid, text="ALLTAG", width=8,
+            grid, text="TEACHEN", width=8,
             bg=BTN_OFF_DARK, fg=FG_WHITE, font=FONT_BUTTON,
             activebackground=BG_FRAME,
             command=self._toggle_daily_learner,
@@ -217,7 +217,7 @@ class PtzModule:
         self._lbl_st.grid(row=1, column=1, pady=(0, 5))
 
         self._lbl_alltag = tk.Label(
-            grid, text="AUS", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
+            grid, text="Bereit", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
         )
         self._lbl_alltag.grid(row=1, column=2, pady=(0, 5))
 
@@ -285,7 +285,7 @@ class PtzModule:
                     bg=BTN_ON_GREEN if dl else BTN_OFF_DARK
                 )
                 self._lbl_alltag.config(
-                    text="AN" if dl else "AUS",
+                    text="Lernt..." if dl else "Bereit",
                     fg=BTN_ON_GREEN if dl else FG_DIM,
                 )
 
@@ -330,6 +330,6 @@ class PtzModule:
             bg=BTN_ON_GREEN if self._daily_learner else BTN_OFF_DARK
         )
         self._lbl_alltag.config(
-            text="AN" if self._daily_learner else "AUS",
+            text="Lernt..." if self._daily_learner else "Bereit",
             fg=BTN_ON_GREEN if self._daily_learner else FG_DIM,
         )
