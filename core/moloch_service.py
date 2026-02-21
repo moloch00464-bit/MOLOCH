@@ -2221,10 +2221,14 @@ class MolochService:
             level = cmd.get('level', 0)
             try:
                 if self._cloud and self._cloud.connected:
-                    self._cloud.run(self._cloud.bridge.set_led(int(level)))
-                    logger.info(f"[IPC] LED level: {level}")
+                    # PT2 hat kein lightStrength — weisse LEDs ueber nightVision steuern
+                    # Level 0=aus(day), 1=auto, 2=an(night), 3=an(night)
+                    night_modes = {0: 'day', 1: 'auto', 2: 'night', 3: 'night'}
+                    mode = night_modes.get(int(level), 'day')
+                    self._cloud.run(self._cloud.bridge.set_night(mode))
+                    logger.info(f"[IPC] LED/Night mode: {mode} (level={level})")
             except Exception as e:
-                logger.error(f"[IPC] LED failed: {e}")
+                logger.error(f"[IPC] LED/Night failed: {e}")
 
         elif action == 'cloud_alarm':
             try:
