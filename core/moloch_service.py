@@ -232,6 +232,9 @@ class MolochService:
         # TTS Announcement Cooldown
         self._last_announce = {}
 
+        # Alarm State
+        self._alarm_on = False
+
         # Cross-process NPU pause
         self._paused_models = []
         self._npu_paused = False
@@ -2233,8 +2236,9 @@ class MolochService:
         elif action == 'cloud_alarm':
             try:
                 if self._cloud and self._cloud.connected:
-                    self._cloud.run(self._cloud.bridge.set_alarm(True))
-                    logger.info("[IPC] Alarm triggered")
+                    self._alarm_on = not self._alarm_on
+                    self._cloud.run(self._cloud.bridge.set_alarm(self._alarm_on))
+                    logger.info(f"[IPC] Alarm: {'AN' if self._alarm_on else 'AUS'}")
             except Exception as e:
                 logger.error(f"[IPC] Alarm failed: {e}")
 
