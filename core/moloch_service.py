@@ -2200,6 +2200,52 @@ class MolochService:
             except Exception as e:
                 logger.error(f"[IPC] PTZ calibrate failed: {e}")
 
+        elif action == 'cloud_led':
+            level = cmd.get('level', 0)
+            try:
+                if self._cloud and self._cloud.connected:
+                    self._cloud.run(self._cloud.bridge.set_led(int(level)))
+                    logger.info(f"[IPC] LED level: {level}")
+            except Exception as e:
+                logger.error(f"[IPC] LED failed: {e}")
+
+        elif action == 'cloud_alarm':
+            try:
+                if self._cloud and self._cloud.connected:
+                    self._cloud.run(self._cloud.bridge.set_alarm(True))
+                    logger.info("[IPC] Alarm triggered")
+            except Exception as e:
+                logger.error(f"[IPC] Alarm failed: {e}")
+
+        elif action == 'snapshot':
+            try:
+                # Snapshot ueber lokale Kamera, nicht Cloud
+                from core.hardware.camera import get_camera_controller
+                cam = get_camera_controller()
+                if cam.is_connected:
+                    cam.take_snapshot()
+                    logger.info("[IPC] Snapshot taken")
+            except Exception as e:
+                logger.error(f"[IPC] Snapshot failed: {e}")
+
+        elif action == 'cloud_status_led':
+            try:
+                if self._cloud and self._cloud.connected:
+                    # Toggle: aktuellen Status invertieren
+                    self._status_led_on = not getattr(self, '_status_led_on', False)
+                    self._cloud.run(self._cloud.bridge.set_status_led(self._status_led_on))
+                    logger.info(f"[IPC] Status LED: {self._status_led_on}")
+            except Exception as e:
+                logger.error(f"[IPC] Status LED failed: {e}")
+
+        elif action == 'cloud_sync':
+            try:
+                if self._cloud and self._cloud.connected:
+                    status = self._cloud.run(self._cloud.bridge.get_device_params())
+                    logger.info(f"[IPC] Cloud sync: {status}")
+            except Exception as e:
+                logger.error(f"[IPC] Cloud sync failed: {e}")
+
     # ----------------------------------------------------------------
     # Settings Persistence
     # ----------------------------------------------------------------
