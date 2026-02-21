@@ -215,7 +215,7 @@ class PtzModule:
 
         if status:
             # Autonomer Modus
-            auto = status.get("autonomous_mode", False)
+            auto = not status.get("manual_mode", True)
             if auto != self._autonomous:
                 self._autonomous = auto
                 self._btn_autonom.config(
@@ -250,7 +250,7 @@ class PtzModule:
         if not status:
             return
 
-        self._autonomous = status.get("autonomous_mode", False)
+        self._autonomous = not status.get("manual_mode", True)
         self._daily_learner = status.get("daily_learner_enabled", False)
 
         self._btn_autonom.config(

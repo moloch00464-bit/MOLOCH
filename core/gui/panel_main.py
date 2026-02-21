@@ -447,7 +447,7 @@ class MolochPanel:
                 fps = 0.0
 
             # Modus aus autonomous_mode ableiten
-            auto = status.get("autonomous_mode", False)
+            auto = not status.get("manual_mode", True)
             mode = "AUTONOM" if auto else "MANUELL"
 
             self.status_bar.config(
