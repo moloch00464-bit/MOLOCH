@@ -885,6 +885,23 @@ class MolochService:
                                                    emotion=emotion, gender=gender, age_range=age_range,
                                                    head_pose=_head_pose if '_head_pose' in dir() else None)
 
+                            # DailyLearner: Snapshot bei erkanntem Gesicht
+                            if self._daily_learner and self._daily_learner.enabled and name != "Keine DB":
+                                try:
+                                    _hp = None
+                                    if '_head_pose' in dir() and _head_pose is not None:
+                                        _hp = {"pitch": _head_pose[0], "yaw": _head_pose[1], "roll": _head_pose[2]}
+                                    self._daily_learner.maybe_snapshot(
+                                        face_crop=crop,
+                                        name=name,
+                                        confidence=sim,
+                                        bbox=(float(x1), float(y1), float(x2), float(y2)),
+                                        frame_height=fh,
+                                        head_pose=_hp,
+                                    )
+                                except Exception as e:
+                                    logger.debug(f"DailyLearner: {e}")
+
                             # TTS Ansage (60s Cooldown pro Person)
                             if name != "Unbekannt" and name != "Keine DB":
                                 now = time.time()

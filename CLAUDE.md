@@ -290,7 +290,24 @@ engine.speak_event(MolochEvent.PERSON_UNKNOWN, conflict=True)  # Beide Stimmen
 engine.manual_override("Moloch, Schatten")               # Switch
 ```
 
-## REGEL 10 — MODULARES PANEL
+## REGEL 10 — CHRISTIAN-PRINZIP + MODULARES PANEL
+
+> Benannt nach Christian Wendt, FRANCOR CEO, RoboCup Rescue.
+
+```
+a) Separation of Concerns: 1 Datei = 1 Aufgabe. Kein Modul mischt Verantwortungen.
+b) Fail Isolation: try/except bei Imports und Modulstart. Ein Crash darf NIE das Gesamtsystem killen.
+c) Interface Contract: Module kommunizieren NUR ueber ServiceProxy/IPC. Keine direkten Querverbindungen.
+d) Pipeline-Architektur: Daten fliessen durch definierte Stages mit Typ-Checks an den Ports.
+e) Pre/Post-Conditions: Vor jeder Aktion pruefen ob Zustand erlaubt. Nach jeder Aktion Ergebnis validieren.
+f) Handshake statt Fire-and-Forget: Command -> ACK/NACK. Kein blindes Hoffen.
+g) State Validation: Ist der Service online? Ist der Modus richtig? Ist die Hardware erreichbar?
+h) Health Monitoring: Jedes Modul meldet seinen Zustand. Heartbeat-System. Timeout-Erkennung.
+i) Mux/Exklusiver Zugriff: Wer steuert die Hardware? Nur einer gleichzeitig. Prioritaeten definiert.
+j) Atomic Changes: Git Backup VOR jeder Aenderung. Ein Auftrag = eine Datei.
+```
+
+### MODULARES PANEL
 
 Das Panel ist MODULAR aufgebaut. Jedes Modul und jedes Popup ist eine eigene Datei unter `core/gui/`.
 
@@ -309,7 +326,8 @@ core/gui/
 │   ├── popup_audio.py     # Gain, Noise Gate, AGC, VU Meter, MIC TEST
 │   ├── popup_hardware.py  # CPU, RAM, SSD1/SSD2, NPU Monitor, 5s Refresh
 │   ├── popup_npu.py       # SCRFD/ArcFace/YOLOv8m Threshold Sliders
-│   └── popup_settings.py  # Save/Load settings.json
+│   ├── popup_settings.py  # Save/Load settings.json
+│   └── popup_gallery.py   # Snapshot-Galerie (Manuell/Learning/Teaching)
 ```
 
 ### REGELN:
