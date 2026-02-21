@@ -6,8 +6,9 @@ M.O.L.O.C.H. Panel eWeLink
 eWeLink Cloud Controls fuer Sonoff CAM-PT2.
 Bekommt parent_frame (LabelFrame) und ServiceProxy von panel_main.
 
-- LED Section: AUS/LOW/MED/HIGH (4 Buttons, aktiver Level cyan)
-- Einzel-Buttons: ALARM (rot toggle), SNAP (cyan einmal), White LED (toggle)
+- FLUTLICHT: Toggle weisse LEDs (nightVision 0=aus, 2=an)
+- ERKANNT: Toggle blaue Status-LED (sledOnline)
+- ALARM (rot toggle), SNAP (cyan einmal)
 - SYNC Button: Holt Cloud-Status, aktualisiert Button-Farben
 
 Alle Commands via ServiceProxy._write_command().
@@ -28,14 +29,6 @@ from core.gui.panel_styles import (
 class EwelinkModule:
     """eWeLink Cloud Controls im uebergebenen LabelFrame."""
 
-    # LED Level Namen
-    LED_LEVELS = [
-        ("AUS", 0),
-        ("LOW", 1),
-        ("MED", 2),
-        ("HIGH", 3),
-    ]
-
     def __init__(self, parent_frame, service_proxy):
         """
         Args:
@@ -46,67 +39,24 @@ class EwelinkModule:
         self._service = service_proxy
 
         # Zustaende (vom Cloud-Sync aktualisiert)
-        self._led_level = 0
+        self._flutlicht_on = False  # nightVision: 0=aus, 2=an
         self._alarm_active = False
-        self._white_led_on = False
+        self._erkannt_led_on = False  # blaue Status-LED (sledOnline)
 
         # Button-Referenzen
-        self._led_btns = []
         self._btn_alarm = None
-        self._btn_white_led = None
+        self._btn_flutlicht = None
+        self._btn_erkannt = None
 
         # GUI aufbauen
-        self._build_led_section()
         self._build_action_buttons()
 
     # =========================================================================
-    # LED Section
-    # =========================================================================
-
-    def _build_led_section(self):
-        """4 LED Buttons in Reihe: AUS/LOW/MED/HIGH."""
-        section = tk.LabelFrame(
-            self._parent,
-            text="LED",
-            bg=BG_FRAME,
-            fg=FG_LABEL,
-            font=FONT_LABEL,
-        )
-        section.pack(fill=tk.X, padx=5, pady=(5, 2))
-
-        row = tk.Frame(section, bg=BG_FRAME)
-        row.pack(pady=5, padx=5)
-
-        self._led_btns = []
-        for i, (label, level) in enumerate(self.LED_LEVELS):
-            btn = tk.Button(
-                row, text=label, width=7,
-                bg=ACCENT_CYAN if level == self._led_level else BTN_OFF_DARK,
-                fg=FG_WHITE, font=FONT_BUTTON,
-                activebackground=BG_FRAME,
-                command=lambda lv=level: self._set_led(lv),
-            )
-            btn.grid(row=0, column=i, padx=2, pady=2)
-            self._led_btns.append(btn)
-
-    def _set_led(self, level):
-        """LED Level setzen und Buttons aktualisieren."""
-        self._led_level = level
-        self._update_led_buttons()
-        self._service._write_command("cloud_led", {"level": level})
-
-    def _update_led_buttons(self):
-        """LED Buttons farblich aktualisieren."""
-        for i, (_, level) in enumerate(self.LED_LEVELS):
-            bg = ACCENT_CYAN if level == self._led_level else BTN_OFF_DARK
-            self._led_btns[i].config(bg=bg)
-
-    # =========================================================================
-    # Einzel-Buttons: ALARM, SNAP, White LED, SYNC
+    # Buttons: ALARM, SNAP, FLUTLICHT, ERKANNT, SYNC
     # =========================================================================
 
     def _build_action_buttons(self):
-        """ALARM, SNAP, White LED und SYNC Buttons."""
+        """ALARM, SNAP, FLUTLICHT, ERKANNT, SYNC, GALERIE Buttons."""
         section = tk.LabelFrame(
             self._parent,
             text="Aktionen",
@@ -136,14 +86,23 @@ class EwelinkModule:
             command=self._take_snapshot,
         ).grid(row=0, column=1, padx=3, pady=2)
 
-        # White LED (toggle)
-        self._btn_white_led = tk.Button(
-            row, text="W-LED", width=8,
+        # FLUTLICHT (weisse LEDs toggle, nightVision 0=aus / 2=an)
+        self._btn_flutlicht = tk.Button(
+            row, text="FLUTLICHT", width=8,
             bg=BTN_OFF_DARK, fg=FG_WHITE, font=FONT_BUTTON,
             activebackground=BG_FRAME,
-            command=self._toggle_white_led,
+            command=self._toggle_flutlicht,
         )
-        self._btn_white_led.grid(row=0, column=2, padx=3, pady=2)
+        self._btn_flutlicht.grid(row=0, column=2, padx=3, pady=2)
+
+        # ERKANNT (blaue Status-LED toggle, sledOnline)
+        self._btn_erkannt = tk.Button(
+            row, text="ERKANNT", width=8,
+            bg=BTN_OFF_DARK, fg=FG_WHITE, font=FONT_BUTTON,
+            activebackground=BG_FRAME,
+            command=self._toggle_erkannt,
+        )
+        self._btn_erkannt.grid(row=0, column=3, padx=3, pady=2)
 
         # SYNC Button
         tk.Button(
@@ -151,7 +110,7 @@ class EwelinkModule:
             bg=BG_BUTTON, fg=FG_LABEL, font=FONT_BUTTON,
             activebackground=BG_FRAME,
             command=self._sync_cloud_status,
-        ).grid(row=0, column=3, padx=3, pady=2)
+        ).grid(row=0, column=4, padx=3, pady=2)
 
         # GALERIE Button
         tk.Button(
@@ -159,7 +118,7 @@ class EwelinkModule:
             bg=BG_BUTTON, fg=FG_LABEL, font=FONT_BUTTON,
             activebackground=BG_FRAME,
             command=self._open_gallery,
-        ).grid(row=0, column=4, padx=3, pady=2)
+        ).grid(row=0, column=5, padx=3, pady=2)
 
         # Status-Labels
         self._lbl_alarm = tk.Label(
@@ -172,15 +131,20 @@ class EwelinkModule:
         )
         self._lbl_snap.grid(row=1, column=1, pady=(0, 5))
 
-        self._lbl_white_led = tk.Label(
+        self._lbl_flutlicht = tk.Label(
             row, text="AUS", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
         )
-        self._lbl_white_led.grid(row=1, column=2, pady=(0, 5))
+        self._lbl_flutlicht.grid(row=1, column=2, pady=(0, 5))
+
+        self._lbl_erkannt = tk.Label(
+            row, text="AUS", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
+        )
+        self._lbl_erkannt.grid(row=1, column=3, pady=(0, 5))
 
         self._lbl_sync = tk.Label(
             row, text="", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
         )
-        self._lbl_sync.grid(row=1, column=3, pady=(0, 5))
+        self._lbl_sync.grid(row=1, column=4, pady=(0, 5))
 
     def _toggle_alarm(self):
         """Alarm an/aus."""
@@ -206,20 +170,36 @@ class EwelinkModule:
             text="bereit", fg=FG_DIM
         ))
 
-    def _toggle_white_led(self):
-        """Weisse Status-LED an/aus."""
-        self._white_led_on = not self._white_led_on
-        self._update_white_led_button()
-        self._service._write_command("cloud_status_led", {"on": self._white_led_on})
+    def _toggle_flutlicht(self):
+        """Weisse LEDs an/aus (nightVision 0=day/aus, 2=night/an)."""
+        self._flutlicht_on = not self._flutlicht_on
+        level = 2 if self._flutlicht_on else 0
+        self._update_flutlicht_button()
+        self._service._write_command("cloud_led", {"level": level})
 
-    def _update_white_led_button(self):
-        """White LED Button Farbe aktualisieren."""
-        if self._white_led_on:
-            self._btn_white_led.config(bg=ACCENT_CYAN)
-            self._lbl_white_led.config(text="AN", fg=ACCENT_CYAN)
+    def _update_flutlicht_button(self):
+        """FLUTLICHT Button Farbe aktualisieren."""
+        if self._flutlicht_on:
+            self._btn_flutlicht.config(bg=ACCENT_CYAN)
+            self._lbl_flutlicht.config(text="AN", fg=ACCENT_CYAN)
         else:
-            self._btn_white_led.config(bg=BTN_OFF_DARK)
-            self._lbl_white_led.config(text="AUS", fg=FG_DIM)
+            self._btn_flutlicht.config(bg=BTN_OFF_DARK)
+            self._lbl_flutlicht.config(text="AUS", fg=FG_DIM)
+
+    def _toggle_erkannt(self):
+        """Blaue Status-LED an/aus (sledOnline)."""
+        self._erkannt_led_on = not self._erkannt_led_on
+        self._update_erkannt_button()
+        self._service._write_command("cloud_status_led", {"on": self._erkannt_led_on})
+
+    def _update_erkannt_button(self):
+        """ERKANNT Button Farbe aktualisieren."""
+        if self._erkannt_led_on:
+            self._btn_erkannt.config(bg=ACCENT_CYAN)
+            self._lbl_erkannt.config(text="AN", fg=ACCENT_CYAN)
+        else:
+            self._btn_erkannt.config(bg=BTN_OFF_DARK)
+            self._lbl_erkannt.config(text="AUS", fg=FG_DIM)
 
     def _sync_cloud_status(self):
         """Cloud-Status holen und alle Buttons aktualisieren."""
@@ -231,11 +211,11 @@ class EwelinkModule:
         if status:
             cloud = status.get("cloud", {})
             if cloud:
-                # LED Level
+                # FLUTLICHT (nightVision: 0=aus, 2=an)
                 led = cloud.get("led_level")
                 if led is not None:
-                    self._led_level = led
-                    self._update_led_buttons()
+                    self._flutlicht_on = (led >= 2)
+                    self._update_flutlicht_button()
 
                 # Alarm
                 alarm = cloud.get("alarm_active")
@@ -243,11 +223,11 @@ class EwelinkModule:
                     self._alarm_active = alarm
                     self._update_alarm_button()
 
-                # White LED
+                # ERKANNT (blaue Status-LED)
                 wled = cloud.get("status_led")
                 if wled is not None:
-                    self._white_led_on = wled
-                    self._update_white_led_button()
+                    self._erkannt_led_on = wled
+                    self._update_erkannt_button()
 
                 self._lbl_sync.config(text="OK", fg=ACCENT_CYAN)
             else:

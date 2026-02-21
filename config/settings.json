@@ -7,8 +7,8 @@
     "yolo_conf": 0.5
   },
   "hand_occlusion": {
-    "timeout": 5.0,
-    "streak": 3,
+    "timeout": 9.0,
+    "streak": 8,
     "recency": 2.0
   },
   "audio": {
