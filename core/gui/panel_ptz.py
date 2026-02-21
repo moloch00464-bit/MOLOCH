@@ -254,7 +254,7 @@ class PtzModule:
 
         if status:
             # Autonomer Modus
-            auto = status.get("autonomous", False)
+            auto = status.get("autonomous_mode", False)
             if auto != self._autonomous:
                 self._autonomous = auto
                 self._btn_autonom.config(
@@ -265,8 +265,8 @@ class PtzModule:
                     fg=BTN_ON_GREEN if auto else FG_DIM,
                 )
 
-            # Smart Tracking
-            st = status.get("smart_tracking", False)
+            # Smart Tracking (tentakel_enabled im Service)
+            st = status.get("tentakel_enabled", False)
             if st != self._smart_tracking:
                 self._smart_tracking = st
                 self._btn_st.config(
@@ -278,7 +278,7 @@ class PtzModule:
                 )
 
             # Daily Learner
-            dl = status.get("daily_learner", False)
+            dl = status.get("daily_learner_enabled", False)
             if dl != self._daily_learner:
                 self._daily_learner = dl
                 self._btn_alltag.config(
@@ -289,10 +289,10 @@ class PtzModule:
                     fg=BTN_ON_GREEN if dl else FG_DIM,
                 )
 
-            # CAL zuruecksetzen wenn fertig
-            if not status.get("calibrating", False):
-                self._btn_cal.config(bg=BTN_OFF_DARK)
-                self._lbl_cal.config(text="bereit", fg=FG_DIM)
+            # CAL: kein calibrating Key im Service-Status vorhanden
+            # Button reset auf default (spaeter erweiterbar)
+            self._btn_cal.config(bg=BTN_OFF_DARK)
+            self._lbl_cal.config(text="bereit", fg=FG_DIM)
 
         # Widgets sofort neu zeichnen
         self._parent.update_idletasks()
@@ -306,9 +306,9 @@ class PtzModule:
         if not status:
             return
 
-        self._autonomous = status.get("autonomous", False)
-        self._smart_tracking = status.get("smart_tracking", False)
-        self._daily_learner = status.get("daily_learner", False)
+        self._autonomous = status.get("autonomous_mode", False)
+        self._smart_tracking = status.get("tentakel_enabled", False)
+        self._daily_learner = status.get("daily_learner_enabled", False)
 
         self._btn_autonom.config(
             bg=BTN_ON_GREEN if self._autonomous else BTN_OFF_RED

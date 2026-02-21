@@ -268,20 +268,27 @@ class ModelsModule:
         status = self._service.read_status()
 
         if status:
-            # FPS sicher extrahieren (kann dict/list/None sein)
+            # FPS ist ein dict mit scrfd/arcface/yolov8m/hand_landmark/total
             try:
-                raw = status.get("fps")
-                fps = float(raw) if not isinstance(raw, (dict, list)) and raw is not None else 0.0
+                fps_dict = status.get("fps", {})
+                fps = float(fps_dict.get("total", 0.0)) if isinstance(fps_dict, dict) else 0.0
                 self._lbl_fps.config(text=f"{fps:.1f}")
             except (TypeError, ValueError):
                 self._lbl_fps.config(text="--")
 
-            # Model-Checkboxen aktualisieren (models muss dict sein)
-            raw_models = status.get("models")
-            models = raw_models if isinstance(raw_models, dict) else {}
+            # Model-Checkboxen: einzelne Keys statt "models" dict
+            # scrfd->scrfd_active, arcface->arcface_active,
+            # yolov8m->yolo_active, hand_landmark->hand_active
+            status_key_map = {
+                "scrfd": "scrfd_active",
+                "arcface": "arcface_active",
+                "yolov8m": "yolo_active",
+                "hand_landmark": "hand_active",
+            }
             for _, key in self.MODELS:
                 try:
-                    active = bool(models.get(key, False))
+                    status_key = status_key_map.get(key, key)
+                    active = bool(status.get(status_key, False))
                     if self._model_vars[key].get() != active:
                         self._model_vars[key].set(active)
                 except (TypeError, ValueError):

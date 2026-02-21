@@ -439,33 +439,19 @@ class MolochPanel:
         """Status vom Service pollen (alle STATUS_UPDATE_MS Millisekunden)."""
         status = self.service.read_status()
         if status:
-            # Werte sicher extrahieren (koennen dict/list/None sein)
+            # FPS ist ein dict mit scrfd/arcface/yolov8m/hand_landmark/total
             try:
-                raw = status.get("fps")
-                fps = float(raw) if not isinstance(raw, (dict, list)) and raw is not None else 0.0
+                fps_dict = status.get("fps", {})
+                fps = float(fps_dict.get("total", 0.0)) if isinstance(fps_dict, dict) else 0.0
             except (TypeError, ValueError):
                 fps = 0.0
 
-            try:
-                raw = status.get("persons")
-                persons = int(raw) if not isinstance(raw, (dict, list)) and raw is not None else 0
-            except (TypeError, ValueError):
-                persons = 0
-
-            try:
-                raw = status.get("faces_recognized")
-                faces = str(raw) if not isinstance(raw, (dict, list)) and raw is not None else "---"
-            except (TypeError, ValueError):
-                faces = "---"
-
-            try:
-                raw = status.get("mode")
-                mode = str(raw) if not isinstance(raw, (dict, list)) and raw is not None else "---"
-            except (TypeError, ValueError):
-                mode = "---"
+            # Modus aus autonomous_mode ableiten
+            auto = status.get("autonomous_mode", False)
+            mode = "AUTONOM" if auto else "MANUELL"
 
             self.status_bar.config(
-                text=f"Service: aktiv | FPS: {fps:.1f} | Personen: {persons} | Erkannt: {faces} | Modus: {mode}",
+                text=f"Service: aktiv | FPS: {fps:.1f} | Modus: {mode}",
                 fg=STATUS_GREEN,
             )
         else:
