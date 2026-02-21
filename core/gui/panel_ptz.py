@@ -48,6 +48,7 @@ class PtzModule:
         # Toggle-Zustaende (vom Service-Status aktualisiert)
         self._autonomous = False
         self._daily_learner = False
+        self._active_position = None
 
         # GUI aufbauen
         self._build_dpad()
@@ -151,11 +152,12 @@ class PtzModule:
     def _ptz_goto(self, position):
         """Zu gespeicherter Position fahren mit Farb-Feedback."""
         self._service._write_command("ptz_goto", {"position": position})
-        # Button finden und kurz einfaerben
+        self._active_position = position
         for btn_widget, pos_name in self._pos_buttons:
             if pos_name == position:
                 btn_widget.config(bg=ACCENT_CYAN)
-                self._parent.after(2000, lambda b=btn_widget: b.config(bg=BG_BUTTON))
+            else:
+                btn_widget.config(bg=BG_BUTTON)
 
     # =========================================================================
     # Toggle-Buttons + Status-Labels
