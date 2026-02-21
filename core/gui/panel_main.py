@@ -17,7 +17,6 @@ from tkinter import ttk
 import json
 import struct
 import os
-import time
 import logging
 import glob as glob_mod
 from typing import Optional, Dict, Any
@@ -105,13 +104,15 @@ class ServiceProxy:
                 continue
         return max_num + 1
 
-    def _write_command(self, command: str, params: Optional[Dict[str, Any]] = None) -> bool:
+    def _write_command(self, action: str, params: Optional[Dict[str, Any]] = None) -> bool:
         """
         Command als nummerierte JSON-Datei schreiben.
+        Format: Flaches JSON mit "action" als Key.
+        params werden direkt ins Dict gemischt (nicht verschachtelt).
 
         Args:
-            command: Command-Name (z.B. 'toggle_model')
-            params: Optionale Parameter
+            action: Action-Name (z.B. 'toggle_model')
+            params: Optionale Parameter (werden flach ins Dict gemischt)
 
         Returns:
             True wenn geschrieben
@@ -120,17 +121,14 @@ class ServiceProxy:
             self.CMD_DIR,
             f"{self.CMD_PREFIX}{self._cmd_counter:04d}.json"
         )
-        payload = {
-            "command": command,
-            "timestamp": time.time(),
-        }
+        payload = {"action": action}
         if params:
-            payload["params"] = params
+            payload.update(params)
 
         try:
             with open(cmd_file, "w") as f:
                 json.dump(payload, f)
-            self.logger.info(f"CMD #{self._cmd_counter:04d}: {command}")
+            self.logger.info(f"CMD #{self._cmd_counter:04d}: {action}")
             self._cmd_counter += 1
             return True
         except Exception as e:
