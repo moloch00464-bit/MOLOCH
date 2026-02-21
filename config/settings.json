@@ -7,9 +7,9 @@
     "yolo_conf": 0.5
   },
   "hand_occlusion": {
-    "timeout": 4.5,
-    "streak": 5,
-    "recency": 2.0
+    "timeout": 4.0,
+    "streak": 8,
+    "recency": 2.5
   },
   "audio": {
     "mic_gain": 1.08,

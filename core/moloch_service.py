@@ -977,6 +977,75 @@ class MolochService:
                 except Exception as e:
                     logger.error(f"YOLOv8m Fehler: {e}")
 
+            # 4. Hand Landmark Detection (224x224 Crop aus Person-BBox oder Bildmitte)
+            if self.hand_active and "hand_landmark" in self._active_ctx:
+                try:
+                    t0 = time.perf_counter()
+
+                    # Crop-Region bestimmen (in 640x640 Space)
+                    if _persons_detected and 'persons' in dir() and persons:
+                        # Obere Haelfte der groessten Person-BBox (Haende sind oben)
+                        p = max(persons, key=lambda d: d["confidence"])
+                        bx = p["bbox"]  # [x1, y1, x2, y2] normalisiert 0-1
+                        cx1 = int(bx[0] * 640)
+                        cy1 = int(bx[1] * 640)
+                        cx2 = int(bx[2] * 640)
+                        cy2 = int(bx[3] * 640)
+                        # Obere 60% der Person (Haende/Arme)
+                        ch = cy2 - cy1
+                        cy2 = cy1 + int(ch * 0.6)
+                    elif face_boxes:
+                        # Face-BBox erweitert (Haende sind in der Naehe)
+                        fb = face_boxes[0][0]  # (x1, y1, x2, y2) normalisiert
+                        cx = int((fb[0] + fb[2]) / 2 * 640)
+                        cy = int((fb[1] + fb[3]) / 2 * 640)
+                        cx1 = max(0, cx - 160)
+                        cy1 = max(0, cy - 80)
+                        cx2 = min(640, cx + 160)
+                        cy2 = min(640, cy + 240)
+                    else:
+                        # Bildmitte als Fallback
+                        cx1, cy1, cx2, cy2 = 120, 80, 520, 560
+
+                    # Crop aus 640x640 und auf 224x224 skalieren
+                    cx1 = max(0, cx1)
+                    cy1 = max(0, cy1)
+                    cx2 = min(640, cx2)
+                    cy2 = min(640, cy2)
+                    crop_w = max(cx2 - cx1, 1)
+                    crop_h = max(cy2 - cy1, 1)
+
+                    hand_crop = input_rgb[cy1:cy2, cx1:cx2]
+                    hand_224 = cv2.resize(hand_crop, (224, 224))
+
+                    outputs = self._run_model("hand_landmark", hand_224)
+                    hand_result = decode_hand_landmark(outputs)
+
+                    dt = time.perf_counter() - t0
+                    with self._fps_lock:
+                        self._fps["hand_landmark"] = 1.0 / dt if dt > 0 else 0
+
+                    if hand_result is not None:
+                        self._last_hand_detected = True
+                        if "hand" in _allowed_draws:
+                            draw_hand_landmarks(
+                                annotated, hand_result,
+                                crop_x=cx1, crop_y=cy1,
+                                crop_w=crop_w, crop_h=crop_h,
+                                scale_x=scale_x, scale_y=scale_y,
+                            )
+                        # Gesture Detection aus Landmarks
+                        try:
+                            gesture = self._gesture_detector.detect(hand_result["landmarks"])
+                            self._current_gesture = gesture
+                        except Exception:
+                            pass
+                    else:
+                        self._last_hand_detected = False
+
+                except Exception as e:
+                    logger.error(f"Hand Landmark Fehler: {e}")
+
             # ===== Perception Engine: Dual-Slot Empfehlung (nach allen Detektionen) =====
             if self._perception:
                 _perc_face_bbox = None
