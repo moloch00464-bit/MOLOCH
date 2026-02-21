@@ -2174,10 +2174,8 @@ class MolochService:
         elif action == 'ptz_goto':
             position = cmd.get('position', '')
             positions = {
-                'schreibtisch': (0.0, -20.0),
-                'tuer': (-90.0, 0.0),
-                'fenster': (90.0, 10.0),
-                'bett': (170.0, -10.0),
+                'werkstatt': (0.0, -20.0),
+                'wohnzimmer': (-90.0, 0.0),
             }
             try:
                 from core.hardware.camera import get_camera_controller

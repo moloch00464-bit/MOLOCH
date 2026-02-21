@@ -7,7 +7,7 @@ PTZ Steuerung und Hauptbuttons.
 Bekommt parent_frame (LabelFrame) und ServiceProxy von panel_main.
 
 - D-Pad: 5 Buttons in Kreuzform (Hoch/Runter/Links/Rechts/Home)
-- Quick Positions: Schreibtisch, Tuer, Fenster, Bett
+- Quick Positions: Werkstatt, Wohnzimmer
 - Toggle-Buttons: AUTONOM, TEACHEN
 - Status-Labels mit 500ms Update via ServiceProxy
 
@@ -22,6 +22,7 @@ from core.gui.panel_styles import (
     FG_WHITE, FG_LABEL, FG_DIM,
     FONT_BUTTON, FONT_LABEL, FONT_SMALL,
     STATUS_UPDATE_MS,
+    ACCENT_CYAN,
 )
 
 
@@ -30,10 +31,8 @@ class PtzModule:
 
     # Quick-Position Definitionen
     POSITIONS = [
-        ("Schreibtisch", "schreibtisch"),
-        ("Tuer", "tuer"),
-        ("Fenster", "fenster"),
-        ("Bett", "bett"),
+        ("Werkstatt", "werkstatt"),
+        ("Wohnzimmer", "wohnzimmer"),
     ]
 
     def __init__(self, parent_frame, service_proxy):
@@ -138,17 +137,25 @@ class PtzModule:
         row = tk.Frame(section, bg=BG_FRAME)
         row.pack(pady=5, padx=5)
 
+        self._pos_buttons = []
         for i, (label, name) in enumerate(self.POSITIONS):
-            tk.Button(
-                row, text=label, width=10,
+            btn = tk.Button(
+                row, text=label, width=14,
                 bg=BG_BUTTON, fg=FG_WHITE, font=FONT_BUTTON,
                 activebackground=BG_FRAME,
                 command=lambda n=name: self._ptz_goto(n),
-            ).grid(row=0, column=i, padx=2, pady=2)
+            )
+            btn.grid(row=0, column=i, padx=2, pady=2)
+            self._pos_buttons.append((btn, name))
 
     def _ptz_goto(self, position):
-        """Zu gespeicherter Position fahren."""
+        """Zu gespeicherter Position fahren mit Farb-Feedback."""
         self._service._write_command("ptz_goto", {"position": position})
+        # Button finden und kurz einfaerben
+        for btn_widget, pos_name in self._pos_buttons:
+            if pos_name == position:
+                btn_widget.config(bg=ACCENT_CYAN)
+                self._parent.after(2000, lambda b=btn_widget: b.config(bg=BG_BUTTON))
 
     # =========================================================================
     # Toggle-Buttons + Status-Labels
