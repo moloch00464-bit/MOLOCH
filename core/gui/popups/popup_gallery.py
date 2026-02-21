@@ -3,10 +3,9 @@
 M.O.L.O.C.H. Snapshot Galerie Popup
 =====================================
 
-Eigenstaendiges Toplevel-Fenster mit 3 Tabs (ttk.Notebook):
-  Tab 1: Manuell  — ~/moloch/snapshots/
-  Tab 2: Learning — /mnt/moloch-data/daily/<YYYY-MM-DD>/
-  Tab 3: Teaching — ~/moloch/data/faces/train/<person>/
+Eigenstaendiges Toplevel-Fenster mit 2 Tabs (ttk.Notebook):
+  Tab 1: Snapshots — ~/moloch/snapshots/ (manuelle Snap-Button Fotos)
+  Tab 2: Teachen  — /mnt/moloch-data/daily/<YYYY-MM-DD>/ (DailyLearner)
 
 Features:
 - Thumbnail-Grid (3 Spalten, 150x112px)
@@ -43,7 +42,6 @@ logger = logging.getLogger("moloch.popup_gallery")
 # Pfade
 SNAP_DIR = os.path.expanduser("~/moloch/snapshots")
 DAILY_DIR = "/mnt/moloch-data/daily"
-FACES_TRAIN_DIR = os.path.expanduser("~/moloch/data/faces/train")
 
 THUMB_W = 150
 THUMB_H = 112
@@ -93,7 +91,7 @@ class _ScrollableGrid:
 
 
 class SnapshotGallery:
-    """Snapshot Galerie als eigenstaendiges Toplevel mit 3 Tabs."""
+    """Snapshot Galerie als eigenstaendiges Toplevel mit 2 Tabs."""
 
     def __init__(self, parent):
         self._parent = parent
@@ -121,29 +119,23 @@ class SnapshotGallery:
         self._notebook = ttk.Notebook(self.win, style="Dark.TNotebook")
         self._notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        # Tab 1: Manuell
-        self._tab_manual = tk.Frame(self._notebook, bg=BG_DARK)
-        self._notebook.add(self._tab_manual, text="Manuell")
-        self._grid_manual = self._build_tab(self._tab_manual, self._load_manual)
+        # Tab 1: Snapshots (manuelle Fotos)
+        self._tab_snapshots = tk.Frame(self._notebook, bg=BG_DARK)
+        self._notebook.add(self._tab_snapshots, text="Snapshots")
+        self._grid_snapshots = self._build_tab(self._tab_snapshots, self._load_snapshots)
 
-        # Tab 2: Learning
-        self._tab_learning = tk.Frame(self._notebook, bg=BG_DARK)
-        self._notebook.add(self._tab_learning, text="Learning")
-        self._grid_learning, self._day_var, self._day_menu = self._build_learning_tab()
-
-        # Tab 3: Teaching
-        self._tab_teaching = tk.Frame(self._notebook, bg=BG_DARK)
-        self._notebook.add(self._tab_teaching, text="Teaching")
-        self._grid_teaching = self._build_tab(self._tab_teaching, self._load_teaching)
+        # Tab 2: Teachen (DailyLearner)
+        self._tab_teachen = tk.Frame(self._notebook, bg=BG_DARK)
+        self._notebook.add(self._tab_teachen, text="Teachen")
+        self._grid_teachen, self._day_var, self._day_menu = self._build_teachen_tab()
 
         # Mausrad-Scrolling (nur fuer aktiven Tab)
         self.win.bind("<Button-4>", self._on_scroll_up)
         self.win.bind("<Button-5>", self._on_scroll_down)
 
-        # Alle Tabs laden (im Background)
-        self._load_manual()
-        self._load_learning()
-        self._load_teaching()
+        # Beide Tabs laden (im Background)
+        self._load_snapshots()
+        self._load_teachen()
 
     # =========================================================================
     # Tab-Builder
@@ -164,9 +156,9 @@ class SnapshotGallery:
         grid = _ScrollableGrid(tab_frame)
         return grid
 
-    def _build_learning_tab(self):
-        """Learning-Tab mit Tages-Dropdown + ScrollableGrid."""
-        header = tk.Frame(self._tab_learning, bg=BG_DARK)
+    def _build_teachen_tab(self):
+        """Teachen-Tab mit Tages-Dropdown + ScrollableGrid."""
+        header = tk.Frame(self._tab_teachen, bg=BG_DARK)
         header.pack(fill=tk.X, padx=5, pady=(5, 0))
 
         tk.Label(
@@ -179,7 +171,7 @@ class SnapshotGallery:
 
         day_menu = tk.OptionMenu(
             header, day_var, *(days if days else ["(leer)"]),
-            command=lambda _: self._load_learning(),
+            command=lambda _: self._load_teachen(),
         )
         day_menu.config(bg=BG_BUTTON, fg=FG_WHITE, font=FONT_SMALL,
                         activebackground=BG_FRAME, highlightthickness=0)
@@ -189,10 +181,10 @@ class SnapshotGallery:
             header, text="REFRESH", width=10,
             bg=BG_BUTTON, fg=FG_LABEL, font=FONT_BUTTON,
             activebackground=BG_FRAME,
-            command=self._refresh_learning,
+            command=self._refresh_teachen,
         ).pack(side=tk.RIGHT, padx=5)
 
-        grid = _ScrollableGrid(self._tab_learning)
+        grid = _ScrollableGrid(self._tab_teachen)
         return grid, day_var, day_menu
 
     # =========================================================================
@@ -211,9 +203,9 @@ class SnapshotGallery:
         days.sort(reverse=True)
         return days
 
-    def _load_manual(self):
-        """Tab Manuell: Snapshots aus ~/moloch/snapshots/ laden."""
-        grid = self._grid_manual
+    def _load_snapshots(self):
+        """Tab Snapshots: Fotos aus ~/moloch/snapshots/ laden."""
+        grid = self._grid_snapshots
         grid.clear()
 
         def _bg_load():
@@ -230,21 +222,21 @@ class SnapshotGallery:
             # Zurueck im Main-Thread
             try:
                 self.win.after(0, lambda: self._populate_grid(
-                    grid, files, f"Manuell ({len(files)})", 0))
+                    grid, files, f"Snapshots ({len(files)})", 0))
             except tk.TclError:
                 pass
 
         threading.Thread(target=_bg_load, daemon=True).start()
 
-    def _load_learning(self):
-        """Tab Learning: Bilder aus ausgewaehltem Tag laden."""
-        grid = self._grid_learning
+    def _load_teachen(self):
+        """Tab Teachen: Bilder aus ausgewaehltem Tag laden."""
+        grid = self._grid_teachen
         grid.clear()
 
         day = self._day_var.get()
         if not day or day == "(leer)":
-            self._show_empty(grid, "Keine Learning-Daten")
-            self._update_tab_title(1, "Learning (0)")
+            self._show_empty(grid, "Keine Teachen-Daten")
+            self._update_tab_title(1, "Teachen (0)")
             return
 
         day_dir = os.path.join(DAILY_DIR, day)
@@ -269,64 +261,35 @@ class SnapshotGallery:
             files.sort(key=lambda x: x[2], reverse=True)
 
             try:
-                self.win.after(0, lambda: self._populate_learning_grid(
+                self.win.after(0, lambda: self._populate_teachen_grid(
                     grid, files, len(files)))
             except tk.TclError:
                 pass
 
         threading.Thread(target=_bg_load, daemon=True).start()
 
-    def _load_teaching(self):
-        """Tab Teaching: Face-Training-Bilder laden."""
-        grid = self._grid_teaching
-        grid.clear()
-
-        def _bg_load():
-            files = []
-            if os.path.isdir(FACES_TRAIN_DIR):
-                for person in sorted(os.listdir(FACES_TRAIN_DIR)):
-                    person_dir = os.path.join(FACES_TRAIN_DIR, person)
-                    if not os.path.isdir(person_dir):
-                        continue
-                    for f in os.listdir(person_dir):
-                        if f.lower().endswith((".jpg", ".jpeg", ".png")):
-                            path = os.path.join(person_dir, f)
-                            mtime = os.path.getmtime(path)
-                            display_name = f"{person}/{f}"
-                            files.append((path, display_name, mtime))
-            files.sort(key=lambda x: x[2], reverse=True)
-
-            try:
-                self.win.after(0, lambda: self._populate_grid(
-                    grid, files, f"Teaching ({len(files)})", 2))
-            except tk.TclError:
-                pass
-
-        threading.Thread(target=_bg_load, daemon=True).start()
-
-    def _refresh_learning(self):
-        """Learning-Tab komplett refreshen (inkl. Tage-Dropdown)."""
+    def _refresh_teachen(self):
+        """Teachen-Tab komplett refreshen (inkl. Tage-Dropdown)."""
         days = self._get_daily_days()
         menu = self._day_menu["menu"]
         menu.delete(0, "end")
         for d in (days if days else ["(leer)"]):
-            menu.add_command(label=d, command=lambda v=d: (self._day_var.set(v), self._load_learning()))
+            menu.add_command(label=d, command=lambda v=d: (self._day_var.set(v), self._load_teachen()))
         if days and self._day_var.get() not in days:
             self._day_var.set(days[0])
-        self._load_learning()
+        self._load_teachen()
 
     # =========================================================================
     # Grid Population
     # =========================================================================
 
     def _populate_grid(self, grid, files, tab_title, tab_index):
-        """Standard-Grid mit Thumbnails fuellen (Manuell / Teaching)."""
+        """Standard-Grid mit Thumbnails fuellen (Snapshots-Tab)."""
         grid.clear()
         self._update_tab_title(tab_index, tab_title)
 
         if not files:
-            msg = "Keine Snapshots vorhanden" if tab_index == 0 else "Keine Teaching-Bilder"
-            self._show_empty(grid, msg)
+            self._show_empty(grid, "Keine Snapshots vorhanden")
             return
 
         for idx, (path, fname, mtime) in enumerate(files):
@@ -334,13 +297,13 @@ class SnapshotGallery:
             col = idx % COLUMNS
             self._build_thumbnail(grid, row, col, path, fname, mtime)
 
-    def _populate_learning_grid(self, grid, files, count):
-        """Learning-Grid mit Thumbnails + Metadaten fuellen."""
+    def _populate_teachen_grid(self, grid, files, count):
+        """Teachen-Grid mit Thumbnails + Metadaten fuellen."""
         grid.clear()
-        self._update_tab_title(1, f"Learning ({count})")
+        self._update_tab_title(1, f"Teachen ({count})")
 
         if not files:
-            self._show_empty(grid, "Keine Learning-Bilder fuer diesen Tag")
+            self._show_empty(grid, "Keine Teachen-Bilder fuer diesen Tag")
             return
 
         for idx, (path, fname, mtime, meta) in enumerate(files):
@@ -383,7 +346,7 @@ class SnapshotGallery:
             cell, text=date_str, bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
         ).pack()
 
-        # Metadaten (Learning-Tab)
+        # Metadaten (Teachen-Tab)
         if meta:
             name = meta.get("name", "?")
             conf = meta.get("confidence", 0)
@@ -451,11 +414,9 @@ class SnapshotGallery:
         # Aktuellen Tab neu laden
         tab_idx = self._notebook.index(self._notebook.select())
         if tab_idx == 0:
-            self._load_manual()
+            self._load_snapshots()
         elif tab_idx == 1:
-            self._load_learning()
-        elif tab_idx == 2:
-            self._load_teaching()
+            self._load_teachen()
 
     # =========================================================================
     # Hilfsfunktionen
@@ -494,11 +455,9 @@ class SnapshotGallery:
         except Exception:
             return None
         if idx == 0:
-            return self._grid_manual
+            return self._grid_snapshots
         elif idx == 1:
-            return self._grid_learning
-        elif idx == 2:
-            return self._grid_teaching
+            return self._grid_teachen
         return None
 
     def _on_close(self):
