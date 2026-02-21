@@ -287,5 +287,8 @@ class ModelsModule:
                 except (TypeError, ValueError):
                     pass
 
+        # Widgets sofort neu zeichnen
+        self._parent.update_idletasks()
+
         # Naechster Poll
         self._after_id = self._parent.after(STATUS_UPDATE_MS, self._poll_status)

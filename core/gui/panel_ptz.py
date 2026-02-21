@@ -294,6 +294,9 @@ class PtzModule:
                 self._btn_cal.config(bg=BTN_OFF_DARK)
                 self._lbl_cal.config(text="bereit", fg=FG_DIM)
 
+        # Widgets sofort neu zeichnen
+        self._parent.update_idletasks()
+
         # Naechster Poll
         self._after_id = self._parent.after(STATUS_UPDATE_MS, self._poll_status)
 
