@@ -273,6 +273,9 @@ def match_face(embedding: np.ndarray, face_db: Dict[str, np.ndarray],
                threshold: float = 0.6) -> Tuple[str, float]:
     """Match embedding gegen Face-DB via Cosine-Similarity.
 
+    Unterstuetzt Learner-Embeddings mit '#'-Suffix (z.B. 'Markus#learn_1740000000').
+    Der Suffix wird beim Rueckgabe-Namen entfernt.
+
     Returns: (name, similarity) oder ("Unbekannt", 0.0)
     """
     best_name = "Unbekannt"
@@ -286,7 +289,9 @@ def match_face(embedding: np.ndarray, face_db: Dict[str, np.ndarray],
             best_name = name
 
     if best_sim >= threshold:
-        return best_name, best_sim
+        # Learner-Suffix strippen: "Markus#learn_123" -> "Markus"
+        base_name = best_name.split('#')[0]
+        return base_name, best_sim
     return "Unbekannt", best_sim
 
 

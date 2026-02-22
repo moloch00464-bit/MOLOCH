@@ -905,6 +905,7 @@ class MolochService:
                                         frame_height=fh,
                                         head_pose=_hp,
                                         full_frame=frame,
+                                        embedding=embedding,
                                     )
                                     # LED-Blitz bei erfolgreichem Snapshot
                                     if _saved and self._learner_flash:
@@ -1864,8 +1865,13 @@ class MolochService:
         """Face-DB neu laden (nach Enrollment)."""
         self._face_db = load_face_db(FACE_DB_PATH)
         n = len(self._face_db)
-        names = ", ".join(self._face_db.keys()) if self._face_db else "leer"
-        self._update_status(f"Face-DB: {n} Personen ({names})")
+        # Basis-Namen (ohne #learn Suffix) fuer Anzeige
+        base_names = set(k.split('#')[0] for k in self._face_db.keys()) if self._face_db else set()
+        learned = sum(1 for k in self._face_db if '#' in k)
+        self._update_status(f"Face-DB: {len(base_names)} Personen, {learned} gelernt ({', '.join(base_names)})")
+        # DailyLearner Referenz aktualisieren
+        if self._daily_learner:
+            self._daily_learner.set_face_db(self._face_db, FACE_DB_PATH)
 
     def _write_face_state(self, name, similarity, person_count, emotion=None, gender=None, age_range=None, head_pose=None):
         """Schreibe Face-Recognition-State fuer IPC mit push_to_talk."""
@@ -1921,6 +1927,10 @@ class MolochService:
         self._face_db = load_face_db(FACE_DB_PATH)
         if self._face_db:
             logger.info(f"Face-DB: {len(self._face_db)} Personen")
+
+        # 2b. DailyLearner mit Face-DB verbinden (Real-Time Learning)
+        if self._daily_learner:
+            self._daily_learner.set_face_db(self._face_db, FACE_DB_PATH)
 
         # 3. RTSP
         self._start_rtsp()

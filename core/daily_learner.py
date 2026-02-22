@@ -6,11 +6,16 @@ Sammelt automatisch Snapshots von Markus bei:
 - Verschiedenen Lichtverhältnissen
 - Verschiedenen Entfernungen
 
+Real-Time Learning: Jedes Learner-Foto wird sofort als Embedding
+in die Face-DB aufgenommen (in-memory + Disk). Qualitaetscheck
+stellt sicher dass nur echte Matches gelernt werden.
+
 Max 1 Snapshot/Minute. Läuft im Hintergrund, Toggle via Panel.
 """
 import os
 import time
 import json
+import threading
 import cv2
 import numpy as np
 from pathlib import Path
@@ -21,6 +26,15 @@ logger = logging.getLogger(__name__)
 
 # Storage auf moloch-data SSD (nicht System-SSD)
 DAILY_DIR = Path("/mnt/moloch-data/daily")
+
+# Qualitaetscheck: Mindest-Similarity zum bestehenden Basis-Embedding
+LEARN_MIN_SIMILARITY = 0.4
+
+# Max gelernte Embeddings pro Person (verhindert DB-Bloat)
+MAX_LEARNED_PER_PERSON = 50
+
+# Label-Format fuer gelernte Embeddings: "Name#learn_TIMESTAMP"
+LEARN_SEPARATOR = '#'
 
 
 class DailyLearner:
@@ -36,6 +50,27 @@ class DailyLearner:
         # Value: timestamp wann zuletzt gesehen
         self.seen_conditions: Dict[Tuple[int, int, int], float] = {}
         self.condition_cooldown = 3600  # 1h bevor gleiche Bedingung wieder interessant
+
+        # Face-DB Referenz (wird vom Service injiziert)
+        self._face_db: Optional[Dict[str, np.ndarray]] = None
+        self._face_db_path: Optional[str] = None
+        self._save_lock = threading.Lock()
+
+        # Stats: Gelernte Embeddings seit Start
+        self.embeddings_learned = 0
+        self.embeddings_rejected = 0
+
+    def set_face_db(self, face_db: Dict[str, np.ndarray], db_path: str):
+        """Injiziere Face-DB Referenz vom Service.
+
+        Args:
+            face_db: Das Live-Dict {name: embedding} aus dem Service
+            db_path: Pfad zur face_embeddings.json fuer Disk-Persistierung
+        """
+        self._face_db = face_db
+        self._face_db_path = db_path
+        learned = sum(1 for k in face_db if LEARN_SEPARATOR in k)
+        logger.info(f"[DailyLearner] Face-DB verbunden ({len(face_db)} Eintraege, {learned} gelernt)")
 
     def enable(self):
         """Aktiviere Daily Learning."""
@@ -117,6 +152,116 @@ class DailyLearner:
 
         return False
 
+    def _check_embedding_quality(self, name: str, embedding: np.ndarray) -> float:
+        """Pruefe ob Embedding wirklich zu dieser Person gehoert.
+
+        Vergleicht gegen das Basis-Embedding (ohne #learn Suffix).
+        Returns: Beste Similarity zum Basis-Embedding, 0.0 wenn keine DB.
+        """
+        if self._face_db is None:
+            return 0.0
+
+        # Basis-Embedding fuer diese Person finden (ohne #learn Suffix)
+        base_emb = self._face_db.get(name)
+        if base_emb is None:
+            return 0.0
+
+        # Cosine Similarity
+        emb_norm = embedding / (np.linalg.norm(embedding) + 1e-10)
+        ref_norm = base_emb / (np.linalg.norm(base_emb) + 1e-10)
+        sim = float(np.dot(emb_norm, ref_norm))
+        return sim
+
+    def _count_learned_for_person(self, name: str) -> int:
+        """Zaehle wie viele gelernte Embeddings fuer diese Person existieren."""
+        if self._face_db is None:
+            return 0
+        prefix = f"{name}{LEARN_SEPARATOR}"
+        return sum(1 for k in self._face_db if k.startswith(prefix))
+
+    def _learn_embedding(
+        self,
+        name: str,
+        embedding: np.ndarray,
+        angle: int,
+        light: int,
+        distance: int,
+        confidence: float
+    ) -> bool:
+        """Embedding in Face-DB aufnehmen (in-memory + Disk).
+
+        Returns: True wenn gelernt, False wenn abgelehnt.
+        """
+        if self._face_db is None:
+            return False
+
+        # Qualitaetscheck: Ist es wirklich diese Person?
+        sim = self._check_embedding_quality(name, embedding)
+        if sim < LEARN_MIN_SIMILARITY:
+            self.embeddings_rejected += 1
+            logger.info(f"[LEARNER] Embedding ABGELEHNT fuer {name} "
+                       f"(sim={sim:.3f} < {LEARN_MIN_SIMILARITY}, unsicher)")
+            return False
+
+        # Limit pruefen
+        learned_count = self._count_learned_for_person(name)
+        if learned_count >= MAX_LEARNED_PER_PERSON:
+            logger.debug(f"[LEARNER] Max Embeddings erreicht fuer {name} ({MAX_LEARNED_PER_PERSON})")
+            return False
+
+        # Key generieren: "Markus#learn_1740000000"
+        learn_key = f"{name}{LEARN_SEPARATOR}learn_{int(time.time())}"
+
+        # Sicherstellen dass embedding normalisiert ist
+        emb_norm = embedding / (np.linalg.norm(embedding) + 1e-10)
+
+        # In-Memory: Dict-Update (thread-safe in CPython fuer einzelne Zuweisung)
+        self._face_db[learn_key] = emb_norm.astype(np.float32)
+
+        # Disk-Persistierung in separatem Thread (blockiert nicht die Inference Loop)
+        threading.Thread(
+            target=self._save_face_db_to_disk,
+            daemon=True
+        ).start()
+
+        self.embeddings_learned += 1
+        angle_names = {0: "frontal", 1: "seitlich", 2: "stark_seitlich"}
+        light_names = {0: "dunkel", 1: "normal", 2: "hell"}
+        dist_names = {0: "fern", 1: "mittel", 2: "nah"}
+
+        logger.info(f"[LEARNER] Neues Embedding fuer {name} gelernt! "
+                   f"(Winkel={angle_names.get(angle, '?')}, "
+                   f"Licht={light_names.get(light, '?')}, "
+                   f"Distanz={dist_names.get(distance, '?')}, "
+                   f"sim={sim:.3f}, conf={confidence:.2f}, "
+                   f"gesamt={learned_count + 1}/{MAX_LEARNED_PER_PERSON})")
+        return True
+
+    def _save_face_db_to_disk(self):
+        """Face-DB als JSON auf Disk schreiben (thread-safe)."""
+        if not self._face_db or not self._face_db_path:
+            return
+
+        with self._save_lock:
+            try:
+                # Dict -> JSON-serialisierbar
+                data = {}
+                for name, emb in self._face_db.items():
+                    if isinstance(emb, np.ndarray):
+                        data[name] = emb.tolist()
+                    else:
+                        data[name] = list(emb)
+
+                # Atomic write: erst temp, dann rename
+                tmp_path = self._face_db_path + ".tmp"
+                with open(tmp_path, 'w', encoding='utf-8') as f:
+                    json.dump(data, f)
+                os.replace(tmp_path, self._face_db_path)
+
+                logger.debug(f"[LEARNER] Face-DB gespeichert ({len(data)} Eintraege)")
+            except Exception as e:
+                logger.error(f"[LEARNER] Face-DB Speichern fehlgeschlagen: {e}")
+
     def _save_snapshot(
         self,
         face_crop: np.ndarray,
@@ -126,12 +271,16 @@ class DailyLearner:
         light: int,
         distance: int,
         head_pose: Optional[Dict] = None,
-        full_frame: Optional[np.ndarray] = None
+        full_frame: Optional[np.ndarray] = None,
+        embedding: Optional[np.ndarray] = None
     ):
-        """Speichere Snapshot mit Metadaten.
+        """Speichere Snapshot mit Metadaten + lerne Embedding.
 
         Speichert Face-Crop (50% Margin, Q95) und optional den vollen 1080p Frame.
+        Wenn ein Embedding mitgegeben wird, wird es nach Qualitaetscheck in die
+        Face-DB aufgenommen.
         """
+        learned = False
         try:
             # Verzeichnis: /mnt/moloch-data/daily/YYYY-MM-DD/
             today = time.strftime("%Y-%m-%d")
@@ -152,6 +301,10 @@ class DailyLearner:
                 full_filepath = day_dir / full_filename
                 cv2.imwrite(str(full_filepath), full_frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
 
+            # Real-Time Learning: Embedding in Face-DB aufnehmen
+            if embedding is not None:
+                learned = self._learn_embedding(name, embedding, angle, light, distance, confidence)
+
             # Speichere Metadaten als JSON
             meta = {
                 "timestamp": time.time(),
@@ -162,14 +315,16 @@ class DailyLearner:
                 "lighting": light,
                 "distance": distance,
                 "head_pose": head_pose,
-                "has_full_frame": full_frame is not None
+                "has_full_frame": full_frame is not None,
+                "embedding_learned": learned
             }
             meta_path = filepath.with_suffix(".json")
             with open(meta_path, 'w') as f:
                 json.dump(meta, f, indent=2)
 
             logger.info(f"[DailyLearner] Snapshot: {filename}" +
-                       (" + full_frame" if full_frame is not None else ""))
+                       (" + full_frame" if full_frame is not None else "") +
+                       (" + LEARNED" if learned else ""))
 
         except Exception as e:
             logger.error(f"[DailyLearner] Save failed: {e}")
@@ -182,7 +337,8 @@ class DailyLearner:
         bbox: Tuple[float, float, float, float],
         frame_height: int,
         head_pose: Optional[Dict] = None,
-        full_frame: Optional[np.ndarray] = None
+        full_frame: Optional[np.ndarray] = None,
+        embedding: Optional[np.ndarray] = None
     ) -> bool:
         """Prüfe ob Snapshot sinnvoll ist und speichere ggf.
 
@@ -194,6 +350,7 @@ class DailyLearner:
             frame_height: Frame-Höhe in Pixel
             head_pose: Optional Head Pose Dict mit yaw/pitch/roll
             full_frame: Optional voller 1080p Frame als Referenzbild
+            embedding: Optional 512-dim ArcFace Embedding (fuer Real-Time Learning)
 
         Returns:
             True wenn Snapshot gespeichert wurde, sonst False
@@ -226,7 +383,7 @@ class DailyLearner:
 
         if save_it:
             self._save_snapshot(face_crop, name, confidence, angle, light, distance, head_pose,
-                               full_frame=full_frame)
+                               full_frame=full_frame, embedding=embedding)
             self.last_snapshot_time = now
 
             # Markiere Bedingung als gesehen
@@ -248,11 +405,18 @@ class DailyLearner:
         if day_dir.exists():
             snapshots_today = len(list(day_dir.glob("*.jpg")))
 
+        learned_total = 0
+        if self._face_db:
+            learned_total = sum(1 for k in self._face_db if LEARN_SEPARATOR in k)
+
         return {
             "enabled": self.enabled,
             "snapshots_today": snapshots_today,
             "conditions_seen": len(self.seen_conditions),
-            "next_snapshot_in": max(0, int(self.snapshot_interval - (time.time() - self.last_snapshot_time)))
+            "next_snapshot_in": max(0, int(self.snapshot_interval - (time.time() - self.last_snapshot_time))),
+            "embeddings_learned": self.embeddings_learned,
+            "embeddings_rejected": self.embeddings_rejected,
+            "embeddings_in_db": learned_total
         }
 
 
