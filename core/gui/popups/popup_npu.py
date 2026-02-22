@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-M.O.L.O.C.H. NPU Thresholds Popup — Hailo-10H
-=================================================
+M.O.L.O.C.H. NPU Einstellungen Popup — Hailo-10H
+===================================================
 
-Eigenstaendiges Toplevel-Fenster fuer NPU Model Thresholds
-und Hand-Occlusion Parameter.
+Eigenstaendiges Toplevel-Fenster fuer NPU Modell-Schwellwerte
+und Hand-Verdeckung Parameter.
 
 Threshold Slider:
-- SCRFD Confidence (0.1-0.9, default 0.5, Schritt 0.05)
-- SCRFD NMS (0.1-0.9, default 0.4, Schritt 0.05)
-- ArcFace Threshold (0.3-0.9, default 0.6, Schritt 0.05)
-- YOLOv8m Confidence (0.1-0.9, default 0.5, Schritt 0.05)
+- SCRFD Erkennungsschwelle (0.1-0.9, default 0.5, Schritt 0.05)
+- SCRFD Ueberlappungsfilter (0.1-0.9, default 0.4, Schritt 0.05)
+- ArcFace Aehnlichkeit (0.3-0.9, default 0.6, Schritt 0.05)
+- YOLOv8m Erkennungsschwelle (0.1-0.9, default 0.5, Schritt 0.05)
 
-Hand-Occlusion:
-- Timeout (1-10s), Streak (1-10), Recency (0.5-5.0s)
+Hand-Verdeckung:
+- Zeitlimit (1-10s), Trefferfolge (1-10), Aktualitaet (0.5-5.0s)
 
 Aenderungen sofort via _write_command an Service gesendet
 und persistent in settings.json gespeichert.
@@ -38,18 +38,29 @@ SETTINGS_PATH = os.path.expanduser("~/moloch/config/settings.json")
 
 # Threshold Definitionen: (Anzeigename, settings-key, min, max, default, schritt)
 THRESHOLD_DEFS = [
-    ("SCRFD Confidence", "scrfd_conf", 0.1, 0.9, 0.5, 0.05),
-    ("SCRFD NMS", "scrfd_nms", 0.1, 0.9, 0.4, 0.05),
-    ("ArcFace Threshold", "arcface_thresh", 0.3, 0.9, 0.6, 0.05),
-    ("YOLOv8m Confidence", "yolo_conf", 0.1, 0.9, 0.5, 0.05),
+    ("SCRFD Erkennungsschwelle", "scrfd_conf", 0.1, 0.9, 0.5, 0.05),
+    ("SCRFD Überlappungsfilter", "scrfd_nms", 0.1, 0.9, 0.4, 0.05),
+    ("ArcFace Ähnlichkeit", "arcface_thresh", 0.3, 0.9, 0.6, 0.05),
+    ("YOLOv8m Erkennungsschwelle", "yolo_conf", 0.1, 0.9, 0.5, 0.05),
 ]
 
 # Hand-Occlusion Definitionen: (Anzeigename, settings-key, min, max, default, schritt, einheit)
 HAND_DEFS = [
-    ("Timeout", "timeout", 1.0, 10.0, 5.0, 0.5, "s"),
-    ("Streak", "streak", 1, 10, 3, 1, ""),
-    ("Recency", "recency", 0.5, 5.0, 2.0, 0.5, "s"),
+    ("Zeitlimit", "timeout", 1.0, 10.0, 5.0, 0.5, "s"),
+    ("Trefferfolge", "streak", 1, 10, 3, 1, ""),
+    ("Aktualität", "recency", 0.5, 5.0, 2.0, 0.5, "s"),
 ]
+
+# Tooltip-Beschreibungen pro Slider (key -> text)
+TOOLTIPS = {
+    "scrfd_conf": "Höher = weniger Fehlerkennungen, niedriger = mehr Gesichter",
+    "scrfd_nms": "Filtert doppelte Erkennungen (höher = aggressiver)",
+    "arcface_thresh": "Wie ähnlich muss ein Gesicht sein? (höher = strenger)",
+    "yolo_conf": "Höher = weniger Fehlerkennungen, niedriger = mehr Personen",
+    "timeout": "Sekunden bis Hand-Modus deaktiviert wird",
+    "streak": "Frames in Folge mit Hand bevor Modus wechselt",
+    "recency": "Zeitfenster für letzte Erkennung",
+}
 
 
 class NpuThreshPopup:
@@ -71,9 +82,9 @@ class NpuThreshPopup:
         self.win = tk.Toplevel(parent)
         self.win.attributes('-topmost', True)
         self.win.transient(parent)
-        self.win.title("NPU Thresholds \u2014 Hailo-10H")
+        self.win.title("NPU Einstellungen \u2014 Hailo-10H")
         self.win.configure(bg=BG_DARK)
-        self.win.geometry("400x440")
+        self.win.geometry("420x480")
         self.win.resizable(False, False)
         self.win.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -97,7 +108,7 @@ class NpuThreshPopup:
     def _build_threshold_section(self):
         """Threshold Slider fuer alle AI-Modelle."""
         section = tk.LabelFrame(
-            self.win, text="Model Thresholds",
+            self.win, text="Modell-Schwellwerte",
             bg=BG_FRAME, fg=FG_LABEL, font=FONT_LABEL,
         )
         section.pack(fill=tk.X, padx=10, pady=(10, 5))
@@ -107,6 +118,7 @@ class NpuThreshPopup:
                 section, name, key, vmin, vmax, default, step,
                 self._thresh_vars, self._thresh_labels,
                 self._on_threshold_changed,
+                tooltip=TOOLTIPS.get(key, ""),
             )
 
     # =========================================================================
@@ -116,7 +128,7 @@ class NpuThreshPopup:
     def _build_hand_section(self):
         """Hand-Occlusion Parameter Slider."""
         section = tk.LabelFrame(
-            self.win, text="Hand-Occlusion",
+            self.win, text="Hand-Verdeckung",
             bg=BG_FRAME, fg=FG_LABEL, font=FONT_LABEL,
         )
         section.pack(fill=tk.X, padx=10, pady=(5, 10))
@@ -126,6 +138,7 @@ class NpuThreshPopup:
                 section, name, key, vmin, vmax, default, step,
                 self._hand_vars, self._hand_labels,
                 self._on_hand_changed, unit=unit,
+                tooltip=TOOLTIPS.get(key, ""),
             )
 
     # =========================================================================
@@ -133,14 +146,14 @@ class NpuThreshPopup:
     # =========================================================================
 
     def _build_slider_row(self, parent, name, key, vmin, vmax, default, step,
-                          var_dict, label_dict, callback, unit=""):
+                          var_dict, label_dict, callback, unit="", tooltip=""):
         """Eine Slider-Zeile: Label links, Slider mitte, Wert rechts."""
         row = tk.Frame(parent, bg=BG_FRAME)
         row.pack(fill=tk.X, padx=8, pady=3)
 
         # Name links
         tk.Label(
-            row, text=name, width=16, anchor=tk.W,
+            row, text=name, width=24, anchor=tk.W,
             bg=BG_FRAME, fg=FG_LABEL, font=FONT_LABEL,
         ).pack(side=tk.LEFT)
 
@@ -168,6 +181,13 @@ class NpuThreshPopup:
             command=lambda val, k=key, u=unit: callback(k, val, u),
         )
         slider.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 5))
+
+        # Tooltip-Beschreibung unter dem Slider
+        if tooltip:
+            tk.Label(
+                parent, text=tooltip, anchor=tk.W,
+                bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
+            ).pack(fill=tk.X, padx=16, pady=(0, 2))
 
     # =========================================================================
     # Callbacks
