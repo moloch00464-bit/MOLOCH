@@ -138,6 +138,10 @@ class TrackingConfig:
     switch_cooldown_sec: float = 1.0
     prefer_current_target: bool = True
 
+    # === SMOOTHING: Face/Person Wechsel-Daempfung ===
+    source_hysteresis_frames: int = 3   # Neuer Source-Typ muss 3 Frames stabil sein
+    center_ring_buffer_size: int = 5    # Mittelwert ueber letzte 5 Frame-Zentren
+
 
 @dataclass
 class DetectionData:
@@ -196,6 +200,12 @@ class AutonomousTracker:
         self.candidate_target_type = TargetType.NONE
         self.target_type_stability = 0
         self.last_target_switch_time = 0.0
+
+        # === SMOOTHING: Source-Typ Hysterese + Ring-Buffer ===
+        self._current_source = "none"       # "face" oder "body" - aktiver Source-Typ
+        self._candidate_source = "none"     # Anwaerter-Source
+        self._source_stability = 0          # Frames stabil beim neuen Source
+        self._center_ring = []              # Ring-Buffer: [(cx, cy), ...] letzte N Frames
 
         # Search mode state
         self.search_direction = 1
@@ -304,9 +314,11 @@ class AutonomousTracker:
         Update with new detection data from vision system.
 
         Implements stable target selection:
+        - Face hat IMMER Prioritaet vor Person-Box
+        - Source-Typ Hysterese: Wechsel erst nach N stabilen Frames
+        - Ring-Buffer Smoothing: Tracking-Zentrum ueber letzte 5 Frames gemittelt
         - Filters out hands, partial bodies, low-confidence detections
         - Maintains current target if still valid
-        - Requires stability before switching to new target
         """
         with self._lock:
             self.config.frame_width = frame_width
@@ -318,13 +330,52 @@ class AutonomousTracker:
                 self.candidate_stability_count = 0
                 return
 
+            # === Face-Prioritaet: Face und Person getrennt behandeln ===
+            face_dets = [d for d in detections if d.get("class", "") == "face"]
             person_dets = [d for d in detections if d.get("class", "") == "person"]
-            if not person_dets:
-                person_dets = detections
+            incoming_source = "none"
+
+            # Face hat IMMER Vorrang
+            if face_dets:
+                work_dets = face_dets
+                incoming_source = "face"
+            elif person_dets:
+                work_dets = person_dets
+                incoming_source = "body"
+            else:
+                work_dets = detections
+                incoming_source = "body"
+
+            # === Source-Typ Hysterese ===
+            if incoming_source != self._current_source:
+                if incoming_source == self._candidate_source:
+                    self._source_stability += 1
+                else:
+                    self._candidate_source = incoming_source
+                    self._source_stability = 1
+
+                # Wechsel erst nach N stabilen Frames (AUSNAHME: face -> sofort)
+                if incoming_source == "face":
+                    # Face hat sofort Prioritaet - kein Warten
+                    self._current_source = "face"
+                    self._source_stability = 0
+                    self._candidate_source = "none"
+                elif self._source_stability >= self.config.source_hysteresis_frames:
+                    logger.info(f"[SMOOTH] Source-Wechsel: {self._current_source} -> {incoming_source} "
+                               f"(stabil seit {self._source_stability} Frames)")
+                    self._current_source = incoming_source
+                    self._source_stability = 0
+                    self._candidate_source = "none"
+                else:
+                    # Noch nicht stabil genug - aktuelle Quelle beibehalten, KEIN Update
+                    return
+            else:
+                self._source_stability = 0
+                self._candidate_source = "none"
 
             # === STAGE 1: Filter out invalid detections ===
             valid_dets = []
-            for d in person_dets:
+            for d in work_dets:
                 bbox = d.get("bbox", [0, 0, 0, 0])
                 conf = d.get("confidence", 0)
                 det_class = d.get("class", "person")
@@ -449,14 +500,31 @@ class AutonomousTracker:
                 center_x = (tx1 + tx2) / 2 / frame_width
                 center_y = (ty1 + ty2) / 2 / frame_height
 
+            # === STAGE 4: Ring-Buffer Smoothing (letzte N Frames mitteln) ===
+            buf_size = self.config.center_ring_buffer_size
+            self._center_ring.append((center_x, center_y))
+            if len(self._center_ring) > buf_size:
+                self._center_ring = self._center_ring[-buf_size:]
+
+            # Gewichteter Mittelwert: neuere Frames zaehlen mehr
+            if len(self._center_ring) > 1:
+                weights = list(range(1, len(self._center_ring) + 1))
+                w_sum = sum(weights)
+                smooth_cx = sum(w * c[0] for w, c in zip(weights, self._center_ring)) / w_sum
+                smooth_cy = sum(w * c[1] for w, c in zip(weights, self._center_ring)) / w_sum
+            else:
+                smooth_cx = center_x
+                smooth_cy = center_y
+
             self.latest_detection = DetectionData(
                 detected=True,
                 bbox=self.current_target_bbox,
-                center_x=center_x,
-                center_y=center_y,
+                center_x=smooth_cx,
+                center_y=smooth_cy,
                 confidence=self.current_target_confidence,
                 target_id=self.current_target_id,
-                timestamp=time.time()
+                timestamp=time.time(),
+                target_type=self._current_source
             )
             self.last_detection_time = time.time()
 

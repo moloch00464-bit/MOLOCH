@@ -44,9 +44,12 @@ from hailo_platform import HEF, VDevice, FormatType
 from core.perception.hailo_postprocess import (
     decode_scrfd, decode_yolov8_nms,
     normalize_arcface, match_face,
-    draw_faces, draw_name, draw_persons, draw_hands, enforce_draw_priority,
+    draw_faces, draw_name, draw_persons, draw_objects, draw_hands,
+    draw_poses, enforce_draw_priority,
     decode_hand_landmark, draw_hand_landmarks,
+    decode_yolov8_pose,
     estimate_head_pose,
+    COCO_LABELS,
 )
 from core.hardware.hailo_manager import get_hailo_manager
 from core.vision.gesture_detector import GestureDetector, KeypointPosition
@@ -70,6 +73,7 @@ MODEL_PATHS = {
     "arcface": f"{MODEL_DIR}/arcface_mobilefacenet.hef",
     "yolov8m": f"{MODEL_DIR}/yolov8m_h10.hef",
     "hand_landmark": f"{MODEL_DIR}/hand_landmark_lite.hef",
+    "pose": f"{MODEL_DIR}/yolov8s_pose_h10.hef",
 }
 
 FACE_DB_PATH = os.path.expanduser("~/moloch/data/face_embeddings.json")
@@ -312,6 +316,7 @@ class MolochService:
         self.arcface_active = False
         self.yolo_active = False
         self.hand_active = False
+        self.pose_active = False
 
         # Watchdog: Anti-Oszillation Swap-Log
         self._swap_log = []
@@ -329,7 +334,7 @@ class MolochService:
         self._load_settings()
 
         # FPS Tracking
-        self._fps = {"scrfd": 0, "arcface": 0, "yolov8m": 0, "hand_landmark": 0, "total": 0}
+        self._fps = {"scrfd": 0, "arcface": 0, "yolov8m": 0, "hand_landmark": 0, "pose": 0, "total": 0}
         self._fps_lock = threading.Lock()
 
         # Smart Tracking State
@@ -903,7 +908,8 @@ class MolochService:
                                       head_pose=_head_pose if '_head_pose' in dir() else None)
                             self._write_face_state(name, sim, len(face_boxes),
                                                    emotion=emotion, gender=gender, age_range=age_range,
-                                                   head_pose=_head_pose if '_head_pose' in dir() else None)
+                                                   head_pose=_head_pose if '_head_pose' in dir() else None,
+                                                   detected_objects=_detected_objects if '_detected_objects' in dir() else [])
 
                             # DailyLearner: Snapshot bei erkanntem Gesicht
                             if self._daily_learner and self._daily_learner.enabled and name != "Keine DB":
@@ -958,20 +964,33 @@ class MolochService:
                 except Exception as e:
                     logger.error(f"ArcFace Fehler: {e}")
 
-            # 3. YOLOv8m Person Detection (uebersprungen wenn Face erkannt)
+            # 3. YOLOv8m Detection (alle COCO Klassen, uebersprungen wenn Face erkannt)
+            _detected_objects = []  # Nicht-Person-Objekte fuer Status
             if self.yolo_active and "yolov8m" in self._active_ctx and not face_detected:
                 try:
                     t0 = time.perf_counter()
                     outputs = self._run_model("yolov8m", input_rgb)
                     out_key = self._output_names["yolov8m"][0]
-                    persons = decode_yolov8_nms(
+                    all_dets = decode_yolov8_nms(
                         outputs[out_key],
-                        class_id=0,
+                        class_id=-1,
                         conf_thresh=self.yolo_conf_val
                     )
                     dt = time.perf_counter() - t0
                     with self._fps_lock:
                         self._fps["yolov8m"] = 1.0 / dt if dt > 0 else 0
+
+                    # Personen und andere Objekte trennen
+                    persons = [d for d in all_dets if d.get("class_id", -1) == 0]
+                    objects = [d for d in all_dets if d.get("class_id", -1) != 0]
+
+                    # Nicht-Person-Objekte zeichnen (orange)
+                    if objects:
+                        draw_objects(annotated, objects, scale_x, scale_y)
+                        _detected_objects = [
+                            {"class": d["class"], "confidence": round(d["confidence"], 2)}
+                            for d in objects
+                        ]
 
                     if persons:
                         _persons_detected = True
@@ -1070,6 +1089,60 @@ class MolochService:
                 except Exception as e:
                     logger.error(f"Hand Landmark Fehler: {e}")
 
+            # 5. Pose Estimation (YOLOv8s Pose - Skeleton + Keypoints)
+            _pose_data = []
+            if self.pose_active and "pose" in self._active_ctx and not face_detected:
+                try:
+                    t0 = time.perf_counter()
+                    outputs = self._run_model("pose", input_rgb)
+                    _pose_data = decode_yolov8_pose(
+                        outputs,
+                        conf_thresh=self.yolo_conf_val,
+                        img_h=640, img_w=640,
+                    )
+                    dt = time.perf_counter() - t0
+                    with self._fps_lock:
+                        self._fps["pose"] = 1.0 / dt if dt > 0 else 0
+
+                    if _pose_data:
+                        draw_poses(annotated, _pose_data, scale_x, scale_y)
+                        # Tracker mit Pose-Daten fuettern (FACE > BODY Prioritaet)
+                        if self._autonomous_mode and self._tracker and not face_fed_to_tracker:
+                            try:
+                                pose_dets = []
+                                for p in _pose_data:
+                                    kpts = p["keypoints"]  # (17, 3) in model pixels
+                                    # Face-Center aus Nase (kpt 0) + Augen (kpt 1,2)
+                                    face_kpts = [0, 1, 2, 3, 4]  # nose, l_eye, r_eye, l_ear, r_ear
+                                    face_vis = [kpts[k, 2] for k in face_kpts]
+                                    has_face = sum(1 for v in face_vis if v > 0.3) >= 3
+                                    face_center = None
+                                    if has_face:
+                                        fx = np.mean([kpts[k, 0] for k in face_kpts if kpts[k, 2] > 0.3])
+                                        fy = np.mean([kpts[k, 1] for k in face_kpts if kpts[k, 2] > 0.3])
+                                        face_center = (fx / 640.0, fy / 640.0)
+                                    # Torso: Schultern (5,6) + Hueften (11,12)
+                                    torso_kpts = [5, 6, 11, 12]
+                                    has_torso = sum(1 for k in torso_kpts if kpts[k, 2] > 0.3) >= 3
+                                    face_conf = float(np.mean(face_vis)) if has_face else 0.0
+                                    pose_dets.append({
+                                        "bbox": p["bbox"],
+                                        "confidence": p["score"],
+                                        "has_face": has_face,
+                                        "face_center": face_center,
+                                        "face_confidence": face_conf,
+                                        "has_torso": has_torso,
+                                    })
+                                self._tracker.update_pose_detection(
+                                    poses=pose_dets,
+                                    frame_width=640, frame_height=640
+                                )
+                                face_fed_to_tracker = True  # Pose hat Tracker gefuettert
+                            except Exception as e:
+                                logger.debug(f"Tracker pose feed: {e}")
+                except Exception as e:
+                    logger.error(f"Pose Fehler: {e}")
+
             # ===== Perception Engine: All-Slot (alle 4 permanent, nur beim Start) =====
             if self._perception:
                 _perc_face_bbox = None
@@ -1095,6 +1168,8 @@ class MolochService:
                     "unknown_person": face_detected and 'name' in dir() and name == "Unbekannt",
                     "person_count": _person_count,
                     "face_count": _face_count,
+                    "detected_objects": _detected_objects if '_detected_objects' in dir() else [],
+                    "pose_count": len(_pose_data) if '_pose_data' in dir() and _pose_data else 0,
                     "motion_level": 0.0,
                     "camera_moving": _perc_camera_moving,
                     "gesture": self._current_gesture.type.value if self._current_gesture else "none",
@@ -1493,7 +1568,7 @@ class MolochService:
                 "yolov8m": self.yolo_active,
                 "hand_landmark": self.hand_active})
             with self._fps_lock:
-                self._fps = {"scrfd": 0, "arcface": 0, "yolov8m": 0, "hand_landmark": 0, "total": 0}
+                self._fps = {"scrfd": 0, "arcface": 0, "yolov8m": 0, "hand_landmark": 0, "pose": 0, "total": 0}
             logger.info(f"[TENTAKEL] Inference gestoppt, Modelle auf NPU: {list(self._active_ctx.keys())}")
 
             # Position-Tracking zuruecksetzen
@@ -1759,7 +1834,7 @@ class MolochService:
         for name in list(self._active_ctx.keys()):
             self._unconfigure_model(name)
         with self._fps_lock:
-            self._fps = {"scrfd": 0, "arcface": 0, "yolov8m": 0, "hand_landmark": 0, "total": 0}
+            self._fps = {"scrfd": 0, "arcface": 0, "yolov8m": 0, "hand_landmark": 0, "pose": 0, "total": 0}
 
     # =========================================================================
     # Cloud / Camera
@@ -1895,7 +1970,7 @@ class MolochService:
         if self._daily_learner:
             self._daily_learner.set_face_db(self._face_db, FACE_DB_PATH)
 
-    def _write_face_state(self, name, similarity, person_count, emotion=None, gender=None, age_range=None, head_pose=None):
+    def _write_face_state(self, name, similarity, person_count, emotion=None, gender=None, age_range=None, head_pose=None, detected_objects=None):
         """Schreibe Face-Recognition-State fuer IPC mit push_to_talk."""
         try:
             state = {
@@ -1906,6 +1981,7 @@ class MolochService:
                 "gender": gender,
                 "age_range": age_range,
                 "head_pose": {"pitch": head_pose[0], "yaw": head_pose[1], "roll": head_pose[2]} if head_pose else None,
+                "detected_objects": detected_objects or [],
                 "timestamp": time.time(),
                 "source": "moloch_service"
             }
@@ -1968,6 +2044,7 @@ class MolochService:
         self.arcface_active = "arcface" in self._active_ctx
         self.yolo_active = "yolov8m" in self._active_ctx
         self.hand_active = "hand_landmark" in self._active_ctx
+        self.pose_active = "pose" in self._active_ctx
 
     def _npu_watchdog(self):
         """Anti-Oszillation. Laeuft jede Inference-Iteration.

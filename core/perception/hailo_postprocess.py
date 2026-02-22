@@ -94,8 +94,26 @@ def decode_scrfd(outputs: Dict[str, np.ndarray], img_size: int = 640,
 
 
 # ============================================================
-# YOLOv8m Person Detection (On-Chip NMS)
+# YOLOv8m Object Detection (On-Chip NMS) - 80 COCO Klassen
 # ============================================================
+
+# Alle 80 COCO-Klassen
+COCO_LABELS = [
+    "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
+    "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat",
+    "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "backpack",
+    "umbrella", "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball",
+    "kite", "baseball bat", "baseball glove", "skateboard", "surfboard", "tennis racket",
+    "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple",
+    "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake",
+    "chair", "couch", "potted plant", "bed", "dining table", "toilet", "tv", "laptop",
+    "mouse", "remote", "keyboard", "cell phone", "microwave", "oven", "toaster", "sink",
+    "refrigerator", "book", "clock", "vase", "scissors", "teddy bear", "hair drier", "toothbrush",
+]
+
+# Farbe fuer Nicht-Person-Objekte (Orange in BGR)
+COLOR_OBJECT = (0, 165, 255)
+
 
 def decode_yolov8_nms(output: np.ndarray, class_id: int = 0,
                       conf_thresh: float = 0.5) -> List[Dict]:
@@ -103,6 +121,8 @@ def decode_yolov8_nms(output: np.ndarray, class_id: int = 0,
 
     Hailo NMS Format: per class block = float count + count x (y1, x1, y2, x2, score)
     Coordinates normalized [0,1].
+
+    class_id: 0=nur Person, -1=alle Klassen
     """
     detections = []
     num_classes = 80
@@ -126,12 +146,34 @@ def decode_yolov8_nms(output: np.ndarray, class_id: int = 0,
                 break
             y1, x1, y2, x2, score = flat[base:base + 5]
             if score >= conf_thresh:
+                label = COCO_LABELS[cls] if cls < len(COCO_LABELS) else f"class_{cls}"
                 detections.append({
                     "bbox": [float(x1), float(y1), float(x2), float(y2)],
                     "confidence": float(score),
-                    "class": "person" if cls == 0 else f"class_{cls}",
+                    "class": label,
+                    "class_id": cls,
                 })
     return detections
+
+
+def draw_objects(frame: np.ndarray, detections: List[Dict],
+                 scale_x: float, scale_y: float):
+    """Zeichne Nicht-Person-Objekte (COCO Klassen, orange Boxen)."""
+    h, w = frame.shape[:2]
+    font_scale = max(0.5, h / 720)
+    thickness = max(1, int(h / 540))
+    box_thick = max(2, int(3 * font_scale))
+    for det in detections:
+        bx = det["bbox"]
+        x1 = int(bx[0] * w)
+        y1 = int(bx[1] * h)
+        x2 = int(bx[2] * w)
+        y2 = int(bx[3] * h)
+        conf = det["confidence"]
+        label = det.get("class", "object")
+        cv2.rectangle(frame, (x1, y1), (x2, y2), COLOR_OBJECT, box_thick)
+        cv2.putText(frame, f"{label} {conf:.2f}", (x1, y1 - 5),
+                    cv2.FONT_HERSHEY_SIMPLEX, font_scale, COLOR_OBJECT, thickness)
 
 
 # ============================================================
