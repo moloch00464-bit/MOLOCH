@@ -4,8 +4,8 @@
 M.O.L.O.C.H. Whisper Speech-to-Text
 ===================================
 
-NPU-accelerated Whisper using Hailo-10H.
-Falls back to CPU if NPU unavailable.
+NPU-accelerated Whisper using Hailo-10H (8GB RAM).
+Kein CPU-Fallback — NPU-only. Alle Modelle passen gleichzeitig in den Speicher.
 
 Usage:
     whisper = get_whisper()
@@ -37,8 +37,8 @@ class MolochWhisper:
     """
     Hailo NPU-accelerated Whisper transcription.
 
-    Primary: Hailo-10H NPU with Whisper-Base
-    Fallback: CPU with faster-whisper small model
+    NPU-only: Hailo-10H mit 8GB RAM, alle Modelle passen gleichzeitig.
+    Kein CPU-Fallback, kein Model-Unload noetig.
     """
 
     def __init__(self, lazy_npu: bool = True):
@@ -52,19 +52,15 @@ class MolochWhisper:
         self.backend = "none"
         self._npu_processor = None
         self._vdevice = None
-        self._cpu_model = None
         self._npu_initialized = False
         self._lazy_npu = lazy_npu
 
         if lazy_npu:
-            # Lazy loading: don't claim NPU yet, let detection use it first
-            logger.info("Whisper: NPU will be loaded lazily on first transcribe")
+            logger.info("Whisper: NPU wird lazy beim ersten transcribe() geladen")
             self.backend = "lazy-npu"
         else:
-            # Immediate loading (old behavior)
             if not self._init_npu():
-                logger.warning("NPU init failed, falling back to CPU")
-                self._init_cpu()
+                logger.error("NPU init fehlgeschlagen — kein Whisper verfuegbar")
 
     def _init_npu(self) -> bool:
         """Initialize Hailo NPU-based Whisper."""
@@ -110,31 +106,6 @@ class MolochWhisper:
             return False
         except Exception as e:
             logger.error(f"Failed to initialize NPU Whisper: {e}")
-            return False
-
-    def _init_cpu(self) -> bool:
-        """Initialize CPU-based faster_whisper als Fallback.
-        Tiny-Modell: schnell, wenig RAM (~150 MB statt 1.5 GB bei medium)."""
-        try:
-            from faster_whisper import WhisperModel
-
-            logger.info("Loading CPU Whisper-tiny als Fallback (schnell, wenig RAM)...")
-
-            self._cpu_model = WhisperModel(
-                "tiny",
-                device="cpu",
-                compute_type="int8"
-            )
-
-            self.backend = "cpu-tiny"
-            logger.info("CPU Whisper-tiny geladen")
-            return True
-
-        except ImportError as e:
-            logger.error(f"faster_whisper not available: {e}")
-            return False
-        except Exception as e:
-            logger.error(f"Failed to initialize CPU Whisper: {e}")
             return False
 
     def _load_wav_as_numpy(self, audio_path: str) -> Optional[np.ndarray]:
@@ -200,48 +171,35 @@ class MolochWhisper:
         # === HAILO MANAGER: Acquire NPU for voice ===
         hailo_acquired = False
         if npu_already_acquired:
-            # Caller (push_to_talk) already acquired NPU before recording
             logger.info("[Whisper] NPU already acquired by caller - skipping acquire")
-            hailo_acquired = False  # Don't release in finally!
+            hailo_acquired = False
         elif HAILO_MANAGER_AVAILABLE:
             manager = get_hailo_manager()
             if manager.acquire_for_voice(timeout=10.0):
                 hailo_acquired = True
                 logger.info("[Whisper] Hailo NPU acquired via manager")
             else:
-                logger.warning("[Whisper] Failed to acquire Hailo - using CPU fallback")
-                if not self._cpu_model:
-                    self._init_cpu()
-                if self._cpu_model:
-                    return self._transcribe_cpu(audio_path, language)
-                logger.error("No CPU fallback available!")
+                logger.error("[Whisper] NPU nicht verfuegbar — kein Fallback")
                 return ""
 
         try:
-            # Lazy-load NPU once and keep it alive (DO NOT release between calls!)
+            # Lazy-load NPU einmalig (bleibt permanent geladen — 8GB RAM reicht)
             if self._lazy_npu and not self._npu_initialized:
-                logger.info("Whisper: Lazy-loading NPU for first transcription...")
+                logger.info("Whisper: Lazy-loading NPU fuer erste Transkription...")
                 if self._init_npu():
                     self._npu_initialized = True
                 else:
-                    logger.warning("NPU not available, falling back to CPU")
-                    self._init_cpu()
-                    self._npu_initialized = True
+                    logger.error("NPU init fehlgeschlagen — kein Whisper verfuegbar")
+                    return ""
 
-            # Try NPU first
             if self._npu_processor:
                 return self._transcribe_npu(audio_path, language, timeout_ms)
 
-            # Fallback to CPU
-            if self._cpu_model:
-                return self._transcribe_cpu(audio_path, language)
-
-            logger.error("No Whisper backend available!")
+            logger.error("Kein Whisper-Backend verfuegbar (NPU nicht initialisiert)")
             return ""
 
         finally:
-            # === HAILO MANAGER: Release NPU (will auto-restart vision) ===
-            # Only release if WE acquired it (not if caller did)
+            # HAILO MANAGER: Release NPU (Vision startet automatisch wieder)
             if hailo_acquired and HAILO_MANAGER_AVAILABLE:
                 try:
                     manager = get_hailo_manager()
@@ -285,79 +243,33 @@ class MolochWhisper:
 
         except Exception as e:
             logger.error(f"NPU transcription error: {e}")
-            # Try CPU fallback
-            if self._cpu_model:
-                logger.info("Falling back to CPU...")
-                return self._transcribe_cpu(audio_path, language)
-            return ""
-
-    def _transcribe_cpu(self, audio_path: str, language: str) -> str:
-        """Transcribe using CPU (fallback)."""
-        try:
-            # German context prompt helps with accuracy
-            initial_prompt = "Dies ist eine Sprachaufnahme auf Deutsch." if language == "de" else None
-
-            segments, info = self._cpu_model.transcribe(
-                audio_path,
-                language=language,
-                beam_size=5,
-                vad_filter=True,
-                vad_parameters=dict(
-                    min_silence_duration_ms=500,
-                    speech_pad_ms=200
-                ),
-                initial_prompt=initial_prompt,
-                condition_on_previous_text=False  # Prevent hallucinations
-            )
-
-            text_parts = []
-            for seg in segments:
-                text_parts.append(seg.text)
-
-            text = " ".join(text_parts).strip()
-
-            if text:
-                logger.info(f"CPU transcribed ({info.language}): {text[:50]}...")
-            else:
-                logger.warning("No speech detected in audio")
-
-            return text
-
-        except Exception as e:
-            logger.error(f"CPU transcription error: {e}")
             return ""
 
     def release(self):
-        """Alle Whisper-Ressourcen freigeben (NPU + CPU).
-        Wird vom Unload-Timer und HailoManager aufgerufen."""
+        """NPU Whisper-Ressourcen freigeben.
+        Wird vom HailoManager aufgerufen."""
         try:
             if self._npu_processor:
                 self._npu_processor = None
             if self._vdevice:
                 self._vdevice = None
-            if self._cpu_model:
-                del self._cpu_model
-                self._cpu_model = None
 
-            # Force garbage collection um RAM freizugeben
             import gc
             gc.collect()
 
-            # Reset so next transcribe() will re-init
             self.backend = "lazy-npu"
             self._npu_initialized = False
 
-            logger.info("[Whisper] Alle Ressourcen freigegeben (NPU + CPU)")
+            logger.info("[Whisper] NPU-Ressourcen freigegeben")
         except Exception as e:
             logger.error(f"[Whisper] Error during release: {e}")
 
     @property
     def is_available(self) -> bool:
-        """Check if any backend is available."""
-        # Lazy-load mode: assume available until proven otherwise
+        """Check if NPU backend is available."""
         if self._lazy_npu and not self._npu_initialized:
             return True
-        return self._npu_processor is not None or self._cpu_model is not None
+        return self._npu_processor is not None
 
     def __str__(self) -> str:
         return f"MolochWhisper(backend={self.backend}, available={self.is_available})"

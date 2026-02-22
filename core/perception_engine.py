@@ -2,13 +2,13 @@
 """
 M.O.L.O.C.H. Perception Engine
 ================================
-Dual-Slot NPU Management. Beide Slots dynamisch per Scoring.
+All-Slot NPU Management. Alle 4 Modelle permanent geladen.
 
-Hardware: Hailo-10H NPU (40 TOPS), max 2 Modelle gleichzeitig.
-Top 2 Scores gewinnen. ArcFace braucht SCRFD (Dependency).
+Hardware: Hailo-10H NPU (8GB RAM, 40 TOPS), alle Modelle gleichzeitig (~43MB).
+Kein Swapping noetig — SCRFD + ArcFace + YOLOv8m + Hand Landmark permanent aktiv.
+Scoring laeuft weiter fuer Lernfaehigkeit/Logging, treibt aber keine Swaps mehr.
 
-tick(context) -> Optional[List[str]]: Neue Modell-Kombination oder None.
-Nur Entscheidung. Kein Hardware-Zugriff. Kein Threading. Kein Random.
+tick(context) -> Optional[List[str]]: Alle Modelle beim ersten Tick, danach None.
 """
 import time
 import json
@@ -24,7 +24,7 @@ _MAX_ADJUST = 0.10  # Max 10% Aenderung pro Lernzyklus
 
 
 class PerceptionEngine:
-    """Dual-Slot NPU Management mit Scoring."""
+    """All-Slot NPU Management — alle 4 Modelle permanent auf Hailo-10H (8GB)."""
 
     ALL_MODELS = ["scrfd", "arcface", "yolov8m", "hand_landmark"]
 
@@ -77,6 +77,9 @@ class PerceptionEngine:
     def tick(self, context: Dict) -> Optional[List[str]]:
         """Pro Inference-Zyklus aufrufen.
 
+        Hailo-10H mit 8GB RAM: Alle 4 Modelle permanent geladen, kein Swapping.
+        Scoring laeuft weiter fuer Lernfaehigkeit, treibt aber keine Swaps.
+
         Args:
             context: {
                 "face_detected": bool,
@@ -88,74 +91,49 @@ class PerceptionEngine:
             }
 
         Returns:
-            [model1, model2] wenn Swap noetig, None wenn kein Wechsel.
+            ALL_MODELS beim ersten Tick, danach None (kein Swap noetig).
         """
         self._update_face_tracking(context)
         self._update_hand_occlusion(context)
 
-        # Log previous decision utility
+        # Log previous decision utility (Lernfaehigkeit bleibt aktiv)
         if self._last_chosen and self.slots:
             utility = self._check_utility(self._last_chosen, context)
             self._log_decision(self._last_chosen, context, utility)
 
-        # Manueller Override
+        # Scores berechnen (fuer Logging/Lernen, nicht fuer Swaps)
+        scores = self._compute_scores(context)
+        self._scores = scores
+        self._last_scores = scores
+        self._last_context = dict(context)
+
+        # Alle 4 Modelle permanent aktiv — kein Swapping
+        all_models = list(self.ALL_MODELS)
+
+        # Erster tick: alle Modelle setzen
+        if not self.slots:
+            self.slots = all_models
+            self._last_chosen = all_models
+            self._last_rotation = time.time()
+            _logger.info(f"[PERCEPTION] Alle 4 Modelle permanent aktiv: {all_models}")
+            return list(all_models)
+
+        # Manueller Override (force_models) beachten
         if self._forced:
             if set(self._forced) != set(self.slots):
                 self.slots = list(self._forced)
                 return list(self.slots)
             return None
 
-        # Scores berechnen
-        scores = self._compute_scores(context)
-        self._scores = scores
-        self._last_scores = scores
+        # Alle Modelle bereits geladen — kein Swap noetig
+        if set(self.slots) != set(all_models):
+            # Recovery: falls Modelle fehlen, alle wieder laden
+            self.slots = all_models
+            self._last_chosen = all_models
+            _logger.info(f"[PERCEPTION] Recovery: Modelle auf {all_models} gesetzt")
+            return list(all_models)
 
-        # Context merken fuer log_result()
-        self._last_context = dict(context)
-
-        # Top 2 waehlen (Context fuer Hard Rules)
-        new_slots = self._select_top2(scores, context)
-
-        # Erster tick: sofort setzen
-        if not self.slots:
-            self.slots = new_slots
-            self._last_rotation = time.time()
-            return list(new_slots)
-
-        # Gleiche Modelle? Kein Swap.
-        if set(new_slots) == set(self.slots):
-            return None
-
-        # Hysterese: Eintretende muessen deutlich besser sein als Gehende
-        # Bei Hand-Occlusion: Skip (Event-basierter Swap, nicht graduell)
-        if not self._hand_occlusion:
-            leaving = set(self.slots) - set(new_slots)
-            entering = set(new_slots) - set(self.slots)
-
-            if leaving and entering:
-                leaving_best = max(scores.get(m, 0) for m in leaving)
-                entering_worst = min(scores.get(m, 0) for m in entering)
-                if entering_worst - leaving_best < self._hysteresis:
-                    return None
-
-        # Cooldown (verkuerzt bei Hand-Occlusion)
-        now = time.time()
-        cooldown = 3.0 if self._hand_occlusion else self._min_interval
-        if now - self._last_rotation < cooldown:
-            return None
-
-        # Swap!
-        leaving = set(self.slots) - set(new_slots)
-        entering = set(new_slots) - set(self.slots)
-        for m in leaving:
-            self._last_active[m] = now
-        self._last_rotation = now
-        self.slots = new_slots
-        self._last_chosen = list(new_slots)
-        _logger.info(
-            f"[SWAP] -{list(leaving)} +{list(entering)} "
-            f"occlusion={self._hand_occlusion} scores={{{', '.join(f'{k}:{v:.2f}' for k,v in scores.items())}}}")
-        return list(new_slots)
+        return None
 
     def force_models(self, models: Optional[List[str]]):
         """Manueller Override. None = zurueck zu Scoring."""
@@ -186,29 +164,12 @@ class PerceptionEngine:
         }
 
     # =========================================================================
-    # Top-2 Selection
+    # Model Selection (Legacy — alle 4 permanent aktiv auf 8GB Hailo-10H)
     # =========================================================================
 
-    def _select_top2(self, scores: Dict[str, float], context: Dict = None) -> List[str]:
-        """Top 2 Modelle waehlen, Dependencies + Hard Rules beachten."""
-        # HARD RULE: Face erkannt -> SCRFD + ArcFace, IMMER.
-        # Einzige Ausnahme: Hand-Occlusion (Face gerade verdeckt)
-        if context and context.get("face_detected", False) and not self._hand_occlusion:
-            return ["scrfd", "arcface"]
-
-        ranked = sorted(self.ALL_MODELS, key=lambda m: scores.get(m, 0), reverse=True)
-        s1, s2 = ranked[0], ranked[1]
-
-        # Dependencies erzwingen (arcface->scrfd)
-        for _dep, _req in self.DEPENDENCIES.items():
-            if _dep in (s1, s2) and _req not in (s1, s2):
-                if s1 == _dep:
-                    s2 = _req
-                else:
-                    s1 = _req
-                break
-
-        return [s1, s2]
+    def _select_all(self) -> List[str]:
+        """Alle Modelle zurueckgeben — kein Swapping auf 8GB NPU."""
+        return list(self.ALL_MODELS)
 
     # =========================================================================
     # Face Tracking

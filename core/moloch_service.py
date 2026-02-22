@@ -108,7 +108,7 @@ class MolochService:
     - Tentakel-Modus (Takeover/Release)
     - Kamera-Kontrolle
     - Smart Tracking Toggle
-    - Model Swap (ArcFace/YOLOv8m)
+    - Alle 4 NPU-Modelle permanent aktiv (8GB Hailo-10H)
 
     GUI-Aufrufe (root.after, BooleanVar) sind durch
     self._notify() Callbacks ersetzt.
@@ -694,7 +694,7 @@ class MolochService:
                     self._annotated_frame = frame.copy()
                 continue
 
-            # === NPU WATCHDOG: Max-2 + Anti-Oszillation ===
+            # === NPU WATCHDOG: Anti-Oszillation (kein Max-Limit bei 8GB) ===
             self._npu_watchdog()
             self._last_hand_detected = False  # Default: keine Hand pro Frame
 
@@ -1044,7 +1044,7 @@ class MolochService:
                 except Exception as e:
                     logger.error(f"Hand Landmark Fehler: {e}")
 
-            # ===== Perception Engine: Dual-Slot Empfehlung (nach allen Detektionen) =====
+            # ===== Perception Engine: All-Slot (alle 4 permanent, nur beim Start) =====
             if self._perception:
                 _perc_face_bbox = None
                 if face_boxes:
@@ -1122,7 +1122,7 @@ class MolochService:
                     # Alarm-State
                     self._core_integrator.update_input("system", "alarm_active", 1.0 if self._alarm_on else 0.0)
                     # System-Last (grob: NPU aktiv = etwas Last)
-                    _npu_load = len(self._active_ctx) / 2.0  # 0-2 Modelle -> 0.0-1.0
+                    _npu_load = len(self._active_ctx) / 4.0  # 0-4 Modelle -> 0.0-1.0
                     self._core_integrator.update_input("system", "system_load", _npu_load)
                 except Exception:
                     pass  # Integrator darf NIE die Inference-Loop stoeren
@@ -1324,22 +1324,17 @@ class MolochService:
                     self._transitioning = False
                     return
 
-                # 1. NPU Modelle aktivieren (ST bleibt AN!)
-                models_cached = "scrfd" in self._active_ctx and "yolov8m" in self._active_ctx
-                if models_cached:
-                    logger.info("[TENTAKEL] Modelle bereits auf NPU")
+                # 1. Alle NPU Modelle aktivieren (8GB — alle passen gleichzeitig)
+                all_loaded = all(m in self._active_ctx for m in MODEL_PATHS)
+                if all_loaded:
+                    logger.info("[TENTAKEL] Alle Modelle bereits auf NPU")
                 else:
                     self._update_status("Takeover: NPU Modelle laden...")
-                    # Erst Modelle aufräumen die nicht gebraucht werden (max 2!)
-                    for _stale in list(self._active_ctx.keys()):
-                        if _stale not in ("scrfd", "yolov8m"):
-                            logger.info(f"[TENTAKEL] Raeume {_stale} auf (Platz fuer Takeover)")
-                            self._unconfigure_model(_stale)
+                    logger.info("[TENTAKEL] Lade alle NPU Modelle (ST laeuft weiter)")
+                    for _m in MODEL_PATHS:
+                        if _m not in self._active_ctx:
+                            self._configure_model(_m)
                             time.sleep(0.2)
-                    logger.info("[TENTAKEL] Lade NPU Modelle (ST laeuft weiter)")
-                    self._configure_model("scrfd")
-                    time.sleep(0.2)
-                    self._configure_model("yolov8m")
 
                 # 2. Inference starten - Flags aus NPU-Realitaet
                 self._sync_flags_from_npu()
@@ -1590,20 +1585,15 @@ class MolochService:
                                     self._models_preloaded = True  # Guard: nur einmal
                                     def _idle_preload():
                                         try:
-                                            # Erst Modelle aufräumen die nicht gebraucht werden (max 2!)
-                                            for _stale in list(self._active_ctx.keys()):
-                                                if _stale not in ("scrfd", "yolov8m"):
-                                                    logger.info(f"[TENTAKEL] Pre-Load: raeume {_stale} auf")
-                                                    self._unconfigure_model(_stale)
+                                            logger.info("[TENTAKEL] Idle Pre-Load: Alle NPU Modelle vorladen...")
+                                            for _m in MODEL_PATHS:
+                                                if _m not in self._active_ctx:
+                                                    self._configure_model(_m)
                                                     time.sleep(0.2)
-                                            logger.info("[TENTAKEL] Idle Pre-Load: NPU Modelle vorladen...")
-                                            self._configure_model("scrfd")
-                                            time.sleep(0.2)
-                                            self._configure_model("yolov8m")
-                                            if "scrfd" in self._active_ctx and "yolov8m" in self._active_ctx:
-                                                logger.info("[TENTAKEL] Idle Pre-Load: Modelle ready auf NPU")
+                                            if all(m in self._active_ctx for m in MODEL_PATHS):
+                                                logger.info("[TENTAKEL] Idle Pre-Load: Alle 4 Modelle ready auf NPU")
                                             else:
-                                                logger.warning("[TENTAKEL] Idle Pre-Load: Modelle NICHT konfiguriert!")
+                                                logger.warning(f"[TENTAKEL] Idle Pre-Load: Nur {list(self._active_ctx.keys())} konfiguriert!")
                                                 self._models_preloaded = False
                                         except Exception as e:
                                             logger.error(f"[TENTAKEL] Idle Pre-Load Fehler: {e}")
@@ -1954,21 +1944,8 @@ class MolochService:
         self.hand_active = "hand_landmark" in self._active_ctx
 
     def _npu_watchdog(self):
-        """Max-2 Enforcement + Anti-Oszillation. Laeuft jede Inference-Iteration."""
-        # 1) Max 2 Modelle erzwingen
-        _count = len(self._active_ctx)
-        if _count > 2:
-            logger.warning(f"[WATCHDOG] VIOLATION: {_count} Modelle aktiv! {list(self._active_ctx.keys())}")
-            _prio = ["hand_landmark", "yolov8m", "arcface", "scrfd"]
-            _victims = sorted(self._active_ctx.keys(),
-                              key=lambda m: _prio.index(m) if m in _prio else 99)
-            while len(self._active_ctx) > 2:
-                _v = _victims.pop(0)
-                logger.warning(f"[WATCHDOG] Unloading {_v}")
-                self._unconfigure_model(_v)
-            self._sync_flags_from_npu()
-            if self._perception:
-                self._perception.slots = list(self._active_ctx.keys())
+        """Anti-Oszillation. Laeuft jede Inference-Iteration.
+        Hailo-10H 8GB: Alle 4 Modelle passen gleichzeitig (~43MB)."""
 
         # 3) Anti-Oszillation: >3 Swaps in 1s -> Pause
         _now = time.time()
@@ -2045,30 +2022,14 @@ class MolochService:
         if model_key not in active_map:
             return
 
-        # Aktuelle gewuenschte Modelle ermitteln (max 2!)
+        # Aktuelle gewuenschte Modelle ermitteln (8GB NPU — kein Limit)
         current = set(self._active_ctx.keys())
         if enabled:
             wanted = current | {model_key}
             # ArcFace braucht SCRFD
             if "arcface" in wanted and "scrfd" not in wanted:
                 wanted.add("scrfd")
-            # Max 2 Modelle: neues Modell + Dependencies behalten, Rest weg
-            keep = {model_key}
-            # Dependencies in keep aufnehmen
-            DEPS = {"arcface": "scrfd"}
-            if model_key in DEPS:
-                keep.add(DEPS[model_key])
-            while len(wanted) > 2:
-                removable = wanted - keep
-                if removable:
-                    wanted.discard(removable.pop())
-                else:
-                    break
-            # Post-loop: Dependencies nochmal validieren (Sicherheit)
-            if "arcface" in wanted and "scrfd" not in wanted:
-                wanted.discard("arcface")
-                logger.info(f"[TOGGLE] arcface ohne scrfd entfernt -> wanted={wanted}")
-            logger.info(f"[TOGGLE] wanted={wanted} (max 2 enforced)")
+            logger.info(f"[TOGGLE] wanted={wanted}")
         else:
             wanted = current - {model_key}
             # SCRFD weg -> ArcFace auch weg

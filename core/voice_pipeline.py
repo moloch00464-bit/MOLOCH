@@ -110,10 +110,8 @@ class VoicePipeline:
         self._record_proc: Optional[subprocess.Popen] = None
         self._lock = threading.Lock()
 
-        # Whisper STT (MolochWhisper: NPU primary, CPU fallback)
+        # Whisper STT (MolochWhisper: NPU-only, bleibt permanent geladen)
         self._whisper = None
-        self._whisper_unload_timer = None
-        self._whisper_unload_seconds = 60  # Nach 60s Inaktivitaet entladen
 
         # Claude API
         self._claude_client = None
@@ -151,7 +149,7 @@ class VoicePipeline:
             logger.error(f"[VOICE] Claude init fehlgeschlagen: {e}")
 
     def _init_whisper(self):
-        """MolochWhisper lazy-laden (NPU primary, CPU fallback)."""
+        """MolochWhisper lazy-laden (NPU-only, bleibt permanent im Speicher)."""
         if self._whisper is not None:
             return True
         try:
@@ -286,7 +284,7 @@ class VoicePipeline:
     # =========================================================================
 
     def _transcribe(self, wav_path: str) -> Optional[str]:
-        """WAV-Datei mit MolochWhisper transkribieren (NPU + HailoManager)."""
+        """WAV-Datei mit MolochWhisper transkribieren (NPU-only)."""
         if not self._init_whisper():
             return None
 
@@ -295,40 +293,10 @@ class VoicePipeline:
             # Vision pausiert automatisch, startet nach Release wieder
             text = self._whisper.transcribe(wav_path, language="de")
             logger.info(f"[VOICE] Whisper Backend: {self._whisper.backend}")
-            # Auto-Unload Timer starten (entlaedt Whisper nach 60s Inaktivitaet)
-            self._schedule_whisper_unload()
             return text.strip() if text and text.strip() else None
         except Exception as e:
             logger.error(f"[VOICE] Whisper Fehler: {e}")
             return None
-
-    def _schedule_whisper_unload(self):
-        """Timer fuer Whisper-Unload starten/resetten. Spart RAM nach Inaktivitaet."""
-        # Alten Timer abbrechen
-        if self._whisper_unload_timer:
-            self._whisper_unload_timer.cancel()
-        self._whisper_unload_timer = threading.Timer(
-            self._whisper_unload_seconds, self._unload_whisper
-        )
-        self._whisper_unload_timer.daemon = True
-        self._whisper_unload_timer.start()
-        logger.debug(f"[VOICE] Whisper Unload-Timer: {self._whisper_unload_seconds}s")
-
-    def _unload_whisper(self):
-        """Whisper-Modell entladen um RAM freizugeben."""
-        if self._whisper is None:
-            return
-        try:
-            import gc
-            self._whisper.release()
-            self._whisper = None
-            # Singleton auch resetten damit naechster get_whisper() frisch laedt
-            import core.speech.hailo_whisper as _hw
-            _hw._whisper_instance = None
-            gc.collect()
-            logger.info("[VOICE] Whisper entladen (RAM freigegeben)")
-        except Exception as e:
-            logger.error(f"[VOICE] Whisper entladen fehlgeschlagen: {e}")
 
     # =========================================================================
     # Claude API
