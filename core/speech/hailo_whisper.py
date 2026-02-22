@@ -159,7 +159,7 @@ class MolochWhisper:
             return None
 
     def transcribe(self, audio_path: str, language: str = "de",
-                   timeout_ms: int = 15000, **kwargs) -> str:
+                   timeout_ms: int = 0, **kwargs) -> str:
         """
         Audio transkribieren. NPU ist permanent geladen — kein Pause/Resume.
 
@@ -169,7 +169,7 @@ class MolochWhisper:
         Args:
             audio_path: Pfad zur WAV-Datei
             language: Sprache (de, en, etc.)
-            timeout_ms: Timeout in Millisekunden
+            timeout_ms: Timeout in Millisekunden (0 = auto: 4s pro Sekunde Audio, min 30s)
 
         Returns:
             Transkribierter Text
@@ -196,7 +196,12 @@ class MolochWhisper:
             if audio_data is None:
                 return ""
 
-            logger.info(f"NPU transcribing {len(audio_data)/16000:.1f}s audio...")
+            audio_duration_s = len(audio_data) / 16000.0
+            # Dynamischer Timeout: 4s Verarbeitung pro Sekunde Audio, mindestens 30s
+            if timeout_ms <= 0:
+                timeout_ms = max(30000, int(audio_duration_s * 4000))
+
+            logger.info(f"NPU transcribing {audio_duration_s:.1f}s audio (timeout={timeout_ms}ms)...")
 
             segments = self._npu_processor.generate_all_segments(
                 audio_data=audio_data,

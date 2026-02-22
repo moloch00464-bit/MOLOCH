@@ -411,11 +411,8 @@ class VoicePipeline:
     def _speak(self, text: str):
         """Text mit Piper TTS sprechen und ueber HDMI ausgeben.
 
-        Satzweise Synthese mit Vorgeneration:
-        1. Text in Saetze splitten
-        2. Ersten Satz generieren → sofort abspielen
-        3. Naechsten Satz im Hintergrund vorgenerieren waehrend aktueller spielt
-        Ergebnis: Erster Ton nach ~8-10s statt ~26s.
+        Buffer-before-Play: Komplett generieren, dann in einem Stueck abspielen.
+        Kein Stottern zwischen Saetzen, ein einziger aplay-Aufruf.
         """
         if not self._piper_available:
             logger.warning("[VOICE] Piper nicht verfuegbar")
@@ -451,47 +448,28 @@ class VoicePipeline:
         t0 = time.time()
 
         try:
-            pre_generated = None
-
+            # Phase 1: Alle Saetze komplett generieren
+            audio_chunks = []
             for i, sentence in enumerate(sentences):
-                # Audio holen: vorgeneriert oder jetzt generieren
-                if pre_generated is not None:
-                    audio = pre_generated
-                    pre_generated = None
-                else:
-                    audio = self._piper_synthesize(sentence, model_path)
+                chunk = self._piper_synthesize(sentence, model_path)
+                if chunk:
+                    audio_chunks.append(chunk)
 
-                if not audio:
-                    continue
+            if not audio_chunks:
+                logger.warning("[VOICE] Keine Audio-Daten generiert")
+                return
 
-                if i == 0:
-                    logger.info(f"[VOICE] Erster Satz nach {time.time()-t0:.1f}s "
-                                f"({len(sentence)} Zeichen)")
+            # Phase 2: Alles zusammenfuegen und in einem Stueck abspielen
+            full_audio = b"".join(audio_chunks)
+            gen_time = time.time() - t0
+            logger.info(f"[VOICE] Generiert: {len(text)} Zeichen, "
+                        f"{len(sentences)} Saetze, {len(full_audio)//1024}KB "
+                        f"in {gen_time:.1f}s — starte Playback")
 
-                # Naechsten Satz im Hintergrund vorgenerieren
-                gen_result = [None]
-                gen_thread = None
-                if i + 1 < len(sentences):
-                    next_sentence = sentences[i + 1]
-                    def _generate(s, result, mp=model_path):
-                        result[0] = self._piper_synthesize(s, mp)
-                    gen_thread = threading.Thread(
-                        target=_generate, args=(next_sentence, gen_result),
-                        daemon=True,
-                    )
-                    gen_thread.start()
-
-                # Aktuellen Satz fluessig abspielen
-                subprocess.run(aplay_cmd, input=audio, timeout=30)
-
-                # Auf Vorgeneration warten
-                if gen_thread:
-                    gen_thread.join(timeout=45)
-                    pre_generated = gen_result[0]
+            subprocess.run(aplay_cmd, input=full_audio, timeout=120)
 
             dt = time.time() - t0
-            logger.info(f"[VOICE] Gesprochen: {len(text)} Zeichen, "
-                        f"{len(sentences)} Saetze ({dt:.1f}s)")
+            logger.info(f"[VOICE] Gesprochen: {len(text)} Zeichen ({dt:.1f}s total)")
 
         except subprocess.TimeoutExpired:
             logger.error("[VOICE] TTS Timeout")
