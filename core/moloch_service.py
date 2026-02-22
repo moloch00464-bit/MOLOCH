@@ -50,7 +50,7 @@ from core.perception.hailo_postprocess import (
 )
 from core.hardware.hailo_manager import get_hailo_manager
 from core.vision.gesture_detector import GestureDetector, KeypointPosition
-from core.hardware.camera_cloud_bridge import CameraCloudBridge, CloudConfig
+from core.cloud_controller import CloudController
 from core.mpo.autonomous_tracker import AutonomousTracker, TrackerState
 
 logging.basicConfig(level=logging.WARNING)
@@ -97,53 +97,6 @@ def load_face_db(path: str) -> dict:
     except Exception as e:
         logger.error(f"Face-DB laden fehlgeschlagen: {e}")
         return {}
-
-
-class CloudController:
-    """Persistent async eWeLink cloud controller."""
-
-    def __init__(self):
-        self.bridge = None
-        self.loop = None
-        self._thread = None
-        self.connected = False
-
-    def start(self):
-        config = CloudConfig(
-            enabled=True,
-            api_base_url="https://eu-apia.coolkit.cc",
-            app_id=os.environ.get("EWELINK_APP_ID_1", ""),
-            app_secret=os.environ.get("EWELINK_APP_SECRET_1", ""),
-            device_id="1002817609",
-            username=os.environ.get("EWELINK_USERNAME", ""),
-            password=os.environ.get("EWELINK_PASSWORD", ""),
-        )
-        self.bridge = CameraCloudBridge(config)
-
-        def run():
-            self.loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(self.loop)
-            self.loop.run_forever()
-
-        self._thread = threading.Thread(target=run, daemon=True)
-        self._thread.start()
-        time.sleep(0.2)
-        future = asyncio.run_coroutine_threadsafe(self.bridge.connect(), self.loop)
-        try:
-            self.connected = future.result(timeout=10)
-        except Exception as e:
-            logger.error(f"Cloud connect failed: {e}")
-            self.connected = False
-
-    def run(self, coro):
-        if not self.loop:
-            return False
-        future = asyncio.run_coroutine_threadsafe(coro, self.loop)
-        try:
-            return future.result(timeout=5)
-        except Exception as e:
-            logger.error(f"Cloud call failed: {e}")
-            return False
 
 
 class MolochService:
@@ -1359,14 +1312,12 @@ class MolochService:
                 st_off = False
                 if self._cloud and self._cloud.connected:
                     for attempt in range(3):
-                        try:
-                            self._cloud.run(self._cloud.bridge.set_smart_tracking(False))
+                        if self._cloud.set_smart_tracking(False):
                             self._set_smart_tracking_state(False)
                             st_off = True
                             break
-                        except Exception as e:
-                            logger.warning(f"[TENTAKEL] ST AUS Versuch {attempt+1}/3: {e}")
-                            time.sleep(0.5)
+                        logger.warning(f"[TENTAKEL] ST AUS Versuch {attempt+1}/3 fehlgeschlagen")
+                        time.sleep(0.5)
 
                 if not st_off:
                     logger.error("[TENTAKEL] ST AUS fehlgeschlagen - Takeover ABBRUCH")
@@ -1435,12 +1386,9 @@ class MolochService:
 
             # 3. Smart Tracking SOFORT AN (minimaler Gap!)
             if self._cloud and self._cloud.connected:
-                try:
-                    self._cloud.run(self._cloud.bridge.set_smart_tracking(True))
+                if self._cloud.set_smart_tracking(True):
                     self._set_smart_tracking_state(True)
                     logger.info("[TENTAKEL] Smart Tracking wiederhergestellt")
-                except Exception:
-                    pass
 
             # 4. Inference-Flags: Wenn User Modelle forced hat, Flags aus NPU synchen!
             if self._perception and self._perception._forced:
@@ -1733,12 +1681,9 @@ class MolochService:
             self._cloud.start()
             if self._cloud.connected:
                 logger.info("eWeLink Cloud verbunden")
-                try:
-                    self._cloud.run(self._cloud.bridge.set_smart_tracking(True))
+                if self._cloud.set_smart_tracking(True):
                     self._set_smart_tracking_state(True)
                     logger.info("Smart Tracking aktiviert - Kamera scannt autonom (Tentakel-Modus)")
-                except Exception:
-                    pass
                 # LED AUS beim Start (sauberer Zustand)
                 try:
                     self._cloud.run(self._cloud.bridge.set_status_led(False))
@@ -1758,19 +1703,6 @@ class MolochService:
             self._smart_tracking_on = value
         self._notify("smart_tracking", {"on": value})
 
-    def _cloud_run(self, method_name, *args):
-        """Run cloud bridge method in background."""
-        if not self._cloud or not self._cloud.connected:
-            self._update_status("Cloud nicht verbunden")
-            return
-        method = getattr(self._cloud.bridge, method_name, None)
-        if not method:
-            return
-        threading.Thread(
-            target=lambda: self._cloud.run(method(*args)),
-            daemon=True
-        ).start()
-
     def _toggle_smart_tracking(self):
         """Smart Tracking toggle via persistent cloud connection."""
         new_state = not self._smart_tracking_on
@@ -1778,12 +1710,11 @@ class MolochService:
             self._update_status("Cloud nicht verbunden")
             return
         def do_toggle():
-            try:
-                self._cloud.run(self._cloud.bridge.set_smart_tracking(new_state))
+            if self._cloud.set_smart_tracking(new_state):
                 self._set_smart_tracking_state(new_state)
                 self._update_status(f"Smart Tracking {'AN' if new_state else 'AUS'}")
-            except Exception as e:
-                self._update_status(f"Smart Tracking Fehler: {e}")
+            else:
+                self._update_status("Smart Tracking Fehler")
         threading.Thread(target=do_toggle, daemon=True).start()
 
     # =========================================================================
@@ -2063,11 +1994,8 @@ class MolochService:
             # Smart Tracking AUS (wuerde sonst Kamera bewegen)
             def stop_cam_control():
                 if self._cloud and self._cloud.connected:
-                    try:
-                        self._cloud.run(self._cloud.bridge.set_smart_tracking(False))
+                    if self._cloud.set_smart_tracking(False):
                         self._set_smart_tracking_state(False)
-                    except Exception:
-                        pass
                 self._led_off()
             threading.Thread(target=stop_cam_control, daemon=True).start()
 
@@ -2082,12 +2010,9 @@ class MolochService:
             # Smart Tracking AN (Tentakel-Default)
             def start_cam_control():
                 if self._cloud and self._cloud.connected:
-                    try:
-                        self._cloud.run(self._cloud.bridge.set_smart_tracking(True))
+                    if self._cloud.set_smart_tracking(True):
                         self._set_smart_tracking_state(True)
                         logger.info("[TENTAKEL] Smart Tracking aktiviert")
-                    except Exception:
-                        pass
             threading.Thread(target=start_cam_control, daemon=True).start()
 
             # Guardian-State zuruecksetzen (frischer Start)
