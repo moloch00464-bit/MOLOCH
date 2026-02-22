@@ -2130,6 +2130,7 @@ class MolochService:
                     "arcface_thresh": self.arcface_thresh_val,
                     "yolo_conf": self.yolo_conf_val,
                 },
+                "led_markus_on": self._led_markus_on,
                 "audio": {
                     "mic_gain": getattr(self, '_saved_mic_gain', 1.0),
                     "noise_gate_db": getattr(self, '_saved_noise_gate', -60.0),

@@ -7,7 +7,7 @@ eWeLink Cloud Controls fuer Sonoff CAM-PT2.
 Bekommt parent_frame (LabelFrame) und ServiceProxy von panel_main.
 
 - FLUTLICHT: Toggle weisse LEDs (nightVision 0=aus, 2=an)
-- ERKANNT: Toggle blaue Status-LED (sledOnline)
+- ERKANNT: Status-Indikator blaue LED (sledOnline, vom Service gesteuert)
 - ALARM (rot toggle), SNAP (cyan einmal)
 - SYNC Button: Holt Cloud-Status, aktualisiert Button-Farben
 
@@ -95,12 +95,13 @@ class EwelinkModule:
         )
         self._btn_flutlicht.grid(row=0, column=2, padx=3, pady=2)
 
-        # ERKANNT (blaue Status-LED toggle, sledOnline)
+        # ERKANNT (Status-Indikator, wird vom Service gesteuert)
         self._btn_erkannt = tk.Button(
             row, text="ERKANNT", width=8,
             bg=BTN_OFF_DARK, fg=FG_WHITE, font=FONT_BUTTON,
             activebackground=BG_FRAME,
-            command=self._toggle_erkannt,
+            state="disabled",
+            disabledforeground=FG_WHITE,
         )
         self._btn_erkannt.grid(row=0, column=3, padx=3, pady=2)
 
@@ -186,20 +187,14 @@ class EwelinkModule:
             self._btn_flutlicht.config(bg=BTN_OFF_DARK)
             self._lbl_flutlicht.config(text="AUS", fg=FG_DIM)
 
-    def _toggle_erkannt(self):
-        """Blaue Status-LED an/aus (sledOnline)."""
-        self._erkannt_led_on = not self._erkannt_led_on
-        self._update_erkannt_button()
-        self._service._write_command("cloud_status_led", {"on": self._erkannt_led_on})
-
     def _update_erkannt_button(self):
-        """ERKANNT Button Farbe aktualisieren."""
+        """Status-Indikator: zeigt LED-State und wer erkannt wurde."""
         if self._erkannt_led_on:
-            self._btn_erkannt.config(bg=ACCENT_CYAN)
-            self._lbl_erkannt.config(text="AN", fg=ACCENT_CYAN)
+            self._btn_erkannt.config(bg=ACCENT_CYAN, disabledforeground="#000000")
+            self._lbl_erkannt.config(text="MARKUS", fg=ACCENT_CYAN)
         else:
-            self._btn_erkannt.config(bg=BTN_OFF_DARK)
-            self._lbl_erkannt.config(text="AUS", fg=FG_DIM)
+            self._btn_erkannt.config(bg=BTN_OFF_DARK, disabledforeground=FG_WHITE)
+            self._lbl_erkannt.config(text="---", fg=FG_DIM)
 
     def _sync_cloud_status(self):
         """Cloud-Status holen und alle Buttons aktualisieren."""
@@ -239,6 +234,13 @@ class EwelinkModule:
         self._parent.after(3000, lambda: self._lbl_sync.config(
             text="", fg=FG_DIM
         ))
+
+    def update_from_status(self, status):
+        """Vom panel_main Poll aufgerufen: ERKANNT-Indikator aktualisieren."""
+        led_on = status.get("led_markus_on", False)
+        if led_on != self._erkannt_led_on:
+            self._erkannt_led_on = led_on
+            self._update_erkannt_button()
 
     def _open_gallery(self):
         """Snapshot Galerie Popup oeffnen."""

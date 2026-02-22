@@ -388,9 +388,10 @@ class MolochPanel:
                      bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL).pack(pady=5)
 
         # (C) eWeLink -> frame_steuerung (unter PTZ)
+        self._ewelink = None
         if _EWELINK_OK:
             try:
-                EwelinkModule(self.frame_steuerung, self.service)
+                self._ewelink = EwelinkModule(self.frame_steuerung, self.service)
                 self.logger.info("Modul geladen: eWeLink")
             except Exception as e:
                 self.logger.error(f"eWeLink fehlgeschlagen: {e}")
@@ -454,6 +455,10 @@ class MolochPanel:
                 text=f"Service: aktiv | FPS: {fps:.1f} | Modus: {mode}",
                 fg=STATUS_GREEN,
             )
+
+            # ERKANNT-Indikator im eWeLink-Modul aktualisieren
+            if self._ewelink is not None:
+                self._ewelink.update_from_status(status)
         else:
             self.status_bar.config(
                 text="Service: nicht verbunden",
