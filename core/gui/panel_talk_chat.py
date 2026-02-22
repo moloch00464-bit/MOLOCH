@@ -230,46 +230,49 @@ class TalkChatModule:
 
     def _poll_status(self):
         """Whisper-Status und Voice-Toggle aus Service-Status aktualisieren."""
-        status = self._service.read_status()
+        try:
+            status = self._service.read_status()
 
-        if status:
-            # Whisper STT Status
-            voice = status.get("voice", {})
-            whisper_state = voice.get("whisper_status", "Idle")
-            if whisper_state != self._last_whisper_status:
-                self._last_whisper_status = whisper_state
-                color_map = {
-                    "Idle": FG_DIM,
-                    "Aufnahme...": ACCENT_RED,
-                    "Transkribiere...": STATUS_YELLOW,
-                    "Denke...": ACCENT_CYAN,
-                    "Spreche...": ACCENT_GREEN,
-                    "Fehler": ACCENT_RED,
-                }
-                self._lbl_whisper.config(
-                    text=whisper_state,
-                    fg=color_map.get(whisper_state, FG_DIM),
-                )
+            if status:
+                # Whisper STT Status
+                voice = status.get("voice", {})
+                whisper_state = voice.get("whisper_status", "Idle")
+                if whisper_state != self._last_whisper_status:
+                    self._last_whisper_status = whisper_state
+                    color_map = {
+                        "Idle": FG_DIM,
+                        "Aufnahme...": ACCENT_RED,
+                        "Transkribiere...": STATUS_YELLOW,
+                        "Denke...": ACCENT_CYAN,
+                        "Spreche...": ACCENT_GREEN,
+                        "Fehler": ACCENT_RED,
+                    }
+                    self._lbl_whisper.config(
+                        text=whisper_state,
+                        fg=color_map.get(whisper_state, FG_DIM),
+                    )
 
-            # Chat-Messages vom Service abholen — nur neue per ID anzeigen
-            messages = voice.get("messages", [])
-            for msg in messages:
-                msg_id = msg.get("id", 0)
-                if msg_id > self._last_msg_id and msg_id not in self._seen_msg_ids:
-                    sender = msg.get("sender", "?")
-                    text = msg.get("text", "")
-                    if text:
-                        self.add_message(sender, text)
-                    self._seen_msg_ids.add(msg_id)
-                    self._last_msg_id = msg_id
-            # Seen-Set begrenzen (aelteste raus wenn > 100)
-            if len(self._seen_msg_ids) > 100:
-                self._seen_msg_ids = set(sorted(self._seen_msg_ids)[-50:])
+                # Chat-Messages vom Service abholen — nur neue per ID anzeigen
+                messages = voice.get("messages", [])
+                for msg in messages:
+                    msg_id = msg.get("id", 0)
+                    if msg_id > self._last_msg_id and msg_id not in self._seen_msg_ids:
+                        sender = msg.get("sender", "?")
+                        text = msg.get("text", "")
+                        if text:
+                            self.add_message(sender, text)
+                        self._seen_msg_ids.add(msg_id)
+                        self._last_msg_id = msg_id
+                # Seen-Set begrenzen (aelteste raus wenn > 100)
+                if len(self._seen_msg_ids) > 100:
+                    self._seen_msg_ids = set(sorted(self._seen_msg_ids)[-50:])
 
-            # Voice Output Toggle synchronisieren
-            voice_on = voice.get("voice_enabled", False)
-            if self._voice_enabled.get() != voice_on:
-                self._voice_enabled.set(voice_on)
+                # Voice Output Toggle synchronisieren
+                voice_on = voice.get("voice_enabled", False)
+                if self._voice_enabled.get() != voice_on:
+                    self._voice_enabled.set(voice_on)
+        except Exception:
+            pass  # Polling darf NIEMALS sterben
 
-        # Naechster Poll
+        # Naechster Poll — IMMER, auch bei Fehler
         self._after_id = self._parent.after(STATUS_UPDATE_MS, self._poll_status)

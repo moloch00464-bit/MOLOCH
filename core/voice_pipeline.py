@@ -376,6 +376,7 @@ class VoicePipeline:
     def _process_text(self, text: str):
         """Text -> Claude -> TTS in Background."""
         self._whisper_status = "Denke..."
+        self._emit_message("Du", text)
 
         # Langzeitgedaechtnis: User-Text SOFORT speichern
         try:
@@ -410,8 +411,8 @@ class VoicePipeline:
     def _speak(self, text: str):
         """Text mit Piper TTS sprechen und ueber HDMI ausgeben.
 
-        Pipe Streaming: piper --output-raw | aplay
-        Audio startet sofort waehrend Piper noch generiert — keine Wartezeit.
+        Hybrid: Piper generiert komplett in RAM (raw PCM), dann fluessig abspielen.
+        Kein Temp-File, kein Stottern — Audio ist 100% fluessig.
         """
         if not self._piper_available:
             logger.warning("[VOICE] Piper nicht verfuegbar")
@@ -423,8 +424,6 @@ class VoicePipeline:
             return
 
         self._speaking = True
-        piper_proc = None
-        aplay_proc = None
         t0 = time.time()
 
         try:
@@ -439,57 +438,43 @@ class VoicePipeline:
                 except Exception:
                     pass
 
-            # Pipe Streaming: piper gibt raw PCM aus, aplay spielt sofort
-            piper_proc = subprocess.Popen(
+            # Schritt 1: Piper generiert komplett in RAM (raw PCM via stdout)
+            piper_result = subprocess.run(
                 [
                     str(PIPER_PATH),
                     "--model", str(model_path),
                     "--length-scale", str(self._length_scale),
                     "--output-raw",
                 ],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
+                input=text.encode("utf-8"),
+                capture_output=True,
+                timeout=30,
             )
-            aplay_proc = subprocess.Popen(
+
+            if piper_result.returncode != 0 or not piper_result.stdout:
+                logger.error("[VOICE] Piper hat kein Audio generiert")
+                return
+
+            t1 = time.time()
+            logger.info(f"[VOICE] Synthese: {len(piper_result.stdout)} bytes in {t1-t0:.1f}s")
+
+            # Schritt 2: Fluessig abspielen — komplettes Audio via stdin-Pipe
+            subprocess.run(
                 [
                     "aplay", "-D", SPEAKER_DEVICE,
                     "-r", sample_rate, "-f", "S16_LE", "-c", "1", "-q",
                 ],
-                stdin=piper_proc.stdout,
-                stderr=subprocess.DEVNULL,
+                input=piper_result.stdout,
+                timeout=60,
             )
-
-            # stdout im Parent schliessen damit aplay EOF bekommt wenn Piper fertig
-            piper_proc.stdout.close()
-
-            # Text an Piper stdin senden
-            piper_proc.stdin.write(text.encode("utf-8"))
-            piper_proc.stdin.close()
-
-            # Auf Playback warten (60s fuer lange Texte)
-            aplay_proc.wait(timeout=60)
-            piper_proc.wait(timeout=5)
 
             dt = time.time() - t0
             logger.info(f"[VOICE] Gesprochen: {len(text)} Zeichen mit {self._current_voice} ({dt:.1f}s)")
 
         except subprocess.TimeoutExpired:
             logger.error("[VOICE] TTS Timeout")
-            for proc in [aplay_proc, piper_proc]:
-                if proc:
-                    try:
-                        proc.kill()
-                    except Exception:
-                        pass
         except Exception as e:
             logger.error(f"[VOICE] TTS Fehler: {e}")
-            for proc in [aplay_proc, piper_proc]:
-                if proc:
-                    try:
-                        proc.kill()
-                    except Exception:
-                        pass
         finally:
             self._speaking = False
 
@@ -524,10 +509,10 @@ class VoicePipeline:
 
     def get_state(self) -> Dict:
         """Aktuellen Status zurueckgeben (fuer IPC Status-JSON).
-        Messages aelter als 30s werden automatisch entfernt."""
+        Messages aelter als 120s werden automatisch entfernt."""
         with self._msg_lock:
-            # Alte Messages entfernen (aelter als 30 Sekunden)
-            cutoff = time.time() - 30.0
+            # Alte Messages entfernen (aelter als 120 Sekunden)
+            cutoff = time.time() - 120.0
             self._pending_messages = [
                 m for m in self._pending_messages if m.get("ts", 0) > cutoff
             ]
