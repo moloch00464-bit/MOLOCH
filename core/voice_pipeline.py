@@ -411,8 +411,11 @@ class VoicePipeline:
     def _speak(self, text: str):
         """Text mit Piper TTS sprechen und ueber HDMI ausgeben.
 
-        Hybrid: Piper generiert komplett in RAM (raw PCM), dann fluessig abspielen.
-        Kein Temp-File, kein Stottern — Audio ist 100% fluessig.
+        Satzweise Synthese mit Vorgeneration:
+        1. Text in Saetze splitten
+        2. Ersten Satz generieren → sofort abspielen
+        3. Naechsten Satz im Hintergrund vorgenerieren waehrend aktueller spielt
+        Ergebnis: Erster Ton nach ~8-10s statt ~26s.
         """
         if not self._piper_available:
             logger.warning("[VOICE] Piper nicht verfuegbar")
@@ -423,23 +426,84 @@ class VoicePipeline:
             logger.warning(f"[VOICE] Stimme nicht gefunden: {model_path}")
             return
 
+        # Sample-Rate aus Model-Config (Piper default: 22050)
+        sample_rate = "22050"
+        model_config = model_path.with_suffix(".onnx.json")
+        if model_config.exists():
+            try:
+                with open(model_config) as f:
+                    cfg = json.load(f)
+                    sample_rate = str(cfg.get("audio", {}).get("sample_rate", 22050))
+            except Exception:
+                pass
+
+        aplay_cmd = [
+            "aplay", "-D", SPEAKER_DEVICE,
+            "-r", sample_rate, "-f", "S16_LE", "-c", "1", "-q",
+        ]
+
+        # Text in Saetze aufteilen
+        sentences = self._split_sentences(text)
+        if not sentences:
+            return
+
         self._speaking = True
         t0 = time.time()
 
         try:
-            # Sample-Rate aus Model-Config (Piper default: 22050)
-            sample_rate = "22050"
-            model_config = model_path.with_suffix(".onnx.json")
-            if model_config.exists():
-                try:
-                    with open(model_config) as f:
-                        cfg = json.load(f)
-                        sample_rate = str(cfg.get("audio", {}).get("sample_rate", 22050))
-                except Exception:
-                    pass
+            pre_generated = None
 
-            # Schritt 1: Piper generiert komplett in RAM (raw PCM via stdout)
-            piper_result = subprocess.run(
+            for i, sentence in enumerate(sentences):
+                # Audio holen: vorgeneriert oder jetzt generieren
+                if pre_generated is not None:
+                    audio = pre_generated
+                    pre_generated = None
+                else:
+                    audio = self._piper_synthesize(sentence, model_path)
+
+                if not audio:
+                    continue
+
+                if i == 0:
+                    logger.info(f"[VOICE] Erster Satz nach {time.time()-t0:.1f}s "
+                                f"({len(sentence)} Zeichen)")
+
+                # Naechsten Satz im Hintergrund vorgenerieren
+                gen_result = [None]
+                gen_thread = None
+                if i + 1 < len(sentences):
+                    next_sentence = sentences[i + 1]
+                    def _generate(s, result, mp=model_path):
+                        result[0] = self._piper_synthesize(s, mp)
+                    gen_thread = threading.Thread(
+                        target=_generate, args=(next_sentence, gen_result),
+                        daemon=True,
+                    )
+                    gen_thread.start()
+
+                # Aktuellen Satz fluessig abspielen
+                subprocess.run(aplay_cmd, input=audio, timeout=30)
+
+                # Auf Vorgeneration warten
+                if gen_thread:
+                    gen_thread.join(timeout=45)
+                    pre_generated = gen_result[0]
+
+            dt = time.time() - t0
+            logger.info(f"[VOICE] Gesprochen: {len(text)} Zeichen, "
+                        f"{len(sentences)} Saetze ({dt:.1f}s)")
+
+        except subprocess.TimeoutExpired:
+            logger.error("[VOICE] TTS Timeout")
+        except Exception as e:
+            logger.error(f"[VOICE] TTS Fehler: {e}")
+        finally:
+            self._speaking = False
+
+    def _piper_synthesize(self, text: str, model_path) -> bytes:
+        """Einzelnen Text-Chunk mit Piper in raw PCM generieren (in RAM)."""
+        try:
+            result = subprocess.run(
                 [
                     str(PIPER_PATH),
                     "--model", str(model_path),
@@ -448,35 +512,36 @@ class VoicePipeline:
                 ],
                 input=text.encode("utf-8"),
                 capture_output=True,
-                timeout=30,
+                timeout=45,
             )
-
-            if piper_result.returncode != 0 or not piper_result.stdout:
-                logger.error("[VOICE] Piper hat kein Audio generiert")
-                return
-
-            t1 = time.time()
-            logger.info(f"[VOICE] Synthese: {len(piper_result.stdout)} bytes in {t1-t0:.1f}s")
-
-            # Schritt 2: Fluessig abspielen — komplettes Audio via stdin-Pipe
-            subprocess.run(
-                [
-                    "aplay", "-D", SPEAKER_DEVICE,
-                    "-r", sample_rate, "-f", "S16_LE", "-c", "1", "-q",
-                ],
-                input=piper_result.stdout,
-                timeout=60,
-            )
-
-            dt = time.time() - t0
-            logger.info(f"[VOICE] Gesprochen: {len(text)} Zeichen mit {self._current_voice} ({dt:.1f}s)")
-
+            if result.returncode == 0 and result.stdout:
+                return result.stdout
         except subprocess.TimeoutExpired:
-            logger.error("[VOICE] TTS Timeout")
+            logger.error(f"[VOICE] Piper Timeout fuer: {text[:50]}...")
         except Exception as e:
-            logger.error(f"[VOICE] TTS Fehler: {e}")
-        finally:
-            self._speaking = False
+            logger.error(f"[VOICE] Piper Fehler: {e}")
+        return None
+
+    def _split_sentences(self, text: str) -> list:
+        """Text in sprechbare Chunks aufteilen fuer schnellere TTS.
+        Kurze Saetze werden zusammengefasst (min ~40 Zeichen pro Chunk)."""
+        chunks = []
+        current = []
+        for word in text.split():
+            current.append(word)
+            joined = " ".join(current)
+            # Satzende erkannt und genug Text fuer eigenen Chunk
+            if (word[-1:] in '.!?') and len(joined) >= 40:
+                chunks.append(joined)
+                current = []
+        # Rest anfuegen
+        if current:
+            rest = " ".join(current)
+            if chunks and len(rest) < 40:
+                chunks[-1] += " " + rest
+            else:
+                chunks.append(rest)
+        return chunks if chunks else [text.strip()] if text.strip() else []
 
     # =========================================================================
     # Konfiguration
