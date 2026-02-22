@@ -170,7 +170,7 @@ class DailyLearner:
         bbox: Tuple[float, float, float, float],
         frame_height: int,
         head_pose: Optional[Dict] = None
-    ):
+    ) -> bool:
         """Prüfe ob Snapshot sinnvoll ist und speichere ggf.
 
         Args:
@@ -180,14 +180,17 @@ class DailyLearner:
             bbox: (x1, y1, x2, y2) in Pixel
             frame_height: Frame-Höhe in Pixel
             head_pose: Optional Head Pose Dict mit yaw/pitch/roll
+
+        Returns:
+            True wenn Snapshot gespeichert wurde, sonst False
         """
         if not self.enabled:
-            return
+            return False
 
         # Rate Limit: 1 Snapshot/Minute
         now = time.time()
         if now - self.last_snapshot_time < self.snapshot_interval:
-            return
+            return False
 
         # Bedingungen schätzen
         light = self._estimate_lighting(face_crop)
@@ -198,7 +201,7 @@ class DailyLearner:
         # Nur speichern bei echtem Match (kein unknown_maybe, Unbekannt, Keine DB)
         _SKIP_NAMES = {"unknown_maybe", "Unbekannt", "Keine DB"}
         if name in _SKIP_NAMES or confidence <= 0.5:
-            return
+            return False
 
         save_it = False
         reason = ""
@@ -217,6 +220,9 @@ class DailyLearner:
 
             logger.info(f"[DailyLearner] Snapshot gespeichert: {reason}, "
                        f"angle={angle}, light={light}, dist={distance}, conf={confidence:.2f}")
+            return True
+
+        return False
 
     def get_stats(self) -> Dict:
         """Stats für Display."""

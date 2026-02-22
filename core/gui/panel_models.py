@@ -78,6 +78,9 @@ class ModelsModule:
         for _, key in self.MODELS:
             self._model_vars[key] = tk.BooleanVar(value=False)
 
+        # Learner Flash State
+        self._learner_flash = False
+
         # Popup-Callbacks (werden von panel_main spaeter gesetzt)
         self.on_popup_audio = self._open_audio_popup
         self.on_popup_hardware = self._open_hardware_popup
@@ -202,7 +205,7 @@ class ModelsModule:
     # =========================================================================
 
     def _build_save_button(self):
-        """SAVE SETTINGS Button mit Feedback-Label."""
+        """SAVE SETTINGS Button + BLITZ Toggle + Feedback-Label."""
         row = tk.Frame(self._parent, bg=BG_FRAME)
         row.pack(fill=tk.X, padx=5, pady=2)
 
@@ -213,10 +216,34 @@ class ModelsModule:
             command=self._save_settings,
         ).pack(side=tk.LEFT, padx=5)
 
+        # BLITZ Toggle: Weisse LED blinkt bei Learner-Snapshot
+        self._btn_blitz = tk.Button(
+            row, text="BLITZ", width=8,
+            bg=BTN_OFF_DARK, fg=FG_DIM, font=FONT_BUTTON,
+            activebackground=BG_FRAME,
+            command=self._toggle_learner_flash,
+        )
+        self._btn_blitz.pack(side=tk.LEFT, padx=5)
+
         self._lbl_save = tk.Label(
             row, text="", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
         )
         self._lbl_save.pack(side=tk.LEFT, padx=5)
+
+    def _toggle_learner_flash(self):
+        """Learner Flash umschalten und Command senden."""
+        self._learner_flash = not self._learner_flash
+        self._service._write_command("toggle_learner_flash", {
+            "on": self._learner_flash,
+        })
+        self._update_blitz_button()
+
+    def _update_blitz_button(self):
+        """BLITZ Button Farbe aktualisieren."""
+        if self._learner_flash:
+            self._btn_blitz.config(bg=ACCENT_CYAN, fg=BG_FRAME)
+        else:
+            self._btn_blitz.config(bg=BTN_OFF_DARK, fg=FG_DIM)
 
     def _save_settings(self):
         """Settings speichern und kurzes Feedback zeigen."""
@@ -293,6 +320,12 @@ class ModelsModule:
                         self._model_vars[key].set(active)
                 except (TypeError, ValueError):
                     pass
+
+            # BLITZ Button State vom Service synchronisieren
+            flash_active = bool(status.get("learner_flash", False))
+            if self._learner_flash != flash_active:
+                self._learner_flash = flash_active
+                self._update_blitz_button()
 
         # Widgets sofort neu zeichnen
         self._parent.update_idletasks()

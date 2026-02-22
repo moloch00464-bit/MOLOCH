@@ -174,6 +174,7 @@ class MolochService:
 
         # Daily Learner
         self._daily_learner = None
+        self._learner_flash = False
         try:
             from core.daily_learner import get_daily_learner
             self._daily_learner = get_daily_learner()
@@ -866,7 +867,7 @@ class MolochService:
                                     _hp = None
                                     if '_head_pose' in dir() and _head_pose is not None:
                                         _hp = {"pitch": _head_pose[0], "yaw": _head_pose[1], "roll": _head_pose[2]}
-                                    self._daily_learner.maybe_snapshot(
+                                    _saved = self._daily_learner.maybe_snapshot(
                                         face_crop=crop,
                                         name=name,
                                         confidence=sim,
@@ -874,6 +875,12 @@ class MolochService:
                                         frame_height=fh,
                                         head_pose=_hp,
                                     )
+                                    # LED-Blitz bei erfolgreichem Snapshot
+                                    if _saved and self._learner_flash:
+                                        threading.Thread(
+                                            target=self._flash_white_led,
+                                            daemon=True
+                                        ).start()
                                 except Exception as e:
                                     logger.debug(f"DailyLearner: {e}")
 
@@ -1826,6 +1833,18 @@ class MolochService:
         except Exception:
             pass
 
+    def _flash_white_led(self):
+        """Kurzer Blitz der weissen LED (200ms) - laeuft in Daemon-Thread."""
+        try:
+            if not self._cloud or not self._cloud.connected:
+                return
+            self._cloud.run(self._cloud.bridge.set_night('night'))
+            time.sleep(0.2)
+            self._cloud.run(self._cloud.bridge.set_night('day'))
+            logger.info("[LEARNER] Flash-LED Blitz")
+        except Exception as e:
+            logger.debug(f"[LEARNER] Flash-LED Fehler: {e}")
+
     def _announce_person(self, name):
         """Person erkannt - Log (LED wird vom Indikator gesteuert)."""
         logger.info(f"[FACE] Person erkannt: {name}")
@@ -2123,6 +2142,7 @@ class MolochService:
                 "moloch_has_control": self._moloch_has_control,
                 "tentakel_enabled": self._tentakel_enabled,
                 "daily_learner_enabled": self._daily_learner.enabled if self._daily_learner else False,
+                "learner_flash": self._learner_flash,
                 "frame_age": round(time.time() - self._last_frame_write, 1),
                 "frozen_restarts": self._frozen_restart_count,
                 "fps": {k: round(v, 1) for k, v in self._fps.items()},
@@ -2252,6 +2272,10 @@ class MolochService:
             if self._daily_learner:
                 enabled = self._daily_learner.toggle()
                 logger.info(f"[IPC] DailyLearner: {'AN' if enabled else 'AUS'}")
+
+        elif action == 'toggle_learner_flash':
+            self._learner_flash = bool(cmd.get('on', not self._learner_flash))
+            logger.info(f"[IPC] Learner Flash: {'AN' if self._learner_flash else 'AUS'}")
 
         elif action == 'ptz_move':
             direction = cmd.get('direction', '')
@@ -2428,6 +2452,15 @@ class MolochService:
         except Exception as e:
             logger.warning(f"[SETTINGS] Camera-Fehler: {e}")
 
+        # Learner Flash
+        try:
+            learner = data.get("learner", {})
+            if "flash_enabled" in learner:
+                self._learner_flash = bool(learner["flash_enabled"])
+                logger.info(f"[SETTINGS] Learner Flash: {self._learner_flash}")
+        except Exception as e:
+            logger.warning(f"[SETTINGS] Learner-Fehler: {e}")
+
         # Aktive Modelle (fuer force_models nach Perception-Init)
         try:
             am = data.get("active_models")
@@ -2469,6 +2502,11 @@ class MolochService:
             "ptz_speed": round(getattr(self, '_saved_ptz_speed', 15.0), 1),
             "led_enabled": getattr(self, '_saved_led', False),
             "ir_mode": getattr(self, '_saved_ir', "Aus"),
+        }
+
+        # Learner
+        data["learner"] = {
+            "flash_enabled": self._learner_flash,
         }
 
         # Aktive Modelle (fuer Wiederherstellung nach Restart)
