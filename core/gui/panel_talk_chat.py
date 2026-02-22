@@ -48,6 +48,7 @@ class TalkChatModule:
         self._voice_enabled = tk.BooleanVar(value=False)
         self._last_whisper_status = ""
         self._last_msg_id = 0  # Tracking fuer angezeigte Messages
+        self._seen_msg_ids = set()  # Backup-Dedup: bereits angezeigte Message-IDs
 
         # GUI aufbauen
         self._build_chat_display()
@@ -254,12 +255,16 @@ class TalkChatModule:
             messages = voice.get("messages", [])
             for msg in messages:
                 msg_id = msg.get("id", 0)
-                if msg_id > self._last_msg_id:
+                if msg_id > self._last_msg_id and msg_id not in self._seen_msg_ids:
                     sender = msg.get("sender", "?")
                     text = msg.get("text", "")
                     if text:
                         self.add_message(sender, text)
+                    self._seen_msg_ids.add(msg_id)
                     self._last_msg_id = msg_id
+            # Seen-Set begrenzen (aelteste raus wenn > 100)
+            if len(self._seen_msg_ids) > 100:
+                self._seen_msg_ids = set(sorted(self._seen_msg_ids)[-50:])
 
             # Voice Output Toggle synchronisieren
             voice_on = voice.get("voice_enabled", False)

@@ -112,6 +112,8 @@ class VoicePipeline:
 
         # Whisper STT (MolochWhisper: NPU primary, CPU fallback)
         self._whisper = None
+        self._whisper_unload_timer = None
+        self._whisper_unload_seconds = 60  # Nach 60s Inaktivitaet entladen
 
         # Claude API
         self._claude_client = None
@@ -169,10 +171,11 @@ class VoicePipeline:
                 "id": self._msg_counter,
                 "sender": sender,
                 "text": text,
+                "ts": time.time(),
             })
-            # Max 50 Messages behalten
-            if len(self._pending_messages) > 50:
-                self._pending_messages = self._pending_messages[-50:]
+            # Max 20 Messages behalten
+            if len(self._pending_messages) > 20:
+                self._pending_messages = self._pending_messages[-20:]
         if self._on_message:
             self._on_message(sender, text)
 
@@ -292,10 +295,40 @@ class VoicePipeline:
             # Vision pausiert automatisch, startet nach Release wieder
             text = self._whisper.transcribe(wav_path, language="de")
             logger.info(f"[VOICE] Whisper Backend: {self._whisper.backend}")
+            # Auto-Unload Timer starten (entlaedt Whisper nach 60s Inaktivitaet)
+            self._schedule_whisper_unload()
             return text.strip() if text and text.strip() else None
         except Exception as e:
             logger.error(f"[VOICE] Whisper Fehler: {e}")
             return None
+
+    def _schedule_whisper_unload(self):
+        """Timer fuer Whisper-Unload starten/resetten. Spart RAM nach Inaktivitaet."""
+        # Alten Timer abbrechen
+        if self._whisper_unload_timer:
+            self._whisper_unload_timer.cancel()
+        self._whisper_unload_timer = threading.Timer(
+            self._whisper_unload_seconds, self._unload_whisper
+        )
+        self._whisper_unload_timer.daemon = True
+        self._whisper_unload_timer.start()
+        logger.debug(f"[VOICE] Whisper Unload-Timer: {self._whisper_unload_seconds}s")
+
+    def _unload_whisper(self):
+        """Whisper-Modell entladen um RAM freizugeben."""
+        if self._whisper is None:
+            return
+        try:
+            import gc
+            self._whisper.release()
+            self._whisper = None
+            # Singleton auch resetten damit naechster get_whisper() frisch laedt
+            import core.speech.hailo_whisper as _hw
+            _hw._whisper_instance = None
+            gc.collect()
+            logger.info("[VOICE] Whisper entladen (RAM freigegeben)")
+        except Exception as e:
+            logger.error(f"[VOICE] Whisper entladen fehlgeschlagen: {e}")
 
     # =========================================================================
     # Claude API
@@ -452,8 +485,13 @@ class VoicePipeline:
 
     def get_state(self) -> Dict:
         """Aktuellen Status zurueckgeben (fuer IPC Status-JSON).
-        Messages bleiben erhalten — Panel tracked per ID welche schon angezeigt."""
+        Messages aelter als 30s werden automatisch entfernt."""
         with self._msg_lock:
+            # Alte Messages entfernen (aelter als 30 Sekunden)
+            cutoff = time.time() - 30.0
+            self._pending_messages = [
+                m for m in self._pending_messages if m.get("ts", 0) > cutoff
+            ]
             messages = list(self._pending_messages)
         return {
             "whisper_status": self._whisper_status,

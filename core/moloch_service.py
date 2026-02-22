@@ -1529,12 +1529,18 @@ class MolochService:
     # =========================================================================
 
     def _cam_status_loop(self):
-        """Kamera-Status polling loop (1.5s Intervall fuer schnelle Reaktion)."""
+        """Kamera-Status + IPC Status-JSON polling loop (1.5s Intervall).
+        Schreibt Status-JSON auch wenn NPU/Frames ausfallen."""
         while self.running:
             try:
                 self._update_cam_status()
             except Exception as e:
                 logger.error(f"Cam status error: {e}")
+            # Status-JSON IMMER schreiben — Panel braucht Voice/Chat auch ohne NPU
+            try:
+                self._write_status_json()
+            except Exception:
+                pass
             time.sleep(1.5)
 
     def _update_cam_status(self):
@@ -2216,6 +2222,13 @@ class MolochService:
         except Exception:
             pass
 
+        # Status-JSON immer mitschreiben wenn Frame da
+        self._write_status_json()
+
+    def _write_status_json(self):
+        """Status-JSON nach /dev/shm schreiben (unabhaengig von Frame).
+        Wird von _write_shm und _cam_status_loop aufgerufen,
+        damit Panel auch bei NPU-Ausfall funktioniert."""
         try:
             status = {
                 "scrfd_active": self.scrfd_active,
@@ -2230,7 +2243,7 @@ class MolochService:
                 "tentakel_enabled": self._tentakel_enabled,
                 "daily_learner_enabled": self._daily_learner.enabled if self._daily_learner else False,
                 "learner_flash": self._learner_flash,
-                "frame_age": round(time.time() - self._last_frame_write, 1),
+                "frame_age": round(time.time() - self._last_frame_write, 1) if self._last_frame_write else -1,
                 "frozen_restarts": self._frozen_restart_count,
                 "fps": {k: round(v, 1) for k, v in self._fps.items()},
                 "thresholds": {

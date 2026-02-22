@@ -113,22 +113,21 @@ class MolochWhisper:
             return False
 
     def _init_cpu(self) -> bool:
-        """Initialize CPU-based faster_whisper as fallback."""
+        """Initialize CPU-based faster_whisper als Fallback.
+        Tiny-Modell: schnell, wenig RAM (~150 MB statt 1.5 GB bei medium)."""
         try:
             from faster_whisper import WhisperModel
 
-            # Use "medium" model for better German recognition
-            # (larger than "small" but much better accuracy for German)
-            logger.info("Loading CPU Whisper-medium as fallback (better German)...")
+            logger.info("Loading CPU Whisper-tiny als Fallback (schnell, wenig RAM)...")
 
             self._cpu_model = WhisperModel(
-                "medium",
+                "tiny",
                 device="cpu",
                 compute_type="int8"
             )
 
-            self.backend = "cpu-medium"
-            logger.info("CPU Whisper-medium loaded successfully")
+            self.backend = "cpu-tiny"
+            logger.info("CPU Whisper-tiny geladen")
             return True
 
         except ImportError as e:
@@ -329,18 +328,18 @@ class MolochWhisper:
             return ""
 
     def release(self):
-        """Release NPU resources so other processes can use the NPU.
-
-        Only called by HailoManager when vision needs the NPU,
-        NOT after every transcription!
-        """
+        """Alle Whisper-Ressourcen freigeben (NPU + CPU).
+        Wird vom Unload-Timer und HailoManager aufgerufen."""
         try:
             if self._npu_processor:
                 self._npu_processor = None
             if self._vdevice:
                 self._vdevice = None
+            if self._cpu_model:
+                del self._cpu_model
+                self._cpu_model = None
 
-            # Force garbage collection to release the Hailo resources
+            # Force garbage collection um RAM freizugeben
             import gc
             gc.collect()
 
@@ -348,7 +347,7 @@ class MolochWhisper:
             self.backend = "lazy-npu"
             self._npu_initialized = False
 
-            logger.info("[Whisper] NPU resources released (VDevice freed)")
+            logger.info("[Whisper] Alle Ressourcen freigegeben (NPU + CPU)")
         except Exception as e:
             logger.error(f"[Whisper] Error during release: {e}")
 
