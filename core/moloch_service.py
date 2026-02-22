@@ -55,6 +55,7 @@ from core.hardware.hailo_manager import get_hailo_manager
 from core.vision.gesture_detector import GestureDetector, KeypointPosition
 from core.cloud_controller import CloudController
 from core.mpo.autonomous_tracker import AutonomousTracker, TrackerState
+from core.longterm_memory import get_memory
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger("MolochService")
@@ -2027,6 +2028,15 @@ class MolochService:
         """Hardware initialisieren: VDevice, Models, RTSP, Cloud."""
         logger.info("M.O.L.O.C.H. Service initialisiert...")
 
+        # 0. Langzeitgedaechtnis initialisieren (SSD2, persistent)
+        try:
+            self._memory = get_memory()
+            identity = self._memory.get_identity()
+            logger.info(f"[INIT] Memory bereit: {identity.get('name', '?')} v{identity.get('version', '?')}")
+        except Exception as e:
+            self._memory = None
+            logger.error(f"[INIT] Memory fehlgeschlagen: {e}")
+
         # 1. Hailo VDevice + Models
         self._hailo_manager = get_hailo_manager()
         self._hailo_manager.acquire_for_vision(timeout=10.0)
@@ -2241,6 +2251,16 @@ class MolochService:
         """Sauberes Herunterfahren."""
         logger.info("M.O.L.O.C.H. Service wird gestoppt...")
         self.running = False
+
+        # Langzeitgedaechtnis: Core State SOFORT sichern
+        if self._memory and self._core_integrator:
+            try:
+                state = self._core_integrator.get_state()
+                state["personality_zone"] = self._core_integrator.get_personality_zone()
+                self._memory.save_core_state(state)
+                logger.info("[STOP] Core State persistent gesichert")
+            except Exception as e:
+                logger.error(f"[STOP] Core State Speichern fehlgeschlagen: {e}")
 
         # Core Integrator stoppen
         if self._core_integrator:

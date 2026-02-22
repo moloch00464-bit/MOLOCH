@@ -23,6 +23,8 @@ import threading
 from pathlib import Path
 from typing import Optional, List, Dict, Callable
 
+from core.longterm_memory import get_memory
+
 logger = logging.getLogger("VoicePipeline")
 
 # Audio Device Konfiguration
@@ -261,6 +263,12 @@ class VoicePipeline:
         logger.info(f"[VOICE] Transkription: {text}")
         self._emit_message("Du", text)
 
+        # Langzeitgedaechtnis: User-Nachricht SOFORT speichern
+        try:
+            get_memory().save_message("user", text, source="voice")
+        except Exception as e:
+            logger.error(f"[VOICE] Memory save_message(user) fehlgeschlagen: {e}")
+
         # 2. Claude API
         self._whisper_status = "Denke..."
         response = self._chat(text)
@@ -271,6 +279,12 @@ class VoicePipeline:
 
         logger.info(f"[VOICE] Antwort: {response[:100]}...")
         self._emit_message("MOLOCH", response)
+
+        # Langzeitgedaechtnis: Moloch-Antwort SOFORT speichern
+        try:
+            get_memory().save_message("moloch", response, source="voice")
+        except Exception as e:
+            logger.error(f"[VOICE] Memory save_message(moloch) fehlgeschlagen: {e}")
 
         # 3. TTS
         if self._voice_enabled:
@@ -316,13 +330,29 @@ class VoicePipeline:
             self._conversation = self._conversation[-10:]
 
         try:
+            # System-Prompt mit Memory-Kontext anreichern
+            system = self._system_prompt
+            try:
+                memory_ctx = get_memory().get_memory_context()
+                if memory_ctx:
+                    system = system + "\n\n--- LANGZEITGEDAECHTNIS ---\n" + memory_ctx
+            except Exception as e:
+                logger.error(f"[VOICE] Memory-Kontext laden fehlgeschlagen: {e}")
+
             response = self._claude_client.messages.create(
                 model="claude-sonnet-4-20250514",
                 max_tokens=256,
-                system=self._system_prompt,
+                system=system,
                 messages=self._conversation,
             )
             text = response.content[0].text
+
+            # REMEMBER-Tags extrahieren und lernen (persistiert in beide Systeme)
+            try:
+                text = get_memory().extract_and_learn(text)
+            except Exception as e:
+                logger.error(f"[VOICE] extract_and_learn fehlgeschlagen: {e}")
+
             self._conversation.append({"role": "assistant", "content": text})
             return text
         except Exception as e:
@@ -347,6 +377,12 @@ class VoicePipeline:
         """Text -> Claude -> TTS in Background."""
         self._whisper_status = "Denke..."
 
+        # Langzeitgedaechtnis: User-Text SOFORT speichern
+        try:
+            get_memory().save_message("user", text, source="text")
+        except Exception as e:
+            logger.error(f"[VOICE] Memory save_message(user/text) fehlgeschlagen: {e}")
+
         response = self._chat(text)
         if not response:
             self._whisper_status = "Idle"
@@ -354,6 +390,12 @@ class VoicePipeline:
 
         logger.info(f"[VOICE] Antwort: {response[:100]}...")
         self._emit_message("MOLOCH", response)
+
+        # Langzeitgedaechtnis: Moloch-Antwort SOFORT speichern
+        try:
+            get_memory().save_message("moloch", response, source="text")
+        except Exception as e:
+            logger.error(f"[VOICE] Memory save_message(moloch/text) fehlgeschlagen: {e}")
 
         if self._voice_enabled:
             self._whisper_status = "Spreche..."

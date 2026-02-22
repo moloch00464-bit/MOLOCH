@@ -34,6 +34,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "world"))
 # Timeline for temporal awareness
 from core.timeline import get_timeline, describe_last_offline_duration, get_offline_info
 
+# Langzeitgedaechtnis
+from core.longterm_memory import get_memory
+
 # Claude API
 try:
     import anthropic
@@ -976,6 +979,12 @@ class MolochConsole:
             "content": user_input
         })
 
+        # Langzeitgedaechtnis: User-Nachricht SOFORT speichern
+        try:
+            get_memory().save_message("user", user_input, source="console")
+        except Exception as e:
+            logger.error(f"Memory save_message(user) fehlgeschlagen: {e}")
+
         # Log to timeline (length only, no content)
         get_timeline().user_input(len(user_input), interface="console")
 
@@ -986,21 +995,42 @@ class MolochConsole:
         try:
             self.status = "Thinking..."
 
+            # System-Prompt mit Memory-Kontext anreichern
+            system = self.system_prompt
+            try:
+                memory_ctx = get_memory().get_memory_context()
+                if memory_ctx:
+                    system = system + "\n\n--- LANGZEITGEDAECHTNIS ---\n" + memory_ctx
+            except Exception as e:
+                logger.error(f"Memory-Kontext laden fehlgeschlagen: {e}")
+
             response = self.claude_client.messages.create(
                 model="claude-sonnet-4-20250514",
                 max_tokens=1024,
-                system=self.system_prompt,
+                system=system,
                 messages=self.conversation_history
             )
 
             # Extract response text
             assistant_message = response.content[0].text
 
+            # REMEMBER-Tags extrahieren und lernen (persistiert in beide Systeme)
+            try:
+                assistant_message = get_memory().extract_and_learn(assistant_message)
+            except Exception as e:
+                logger.error(f"extract_and_learn fehlgeschlagen: {e}")
+
             # Add to history
             self.conversation_history.append({
                 "role": "assistant",
                 "content": assistant_message
             })
+
+            # Langzeitgedaechtnis: Moloch-Antwort SOFORT speichern
+            try:
+                get_memory().save_message("moloch", assistant_message, source="console")
+            except Exception as e:
+                logger.error(f"Memory save_message(moloch) fehlgeschlagen: {e}")
 
             # Log to timeline (length only)
             get_timeline().assistant_response(len(assistant_message))

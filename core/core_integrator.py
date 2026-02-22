@@ -201,9 +201,24 @@ class CoreIntegrator:
     # =========================================================================
 
     def start(self):
-        """Integrator-Thread starten (1 Hz tick)."""
+        """Integrator-Thread starten (1 Hz tick). Laedt persistenten State."""
         if self._running:
             return
+
+        # Persistenten State laden (Langzeitgedaechtnis)
+        try:
+            from core.longterm_memory import get_memory
+            saved = get_memory().load_core_state()
+            if saved and saved.get("last_updated"):
+                self._tension = float(saved.get("tension", 0.0))
+                self._attention = float(saved.get("attention", 0.0))
+                self._presence = float(saved.get("presence", 0.0))
+                _logger.info(f"[CORE] State aus Langzeitgedaechtnis geladen: "
+                             f"T={self._tension:.2f} A={self._attention:.2f} P={self._presence:.2f} "
+                             f"(gespeichert: {saved.get('last_updated', '?')})")
+        except Exception as e:
+            _logger.warning(f"[CORE] Persistenter State nicht verfuegbar: {e}")
+
         self._running = True
         self._thread = threading.Thread(
             target=self._tick_loop, daemon=True, name="CoreIntegrator"
@@ -212,12 +227,14 @@ class CoreIntegrator:
         _logger.info("[CORE] Integrator-Thread gestartet (1 Hz)")
 
     def stop(self):
-        """Integrator-Thread stoppen."""
+        """Integrator-Thread stoppen + State persistent sichern."""
         self._running = False
         if self._thread:
             self._thread.join(timeout=3)
             self._thread = None
-        _logger.info("[CORE] Integrator-Thread gestoppt")
+        # Letzten State auf Disk sichern
+        self._persist_state()
+        _logger.info("[CORE] Integrator-Thread gestoppt (State persistent gesichert)")
 
     # =========================================================================
     # Tick-Loop (1 Hz)
@@ -225,9 +242,15 @@ class CoreIntegrator:
 
     def _tick_loop(self):
         """Hauptschleife: 1x pro Sekunde State neu berechnen."""
+        _persist_counter = 0
         while self._running:
             try:
                 self._tick()
+                # Alle 60 Ticks (~60 Sekunden): State persistent speichern
+                _persist_counter += 1
+                if _persist_counter >= 60:
+                    _persist_counter = 0
+                    self._persist_state()
             except Exception as e:
                 _logger.error(f"[CORE] Tick-Fehler: {e}")
             time.sleep(1.0)
@@ -354,6 +377,17 @@ class CoreIntegrator:
                 "effects": {k: round(v, 3) for k, v in self._effects.items()},
                 "tick": self._tick_count,
             }
+
+    def _persist_state(self):
+        """State auf SSD2 persistent speichern (Langzeitgedaechtnis)."""
+        try:
+            from core.longterm_memory import get_memory
+            state = self.get_state()
+            state["personality_zone"] = self.get_personality_zone()
+            state["uptime_seconds"] = self._tick_count
+            get_memory().save_core_state(state)
+        except Exception as e:
+            _logger.error(f"[CORE] State-Persistenz fehlgeschlagen: {e}")
 
 
 # =============================================================================
