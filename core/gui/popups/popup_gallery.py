@@ -12,7 +12,7 @@ Features:
 - Klick auf Thumbnail oeffnet Vollbild
 - Dateiname + Datum unter jedem Thumbnail
 - Refresh-Button pro Tab
-- Loeschen-Button pro Bild (mit Bestaetigung)
+- Loeschen-Button pro Bild (sofort, ohne Bestaetigung)
 - Scrollbar bei vielen Bildern (Canvas + Scrollbar Pattern)
 - Thumbnails in Background-Thread laden (kein GUI-Freeze)
 
@@ -25,7 +25,7 @@ import os
 import threading
 import time
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk
 
 from PIL import Image, ImageTk
 
@@ -394,14 +394,7 @@ class SnapshotGallery:
         tk.Label(full_win, image=photo, bg=BG_DARK).pack()
 
     def _delete_file(self, path, fname):
-        """Datei loeschen mit Bestaetigung."""
-        confirm = messagebox.askyesno(
-            "Loeschen",
-            f"Wirklich loeschen?\n{fname}",
-            parent=self.win,
-        )
-        if not confirm:
-            return
+        """Datei sofort loeschen (ohne Bestaetigung)."""
         try:
             os.remove(path)
             # Zugehoerige JSON-Metadaten auch loeschen
