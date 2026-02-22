@@ -224,13 +224,24 @@ class TalkChatModule:
                 self._last_whisper_status = whisper_state
                 color_map = {
                     "Idle": FG_DIM,
-                    "Listening": STATUS_YELLOW,
-                    "Processing": ACCENT_CYAN,
+                    "Aufnahme...": ACCENT_RED,
+                    "Transkribiere...": STATUS_YELLOW,
+                    "Denke...": ACCENT_CYAN,
+                    "Spreche...": ACCENT_GREEN,
+                    "Fehler": ACCENT_RED,
                 }
                 self._lbl_whisper.config(
                     text=whisper_state,
                     fg=color_map.get(whisper_state, FG_DIM),
                 )
+
+            # Chat-Messages vom Service abholen und anzeigen
+            messages = voice.get("messages", [])
+            for msg in messages:
+                sender = msg.get("sender", "?")
+                text = msg.get("text", "")
+                if text:
+                    self.add_message(sender, text)
 
             # Voice Output Toggle synchronisieren
             voice_on = voice.get("voice_enabled", False)

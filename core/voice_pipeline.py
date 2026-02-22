@@ -125,6 +125,10 @@ class VoicePipeline:
         self._length_scale = 1.1  # Leicht langsamer fuer Verstaendlichkeit
         self._piper_available = PIPER_PATH.exists()
 
+        # Message-Queue fuer IPC zum Panel (wird via get_state() abgeholt)
+        self._pending_messages: List[Dict[str, str]] = []
+        self._msg_lock = threading.Lock()
+
         # Init
         self._init_claude()
         logger.info(f"[VOICE] Pipeline init: claude={self._claude_available}, "
@@ -161,6 +165,13 @@ class VoicePipeline:
         except Exception as e:
             logger.error(f"[VOICE] Whisper laden fehlgeschlagen: {e}")
             return False
+
+    def _emit_message(self, sender: str, text: str):
+        """Nachricht in Queue legen und optionalen Callback aufrufen."""
+        with self._msg_lock:
+            self._pending_messages.append({"sender": sender, "text": text})
+        if self._on_message:
+            self._on_message(sender, text)
 
     # =========================================================================
     # PTT Recording
@@ -244,8 +255,7 @@ class VoicePipeline:
             return
 
         logger.info(f"[VOICE] Transkription: {text}")
-        if self._on_message:
-            self._on_message("Markus", text)
+        self._emit_message("Du", text)
 
         # 2. Claude API
         self._whisper_status = "Denke..."
@@ -256,8 +266,7 @@ class VoicePipeline:
             return
 
         logger.info(f"[VOICE] Antwort: {response[:100]}...")
-        if self._on_message:
-            self._on_message("MOLOCH", response)
+        self._emit_message("MOLOCH", response)
 
         # 3. TTS
         if self._voice_enabled:
@@ -343,8 +352,7 @@ class VoicePipeline:
             return
 
         logger.info(f"[VOICE] Antwort: {response[:100]}...")
-        if self._on_message:
-            self._on_message("MOLOCH", response)
+        self._emit_message("MOLOCH", response)
 
         if self._voice_enabled:
             self._whisper_status = "Spreche..."
@@ -443,7 +451,12 @@ class VoicePipeline:
         return self._voice_enabled
 
     def get_state(self) -> Dict:
-        """Aktuellen Status zurueckgeben (fuer IPC Status-JSON)."""
+        """Aktuellen Status zurueckgeben (fuer IPC Status-JSON).
+        Pending Messages werden mitgesendet und danach geleert."""
+        # Messages atomar abholen und leeren
+        with self._msg_lock:
+            messages = list(self._pending_messages)
+            self._pending_messages.clear()
         return {
             "whisper_status": self._whisper_status,
             "voice_enabled": self._voice_enabled,
@@ -453,6 +466,7 @@ class VoicePipeline:
             "claude_available": self._claude_available,
             "piper_available": self._piper_available,
             "voices": self.list_voices(),
+            "messages": messages,
         }
 
     def reset_conversation(self):
