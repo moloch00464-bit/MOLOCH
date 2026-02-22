@@ -253,7 +253,7 @@ class MolochService:
         self._takeover_cooldown_until = 0
         self.RELEASE_COOLDOWN = 60
         self.MAX_COOLDOWN = 180
-        self.STARTUP_GRACE = 15
+        self.STARTUP_GRACE = 60
         self._failed_takeovers = 0
         self._takeover_found_something = False
         self._takeover_cooldown_until = time.time() + self.STARTUP_GRACE
@@ -885,13 +885,26 @@ class MolochService:
                                     _hp = None
                                     if '_head_pose' in dir() and _head_pose is not None:
                                         _hp = {"pitch": _head_pose[0], "yaw": _head_pose[1], "roll": _head_pose[2]}
+                                    # Breiterer Crop fuer Learner (50% Margin statt 20%)
+                                    _lx1 = max(0, int(box[0] * fw))
+                                    _ly1 = max(0, int(box[1] * fh))
+                                    _lx2 = min(fw, int(box[2] * fw))
+                                    _ly2 = min(fh, int(box[3] * fh))
+                                    _lbw, _lbh = _lx2 - _lx1, _ly2 - _ly1
+                                    _lmx, _lmy = int(_lbw * 0.5), int(_lbh * 0.5)
+                                    _lx1 = max(0, _lx1 - _lmx)
+                                    _ly1 = max(0, _ly1 - _lmy)
+                                    _lx2 = min(fw, _lx2 + _lmx)
+                                    _ly2 = min(fh, _ly2 + _lmy)
+                                    learner_crop = frame[_ly1:_ly2, _lx1:_lx2]
                                     _saved = self._daily_learner.maybe_snapshot(
-                                        face_crop=crop,
+                                        face_crop=learner_crop,
                                         name=name,
                                         confidence=sim,
-                                        bbox=(float(x1), float(y1), float(x2), float(y2)),
+                                        bbox=(float(_lx1), float(_ly1), float(_lx2), float(_ly2)),
                                         frame_height=fh,
                                         head_pose=_hp,
+                                        full_frame=frame,
                                     )
                                     # LED-Blitz bei erfolgreichem Snapshot
                                     if _saved and self._learner_flash:
@@ -1486,7 +1499,7 @@ class MolochService:
         if not self._guardian_mode or self._transitioning or self._manual_mode:
             return
         # Safety: verwaister autonomer Modus
-        if self._autonomous_mode and not self._moloch_has_control and not self._manual_autonomous and (time.time() - getattr(self, "_autonomous_enabled_at", 0)) > 15:
+        if self._autonomous_mode and not self._moloch_has_control and not self._manual_autonomous and (time.time() - getattr(self, "_autonomous_enabled_at", 0)) > self.STARTUP_GRACE:
             logger.warning("[SAFETY] Orphaned autonomous mode detected - disabling")
             self._disable_autonomous()
             return
@@ -1975,6 +1988,18 @@ class MolochService:
         # Default: Autonomous Mode nach Boot aktivieren
         self._enable_autonomous()
         logger.info("[START] Autonomous Mode aktiviert (Default nach Boot)")
+
+        # nightVision auf day setzen (verhindert IR-Modus nach Reboot)
+        def _reset_night_vision():
+            try:
+                time.sleep(5)  # Warten bis Cloud-Bridge bereit
+                if self._cloud and self._cloud.connected:
+                    self._cloud.run(self._cloud.bridge.set_night('day'))
+                    logger.info("[START] nightVision auf 'day' gesetzt")
+            except Exception as e:
+                logger.debug(f"[START] nightVision Reset fehlgeschlagen: {e}")
+        threading.Thread(target=_reset_night_vision, daemon=True, name="NightVisionReset").start()
+
         threading.Thread(target=self._frozen_frame_watchdog, daemon=True, name="FrozenWatchdog").start()
 
         if not blocking:

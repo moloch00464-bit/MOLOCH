@@ -125,9 +125,13 @@ class DailyLearner:
         angle: int,
         light: int,
         distance: int,
-        head_pose: Optional[Dict] = None
+        head_pose: Optional[Dict] = None,
+        full_frame: Optional[np.ndarray] = None
     ):
-        """Speichere Snapshot mit Metadaten."""
+        """Speichere Snapshot mit Metadaten.
+
+        Speichert Face-Crop (50% Margin, Q95) und optional den vollen 1080p Frame.
+        """
         try:
             # Verzeichnis: /mnt/moloch-data/daily/YYYY-MM-DD/
             today = time.strftime("%Y-%m-%d")
@@ -139,8 +143,14 @@ class DailyLearner:
             filename = f"{timestamp}_{name}_c{int(confidence*100)}_a{angle}_l{light}_d{distance}.jpg"
             filepath = day_dir / filename
 
-            # Speichere Bild
-            cv2.imwrite(str(filepath), face_crop)
+            # Speichere Face-Crop (JPEG Quality 95)
+            cv2.imwrite(str(filepath), face_crop, [cv2.IMWRITE_JPEG_QUALITY, 95])
+
+            # Speichere Full-Frame als Referenzbild
+            if full_frame is not None:
+                full_filename = f"{timestamp}_{name}_c{int(confidence*100)}_a{angle}_l{light}_d{distance}_full.jpg"
+                full_filepath = day_dir / full_filename
+                cv2.imwrite(str(full_filepath), full_frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
 
             # Speichere Metadaten als JSON
             meta = {
@@ -151,13 +161,15 @@ class DailyLearner:
                 "angle": angle,
                 "lighting": light,
                 "distance": distance,
-                "head_pose": head_pose
+                "head_pose": head_pose,
+                "has_full_frame": full_frame is not None
             }
             meta_path = filepath.with_suffix(".json")
             with open(meta_path, 'w') as f:
                 json.dump(meta, f, indent=2)
 
-            logger.info(f"[DailyLearner] Snapshot: {filename}")
+            logger.info(f"[DailyLearner] Snapshot: {filename}" +
+                       (" + full_frame" if full_frame is not None else ""))
 
         except Exception as e:
             logger.error(f"[DailyLearner] Save failed: {e}")
@@ -169,17 +181,19 @@ class DailyLearner:
         confidence: float,
         bbox: Tuple[float, float, float, float],
         frame_height: int,
-        head_pose: Optional[Dict] = None
+        head_pose: Optional[Dict] = None,
+        full_frame: Optional[np.ndarray] = None
     ) -> bool:
         """Prüfe ob Snapshot sinnvoll ist und speichere ggf.
 
         Args:
-            face_crop: Face-Crop (BGR)
+            face_crop: Face-Crop (BGR, 50% Margin)
             name: ArcFace Match-Name ("Markus" oder "Unbekannt")
             confidence: ArcFace Confidence
             bbox: (x1, y1, x2, y2) in Pixel
             frame_height: Frame-Höhe in Pixel
             head_pose: Optional Head Pose Dict mit yaw/pitch/roll
+            full_frame: Optional voller 1080p Frame als Referenzbild
 
         Returns:
             True wenn Snapshot gespeichert wurde, sonst False
@@ -211,7 +225,8 @@ class DailyLearner:
             reason = f"neue Bedingung fuer {name}"
 
         if save_it:
-            self._save_snapshot(face_crop, name, confidence, angle, light, distance, head_pose)
+            self._save_snapshot(face_crop, name, confidence, angle, light, distance, head_pose,
+                               full_frame=full_frame)
             self.last_snapshot_time = now
 
             # Markiere Bedingung als gesehen
