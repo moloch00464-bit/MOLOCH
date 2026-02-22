@@ -324,6 +324,44 @@ h) Quick-Verify Einzeiler nach jedem Deploy:
    `sudo systemctl restart moloch && sleep 10 && systemctl is-active moloch && journalctl -u moloch --since "15 sec ago" --no-pager | grep -i "error\|exception\|traceback" | head -5 || echo "=== SERVICE FAILED ==="`
 ```
 
+## KONTEXT-DATEIEN — WO DU ZUERST LIEST
+
+> Bevor du loslegst: Verschaff dir Ueberblick.
+
+### Bei JEDEM Auftrag:
+- `CLAUDE.md` — Regeln, Architektur, Grenzen (IMMER zuerst)
+
+### Bei Service/Backend-Auftraegen:
+- `core/moloch_service.py` — Hauptservice (Inference Loop, Modi, LED, Tentakel)
+- `core/perception_engine.py` — Modell-Scoring, force_models(), Slot-Management
+- `core/daily_learner.py` — Snapshot-Logik, Lern-Bedingungen
+
+### Bei Panel/GUI-Auftraegen:
+- `core/gui/moloch_unified_panel.py` — Hauptpanel (Tk Root, Layout)
+- `core/gui/panel_ewelink.py` — LED, Alarm, Flutlicht, Cloud-Buttons
+- `core/gui/panel_models.py` — Model Checkboxes, FPS, SAVE
+- `core/gui/panel_ptz.py` — PTZ Steuerung, Kamera-Modi
+- `core/gui/popups/` — Alle Popup-Fenster (eigene Toplevel)
+
+### Bei Hardware/Kamera-Auftraegen:
+- `core/hardware/camera.py` — SonoffCameraController, PTZ, ONVIF
+- `core/hardware/camera_cloud_bridge.py` — eWeLink API, LED, SmartTracking
+- `core/hardware/ptz_calibration.py` — Kamera-Kalibrierung
+
+### Bei Audio/Sprache-Auftraegen:
+- `core/console/moloch_console.py` — Claude API, Whisper STT, Chat
+- `core/personality/personality_engine.py` — Guardian/Shadow Prompts, TTS
+
+### Bei Architektur/Refactoring:
+- `docs/SERVICE_REFACTOR_PLAN.md` — Refactor-Roadmap
+- `docs/AUDIT_20260222_POST_FIXES.md` — Letzter System-Audit
+- `config/moloch_vision_pipeline.json` — Vision Pipeline Config
+
+### REGEL:
+Du musst NICHT alle Dateien lesen. Lies nur die fuer deinen Auftrag relevanten.
+Aber lies IMMER CLAUDE.md zuerst. Wenn du unsicher bist welche Dateien relevant sind,
+lies die Sektion hier und entscheide.
+
 ### MODULARES PANEL
 
 Das Panel ist MODULAR aufgebaut. Jedes Modul und jedes Popup ist eine eigene Datei unter `core/gui/`.
