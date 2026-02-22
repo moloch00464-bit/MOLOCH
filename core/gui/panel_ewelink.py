@@ -6,7 +6,7 @@ M.O.L.O.C.H. Panel eWeLink
 eWeLink Cloud Controls fuer Sonoff CAM-PT2.
 Bekommt parent_frame (LabelFrame) und ServiceProxy von panel_main.
 
-- FLUTLICHT: Toggle weisse LEDs (nightVision 0=aus, 2=an)
+- FLUTLICHT: Toggle weisse LEDs (Panel: 0=aus/IR, 2=an/Farb-Nacht)
 - ERKANNT: Status-Indikator blaue LED (sledOnline, vom Service gesteuert)
 - ALARM (rot toggle), SNAP (cyan einmal)
 - SYNC Button: Holt Cloud-Status, aktualisiert Button-Farben

@@ -238,6 +238,9 @@ class MolochService:
         # Alarm State
         self._alarm_on = False
 
+        # Cloud State (LED/Night/Alarm - fuer Panel Sync)
+        self._cloud_state = {"led_level": 0, "alarm_active": False, "status_led": False}
+
         # LED Erkennungs-Indikator State
         self._led_indicator_state = False  # Aktueller Zustand (vermeidet doppelte API-Calls)
         self._led_markus_on = False  # Standlicht: LED an weil Markus sichtbar
@@ -1999,6 +2002,7 @@ class MolochService:
             return
         try:
             self._cloud.run(self._cloud.bridge.set_night('night'))
+            self._cloud_state["led_level"] = 2
             time.sleep(0.2)
         except Exception as e:
             logger.warning(f"[LEARNER] Flash-LED AN Fehler: {e}")
@@ -2006,6 +2010,7 @@ class MolochService:
             # IMMER zuruecksetzen - verhindert haengende weisse LED
             try:
                 self._cloud.run(self._cloud.bridge.set_night('day'))
+                self._cloud_state["led_level"] = 0
             except Exception as e2:
                 logger.error(f"[LEARNER] Flash-LED AUS Fehler (LED koennte haengen!): {e2}")
         logger.info("[LEARNER] Flash-LED Blitz")
@@ -2099,6 +2104,7 @@ class MolochService:
                 time.sleep(5)  # Warten bis Cloud-Bridge bereit
                 if self._cloud and self._cloud.connected:
                     self._cloud.run(self._cloud.bridge.set_night('day'))
+                    self._cloud_state["led_level"] = 0
                     logger.info("[START] nightVision auf 'day' gesetzt")
             except Exception as e:
                 logger.debug(f"[START] nightVision Reset fehlgeschlagen: {e}")
@@ -2327,6 +2333,7 @@ class MolochService:
                     "yolo_conf": self.yolo_conf_val,
                 },
                 "led_markus_on": self._led_markus_on,
+                "cloud": self._cloud_state,
                 "audio": {
                     "mic_gain": getattr(self, '_saved_mic_gain', 1.0),
                     "noise_gate_db": getattr(self, '_saved_noise_gate', -60.0),
@@ -2503,11 +2510,13 @@ class MolochService:
             level = cmd.get('level', 0)
             try:
                 if self._cloud and self._cloud.connected:
-                    # PT2 hat kein lightStrength — weisse LEDs ueber nightVision steuern
-                    # Level 0=aus(day), 1=auto, 2=an(night), 3=an(night)
+                    # PT2 weisse LEDs ueber nightVision steuern
+                    # Panel: 0=aus, 2=an. Mapping auf set_night() Modi:
+                    # 'day' -> IR-only (weiss AUS), 'night' -> Farb-Nacht (weiss AN)
                     night_modes = {0: 'day', 1: 'auto', 2: 'night', 3: 'night'}
                     mode = night_modes.get(int(level), 'day')
                     self._cloud.run(self._cloud.bridge.set_night(mode))
+                    self._cloud_state["led_level"] = int(level)
                     logger.info(f"[IPC] LED/Night mode: {mode} (level={level})")
             except Exception as e:
                 logger.error(f"[IPC] LED/Night failed: {e}")
@@ -2517,6 +2526,7 @@ class MolochService:
                 if self._cloud and self._cloud.connected:
                     self._alarm_on = not self._alarm_on
                     self._cloud.run(self._cloud.bridge.set_alarm(self._alarm_on))
+                    self._cloud_state["alarm_active"] = self._alarm_on
                     logger.info(f"[IPC] Alarm: {'AN' if self._alarm_on else 'AUS'}")
             except Exception as e:
                 logger.error(f"[IPC] Alarm failed: {e}")
@@ -2549,6 +2559,7 @@ class MolochService:
                     # Toggle: aktuellen Status invertieren
                     self._status_led_on = not getattr(self, '_status_led_on', False)
                     self._cloud.run(self._cloud.bridge.set_status_led(self._status_led_on))
+                    self._cloud_state["status_led"] = self._status_led_on
                     logger.info(f"[IPC] Status LED: {self._status_led_on}")
             except Exception as e:
                 logger.error(f"[IPC] Status LED failed: {e}")
@@ -2556,8 +2567,16 @@ class MolochService:
         elif action == 'cloud_sync':
             try:
                 if self._cloud and self._cloud.connected:
-                    status = self._cloud.run(self._cloud.bridge.get_device_params())
-                    logger.info(f"[IPC] Cloud sync: {status}")
+                    params = self._cloud.run(self._cloud.bridge.get_device_params())
+                    if params and isinstance(params, dict):
+                        # Sonoff CAM-PT2 nightVision: 0=auto, 1=IR(aus), 2=farb-nacht(an)
+                        # Panel erwartet: led_level 0=aus, 2=an
+                        nv = int(params.get("nightVision", 1))
+                        # Mapping: IR(1)->0(aus), auto(0)->0(aus), farb-nacht(2)->2(an)
+                        self._cloud_state["led_level"] = 2 if nv == 2 else 0
+                        self._cloud_state["alarm_active"] = bool(params.get("alarmNotify", False))
+                        self._cloud_state["status_led"] = bool(params.get("sledOnline", False))
+                    logger.info(f"[IPC] Cloud sync: nightVision={nv} led_level={self._cloud_state.get('led_level')}")
             except Exception as e:
                 logger.error(f"[IPC] Cloud sync failed: {e}")
 

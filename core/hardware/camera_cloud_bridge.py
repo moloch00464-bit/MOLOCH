@@ -822,9 +822,11 @@ class CameraCloudBridge:
 
         self.logger.info(f"Setting night mode to {mode} via cloud...")
 
-        # eWeLink uses 'nightVision' parameter with NUMERIC values (not strings!)
-        # Device state shows nightVision as integer: 0=day/off, 1=auto, 2=night/on
-        ewelink_mode = {'day': 0, 'auto': 1, 'night': 2}[mode]
+        # eWeLink nightVision fuer Sonoff CAM-PT2 (NUMERIC values):
+        # 0 = Auto (Kamera entscheidet - schaltet weisse LEDs bei Dunkelheit AN!)
+        # 1 = IR-only (Infrarot, weisse LEDs AUS)
+        # 2 = Farb-Nachtsicht (weisse LEDs IMMER AN)
+        ewelink_mode = {'day': 1, 'auto': 0, 'night': 2}[mode]
         return await self._set_device_param('nightVision', ewelink_mode)
 
     # =========================================================================
