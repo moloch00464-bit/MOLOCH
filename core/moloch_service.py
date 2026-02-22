@@ -165,6 +165,10 @@ class MolochService:
                 self._perception._MIN_FACE_STREAK = self._saved_hand_streak
                 self._perception._FACE_RECENCY = self._saved_hand_recency
                 logger.info(f"[SETTINGS] Hand-Occlusion Params aus settings.json angewendet")
+            # Gespeicherte aktive Modelle als force_models setzen
+            if hasattr(self, '_saved_active_models') and self._saved_active_models:
+                self._perception.force_models(self._saved_active_models)
+                logger.info(f"[SETTINGS] force_models({self._saved_active_models}) aus settings.json")
         except Exception as e:
             logger.warning(f"[INIT] Perception Engine nicht verfuegbar: {e}")
 
@@ -1432,7 +1436,7 @@ class MolochService:
         if not self._guardian_mode or self._transitioning or self._manual_mode:
             return
         # Safety: verwaister autonomer Modus
-        if self._autonomous_mode and not self._moloch_has_control and not self._manual_autonomous:
+        if self._autonomous_mode and not self._moloch_has_control and not self._manual_autonomous and (time.time() - getattr(self, "_autonomous_enabled_at", 0)) > 15:
             logger.warning("[SAFETY] Orphaned autonomous mode detected - disabling")
             self._disable_autonomous()
             return
@@ -1634,6 +1638,7 @@ class MolochService:
                     self._tracker.start()
                 self._tracker.enable()
                 self._autonomous_mode = True
+                self._autonomous_enabled_at = time.time()
                 self._update_status("Modus: AUTONOM - MOLOCH sucht...")
                 logger.info("Switched to AUTONOMOUS mode")
                 self._notify("auto_mode", {"state": "active"})
@@ -1901,6 +1906,9 @@ class MolochService:
         threading.Thread(target=self._poll_panel_cmds, daemon=True, name="PanelCmdPoll").start()
 
         # Frozen Frame Watchdog
+        # Default: Autonomous Mode nach Boot aktivieren
+        self._enable_autonomous()
+        logger.info("[START] Autonomous Mode aktiviert (Default nach Boot)")
         threading.Thread(target=self._frozen_frame_watchdog, daemon=True, name="FrozenWatchdog").start()
 
         if not blocking:
@@ -1991,6 +1999,12 @@ class MolochService:
             self._takeover_reason = ""
             self._guardian_move_count = 0
 
+            # Perception: aktuelle Modelle einfrieren (kein Auto-Swap im Manual Mode)
+            if self._perception:
+                frozen = list(self._active_ctx.keys())
+                self._perception.force_models(frozen)
+                logger.info(f"[MODUS] MANUELL -> force_models({frozen}) - Modell-Swap gesperrt")
+
             # Smart Tracking AUS (wuerde sonst Kamera bewegen)
             def stop_cam_control():
                 if self._cloud and self._cloud.connected:
@@ -2006,6 +2020,11 @@ class MolochService:
             logger.info("[MODUS] Wechsel zu AUTONOM - Kamera-Kontrolle freigegeben")
             self._manual_mode = False
             self._tentakel_enabled = True
+
+            # Perception: Auto-Swap wieder freigeben
+            if self._perception:
+                self._perception.force_models(None)
+                logger.info("[MODUS] AUTONOM -> force_models(None) - Perception Auto-Modus")
 
             # Smart Tracking AN (Tentakel-Default)
             def start_cam_control():
@@ -2406,6 +2425,15 @@ class MolochService:
         except Exception as e:
             logger.warning(f"[SETTINGS] Camera-Fehler: {e}")
 
+        # Aktive Modelle (fuer force_models nach Perception-Init)
+        try:
+            am = data.get("active_models")
+            if am and isinstance(am, list):
+                self._saved_active_models = list(am)
+                logger.info(f"[SETTINGS] Active Models: {self._saved_active_models}")
+        except Exception as e:
+            logger.warning(f"[SETTINGS] Active-Models-Fehler: {e}")
+
     def _save_settings(self):
         """Speichere aktuelle Settings nach config/settings.json (atomic write)."""
         data = {"version": 1}
@@ -2439,6 +2467,9 @@ class MolochService:
             "led_enabled": getattr(self, '_saved_led', False),
             "ir_mode": getattr(self, '_saved_ir', "Aus"),
         }
+
+        # Aktive Modelle (fuer Wiederherstellung nach Restart)
+        data["active_models"] = [name for name in self._active_ctx.keys()]
 
         # Atomic write
         try:
