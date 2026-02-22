@@ -135,25 +135,36 @@ class MolochService:
         except Exception as e:
             logger.warning(f"[INIT] CoreIntegrator nicht verfuegbar: {e}")
 
-        # Emotion Detection (CPU, kein NPU)
-        self._emotion_detector = None
-        try:
-            from core.vision.emotion_detector import get_emotion_detector
-            self._emotion_detector = get_emotion_detector()
-            if self._emotion_detector and self._emotion_detector.available:
-                logger.info("[INIT] Emotion Detection bereit (FER+ CPU)")
-        except Exception as e:
-            logger.warning(f"[INIT] Emotion Detection nicht verfuegbar: {e}")
+        # CPU Detectors Default (wird in _load_settings ueberschrieben, aber
+        # _load_settings laeuft NACH __init__ in init(), daher Default hier setzen)
+        if not hasattr(self, '_cpu_detectors_enabled'):
+            self._cpu_detectors_enabled = False
 
-        # Age + Gender Detection (CPU, kein NPU)
+        # Emotion Detection (CPU, kein NPU — nur laden wenn cpu_detectors.enabled)
+        self._emotion_detector = None
+        if self._cpu_detectors_enabled:
+            try:
+                from core.vision.emotion_detector import get_emotion_detector
+                self._emotion_detector = get_emotion_detector()
+                if self._emotion_detector and self._emotion_detector.available:
+                    logger.info("[INIT] Emotion Detection bereit (FER+ CPU, throttled)")
+            except Exception as e:
+                logger.warning(f"[INIT] Emotion Detection nicht verfuegbar: {e}")
+        else:
+            logger.info("[INIT] Emotion Detection DEAKTIVIERT (cpu_detectors.enabled=false)")
+
+        # Age + Gender Detection (CPU, kein NPU — nur laden wenn cpu_detectors.enabled)
         self._age_gender_detector = None
-        try:
-            from core.vision.age_gender_detector import get_age_gender_detector
-            self._age_gender_detector = get_age_gender_detector()
-            if self._age_gender_detector and self._age_gender_detector.available:
-                logger.info("[INIT] Age+Gender Detection bereit (Caffe CPU)")
-        except Exception as e:
-            logger.warning(f"[INIT] Age+Gender Detection nicht verfuegbar: {e}")
+        if self._cpu_detectors_enabled:
+            try:
+                from core.vision.age_gender_detector import get_age_gender_detector
+                self._age_gender_detector = get_age_gender_detector()
+                if self._age_gender_detector and self._age_gender_detector.available:
+                    logger.info("[INIT] Age+Gender Detection bereit (Caffe CPU, throttled)")
+            except Exception as e:
+                logger.warning(f"[INIT] Age+Gender Detection nicht verfuegbar: {e}")
+        else:
+            logger.info("[INIT] Age+Gender Detection DEAKTIVIERT (cpu_detectors.enabled=false)")
 
         # Gesture Detection (aus Pose-Keypoints)
         self._gesture_detector = GestureDetector()
@@ -204,6 +215,15 @@ class MolochService:
         self._active_ctx = {}
         self._ctx_lock = threading.Lock()
         self._input_640 = np.empty((640, 640, 3), dtype=np.uint8)
+
+        # Throttling: Emotion/Age/Gender nur alle N Frames (CPU-Sparmode)
+        # _cpu_detectors_enabled und _cpu_detect_interval werden in _load_settings() gesetzt
+        self._cpu_detect_interval = 30  # Default ~1x/Sek bei 20 FPS
+        self._cpu_detectors_enabled = False  # Default AUS (CPU zu teuer ohne NPU)
+        self._frame_counter = 0
+        self._cached_emotion = {}      # name -> emotion
+        self._cached_gender = {}       # name -> gender
+        self._cached_age_range = {}    # name -> age_range
 
         # TTS Announcement Cooldown
         self._last_announce = {}
@@ -742,6 +762,8 @@ class MolochService:
             t_total = time.perf_counter()
             annotated = frame.copy()
             fh, fw = frame.shape[:2]
+            self._frame_counter += 1
+            _run_cpu_detectors = (self._frame_counter % self._cpu_detect_interval == 0)
 
             # Preprocessing: Resize auf 640x640 fuer Modelle
             input_640 = cv2.resize(frame, (640, 640))
@@ -856,19 +878,23 @@ class MolochService:
                             if name.lower() == "markus":
                                 _markus_recognized = True
 
-                            # Emotion Detection (CPU)
-                            emotion = None
-                            if self._emotion_detector and crop is not None:
+                            # Emotion Detection (CPU, throttled alle N Frames)
+                            emotion = self._cached_emotion.get(name)
+                            if _run_cpu_detectors and self._emotion_detector and crop is not None:
                                 try:
                                     emotion, _ = self._emotion_detector.detect(crop)
+                                    self._cached_emotion[name] = emotion
                                 except Exception:
                                     pass
 
-                            # Age + Gender Detection (CPU)
-                            gender, age_range = None, None
-                            if self._age_gender_detector and crop is not None:
+                            # Age + Gender Detection (CPU, throttled alle N Frames)
+                            gender = self._cached_gender.get(name)
+                            age_range = self._cached_age_range.get(name)
+                            if _run_cpu_detectors and self._age_gender_detector and crop is not None:
                                 try:
                                     gender, age_range, _ = self._age_gender_detector.detect(crop)
+                                    self._cached_gender[name] = gender
+                                    self._cached_age_range[name] = age_range
                                 except Exception:
                                     pass
 
@@ -2569,6 +2595,16 @@ class MolochService:
                 logger.info(f"[SETTINGS] Learner Flash: {self._learner_flash}")
         except Exception as e:
             logger.warning(f"[SETTINGS] Learner-Fehler: {e}")
+
+        # CPU Detectors (Emotion, Age/Gender - Default AUS wegen CPU-Last)
+        try:
+            cd = data.get("cpu_detectors", {})
+            self._cpu_detectors_enabled = bool(cd.get("enabled", False))
+            self._cpu_detect_interval = int(cd.get("interval_frames", 30))
+            logger.info(f"[SETTINGS] CPU Detectors: enabled={self._cpu_detectors_enabled} "
+                        f"interval={self._cpu_detect_interval}")
+        except Exception as e:
+            logger.warning(f"[SETTINGS] CPU-Detectors-Fehler: {e}")
 
         # Aktive Modelle (fuer force_models nach Perception-Init)
         try:

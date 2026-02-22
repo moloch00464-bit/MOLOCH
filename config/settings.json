@@ -1,10 +1,10 @@
 {
   "version": 1,
   "thresholds": {
-    "scrfd_conf": 0.55,
-    "scrfd_nms": 0.6,
+    "scrfd_conf": 0.4,
+    "scrfd_nms": 0.35,
     "arcface_thresh": 0.6,
-    "yolo_conf": 0.5
+    "yolo_conf": 0.7
   },
   "hand_occlusion": {
     "timeout": 6.0,
@@ -24,5 +24,9 @@
   "active_models": [
     "yolov8m",
     "hand_landmark"
-  ]
+  ],
+  "cpu_detectors": {
+    "enabled": false,
+    "interval_frames": 30
+  }
 }
