@@ -2034,6 +2034,14 @@ class MolochService:
         for name in self._models:
             logger.info(f"Modell geladen: {name} ({len(self._output_names[name])} outputs)")
 
+        # 1b. Whisper permanent auf NPU laden (shared VDevice, 8GB reichen)
+        try:
+            from core.speech.hailo_whisper import get_whisper
+            whisper = get_whisper()
+            whisper.set_vdevice(self._vdevice)
+        except Exception as e:
+            logger.error(f"[INIT] Whisper NPU init fehlgeschlagen: {e}")
+
         # 2. Face DB
         self._face_db = load_face_db(FACE_DB_PATH)
         if self._face_db:
