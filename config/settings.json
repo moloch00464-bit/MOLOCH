@@ -1,13 +1,13 @@
 {
   "version": 1,
   "thresholds": {
-    "scrfd_conf": 0.5,
-    "scrfd_nms": 0.4,
+    "scrfd_conf": 0.55,
+    "scrfd_nms": 0.6,
     "arcface_thresh": 0.6,
     "yolo_conf": 0.5
   },
   "hand_occlusion": {
-    "timeout": 2.0,
+    "timeout": 4.0,
     "streak": 5,
     "recency": 2.5
   },

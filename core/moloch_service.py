@@ -115,7 +115,7 @@ class MolochService:
     """
 
     PREVIEW_W = 640
-    PREVIEW_H = 480
+    PREVIEW_H = 360
 
     def __init__(self):
         # State
@@ -384,7 +384,8 @@ class MolochService:
                 if grabbed:
                     ret, frame = cap.retrieve()
                     if ret and frame is not None:
-                        frame = cv2.resize(frame, (self.PREVIEW_W, self.PREVIEW_H))
+                        # Frame bleibt 1920x1080 — Full Resolution Pipeline
+                        # Resize fuer Modelle passiert spaeter (input_640)
 
                         # Frozen Frame Detection via Hash (jeden 20. Pixel samplen)
                         frame_hash = hash(frame[::20, ::20].tobytes())
@@ -714,7 +715,8 @@ class MolochService:
                             continue
                 with self._annotated_lock:
                     self._annotated_frame = frame.copy()
-                self._write_shm(frame)
+                # SHM: Preview-Groesse fuer Panel IPC (1080p waere 6MB/Frame)
+                self._write_shm(cv2.resize(frame, (self.PREVIEW_W, self.PREVIEW_H)))
                 time.sleep(0.03)
                 continue
 
@@ -1092,8 +1094,8 @@ class MolochService:
             with self._annotated_lock:
                 self._annotated_frame = annotated
 
-            # Panel IPC: Frame + Status nach /dev/shm
-            self._write_shm(annotated)
+            # Panel IPC: Preview-Groesse fuer SHM (1080p waere 6MB/Frame)
+            self._write_shm(cv2.resize(annotated, (self.PREVIEW_W, self.PREVIEW_H)))
 
     # =========================================================================
     # Cross-Process NPU Coordination
