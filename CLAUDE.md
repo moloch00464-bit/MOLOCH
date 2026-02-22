@@ -307,6 +307,23 @@ i) Mux/Exklusiver Zugriff: Wer steuert die Hardware? Nur einer gleichzeitig. Pri
 j) Atomic Changes: Git Backup VOR jeder Aenderung. Ein Auftrag = eine Datei.
 ```
 
+## REGEL 11 — DEPLOY & VERIFY
+
+> Jede Code-Änderung die nicht live geht ist wertlos.
+
+```
+a) Nach JEDEM Code-Edit: `sudo systemctl restart moloch` ausfuehren.
+b) Nach dem Restart 10 Sekunden warten, dann mit journalctl verifizieren:
+   `journalctl -u moloch --since "30 sec ago" --no-pager | tail -10`
+c) Pruefen ob der Service LAEUFT: `systemctl is-active moloch` muss "active" liefern.
+d) Pruefen ob KEINE neuen Fehler: grep nach "ERROR|Exception|Traceback" in den letzten Logs.
+e) Wenn der Service NICHT startet: SOFORT den Fehler fixen bevor du weitermachst.
+f) NIEMALS einen Auftrag als "fertig" melden wenn der Service nicht laeuft.
+g) Bei mehreren Dateien: ERST alle Edits machen, DANN einmal restarten (nicht nach jeder Datei).
+h) Quick-Verify Einzeiler nach jedem Deploy:
+   `sudo systemctl restart moloch && sleep 10 && systemctl is-active moloch && journalctl -u moloch --since "15 sec ago" --no-pager | grep -i "error\|exception\|traceback" | head -5 || echo "=== SERVICE FAILED ==="`
+```
+
 ### MODULARES PANEL
 
 Das Panel ist MODULAR aufgebaut. Jedes Modul und jedes Popup ist eine eigene Datei unter `core/gui/`.
