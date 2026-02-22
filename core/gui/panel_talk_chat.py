@@ -47,6 +47,7 @@ class TalkChatModule:
         self._ptt_active = False
         self._voice_enabled = tk.BooleanVar(value=False)
         self._last_whisper_status = ""
+        self._last_msg_id = 0  # Tracking fuer angezeigte Messages
 
         # GUI aufbauen
         self._build_chat_display()
@@ -84,19 +85,33 @@ class TalkChatModule:
         self._txt_chat.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.config(command=self._txt_chat.yview)
 
+        # Farb-Tags: User=Cyan, Moloch=Gruen, System=Dim
+        self._txt_chat.tag_configure("user", foreground=ACCENT_CYAN)
+        self._txt_chat.tag_configure("moloch", foreground="#00FF88")
+        self._txt_chat.tag_configure("system", foreground=FG_DIM)
+        self._txt_chat.tag_configure("timestamp", foreground=FG_DIM)
+
     def add_message(self, sender, text):
         """
-        Nachricht ins Chat-Display einfuegen.
+        Nachricht ins Chat-Display einfuegen mit Farbcodierung.
 
         Args:
-            sender: Absender-Name (z.B. "Markus", "MOLOCH", "System")
+            sender: Absender-Name (z.B. "Du", "Markus", "MOLOCH", "System")
             text: Nachrichtentext
         """
         timestamp = time.strftime("%H:%M:%S")
-        line = f"[{timestamp}] {sender}: {text}\n"
+
+        # Tag basierend auf Sender
+        if sender in ("Du", "Markus"):
+            tag = "user"
+        elif sender == "MOLOCH":
+            tag = "moloch"
+        else:
+            tag = "system"
 
         self._txt_chat.config(state=tk.NORMAL)
-        self._txt_chat.insert(tk.END, line)
+        self._txt_chat.insert(tk.END, f"[{timestamp}] ", "timestamp")
+        self._txt_chat.insert(tk.END, f"{sender}: {text}\n", tag)
         self._txt_chat.see(tk.END)
         self._txt_chat.config(state=tk.DISABLED)
 
@@ -235,13 +250,16 @@ class TalkChatModule:
                     fg=color_map.get(whisper_state, FG_DIM),
                 )
 
-            # Chat-Messages vom Service abholen und anzeigen
+            # Chat-Messages vom Service abholen — nur neue per ID anzeigen
             messages = voice.get("messages", [])
             for msg in messages:
-                sender = msg.get("sender", "?")
-                text = msg.get("text", "")
-                if text:
-                    self.add_message(sender, text)
+                msg_id = msg.get("id", 0)
+                if msg_id > self._last_msg_id:
+                    sender = msg.get("sender", "?")
+                    text = msg.get("text", "")
+                    if text:
+                        self.add_message(sender, text)
+                    self._last_msg_id = msg_id
 
             # Voice Output Toggle synchronisieren
             voice_on = voice.get("voice_enabled", False)

@@ -124,8 +124,9 @@ class VoicePipeline:
         self._length_scale = 1.1  # Leicht langsamer fuer Verstaendlichkeit
         self._piper_available = PIPER_PATH.exists()
 
-        # Message-Queue fuer IPC zum Panel (wird via get_state() abgeholt)
-        self._pending_messages: List[Dict[str, str]] = []
+        # Message-Queue fuer IPC zum Panel (bleibt erhalten, Panel tracked per ID)
+        self._pending_messages: List[Dict] = []
+        self._msg_counter = 0
         self._msg_lock = threading.Lock()
 
         # Init
@@ -163,7 +164,15 @@ class VoicePipeline:
     def _emit_message(self, sender: str, text: str):
         """Nachricht in Queue legen und optionalen Callback aufrufen."""
         with self._msg_lock:
-            self._pending_messages.append({"sender": sender, "text": text})
+            self._msg_counter += 1
+            self._pending_messages.append({
+                "id": self._msg_counter,
+                "sender": sender,
+                "text": text,
+            })
+            # Max 50 Messages behalten
+            if len(self._pending_messages) > 50:
+                self._pending_messages = self._pending_messages[-50:]
         if self._on_message:
             self._on_message(sender, text)
 
@@ -443,11 +452,9 @@ class VoicePipeline:
 
     def get_state(self) -> Dict:
         """Aktuellen Status zurueckgeben (fuer IPC Status-JSON).
-        Pending Messages werden mitgesendet und danach geleert."""
-        # Messages atomar abholen und leeren
+        Messages bleiben erhalten — Panel tracked per ID welche schon angezeigt."""
         with self._msg_lock:
             messages = list(self._pending_messages)
-            self._pending_messages.clear()
         return {
             "whisper_status": self._whisper_status,
             "whisper_backend": self._whisper.backend if self._whisper else "nicht geladen",
