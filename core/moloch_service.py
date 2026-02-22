@@ -126,6 +126,15 @@ class MolochService:
         self._output_names = {}
         self._face_db = {}
 
+        # Core Integrator (Zentrales Zustandsmodell: Tension/Attention/Presence)
+        self._core_integrator = None
+        try:
+            from core.core_integrator import get_core_integrator
+            self._core_integrator = get_core_integrator()
+            logger.info("[INIT] CoreIntegrator bereit")
+        except Exception as e:
+            logger.warning(f"[INIT] CoreIntegrator nicht verfuegbar: {e}")
+
         # Emotion Detection (CPU, kein NPU)
         self._emotion_detector = None
         try:
@@ -1082,6 +1091,28 @@ class MolochService:
                 # LED nur AUS wenn MOLOCH nicht aktiv (Tentakel steuert eigene LED)
                 self._led_indicator_set(False)
 
+            # === Core Integrator fuettern (passiv, parallel zur bestehenden Logik) ===
+            if self._core_integrator:
+                try:
+                    # Perception-Daten -> Integrator
+                    _ci_face_conf = 0.0
+                    if face_boxes:
+                        _ci_face_conf = float(face_boxes[0][1])  # Confidence der ersten Face
+                    self._core_integrator.update_inputs("perception", {
+                        "face_detected": 1.0 if face_detected else 0.0,
+                        "face_confidence": _ci_face_conf,
+                        "person_detected": 1.0 if _persons_detected else 0.0,
+                        "markus_recognized": 1.0 if _markus_recognized else 0.0,
+                        "unknown_person": 1.0 if (face_detected and 'name' in dir() and name == "Unbekannt") else 0.0,
+                    })
+                    # Alarm-State
+                    self._core_integrator.update_input("system", "alarm_active", 1.0 if self._alarm_on else 0.0)
+                    # System-Last (grob: NPU aktiv = etwas Last)
+                    _npu_load = len(self._active_ctx) / 2.0  # 0-2 Modelle -> 0.0-1.0
+                    self._core_integrator.update_input("system", "system_load", _npu_load)
+                except Exception:
+                    pass  # Integrator darf NIE die Inference-Loop stoeren
+
             # Auto-Switch: Hand-Forced zurueck zu Auto wenn keine Hand
             if self.hand_active and self._perception and self._perception._forced:
                 if self._last_hand_detected:
@@ -1926,6 +1957,11 @@ class MolochService:
         """
         logger.info("M.O.L.O.C.H. Service gestartet")
 
+        # Core Integrator Thread starten (1 Hz State-Berechnung)
+        if self._core_integrator:
+            self._core_integrator.start()
+            logger.info("[START] CoreIntegrator 1Hz-Thread gestartet")
+
         # Inference Loop
         threading.Thread(target=self._inference_loop, daemon=True, name="InferenceLoop").start()
 
@@ -2078,6 +2114,13 @@ class MolochService:
         logger.info("M.O.L.O.C.H. Service wird gestoppt...")
         self.running = False
 
+        # Core Integrator stoppen
+        if self._core_integrator:
+            try:
+                self._core_integrator.stop()
+            except Exception:
+                pass
+
         # Tracker stoppen
         if self._tracker:
             try:
@@ -2172,6 +2215,8 @@ class MolochService:
             }
             if self._perception:
                 status["perception"] = self._perception.get_state()
+            if self._core_integrator:
+                status["core"] = self._core_integrator.get_status_dict()
             with open('/dev/shm/moloch_status.tmp', 'w') as f:
                 json.dump(status, f)
             os.rename('/dev/shm/moloch_status.tmp', '/dev/shm/moloch_status.json')
@@ -2400,11 +2445,15 @@ class MolochService:
             if self._voice_pipeline:
                 self._voice_pipeline.start_recording()
                 logger.info("[IPC] PTT: Aufnahme gestartet")
+            if self._core_integrator:
+                self._core_integrator.update_input("voice", "voice_activity", 1.0)
 
         elif action == 'ptt_stop':
             if self._voice_pipeline:
                 self._voice_pipeline.stop_recording()
                 logger.info("[IPC] PTT: Aufnahme gestoppt, verarbeite...")
+            if self._core_integrator:
+                self._core_integrator.update_input("voice", "voice_activity", 0.0)
 
         elif action == 'chat_message':
             text = cmd.get('text', '').strip()
