@@ -408,7 +408,11 @@ class VoicePipeline:
     # =========================================================================
 
     def _speak(self, text: str):
-        """Text mit Piper TTS sprechen und ueber HDMI ausgeben."""
+        """Text mit Piper TTS sprechen und ueber HDMI ausgeben.
+
+        Pipe Streaming: piper --output-raw | aplay
+        Audio startet sofort waehrend Piper noch generiert — keine Wartezeit.
+        """
         if not self._piper_available:
             logger.warning("[VOICE] Piper nicht verfuegbar")
             return
@@ -419,50 +423,75 @@ class VoicePipeline:
             return
 
         self._speaking = True
-        wav_path = os.path.join(TEMP_DIR, f"moloch_tts_{os.getpid()}.wav")
+        piper_proc = None
+        aplay_proc = None
+        t0 = time.time()
 
         try:
-            # Piper TTS: Text -> WAV
-            piper_result = subprocess.run(
+            # Sample-Rate aus Model-Config (Piper default: 22050)
+            sample_rate = "22050"
+            model_config = model_path.with_suffix(".onnx.json")
+            if model_config.exists():
+                try:
+                    with open(model_config) as f:
+                        cfg = json.load(f)
+                        sample_rate = str(cfg.get("audio", {}).get("sample_rate", 22050))
+                except Exception:
+                    pass
+
+            # Pipe Streaming: piper gibt raw PCM aus, aplay spielt sofort
+            piper_proc = subprocess.Popen(
                 [
                     str(PIPER_PATH),
                     "--model", str(model_path),
                     "--length-scale", str(self._length_scale),
-                    "--output_file", wav_path,
+                    "--output-raw",
                 ],
-                input=text,
-                capture_output=True,
-                text=True,
-                timeout=30,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            )
+            aplay_proc = subprocess.Popen(
+                [
+                    "aplay", "-D", SPEAKER_DEVICE,
+                    "-r", sample_rate, "-f", "S16_LE", "-c", "1", "-q",
+                ],
+                stdin=piper_proc.stdout,
+                stderr=subprocess.DEVNULL,
             )
 
-            if piper_result.returncode != 0:
-                logger.error(f"[VOICE] Piper Fehler: {piper_result.stderr}")
-                return
+            # stdout im Parent schliessen damit aplay EOF bekommt wenn Piper fertig
+            piper_proc.stdout.close()
 
-            if not os.path.exists(wav_path):
-                logger.error("[VOICE] Piper hat keine WAV erzeugt")
-                return
+            # Text an Piper stdin senden
+            piper_proc.stdin.write(text.encode("utf-8"))
+            piper_proc.stdin.close()
 
-            # Playback ueber HDMI
-            subprocess.run(
-                ["aplay", "-D", SPEAKER_DEVICE, wav_path],
-                capture_output=True,
-                timeout=30,
-            )
-            logger.info(f"[VOICE] Gesprochen: {len(text)} Zeichen mit {self._current_voice}")
+            # Auf Playback warten (60s fuer lange Texte)
+            aplay_proc.wait(timeout=60)
+            piper_proc.wait(timeout=5)
+
+            dt = time.time() - t0
+            logger.info(f"[VOICE] Gesprochen: {len(text)} Zeichen mit {self._current_voice} ({dt:.1f}s)")
 
         except subprocess.TimeoutExpired:
             logger.error("[VOICE] TTS Timeout")
+            for proc in [aplay_proc, piper_proc]:
+                if proc:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
         except Exception as e:
             logger.error(f"[VOICE] TTS Fehler: {e}")
+            for proc in [aplay_proc, piper_proc]:
+                if proc:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
         finally:
             self._speaking = False
-            # Temp-Datei aufraeumen
-            try:
-                os.unlink(wav_path)
-            except FileNotFoundError:
-                pass
 
     # =========================================================================
     # Konfiguration
