@@ -725,7 +725,7 @@ class MolochService:
 
             # Kein Modell konfiguriert ODER Inference pausiert -> Raw-Frame
             any_active = bool(self._active_ctx) and (
-                self.scrfd_active or self.yolo_active or self.hand_active)
+                self.scrfd_active or self.yolo_active or self.hand_active or self.pose_active)
             if not any_active:
                 # Perception tick auch ohne aktive Modelle (forced/initial swap)
                 if self._perception:
@@ -2121,7 +2121,8 @@ class MolochService:
 
         active_map = {"scrfd": "scrfd_active", "arcface": "arcface_active",
                       "yolov8m": "yolo_active",
-                      "hand_landmark": "hand_active"}
+                      "hand_landmark": "hand_active",
+                      "pose": "pose_active"}
         if model_key not in active_map:
             return
 
@@ -2299,6 +2300,7 @@ class MolochService:
                 "arcface_active": self.arcface_active,
                 "yolo_active": self.yolo_active,
                 "hand_active": self.hand_active,
+                "pose_active": self.pose_active,
                 "npu_paused": self._npu_paused,
                 "active_models": list(self._active_ctx.keys()),
                 "autonomous_mode": self._autonomous_mode,

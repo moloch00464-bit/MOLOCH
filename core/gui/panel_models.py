@@ -6,7 +6,7 @@ M.O.L.O.C.H. Panel Models
 Model Steuerung und Popup-Buttons.
 Bekommt parent_frame (LabelFrame) und ServiceProxy von panel_main.
 
-- Model Checkboxen: SCRFD, ArcFace, YOLOv8m, Hand Landmark
+- Model Checkboxen: SCRFD, ArcFace, YOLOv8m, Hand Landmark, Pose
 - FPS Anzeige (STATUS_YELLOW, 500ms Update)
 - SAVE SETTINGS Button
 - Popup-Buttons Reihe: AUDIO, HARDWARE, NPU THRESH, SETTINGS
@@ -61,6 +61,7 @@ class ModelsModule:
         ("ArcFace", "arcface"),
         ("YOLOv8m", "yolov8m"),
         ("Hand LM", "hand_landmark"),
+        ("Pose", "pose"),
     ]
 
     def __init__(self, parent_frame, service_proxy):
@@ -311,6 +312,7 @@ class ModelsModule:
                 "arcface": "arcface_active",
                 "yolov8m": "yolo_active",
                 "hand_landmark": "hand_active",
+                "pose": "pose_active",
             }
             for _, key in self.MODELS:
                 try:
