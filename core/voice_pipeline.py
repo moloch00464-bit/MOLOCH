@@ -110,9 +110,8 @@ class VoicePipeline:
         self._record_proc: Optional[subprocess.Popen] = None
         self._lock = threading.Lock()
 
-        # Whisper STT
-        self._whisper_model = None
-        self._whisper_model_name = "base"
+        # Whisper STT (MolochWhisper: NPU primary, CPU fallback)
+        self._whisper = None
 
         # Claude API
         self._claude_client = None
@@ -149,21 +148,16 @@ class VoicePipeline:
             logger.error(f"[VOICE] Claude init fehlgeschlagen: {e}")
 
     def _init_whisper(self):
-        """Whisper Model lazy-laden (dauert ein paar Sekunden)."""
-        if self._whisper_model is not None:
+        """MolochWhisper lazy-laden (NPU primary, CPU fallback)."""
+        if self._whisper is not None:
             return True
         try:
-            from faster_whisper import WhisperModel
-            logger.info(f"[VOICE] Lade Whisper '{self._whisper_model_name}'...")
-            self._whisper_model = WhisperModel(
-                self._whisper_model_name,
-                device="cpu",
-                compute_type="int8",
-            )
-            logger.info("[VOICE] Whisper bereit")
+            from core.speech.hailo_whisper import get_whisper
+            self._whisper = get_whisper()
+            logger.info(f"[VOICE] MolochWhisper geladen: {self._whisper}")
             return True
         except Exception as e:
-            logger.error(f"[VOICE] Whisper laden fehlgeschlagen: {e}")
+            logger.error(f"[VOICE] MolochWhisper laden fehlgeschlagen: {e}")
             return False
 
     def _emit_message(self, sender: str, text: str):
@@ -280,19 +274,16 @@ class VoicePipeline:
     # =========================================================================
 
     def _transcribe(self, wav_path: str) -> Optional[str]:
-        """WAV-Datei mit Whisper transkribieren."""
+        """WAV-Datei mit MolochWhisper transkribieren (NPU + HailoManager)."""
         if not self._init_whisper():
             return None
 
         try:
-            segments, info = self._whisper_model.transcribe(
-                wav_path,
-                language="de",
-                beam_size=5,
-                vad_filter=True,
-            )
-            text = " ".join(seg.text.strip() for seg in segments)
-            return text.strip() if text.strip() else None
+            # MolochWhisper.transcribe() handhabt NPU acquire/release intern
+            # Vision pausiert automatisch, startet nach Release wieder
+            text = self._whisper.transcribe(wav_path, language="de")
+            logger.info(f"[VOICE] Whisper Backend: {self._whisper.backend}")
+            return text.strip() if text and text.strip() else None
         except Exception as e:
             logger.error(f"[VOICE] Whisper Fehler: {e}")
             return None
@@ -459,6 +450,7 @@ class VoicePipeline:
             self._pending_messages.clear()
         return {
             "whisper_status": self._whisper_status,
+            "whisper_backend": self._whisper.backend if self._whisper else "nicht geladen",
             "voice_enabled": self._voice_enabled,
             "current_voice": self._current_voice,
             "recording": self._recording,
