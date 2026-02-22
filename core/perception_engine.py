@@ -53,8 +53,9 @@ class PerceptionEngine:
         self._last_face_time = 0.0
         self._face_streak = 0
 
-        # Hand Occlusion
+        # Hand Occlusion (deaktivierbar via settings.json "hand_occlusion.enabled")
         self._hand_occlusion = False
+        self._hand_occlusion_enabled = False  # Default AUS
         self._hand_occlusion_start = 0.0
         self._HAND_TIMEOUT = 5.0
         self._FACE_RECENCY = 2.0
@@ -94,7 +95,8 @@ class PerceptionEngine:
             ALL_MODELS beim ersten Tick, danach None (kein Swap noetig).
         """
         self._update_face_tracking(context)
-        self._update_hand_occlusion(context)
+        if self._hand_occlusion_enabled:
+            self._update_hand_occlusion(context)
 
         # Log previous decision utility (Lernfaehigkeit bleibt aktiv)
         if self._last_chosen and self.slots:

@@ -97,6 +97,13 @@ class TrackingConfig:
     move_cooldown_ms: float = 300.0  # schnellere Moves (was 800)
     smooth_alpha: float = 0.5       # schnellere EMA-Reaktion (was 0.2)
 
+    # Kamera Hardware-Limits (SonoffCameraController clampt intern,
+    # aber Tracker muss gecachte Position AUCH clampen!)
+    pan_limit_min: float = -168.4
+    pan_limit_max: float = 170.0
+    tilt_limit_min: float = -78.0
+    tilt_limit_max: float = 78.8
+
     # Search mode parameters
     search_speed: float = 0.3
     search_direction_interval: float = 4.0
@@ -936,9 +943,10 @@ class AutonomousTracker:
         pan_delta = max(-self.config.max_step_pan, min(self.config.max_step_pan, pan_delta))
         tilt_delta = max(-self.config.max_step_tilt, min(self.config.max_step_tilt, tilt_delta))
 
-        # Calculate target position
-        target_pan = self.last_known_pan + pan_delta
-        target_tilt = self.last_known_tilt + tilt_delta
+        # Calculate target position + Clamping auf Hardware-Limits
+        # (verhindert Position-Drift wenn Kamera intern clampt)
+        target_pan = max(self.config.pan_limit_min, min(self.config.pan_limit_max, self.last_known_pan + pan_delta))
+        target_tilt = max(self.config.tilt_limit_min, min(self.config.tilt_limit_max, self.last_known_tilt + tilt_delta))
 
         # PTZ Debug: Vollstaendige Berechnung loggen
         face_side = "LINKS" if error_x_norm < 0 else "RECHTS"

@@ -184,11 +184,13 @@ class MolochService:
             self._perception = PerceptionEngine(personality_engine=_pe)
             logger.info(f"[INIT] Perception Engine bereit (Personality: {_pe.mode.value})")
             # Gespeicherte Hand-Occlusion Params anwenden
+            self._perception._hand_occlusion_enabled = getattr(self, '_hand_occlusion_enabled', False)
             if hasattr(self, '_saved_hand_timeout'):
                 self._perception._HAND_TIMEOUT = self._saved_hand_timeout
                 self._perception._MIN_FACE_STREAK = self._saved_hand_streak
                 self._perception._FACE_RECENCY = self._saved_hand_recency
-                logger.info(f"[SETTINGS] Hand-Occlusion Params aus settings.json angewendet")
+                logger.info(f"[SETTINGS] Hand-Occlusion: enabled={self._perception._hand_occlusion_enabled} "
+                            f"Params aus settings.json angewendet")
             # Gespeicherte aktive Modelle als force_models setzen
             if hasattr(self, '_saved_active_models') and self._saved_active_models:
                 self._perception.force_models(self._saved_active_models)
@@ -224,6 +226,7 @@ class MolochService:
         # _cpu_detectors_enabled und _cpu_detect_interval werden in _load_settings() gesetzt
         self._cpu_detect_interval = 30  # Default ~1x/Sek bei 20 FPS
         self._cpu_detectors_enabled = False  # Default AUS (CPU zu teuer ohne NPU)
+        self._hand_occlusion_enabled = False  # Default AUS (via settings.json steuerbar)
         self._frame_counter = 0
         self._cached_emotion = {}      # name -> emotion
         self._cached_gender = {}       # name -> gender
@@ -1091,7 +1094,7 @@ class MolochService:
 
             # 5. Pose Estimation (YOLOv8s Pose - Skeleton + Keypoints)
             _pose_data = []
-            if self.pose_active and "pose" in self._active_ctx and not face_detected:
+            if self.pose_active and "pose" in self._active_ctx:
                 try:
                     t0 = time.perf_counter()
                     outputs = self._run_model("pose", input_rgb)
@@ -1245,8 +1248,8 @@ class MolochService:
             with self._fps_lock:
                 self._fps["total"] = 1.0 / dt_total if dt_total > 0 else 0
 
-            # Hand-Occlusion Overlay auf Video
-            if self._perception and self._perception._hand_occlusion:
+            # Hand-Occlusion Overlay auf Video (nur wenn enabled in settings.json)
+            if getattr(self, '_hand_occlusion_enabled', False) and self._perception and self._perception._hand_occlusion:
                 overlay = annotated.copy()
                 cv2.rectangle(overlay, (0, 0), (fw, 30), (0, 0, 180), -1)
                 annotated = cv2.addWeighted(overlay, 0.6, annotated, 0.4, 0)
@@ -1992,15 +1995,20 @@ class MolochService:
 
     def _flash_white_led(self):
         """Kurzer Blitz der weissen LED (200ms) - laeuft in Daemon-Thread."""
+        if not self._cloud or not self._cloud.connected:
+            return
         try:
-            if not self._cloud or not self._cloud.connected:
-                return
             self._cloud.run(self._cloud.bridge.set_night('night'))
             time.sleep(0.2)
-            self._cloud.run(self._cloud.bridge.set_night('day'))
-            logger.info("[LEARNER] Flash-LED Blitz")
         except Exception as e:
-            logger.debug(f"[LEARNER] Flash-LED Fehler: {e}")
+            logger.warning(f"[LEARNER] Flash-LED AN Fehler: {e}")
+        finally:
+            # IMMER zuruecksetzen - verhindert haengende weisse LED
+            try:
+                self._cloud.run(self._cloud.bridge.set_night('day'))
+            except Exception as e2:
+                logger.error(f"[LEARNER] Flash-LED AUS Fehler (LED koennte haengen!): {e2}")
+        logger.info("[LEARNER] Flash-LED Blitz")
 
     def _announce_person(self, name):
         """Person erkannt - Log (LED wird vom Indikator gesteuert)."""
@@ -2634,10 +2642,12 @@ class MolochService:
         try:
             ho = data.get("hand_occlusion", {})
             if ho:
+                self._hand_occlusion_enabled = bool(ho.get("enabled", False))
                 self._saved_hand_timeout = float(ho.get("timeout", 5.0))
                 self._saved_hand_streak = int(ho.get("streak", 3))
                 self._saved_hand_recency = float(ho.get("recency", 2.0))
-                logger.info(f"[SETTINGS] Hand-Occlusion: timeout={self._saved_hand_timeout} "
+                logger.info(f"[SETTINGS] Hand-Occlusion: enabled={self._hand_occlusion_enabled} "
+                            f"timeout={self._saved_hand_timeout} "
                             f"streak={self._saved_hand_streak} recency={self._saved_hand_recency}")
         except Exception as e:
             logger.warning(f"[SETTINGS] Hand-Occlusion-Fehler: {e}")
@@ -2709,6 +2719,7 @@ class MolochService:
         # Hand-Occlusion
         if self._perception:
             data["hand_occlusion"] = {
+                "enabled": self._hand_occlusion_enabled,
                 "timeout": round(self._perception._HAND_TIMEOUT, 1),
                 "streak": self._perception._MIN_FACE_STREAK,
                 "recency": round(self._perception._FACE_RECENCY, 1),
