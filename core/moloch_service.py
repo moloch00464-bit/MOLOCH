@@ -182,6 +182,15 @@ class MolochService:
         except Exception as e:
             logger.warning(f"[INIT] DailyLearner nicht verfuegbar: {e}")
 
+        # Voice Pipeline (PTT -> Whisper -> Claude -> TTS)
+        self._voice_pipeline = None
+        try:
+            from core.voice_pipeline import VoicePipeline
+            self._voice_pipeline = VoicePipeline()
+            logger.info("[INIT] Voice Pipeline bereit")
+        except Exception as e:
+            logger.warning(f"[INIT] Voice Pipeline nicht verfuegbar: {e}")
+
         # Persistent Model Contexts
         self._active_ctx = {}
         self._ctx_lock = threading.Lock()
@@ -2159,6 +2168,7 @@ class MolochService:
                     "agc_enabled": getattr(self, '_saved_agc', False),
                     "level": getattr(self, '_audio_level', 0.0),
                 },
+                "voice": self._voice_pipeline.get_state() if self._voice_pipeline else {},
             }
             if self._perception:
                 status["perception"] = self._perception.get_state()
@@ -2383,6 +2393,47 @@ class MolochService:
                     logger.info(f"[IPC] Cloud sync: {status}")
             except Exception as e:
                 logger.error(f"[IPC] Cloud sync failed: {e}")
+
+        # ---- Voice Pipeline Commands ----
+
+        elif action == 'ptt_start':
+            if self._voice_pipeline:
+                self._voice_pipeline.start_recording()
+                logger.info("[IPC] PTT: Aufnahme gestartet")
+
+        elif action == 'ptt_stop':
+            if self._voice_pipeline:
+                self._voice_pipeline.stop_recording()
+                logger.info("[IPC] PTT: Aufnahme gestoppt, verarbeite...")
+
+        elif action == 'chat_message':
+            text = cmd.get('text', '').strip()
+            if text and self._voice_pipeline:
+                self._voice_pipeline.process_text_message(text)
+                logger.info(f"[IPC] Chat: '{text[:50]}...'")
+
+        elif action == 'toggle_voice_output':
+            if self._voice_pipeline:
+                enabled = cmd.get('enabled')
+                self._voice_pipeline.toggle_voice(enabled)
+                logger.info(f"[IPC] Voice Output: {enabled}")
+
+        elif action == 'set_voice':
+            voice_id = cmd.get('voice_id', '')
+            if voice_id and self._voice_pipeline:
+                self._voice_pipeline.set_voice(voice_id)
+                logger.info(f"[IPC] Voice: {voice_id}")
+
+        elif action == 'voice_test':
+            if self._voice_pipeline:
+                text = cmd.get('text', 'Moloch ist online.')
+                self._voice_pipeline.test_voice(text)
+                logger.info(f"[IPC] Voice Test: '{text[:50]}'")
+
+        elif action == 'voice_reset':
+            if self._voice_pipeline:
+                self._voice_pipeline.reset_conversation()
+                logger.info("[IPC] Voice: Konversation zurueckgesetzt")
 
     # ----------------------------------------------------------------
     # Settings Persistence

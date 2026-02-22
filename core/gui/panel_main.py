@@ -61,6 +61,12 @@ try:
 except Exception:
     _TALKCHAT_OK = False
 
+try:
+    from core.gui.panel_voice import VoiceModule
+    _VOICE_OK = True
+except Exception:
+    _VOICE_OK = False
+
 
 # =============================================================================
 # ServiceProxy — IPC zum M.O.L.O.C.H. Backend
@@ -426,6 +432,19 @@ class MolochPanel:
         else:
             tk.Label(self.frame_chat, text="Modul nicht geladen: TalkChat",
                      bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL).pack(pady=20)
+
+        # (F) Voice -> frame_chat (unter TalkChat)
+        if _VOICE_OK:
+            try:
+                VoiceModule(self.frame_chat, self.service)
+                self.logger.info("Modul geladen: Voice")
+            except Exception as e:
+                self.logger.error(f"Voice fehlgeschlagen: {e}")
+                tk.Label(self.frame_chat, text="Modul nicht geladen: Voice",
+                         bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL).pack(pady=5)
+        else:
+            tk.Label(self.frame_chat, text="Modul nicht geladen: Voice",
+                     bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL).pack(pady=5)
 
     def _on_close(self):
         """Fenster schliessen: Preview stoppen, dann beenden."""
