@@ -194,10 +194,10 @@ class MolochService:
 
         # LED Erkennungs-Indikator State
         self._led_indicator_state = False  # Aktueller Zustand (vermeidet doppelte API-Calls)
-        self._led_blinking = False  # True waehrend Blink-Sequenz laeuft
-        self._led_blink_lock = threading.Lock()
-        self._led_markus_last_blink = 0  # Cooldown-Timestamp
-        self._LED_BLINK_COOLDOWN = 10  # Sekunden zwischen Blink-Events
+        self._led_markus_on = False  # Standlicht: LED an weil Markus sichtbar
+        self._led_markus_last_seen = 0  # Letzter Erkennungs-Timestamp
+        self._LED_MARKUS_TIMEOUT = 30  # Sekunden bis LED aus nach letzter Erkennung
+        self._led_markus_timer = None  # Timer-Thread fuer Timeout
 
         # Cross-process NPU pause
         self._paused_models = []
@@ -1057,7 +1057,7 @@ class MolochService:
 
             # === LED Erkennungs-Indikator ===
             if _markus_recognized:
-                self._led_indicator_blink_markus()
+                self._led_indicator_markus_seen()
             elif face_detected or _persons_detected:
                 self._led_indicator_set(True)
             elif not self._moloch_has_control:
@@ -1071,8 +1071,9 @@ class MolochService:
                 else:
                     self._hand_no_detect += 1
                     if self._hand_no_detect >= self._HAND_RELEASE_FRAMES:
-                        logger.info(f"[AUTO-SWITCH] {self._HAND_RELEASE_FRAMES} Frames keine Hand -> Auto-Scoring")
-                        self._perception.force_models(None)
+                        if not self._manual_mode:
+                            logger.info(f"[AUTO-SWITCH] {self._HAND_RELEASE_FRAMES} Frames keine Hand -> Auto-Scoring")
+                            self._perception.force_models(None)
                         self._hand_no_detect = 0
 
             # Total FPS
@@ -1755,8 +1756,11 @@ class MolochService:
         threading.Thread(target=do_blink, daemon=True).start()
 
     def _led_indicator_set(self, on: bool):
-        """LED Indikator: Setzt LED nur bei State-Aenderung (vermeidet API-Spam)."""
-        if self._led_blinking:
+        """LED Indikator: Setzt LED nur bei State-Aenderung (vermeidet API-Spam).
+
+        Markus-Standlicht hat Prioritaet: wenn _led_markus_on, wird LED nicht ausgeschaltet.
+        """
+        if not on and self._led_markus_on:
             return
         if on == self._led_indicator_state:
             return
@@ -1766,33 +1770,29 @@ class MolochService:
         else:
             self._led_off()
 
-    def _led_indicator_blink_markus(self):
-        """3x Blink fuer Markus-Erkennung (eigener Thread, 10s Cooldown)."""
-        now = time.time()
-        if now - self._led_markus_last_blink < self._LED_BLINK_COOLDOWN:
-            return
-        with self._led_blink_lock:
-            if self._led_blinking:
-                return
-            self._led_blinking = True
-        self._led_markus_last_blink = now
-        logger.info("[LED] Markus erkannt -> 3x Blink")
+    def _led_indicator_markus_seen(self):
+        """Markus erkannt: LED an (Standlicht), Timer reset."""
+        self._led_markus_last_seen = time.time()
+        if not self._led_markus_on:
+            self._led_markus_on = True
+            self._led_indicator_state = True
+            self._led_on()
+            logger.info("[LED] Markus erkannt -> Standlicht AN")
+        # Timer (re)starten
+        if self._led_markus_timer:
+            self._led_markus_timer.cancel()
+        self._led_markus_timer = threading.Timer(
+            self._LED_MARKUS_TIMEOUT, self._led_markus_timeout)
+        self._led_markus_timer.daemon = True
+        self._led_markus_timer.start()
 
-        def do_blink():
-            try:
-                # AN-AUS-AN-AUS-AN (3 Flashes, endet AN = Standlicht)
-                for _ in range(2):
-                    self._led_on()
-                    time.sleep(0.3)
-                    self._led_off()
-                    time.sleep(0.3)
-                self._led_on()
-                self._led_indicator_state = True
-            finally:
-                with self._led_blink_lock:
-                    self._led_blinking = False
-
-        threading.Thread(target=do_blink, daemon=True, name="LEDBlinkMarkus").start()
+    def _led_markus_timeout(self):
+        """30s ohne Markus: LED aus."""
+        if time.time() - self._led_markus_last_seen >= self._LED_MARKUS_TIMEOUT - 1:
+            self._led_markus_on = False
+            self._led_indicator_state = False
+            self._led_off()
+            logger.info("[LED] Markus 30s nicht gesehen -> Standlicht AUS")
 
     # =========================================================================
     # Face Recognition

@@ -78,6 +78,8 @@ class HardwarePopup:
 
         # Toplevel erstellen
         self.win = tk.Toplevel(parent)
+        self.win.attributes('-topmost', True)
+        self.win.transient(parent)
         self.win.title("Hardware Monitor \u2014 Pi5")
         self.win.configure(bg=BG_DARK)
         self.win.geometry("380x510")

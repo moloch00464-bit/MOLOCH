@@ -82,6 +82,8 @@ class AudioPopup:
 
         # Toplevel erstellen
         self.win = tk.Toplevel(parent)
+        self.win.attributes('-topmost', True)
+        self.win.transient(parent)
         self.win.title("Audio \u2014 ReSpeaker Lite")
         self.win.configure(bg=BG_DARK)
         self.win.geometry("400x470")

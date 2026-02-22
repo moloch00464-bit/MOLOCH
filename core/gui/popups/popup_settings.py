@@ -68,6 +68,8 @@ class SettingsPopup(tk.Toplevel):
         super().__init__(parent)
         self._service = service_proxy
 
+        self.attributes('-topmost', True)
+        self.transient(parent)
         self.title("Settings — config/settings.json")
         self.configure(bg=BG_DARK)
         self.geometry("520x560")

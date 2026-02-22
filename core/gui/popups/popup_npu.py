@@ -69,6 +69,8 @@ class NpuThreshPopup:
 
         # Toplevel erstellen
         self.win = tk.Toplevel(parent)
+        self.win.attributes('-topmost', True)
+        self.win.transient(parent)
         self.win.title("NPU Thresholds \u2014 Hailo-10H")
         self.win.configure(bg=BG_DARK)
         self.win.geometry("400x440")

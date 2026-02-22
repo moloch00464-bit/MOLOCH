@@ -99,6 +99,8 @@ class SnapshotGallery:
 
         # Toplevel erstellen
         self.win = tk.Toplevel(parent)
+        self.win.attributes('-topmost', True)
+        self.win.transient(parent)
         self.win.title("M.O.L.O.C.H. Galerie")
         self.win.configure(bg=BG_DARK)
         self.win.geometry("560x650")
