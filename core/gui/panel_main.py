@@ -276,8 +276,8 @@ class MolochPanel:
 
         # Spalten konfigurieren
         main_frame.columnconfigure(0, weight=0)  # Kamera: feste Breite
-        main_frame.columnconfigure(1, weight=3)  # Steuerung: mehr Platz
-        main_frame.columnconfigure(2, weight=2)  # Chat: weniger Platz
+        main_frame.columnconfigure(1, weight=3, minsize=350)  # Steuerung: mehr Platz, nie kleiner als 350px
+        main_frame.columnconfigure(2, weight=1)  # Chat: minimal
         main_frame.rowconfigure(0, weight=1)
 
         # --- Spalte Links: Kamera Preview ---
@@ -329,7 +329,7 @@ class MolochPanel:
             fg=FG_LABEL,
             font=FONT_TITLE,
         )
-        self.frame_chat.grid(row=0, column=2, sticky="nsew", padx=(3, 0))
+        self.frame_chat.grid(row=0, column=2, sticky="nsew", padx=(10, 10), ipadx=5)
 
         # Platzhalter
         tk.Label(
