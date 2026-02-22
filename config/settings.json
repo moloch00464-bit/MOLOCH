@@ -7,9 +7,9 @@
     "yolo_conf": 0.5
   },
   "hand_occlusion": {
-    "timeout": 4.0,
-    "streak": 7,
-    "recency": 2.5
+    "timeout": 6.0,
+    "streak": 5,
+    "recency": 4.0
   },
   "audio": {
     "mic_gain": 1.08,
@@ -22,7 +22,7 @@
     "ir_mode": "Aus"
   },
   "active_models": [
-    "scrfd",
+    "yolov8m",
     "hand_landmark"
   ]
 }

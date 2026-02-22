@@ -38,10 +38,10 @@ SETTINGS_PATH = os.path.expanduser("~/moloch/config/settings.json")
 
 # Threshold Definitionen: (Anzeigename, settings-key, min, max, default, schritt)
 THRESHOLD_DEFS = [
-    ("SCRFD Erkennungsschwelle", "scrfd_conf", 0.1, 0.9, 0.5, 0.05),
-    ("SCRFD Überlappungsfilter", "scrfd_nms", 0.1, 0.9, 0.4, 0.05),
+    ("SCRFD Erkennung", "scrfd_conf", 0.1, 0.9, 0.5, 0.05),
+    ("SCRFD Überlappung", "scrfd_nms", 0.1, 0.9, 0.4, 0.05),
     ("ArcFace Ähnlichkeit", "arcface_thresh", 0.3, 0.9, 0.6, 0.05),
-    ("YOLOv8m Erkennungsschwelle", "yolo_conf", 0.1, 0.9, 0.5, 0.05),
+    ("YOLOv8m Erkennung", "yolo_conf", 0.1, 0.9, 0.5, 0.05),
 ]
 
 # Hand-Occlusion Definitionen: (Anzeigename, settings-key, min, max, default, schritt, einheit)

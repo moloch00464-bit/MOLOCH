@@ -276,8 +276,8 @@ class MolochPanel:
 
         # Spalten konfigurieren
         main_frame.columnconfigure(0, weight=0)  # Kamera: feste Breite
-        main_frame.columnconfigure(1, weight=1)  # Steuerung: flexibel
-        main_frame.columnconfigure(2, weight=1)  # Chat: flexibel
+        main_frame.columnconfigure(1, weight=3)  # Steuerung: mehr Platz
+        main_frame.columnconfigure(2, weight=2)  # Chat: weniger Platz
         main_frame.rowconfigure(0, weight=1)
 
         # --- Spalte Links: Kamera Preview ---

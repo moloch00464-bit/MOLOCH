@@ -438,10 +438,13 @@ def draw_hand_landmarks(frame: np.ndarray, hand_result: Dict,
             cv2.circle(frame, (px, py), 4, color, -1)
 
     # Handedness Label am Wrist
+    h_frame, w_frame = frame.shape[:2]
+    font_scale = max(0.5, h_frame / 720)
+    thickness = max(1, int(h_frame / 540))
     wx, wy = pts[0]
     label = f"Hand-{handedness} ({presence:.0%})"
-    cv2.putText(frame, label, (wx - 30, wy + 25),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_HAND, 2)
+    cv2.putText(frame, label, (wx - 30, wy + int(25 * font_scale)),
+                cv2.FONT_HERSHEY_SIMPLEX, font_scale, COLOR_HAND, thickness)
 
 
 # ============================================================
@@ -522,21 +525,25 @@ def draw_faces(frame: np.ndarray, boxes: np.ndarray, scores: np.ndarray,
                landmarks: np.ndarray, scale_x: float, scale_y: float):
     """Zeichne Face-Boxen + Landmarks auf Frame (BGR)."""
     h, w = frame.shape[:2]
+    font_scale = max(0.5, h / 720)
+    thickness = max(1, int(h / 540))
+    box_thick = max(2, int(3 * font_scale))
+    lm_radius = max(2, int(3 * font_scale))
     for i in range(len(boxes)):
         x1 = int(boxes[i, 0] * w)
         y1 = int(boxes[i, 1] * h)
         x2 = int(boxes[i, 2] * w)
         y2 = int(boxes[i, 3] * h)
         conf = scores[i]
-        cv2.rectangle(frame, (x1, y1), (x2, y2), COLOR_FACE, 3)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), COLOR_FACE, box_thick)
         cv2.putText(frame, f"{conf:.2f}", (x1, y1 - 5),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_FACE, 1)
+                    cv2.FONT_HERSHEY_SIMPLEX, font_scale, COLOR_FACE, thickness)
         # 5 Landmarks
         lm = landmarks[i]
         for p in range(5):
             lx = int(lm[p * 2] * w)
             ly = int(lm[p * 2 + 1] * h)
-            cv2.circle(frame, (lx, ly), 2, (0, 255, 255), -1)
+            cv2.circle(frame, (lx, ly), lm_radius, (0, 255, 255), -1)
 
 
 def estimate_head_pose(landmarks_5: np.ndarray, frame_w: int, frame_h: int):
@@ -604,6 +611,8 @@ def draw_name(frame: np.ndarray, box: np.ndarray, name: str,
               gender: str = None, age_range: str = None,
               head_pose: tuple = None):
     """Zeichne Namen + Emotion + Age/Gender unter Face-Box."""
+    font_scale = max(0.5, h / 720)
+    thickness = max(1, int(h / 540))
     x1 = int(box[0] * w)
     y2 = int(box[3] * h)
     label = f"{name} ({similarity:.0%})" if name != "Unbekannt" else "Unbekannt"
@@ -615,14 +624,17 @@ def draw_name(frame: np.ndarray, box: np.ndarray, name: str,
         _p, _y, _r = head_pose
         label += f" P{_p:.0f}/Y{_y:.0f}/R{_r:.0f}"
     color = COLOR_NAME if name != "Unbekannt" else (0, 0, 255)
-    cv2.putText(frame, label, (x1, y2 + 18),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+    cv2.putText(frame, label, (x1, y2 + int(25 * font_scale)),
+                cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness)
 
 
 def draw_persons(frame: np.ndarray, detections: List[Dict],
                  scale_x: float, scale_y: float):
     """Zeichne Person-Boxen (normalized coords)."""
     h, w = frame.shape[:2]
+    font_scale = max(0.5, h / 720)
+    thickness = max(1, int(h / 540))
+    box_thick = max(2, int(3 * font_scale))
     for det in detections:
         bx = det["bbox"]
         x1 = int(bx[0] * w)
@@ -630,15 +642,19 @@ def draw_persons(frame: np.ndarray, detections: List[Dict],
         x2 = int(bx[2] * w)
         y2 = int(bx[3] * h)
         conf = det["confidence"]
-        cv2.rectangle(frame, (x1, y1), (x2, y2), COLOR_PERSON, 3)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), COLOR_PERSON, box_thick)
         cv2.putText(frame, f"Person {conf:.2f}", (x1, y1 - 5),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_PERSON, 1)
+                    cv2.FONT_HERSHEY_SIMPLEX, font_scale, COLOR_PERSON, thickness)
 
 
 def draw_poses(frame: np.ndarray, poses: List[Dict],
                scale_x: float, scale_y: float, joint_thresh: float = 0.3):
     """Zeichne NUR Body-Pose: Box + Skeleton + Keypoints (OHNE Hand-Specials)."""
     h, w = frame.shape[:2]
+    font_scale = max(0.5, h / 720)
+    thickness = max(1, int(h / 540))
+    box_thick = max(2, int(3 * font_scale))
+    kpt_radius = max(2, int(4 * font_scale))
     for pose in poses:
         # Box (in model pixels 640x640 -> frame pixels)
         bx = pose["bbox"]
@@ -646,9 +662,9 @@ def draw_poses(frame: np.ndarray, poses: List[Dict],
         y1 = int(bx[1] * scale_y)
         x2 = int(bx[2] * scale_x)
         y2 = int(bx[3] * scale_y)
-        cv2.rectangle(frame, (x1, y1), (x2, y2), COLOR_POSE_BOX, 3)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), COLOR_POSE_BOX, box_thick)
         cv2.putText(frame, f"Pose {pose['score']:.2f}", (x1, y1 - 5),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_POSE_BOX, 1)
+                    cv2.FONT_HERSHEY_SIMPLEX, font_scale, COLOR_POSE_BOX, thickness)
 
         # Keypoints
         kpts = pose["keypoints"]  # (17, 3) in model pixels
@@ -659,7 +675,7 @@ def draw_poses(frame: np.ndarray, poses: List[Dict],
             vis = kpts[ki, 2]
             pts.append((kx, ky, vis))
             if vis > joint_thresh:
-                cv2.circle(frame, (kx, ky), 4, COLOR_KEYPOINT, -1)
+                cv2.circle(frame, (kx, ky), kpt_radius, COLOR_KEYPOINT, -1)
 
         # Skeleton-Linien
         for j0, j1 in SKELETON_PAIRS:
@@ -675,6 +691,11 @@ def draw_hands(frame: np.ndarray, poses: List[Dict],
     Wrist-Indices: 9 (links), 10 (rechts) aus COCO-17.
     Grosse Kreise + HAND-L/R Label.
     """
+    h, w = frame.shape[:2]
+    font_scale = max(0.5, h / 720)
+    thickness = max(1, int(h / 540))
+    circle_r = max(8, int(12 * font_scale))
+    circle_thick = max(2, int(3 * font_scale))
     WRIST_INDICES = (9, 10)
     for pose in poses:
         kpts = pose["keypoints"]  # (17, 3) in model pixels
@@ -683,7 +704,7 @@ def draw_hands(frame: np.ndarray, poses: List[Dict],
             ky = int(kpts[ki, 1] * scale_y)
             vis = kpts[ki, 2]
             if vis > joint_thresh:
-                cv2.circle(frame, (kx, ky), 12, COLOR_HAND, 3)
+                cv2.circle(frame, (kx, ky), circle_r, COLOR_HAND, circle_thick)
                 side = "L" if ki == 9 else "R"
                 cv2.putText(frame, f"HAND-{side}", (kx + 14, ky + 5),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_HAND, 2)
+                            cv2.FONT_HERSHEY_SIMPLEX, font_scale, COLOR_HAND, thickness)
