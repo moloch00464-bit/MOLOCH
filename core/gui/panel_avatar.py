@@ -7,7 +7,7 @@ HAL-9000 inspiriertes mechanisches Auge als Core State Visualisierung.
 Tkinter Canvas Widget, 300x300 Pixel.
 
 Mapping:
-  TENSION  -> Ring-Farbe + Glow (Guardian=Blau, Shadow=Lila, Berserker=Rot)
+  TENSION  -> Ring-Farbe + Glow (Guardian=Blau, Shadow=Weiss, Berserker=Rot)
   ATTENTION -> Pupille + Blinzeln
   PRESENCE  -> Gesamthelligkeit
 
@@ -25,18 +25,18 @@ from core.gui.panel_styles import BG_DARK, BG_FRAME, FG_DIM, FONT_SMALL
 # =============================================================================
 # Farb-Konstanten pro Zone
 # =============================================================================
-COLOR_GUARDIAN = "#00BFFF"   # Blau
-COLOR_SHADOW = "#9933FF"     # Lila
+COLOR_GUARDIAN = "#0066FF"   # Blau
+COLOR_SHADOW = "#FFFFFF"     # Weiss
 COLOR_BERSERKER = "#FF0000"  # Rot
 
 # Abgedunkelte Versionen fuer Ring-Aussen
-COLOR_GUARDIAN_DIM = "#005577"
-COLOR_SHADOW_DIM = "#441177"
+COLOR_GUARDIAN_DIM = "#003388"
+COLOR_SHADOW_DIM = "#888888"
 COLOR_BERSERKER_DIM = "#770000"
 
 # Iris-Farben (heller als Ring)
-COLOR_GUARDIAN_IRIS = "#33DDFF"
-COLOR_SHADOW_IRIS = "#BB66FF"
+COLOR_GUARDIAN_IRIS = "#3388FF"
+COLOR_SHADOW_IRIS = "#FFFFFF"
 COLOR_BERSERKER_IRIS = "#FF3333"
 
 # Animation
@@ -204,7 +204,7 @@ class AvatarModule:
             y1 = CENTER + math.sin(angle) * (ring_outer_r - 8)
             x2 = CENTER + math.cos(angle) * (ring_outer_r + 8)
             y2 = CENTER + math.sin(angle) * (ring_outer_r + 8)
-            c.create_line(x1, y1, x2, y2, fill=ring_color, width=1)
+            c.create_line(x1, y1, x2, y2, fill="#888888", width=1)
 
         # === IRIS (gefuellter Kreis) ===
         iris_r = int(55 * brightness)
@@ -223,10 +223,9 @@ class AvatarModule:
         if now < self._flash_until:
             base_pupil = 10  # Berserker-Flash: Pupille verengt
         pupil_r = int(base_pupil * brightness)
-        pupil_color = _scale_color(color_main, brightness)
         c.create_oval(
             ix - pupil_r, iy - pupil_r, ix + pupil_r, iy + pupil_r,
-            fill=pupil_color, outline="", width=0,
+            fill="#000000", outline="", width=0,
         )
 
         # Pupillen-Highlight (Lichtreflex)
