@@ -22,6 +22,7 @@ import json
 import os
 import threading
 import logging
+from datetime import datetime
 from typing import Dict, Optional
 
 _logger = logging.getLogger("CoreIntegrator")
@@ -255,9 +256,40 @@ class CoreIntegrator:
                 _logger.error(f"[CORE] Tick-Fehler: {e}")
             time.sleep(1.0)
 
+    def _get_time_period(self) -> str:
+        """Aktuelle Tageszeit-Periode bestimmen."""
+        hour = datetime.now().hour
+        if 6 <= hour < 12:
+            return "morgens"
+        elif 12 <= hour < 17:
+            return "mittags"
+        elif 17 <= hour < 22:
+            return "abends"
+        else:
+            return "nachts"
+
     def _tick(self):
         """Ein Tick: Inputs sammeln, Achsen berechnen, Effekte ableiten."""
         with self._lock:
+            # Tageszeit-Input automatisch einspeisen
+            hour = datetime.now().hour
+            period = self._get_time_period()
+
+            # Zeit-basierte Modifikatoren
+            if "time" not in self._inputs:
+                self._inputs["time"] = {}
+
+            if period == "nachts":
+                # Nachts: Presence auf 0, Tension sinkt
+                self._inputs["time"]["time_since_interaction"] = 1.0  # Presence soll sinken
+                self._inputs["time"]["user_proximity"] = 0.0
+            elif period == "morgens":
+                # Morgens: Langsam hochfahren, Guardian bevorzugt
+                self._inputs["time"]["environmental_stress"] = 0.0
+            elif period == "abends":
+                # Abends: Ruhiger, Tension sinkt natuerlich
+                self._inputs["time"]["environmental_stress"] = 0.0
+
             # Snapshot der Inputs (Thread-safe)
             all_inputs = {}
             for source, data in self._inputs.items():
@@ -297,6 +329,16 @@ class CoreIntegrator:
             self._presence = _clamp(
                 self._presence * self.DECAY_PRESENCE + presence_impulse * 0.3
             )
+
+            # --- Nachtsperre: Presence auf 0 druecken (22:00-06:00) ---
+            if period == "nachts":
+                self._presence *= 0.8  # Schneller Decay nachts
+                if self._presence < 0.05:
+                    self._presence = 0.0
+
+            # --- Abends: Tension sinkt natuerlich schneller ---
+            if period == "abends":
+                self._tension *= 0.97  # Zusaetzlicher Decay abends
 
             # --- Effekte ableiten ---
             self._effects = self._compute_effects()
@@ -366,6 +408,10 @@ class CoreIntegrator:
     # Status-Export (fuer /dev/shm/moloch_status.json)
     # =========================================================================
 
+    def get_time_period(self) -> str:
+        """Aktuelle Tageszeit als Public API (morgens/mittags/abends/nachts)."""
+        return self._get_time_period()
+
     def get_status_dict(self) -> Dict:
         """Kompaktes Status-Dict fuer SHM-Export."""
         with self._lock:
@@ -374,6 +420,7 @@ class CoreIntegrator:
                 "attention": round(self._attention, 4),
                 "presence": round(self._presence, 4),
                 "zone": self._zone_unlocked(),
+                "time_period": self._get_time_period(),
                 "effects": {k: round(v, 3) for k, v in self._effects.items()},
                 "tick": self._tick_count,
             }

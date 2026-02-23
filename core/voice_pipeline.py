@@ -131,6 +131,12 @@ class VoicePipeline:
         self._msg_counter = 0
         self._msg_lock = threading.Lock()
 
+        # Spontane Kommentare State
+        self._spontaneous_cooldown = 600  # 10 Minuten
+        self._last_spontaneous = 0.0
+        self._spontaneous_thread = None
+        self._spontaneous_running = False
+
         # Init
         self._init_claude()
         logger.info(f"[VOICE] Pipeline init: claude={self._claude_available}, "
@@ -330,7 +336,7 @@ class VoicePipeline:
             self._conversation = self._conversation[-10:]
 
         try:
-            # System-Prompt mit Memory-Kontext anreichern
+            # System-Prompt mit Memory-Kontext und Personality-Zone anreichern
             system = self._system_prompt
             try:
                 memory_ctx = get_memory().get_memory_context()
@@ -338,6 +344,21 @@ class VoicePipeline:
                     system = system + "\n\n--- LANGZEITGEDAECHTNIS ---\n" + memory_ctx
             except Exception as e:
                 logger.error(f"[VOICE] Memory-Kontext laden fehlgeschlagen: {e}")
+
+            # Personality Zone vom CoreIntegrator
+            try:
+                from core.personality.personality_engine import get_personality_engine
+                pe = get_personality_engine()
+                pe.update_from_integrator()  # Zone aktualisieren
+                zone_addon = pe.get_zone_system_prompt_addon()
+                if zone_addon:
+                    system = system + zone_addon
+                # Stimme an aktuelle Zone anpassen
+                vc = pe.voice_config
+                self._current_voice = vc.voice_id
+                self._length_scale = vc.speed
+            except Exception as e:
+                logger.debug(f"[VOICE] Personality-Zone nicht verfuegbar: {e}")
 
             response = self._claude_client.messages.create(
                 model="claude-sonnet-4-20250514",
@@ -577,6 +598,143 @@ class VoicePipeline:
         """Konversation zuruecksetzen."""
         self._conversation.clear()
         logger.info("[VOICE] Konversation zurueckgesetzt")
+
+    # =========================================================================
+    # Spontane Kommentare (CoreIntegrator-gesteuert)
+    # =========================================================================
+
+    def start_spontaneous_monitor(self):
+        """Spontane-Kommentare-Monitor starten (separater Thread, prueft alle 30s)."""
+        if self._spontaneous_running:
+            return
+        self._spontaneous_running = True
+        self._spontaneous_thread = threading.Thread(
+            target=self._spontaneous_loop, daemon=True, name="SpontaneousComments"
+        )
+        self._spontaneous_thread.start()
+        logger.info("[VOICE] Spontane-Kommentare-Monitor gestartet")
+
+    def stop_spontaneous_monitor(self):
+        """Monitor stoppen."""
+        self._spontaneous_running = False
+
+    def _spontaneous_loop(self):
+        """Prueft alle 30s ob Moloch spontan kommentieren soll."""
+        while self._spontaneous_running:
+            try:
+                self._check_spontaneous()
+            except Exception as e:
+                logger.error(f"[SPONTAN] Fehler: {e}")
+            time.sleep(30)
+
+    def _check_spontaneous(self):
+        """Pruefe ob Bedingungen fuer spontanen Kommentar erfuellt sind."""
+        # Cooldown pruefen
+        if time.time() - self._last_spontaneous < self._spontaneous_cooldown:
+            return
+
+        # Nicht waehrend Recording/Speaking/Processing
+        if self._recording or self._speaking or self._processing:
+            return
+
+        # CoreIntegrator pruefen
+        try:
+            from core.core_integrator import get_core_integrator
+            ci = get_core_integrator()
+            effects = ci.get_effects()
+            state = ci.get_state()
+        except Exception:
+            return
+
+        spontaneous = effects.get("spontaneous_comments", 0.0)
+        presence = state.get("presence", 0.0)
+
+        # Schwellwerte: spontaneous > 0.7 UND presence > 0.5
+        if spontaneous < 0.7 or presence < 0.5:
+            return
+
+        # Nur wenn Markus erkannt (aus Face State pruefen)
+        markus_visible = False
+        try:
+            face_state_path = "/tmp/moloch_face_state.json"
+            if os.path.exists(face_state_path):
+                with open(face_state_path, "r") as f:
+                    fs = json.load(f)
+                # Markus muss in den letzten 30s erkannt worden sein
+                if fs.get("name") == "Markus" and time.time() - fs.get("timestamp", 0) < 30:
+                    markus_visible = True
+        except Exception:
+            pass
+
+        if not markus_visible:
+            return
+
+        # Nachtsperre: 22:00 - 06:00 keine spontanen Kommentare
+        from datetime import datetime
+        hour = datetime.now().hour
+        if hour >= 22 or hour < 6:
+            return
+
+        # Claude API fuer spontanen Kommentar nutzen
+        logger.info(f"[SPONTAN] Bedingungen erfuellt: spontaneous={spontaneous:.2f} presence={presence:.2f}")
+        self._generate_spontaneous_comment(state)
+
+    def _generate_spontaneous_comment(self, integrator_state: dict):
+        """Spontanen Kommentar via Claude API generieren und sprechen."""
+        if not self._claude_available or not self._claude_client:
+            return
+
+        self._last_spontaneous = time.time()
+
+        # System-Prompt fuer spontanen Kommentar
+        system = """Du bist M.O.L.O.C.H. und machst einen kurzen, spontanen Kommentar.
+Du siehst Markus gerade ueber deine Kamera.
+Sage etwas Kurzes, Relevantes. MAX 1 Satz. Beispiele:
+- "Du bist schon wieder lange am Rechner."
+- "Interessantes Tracking heute."
+- "Alles ruhig hier. Mir ist fast langweilig."
+- "Na, Feierabend oder noch ne Runde?"
+Sei natuerlich. Kein erzwungener Humor. Situationsbezogen."""
+
+        # Memory-Kontext fuer Relevanz
+        try:
+            memory_ctx = get_memory().get_memory_context()
+            if memory_ctx:
+                system += "\n\n--- KONTEXT ---\n" + memory_ctx
+        except Exception:
+            pass
+
+        # Personality Zone
+        try:
+            from core.personality.personality_engine import get_personality_engine
+            pe = get_personality_engine()
+            zone_addon = pe.get_zone_system_prompt_addon()
+            if zone_addon:
+                system += zone_addon
+        except Exception:
+            pass
+
+        try:
+            response = self._claude_client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=80,
+                system=system,
+                messages=[{"role": "user", "content": "Spontaner Kommentar jetzt."}],
+            )
+            text = response.content[0].text.strip()
+            if text:
+                logger.info(f"[SPONTAN] Kommentar: {text}")
+                self._emit_message("MOLOCH", f"[spontan] {text}")
+                # Speichern
+                try:
+                    get_memory().save_message("moloch", text, source="spontaneous")
+                except Exception:
+                    pass
+                # Sprechen
+                if self._voice_enabled:
+                    self._speak(text)
+        except Exception as e:
+            logger.error(f"[SPONTAN] Claude API Fehler: {e}")
 
     def test_voice(self, text: str = "Moloch ist online. Sprach-Pipeline funktioniert."):
         """Voice Test — spricht Text direkt aus."""

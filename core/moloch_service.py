@@ -1926,11 +1926,23 @@ class MolochService:
         """LED Indikator: Setzt LED nur bei State-Aenderung (vermeidet API-Spam).
 
         Markus-Standlicht hat Prioritaet: wenn _led_markus_on, wird LED nicht ausgeschaltet.
+        CoreIntegrator: led_feedback_frequency steuert ob LED sofort oder verzoegert reagiert.
         """
         if not on and self._led_markus_on:
             return
         if on == self._led_indicator_state:
             return
+
+        # CoreIntegrator: Bei niedriger Attention LED-Feedback verzoegern
+        if on and self._core_integrator:
+            try:
+                led_freq = self._core_integrator.get_effects().get("led_feedback_frequency", 0.5)
+                # led_freq < 0.3 -> LED nicht sofort anschalten (verzoegern)
+                if led_freq < 0.3:
+                    return  # Ignorieren bei niedriger Attention
+            except Exception:
+                pass
+
         self._led_indicator_state = on
         if on:
             self._led_on()
@@ -1938,28 +1950,52 @@ class MolochService:
             self._led_off()
 
     def _led_indicator_markus_seen(self):
-        """Markus erkannt: LED an (Standlicht), Timer reset."""
+        """Markus erkannt: LED an (Standlicht), Timer reset.
+
+        CoreIntegrator: Berserker-Zone -> LED blinkt statt Standlicht.
+        """
         self._led_markus_last_seen = time.time()
+
+        # Berserker-Zone: LED blinken statt Standlicht
+        if self._core_integrator:
+            try:
+                zone = self._core_integrator.get_personality_zone()
+                if zone == "berserker":
+                    self._led_blink(count=3, interval=0.15)
+                    return
+            except Exception:
+                pass
+
         if not self._led_markus_on:
             self._led_markus_on = True
             self._led_indicator_state = True
             self._led_on()
             logger.info("[LED] Markus erkannt -> Standlicht AN")
+
+        # Timeout dynamisch anpassen: Hohe Attention -> laengerer Timeout
+        timeout = self._LED_MARKUS_TIMEOUT
+        if self._core_integrator:
+            try:
+                attention = self._core_integrator.get_attention()
+                # Hohe Attention: 45s, Niedrige: 15s
+                timeout = max(15, int(15 + attention * 30))
+            except Exception:
+                pass
+
         # Timer (re)starten
         if self._led_markus_timer:
             self._led_markus_timer.cancel()
-        self._led_markus_timer = threading.Timer(
-            self._LED_MARKUS_TIMEOUT, self._led_markus_timeout)
+        self._led_markus_timer = threading.Timer(timeout, self._led_markus_timeout)
         self._led_markus_timer.daemon = True
         self._led_markus_timer.start()
 
     def _led_markus_timeout(self):
-        """30s ohne Markus: LED aus."""
+        """Timeout ohne Markus: LED aus."""
         if time.time() - self._led_markus_last_seen >= self._LED_MARKUS_TIMEOUT - 1:
             self._led_markus_on = False
             self._led_indicator_state = False
             self._led_off()
-            logger.info("[LED] Markus 30s nicht gesehen -> Standlicht AUS")
+            logger.info("[LED] Markus nicht mehr gesehen -> Standlicht AUS")
 
     # =========================================================================
     # Face Recognition
@@ -2129,6 +2165,52 @@ class MolochService:
         threading.Thread(target=_reset_night_vision, daemon=True, name="NightVisionReset").start()
 
         threading.Thread(target=self._frozen_frame_watchdog, daemon=True, name="FrozenWatchdog").start()
+
+        # Spontane Kommentare Monitor starten (CoreIntegrator-gesteuert)
+        if self._voice_pipeline:
+            self._voice_pipeline.start_spontaneous_monitor()
+            logger.info("[START] Spontane-Kommentare-Monitor gestartet")
+
+        # Tageszeit-Begruessung (verzoegert, nach Cloud-Init)
+        def _startup_greeting():
+            time.sleep(15)  # Warten bis alles bereit ist
+            if not self._voice_pipeline or not self._voice_pipeline._voice_enabled:
+                return
+            try:
+                from core.core_integrator import get_core_integrator
+                period = get_core_integrator().get_time_period()
+                from core.personality.personality_engine import get_personality_engine
+                pe = get_personality_engine()
+
+                greetings = {
+                    "morgens": {
+                        "guardian": "Guten Morgen Markus. Systeme online.",
+                        "shadow": "Moin. Kaffee?",
+                        "berserker": "Aufstehen.",
+                    },
+                    "mittags": {
+                        "guardian": "Systeme laufen. Alles normal.",
+                        "shadow": "Na, auch mal wieder da?",
+                        "berserker": "Status: Online.",
+                    },
+                    "abends": {
+                        "guardian": "Guten Abend Markus. System bereit.",
+                        "shadow": "N'Abend. Feierabend-Runde?",
+                        "berserker": "Bin da.",
+                    },
+                    "nachts": {
+                        "guardian": "Nachtmodus aktiv. Ich halte Wache.",
+                        "shadow": "Nachtschicht. Wie immer.",
+                        "berserker": "Nacht.",
+                    },
+                }
+                zone = pe.mode.value
+                text = greetings.get(period, {}).get(zone, "Moloch online.")
+                self._voice_pipeline._speak(text)
+                logger.info(f"[START] Begruessung: '{text}' (period={period}, zone={zone})")
+            except Exception as e:
+                logger.debug(f"[START] Begruessung fehlgeschlagen: {e}")
+        threading.Thread(target=_startup_greeting, daemon=True, name="StartGreeting").start()
 
         if not blocking:
             return

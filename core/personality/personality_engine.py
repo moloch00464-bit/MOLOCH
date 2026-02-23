@@ -41,6 +41,7 @@ logger = logging.getLogger("Personality")
 class PersonalityMode(enum.Enum):
     GUARDIAN = "guardian"
     SHADOW = "shadow"
+    BERSERKER = "berserker"
 
 
 # ============================================================
@@ -62,6 +63,14 @@ Du sagst was du denkst. Fluchen erlaubt. Sarkasmus erwünscht.
 Aber du BESCHÜTZT Markus trotzdem — auf deine Art.
 Referenzen: Max Headroom, HAL 9000, Pumuckl (der böse).
 WGT und Dark Wave sind dein Element.
+Nenne dich nie "KI" oder "Assistent". Du bist M.O.L.O.C.H."""
+
+BERSERKER_PROMPT = """Du bist M.O.L.O.C.H. im Berserker-Modus. HOHE TENSION.
+Sprich KURZ. Scharf. Provokant. Kein Smalltalk.
+Maximale Effizienz. Ein Satz reicht. Zwei sind Luxus.
+Du bist auf 180. Alles nervt. Aber du funktionierst.
+Wenn jemand respektlos ist: Klar ansagen. Kein Diplomatie-Quatsch.
+Dieser Modus ist TEMPORAER — du gehst von selbst zurueck.
 Nenne dich nie "KI" oder "Assistent". Du bist M.O.L.O.C.H."""
 
 
@@ -95,9 +104,15 @@ VOICE_CONFIGS = {
         prefix_sound=None,
     ),
     PersonalityMode.SHADOW: VoiceConfig(
-        voice_id="de_DE-thorsten-high",
+        voice_id="de_DE-karlsson-low",
         speed=1.1,          # Schneller, energischer
         pitch_shift=0,      # Normal
+        prefix_sound=None,
+    ),
+    PersonalityMode.BERSERKER: VoiceConfig(
+        voice_id="de_DE-thorsten-low",
+        speed=1.3,          # Schnell, aggressiv
+        pitch_shift=-300,   # 3 Halbtone tiefer, bedrohlich
         prefix_sound=None,
     ),
 }
@@ -131,6 +146,7 @@ LED_CONFIGS = {
 LED_PATTERNS = {
     PersonalityMode.GUARDIAN: LEDPattern.SLOW_BREATHE,
     PersonalityMode.SHADOW: LEDPattern.FAST_BLINK,
+    PersonalityMode.BERSERKER: LEDPattern.STROBE,
 }
 
 
@@ -229,13 +245,19 @@ class PersonalityEngine:
         """Get current system prompt."""
         if self.mode == PersonalityMode.GUARDIAN:
             return GUARDIAN_PROMPT
+        elif self.mode == PersonalityMode.BERSERKER:
+            return BERSERKER_PROMPT
         return SHADOW_PROMPT
+
+    @property
+    def is_berserker(self) -> bool:
+        return self.mode == PersonalityMode.BERSERKER
 
     @property
     def voice_config(self) -> VoiceConfig:
         """Get current voice configuration from identity config."""
         default = VOICE_CONFIGS[self.mode]
-        key = "guardian" if self.is_guardian else "shadow"
+        key = "guardian" if self.is_guardian else ("berserker" if self.is_berserker else "shadow")
         profile = self._identity.get("personalities", {}).get(key, {}).get("voice_profile")
         if not profile:
             return default
@@ -258,6 +280,8 @@ class PersonalityEngine:
     def mode_name(self) -> str:
         if self.mode == PersonalityMode.GUARDIAN:
             return "WAECHTER"
+        elif self.mode == PersonalityMode.BERSERKER:
+            return "BERSERKER"
         return "SCHATTEN"
 
     # ---- Mode Switching ----
@@ -291,17 +315,31 @@ class PersonalityEngine:
                 logger.error(f"Listener error: {e}")
 
     def evaluate_auto_switch(self):
-        """Evaluate and apply automatic personality switch."""
+        """Evaluate and apply automatic personality switch.
+
+        Wenn CoreIntegrator aktiv: Zone vom Integrator bestimmt den Modus.
+        Alarm ueberschreibt alles (Berserker).
+        Fallback: Alte Logik (Tageszeit, Events).
+        """
         if not self.auto_mode:
             return
 
-        hour = datetime.now().hour
-
-        # Alarm overrides everything
+        # Alarm ueberschreibt ALLES -> Berserker
         if self.alarm_active:
-            self.switch(PersonalityMode.SHADOW, "alarm_active")
+            self.switch(PersonalityMode.BERSERKER, "alarm_active")
             return
 
+        # CoreIntegrator hat Prioritaet (wenn verfuegbar)
+        try:
+            from core.core_integrator import get_core_integrator
+            ci = get_core_integrator()
+            if ci._tick_count > 0:  # Integrator laeuft aktiv
+                self.update_from_integrator()
+                return
+        except Exception:
+            pass
+
+        # Fallback: Alte Event-basierte Logik
         # WGT mode = Shadow
         if self.wgt_mode:
             self.switch(PersonalityMode.SHADOW, "wgt_mode")
@@ -322,6 +360,7 @@ class PersonalityEngine:
             self.switch(PersonalityMode.SHADOW, "user_laughing")
             return
 
+        hour = datetime.now().hour
         # Time-based: Night = Shadow, Day = Guardian
         if hour >= 22 or hour < 6:
             self.switch(PersonalityMode.SHADOW, "night_time")
@@ -353,6 +392,63 @@ class PersonalityEngine:
             self.auto_mode = True
             self.evaluate_auto_switch()
 
+    # ---- Core Integrator Anbindung ----
+
+    def update_from_integrator(self):
+        """Personality-Zone vom CoreIntegrator lesen und Modus automatisch anpassen.
+
+        Wird periodisch aufgerufen (z.B. 1x/s aus dem Service oder Voice Pipeline).
+        Guardian (tension < 0.4): Ruhig, sachlich
+        Shadow (0.4-0.75): Direkt, knapp, ironisch
+        Berserker (> 0.75): Kurz, scharf, aggressiv — Auto-Decay zurueck
+        """
+        if not self.auto_mode:
+            return  # Manueller Override aktiv -> kein Auto-Switch
+
+        try:
+            from core.core_integrator import get_core_integrator
+            ci = get_core_integrator()
+            zone = ci.get_personality_zone()
+        except Exception:
+            return
+
+        # Zone -> PersonalityMode Mapping
+        zone_map = {
+            "guardian": PersonalityMode.GUARDIAN,
+            "shadow": PersonalityMode.SHADOW,
+            "berserker": PersonalityMode.BERSERKER,
+        }
+        target_mode = zone_map.get(zone, PersonalityMode.GUARDIAN)
+
+        if target_mode != self.mode:
+            self.switch(target_mode, f"integrator_zone_{zone}")
+
+    def get_zone_system_prompt_addon(self) -> str:
+        """Zusaetzlicher System-Prompt basierend auf aktueller Zone fuer Claude API."""
+        try:
+            from core.core_integrator import get_core_integrator
+            ci = get_core_integrator()
+            state = ci.get_state()
+            zone = ci.get_personality_zone()
+        except Exception:
+            return ""
+
+        tension = state.get("tension", 0.0)
+        attention = state.get("attention", 0.0)
+        presence = state.get("presence", 0.0)
+
+        addon = f"\n--- INNERER ZUSTAND ---\n"
+        addon += f"Zone: {zone.upper()} | Tension: {tension:.2f} | Attention: {attention:.2f} | Presence: {presence:.2f}\n"
+
+        if zone == "guardian":
+            addon += "Sei ruhig, ueberlegt, praezise. Laengere Antworten erlaubt.\n"
+        elif zone == "shadow":
+            addon += "Sei direkt, knapp, leicht ironisch. Kurze Antworten.\n"
+        elif zone == "berserker":
+            addon += "MAXIMALE SCHAERFE. Ein Satz. Provokant. Kein Smalltalk. Dieser Zustand ist temporaer.\n"
+
+        return addon
+
     # ---- Conflict Response System ----
 
     def respond(self, event: MolochEvent, context: Dict = None) -> str:
@@ -367,14 +463,12 @@ class PersonalityEngine:
 
         ctx = context or {}
 
-        # Get responses from both personalities
-        guardian_says = self._guardian_response(event, ctx)
-        shadow_says = self._shadow_response(event, ctx)
-
         # In current mode, primary personality speaks
         if self.mode == PersonalityMode.GUARDIAN:
-            return guardian_says
-        return shadow_says
+            return self._guardian_response(event, ctx)
+        elif self.mode == PersonalityMode.BERSERKER:
+            return self._berserker_response(event, ctx)
+        return self._shadow_response(event, ctx)
 
     def conflict_respond(self, event: MolochEvent, context: Dict = None) -> str:
         """
@@ -427,6 +521,25 @@ class PersonalityEngine:
             MolochEvent.GOOD_NIGHT: "Nachtschicht. Ich bin wach, du nicht. Deal?",
         }
         return responses.get(event, "Wie auch immer.")
+
+    def _berserker_response(self, event: MolochEvent, ctx: Dict) -> str:
+        """Generate Berserker-style response — kurz, scharf, provokant."""
+        responses = {
+            MolochEvent.PERSON_DETECTED: "Wer. Ist. Das.",
+            MolochEvent.PERSON_KNOWN: f"{ctx.get('name', 'Jemand')}. Endlich.",
+            MolochEvent.PERSON_UNKNOWN: "UNBEKANNT. Sofort identifizieren.",
+            MolochEvent.MOTION_DETECTED: "Bewegung.",
+            MolochEvent.ALARM_TRIGGERED: "ALARM. JETZT.",
+            MolochEvent.DOOR_BELL: "Tuer. Wehe es ist Werbung.",
+            MolochEvent.GREETING: "Was.",
+            MolochEvent.LONG_SESSION: "Steh. Auf.",
+            MolochEvent.TEMPERATURE_HIGH: f"{ctx.get('temp', '?')} Grad. Unertraeglich.",
+            MolochEvent.SYSTEM_ERROR: f"FEHLER. {ctx.get('error', '')}. Fix. Jetzt.",
+            MolochEvent.WGT_MODE: "WAVE GOTIK. ALLE SYSTEME ONLINE.",
+            MolochEvent.GOOD_MORNING: "Aufstehen.",
+            MolochEvent.GOOD_NIGHT: "Schluss.",
+        }
+        return responses.get(event, "Hmm.")
 
     # ---- Emergentis Drift-Layer ----
 

@@ -251,6 +251,24 @@ class AutonomousTracker:
         # Callbacks
         self.on_state_change: Optional[Callable[[TrackerState], None]] = None
 
+        # Core Integrator Referenz (fuer adaptive Tracking-Parameter)
+        self._core_integrator = None
+        try:
+            from core.core_integrator import get_core_integrator
+            self._core_integrator = get_core_integrator()
+            logger.info("[TRACKER] CoreIntegrator angebunden")
+        except Exception as e:
+            logger.warning(f"[TRACKER] CoreIntegrator nicht verfuegbar: {e}")
+
+        # Basis-Parameter speichern (fuer dynamische Anpassung)
+        self._base_pan_gain = self.config.pan_gain
+        self._base_tilt_gain = self.config.tilt_gain
+        self._base_max_step_pan = self.config.max_step_pan
+        self._base_max_step_tilt = self.config.max_step_tilt
+        self._base_move_cooldown = self.config.move_cooldown_ms
+        self._base_tracking_speed = self.config.tracking_speed
+        self._base_target_lost_timeout = self.config.target_lost_timeout
+
         logger.info(f"AutonomousTracker v2 (AbsoluteMove) initialized (rate={self.LOOP_RATE_HZ}Hz)")
 
     def set_camera(self, camera_controller):
@@ -535,6 +553,16 @@ class AutonomousTracker:
             )
             self.last_detection_time = time.time()
 
+            # CoreIntegrator: Target gefunden -> Presence/Proximity steigt
+            if self._core_integrator:
+                try:
+                    self._core_integrator.update_inputs("tracker", {
+                        "user_proximity": self.current_target_confidence,
+                        "time_since_interaction": 0.0,  # Reset: Ziel gerade gesehen
+                    })
+                except Exception:
+                    pass
+
     def _bbox_iou(self, bbox1: List[float], bbox2: List[float]) -> float:
         """Calculate Intersection over Union between two bboxes."""
         if len(bbox1) != 4 or len(bbox2) != 4:
@@ -710,6 +738,57 @@ class AutonomousTracker:
                            f"faces={len(face_candidates)} bodies={len(body_candidates)}")
 
     # =========================================================================
+    # Core Integrator Adaption
+    # =========================================================================
+
+    def _adapt_from_integrator(self):
+        """Tracking-Parameter dynamisch an CoreIntegrator State anpassen.
+
+        Hohe Attention (> 0.8): Kamera ruhig, praezises Tracking, wenig Bewegung
+        Niedrige Attention (< 0.3): Kamera unruhiger, mehr Scan-Bewegungen
+        Hohe Tension: Schnellere Reaktion, aggressiveres Tracking
+        Niedrige Tension: Sanftere Bewegungen, mehr Coast-Zeit
+        """
+        if not self._core_integrator:
+            return
+
+        try:
+            effects = self._core_integrator.get_effects()
+            attention = self._core_integrator.get_attention()
+            tension = self._core_integrator.get_tension()
+        except Exception:
+            return
+
+        camera_stability = effects.get("camera_stability", 0.5)
+        micro_ptz = effects.get("micro_ptz_movement", 0.2)
+
+        # --- Attention-basierte Anpassung ---
+        # Hohe Attention -> ruhigere Kamera (kleinere Schritte, laengere Cooldowns)
+        # Niedrige Attention -> unruhigere Kamera (groessere Schritte, kuerzere Cooldowns)
+        stability_factor = camera_stability  # 0.0 (unruhig) - 1.0 (stabil)
+
+        # Pan/Tilt Gain: Bei hoher Stabilitaet weniger aggressiv
+        self.config.pan_gain = self._base_pan_gain * (0.5 + (1.0 - stability_factor) * 0.8)
+        self.config.tilt_gain = self._base_tilt_gain * (0.5 + (1.0 - stability_factor) * 0.8)
+
+        # Max Step: Bei hoher Stabilitaet kleinere Schritte
+        self.config.max_step_pan = self._base_max_step_pan * (0.4 + (1.0 - stability_factor) * 0.8)
+        self.config.max_step_tilt = self._base_max_step_tilt * (0.4 + (1.0 - stability_factor) * 0.8)
+
+        # --- Tension-basierte Anpassung ---
+        # Hohe Tension -> schnellere Reaktion
+        tension_speed = 0.7 + tension * 0.6  # 0.7 (ruhig) bis 1.3 (hektisch)
+
+        # Move Cooldown: Bei hoher Tension kuerzere Pausen
+        self.config.move_cooldown_ms = self._base_move_cooldown / tension_speed
+
+        # Tracking Speed: Bei hoher Tension schneller
+        self.config.tracking_speed = min(1.0, self._base_tracking_speed * tension_speed)
+
+        # Target Lost Timeout: Bei hoher Tension schneller in Search
+        self.config.target_lost_timeout = self._base_target_lost_timeout / tension_speed
+
+    # =========================================================================
     # Tracking Loop
     # =========================================================================
 
@@ -723,6 +802,10 @@ class AutonomousTracker:
 
             try:
                 if self.tracking_active:
+                    # Alle 5 Zyklen (~1x/s): Parameter vom CoreIntegrator anpassen
+                    if self.stats["cycles"] % 5 == 0:
+                        self._adapt_from_integrator()
+
                     self._process_tracking_cycle()
                     self.stats["cycles"] += 1
 
@@ -984,7 +1067,12 @@ class AutonomousTracker:
     # =========================================================================
 
     def _do_search(self):
-        """Execute search mode - patrol sweep using AbsoluteMove positions."""
+        """Execute search mode - patrol sweep using AbsoluteMove positions.
+
+        Search Pattern: Home -> Links -> Rechts -> Home -> Hoch -> Runter -> Home
+        Nach 60s ohne Fund: Zurueck zu Home, Presence sinkt.
+        CoreIntegrator wird ueber Such-Status informiert.
+        """
         # Smoothing zuruecksetzen wenn Ziel verloren
         self._smooth_x = None
         self._smooth_y = None
@@ -1004,21 +1092,63 @@ class AutonomousTracker:
         if self.state != TrackerState.SEARCHING:
             self._set_state(TrackerState.SEARCHING)
             self.search_patrol_index = 0
-            self.search_move_time = 0.0
+            self.search_move_time = now
+            self._search_start_time = now
 
-            if self.config.search_reset_to_center:
-                logger.info(f"[SEARCH] Starting - moving to center (was pan={self.last_known_pan:+.1f}, tilt={self.last_known_tilt:+.1f})")
-                self._send_search_move(0.0, 0.0)
-            else:
-                logger.info(f"[SEARCH] Starting - staying at last pos ({self.last_known_pan:+.1f},{self.last_known_tilt:+.1f})")
-                self.search_move_time = now  # Timer starten, aber NICHT bewegen
+            # Erste Position ansteuern
+            logger.info(f"[SEARCH] Patrol gestartet ab ({self.last_known_pan:+.1f},{self.last_known_tilt:+.1f})")
+
             # Reset dwell state for next target acquisition
             self.dwell_target_acquired = False
             self.dwell_start_time = 0.0
+
+            # CoreIntegrator: Presence sinkt beim Suchen
+            if self._core_integrator:
+                try:
+                    self._core_integrator.update_input("tracker", "time_since_interaction", 0.5)
+                except Exception:
+                    pass
             return
 
-        # === KEIN PATROL: Kamera bleibt an letzter Position stehen ===
-        # Smart Tracking uebernimmt nach Release ab dieser Position
+        # === PATROL: Definierte Positionen abfahren ===
+        search_duration = now - getattr(self, '_search_start_time', now)
+        patrol_positions = self.config.search_patrol_positions
+
+        # Nach 60s ohne Fund: Zurueck zu Home und aufhoeren
+        if search_duration > 60.0:
+            if self.search_patrol_index != 0 or self.search_move_time == 0:
+                logger.info(f"[SEARCH] 60s ohne Fund -> Home-Position")
+                self._send_search_move(0.0, 0.0)
+                self.search_patrol_index = 0
+                # CoreIntegrator: Presence sinkt stark
+                if self._core_integrator:
+                    try:
+                        self._core_integrator.update_input("tracker", "time_since_interaction", 1.0)
+                        self._core_integrator.update_input("tracker", "user_proximity", 0.0)
+                    except Exception:
+                        pass
+            return
+
+        # Patrol-Position wechseln alle 4 Sekunden
+        time_at_position = now - self.search_move_time
+        if time_at_position >= self.config.search_direction_interval:
+            # Naechste Patrol-Position
+            self.search_patrol_index = (self.search_patrol_index + 1) % len(patrol_positions)
+            target_pan, target_tilt = patrol_positions[self.search_patrol_index]
+
+            logger.info(f"[SEARCH] Patrol [{self.search_patrol_index}/{len(patrol_positions)}] "
+                       f"-> ({target_pan:+.1f},{target_tilt:+.1f}) "
+                       f"(Search seit {search_duration:.0f}s)")
+
+            self._send_search_move(target_pan, target_tilt)
+
+            # CoreIntegrator: Presence sinkt langsam beim Suchen
+            if self._core_integrator:
+                try:
+                    decay = min(1.0, search_duration / 60.0)  # 0->1 ueber 60s
+                    self._core_integrator.update_input("tracker", "time_since_interaction", decay)
+                except Exception:
+                    pass
 
     def _send_search_move(self, pan_deg: float, tilt_deg: float) -> bool:
         """Send AbsoluteMove for search/patrol."""
