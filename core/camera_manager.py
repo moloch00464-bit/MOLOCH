@@ -838,6 +838,108 @@ class CameraManager:
     # Tracker Stop
     # =================================================================
 
+    # =================================================================
+    # Panel Command Handler (PTZ / Cloud / Snapshot)
+    # =================================================================
+
+    def ptz_move(self, direction, speed=0.3):
+        """PTZ Bewegung in eine Richtung oder Home."""
+        from core.hardware.camera import get_camera_controller
+        cam = get_camera_controller()
+        if not cam.is_connected:
+            cam.connect()
+        if direction == 'home':
+            cam.goto_home()
+        elif direction in ('up', 'down', 'left', 'right'):
+            cam.move_manual(direction, speed=speed)
+        logger.info(f"[PTZ] move {direction}")
+
+    def ptz_goto(self, position):
+        """PTZ zu vordefinierter Position fahren."""
+        positions = {
+            'werkstatt': (0.0, -20.0),
+            'wohnzimmer': (-90.0, 0.0),
+        }
+        if position not in positions:
+            logger.warning(f"[PTZ] Unbekannte Position: '{position}'")
+            return
+        from core.hardware.camera import get_camera_controller
+        cam = get_camera_controller()
+        if not cam.is_connected:
+            cam.connect()
+        pan, tilt = positions[position]
+        cam.move_absolute(pan=pan, tilt=tilt)
+        logger.info(f"[PTZ] goto {position} ({pan}, {tilt})")
+
+    def ptz_calibrate(self):
+        """PTZ Kalibrierung triggern."""
+        from core.hardware.camera_cloud_bridge import CameraCloudBridgeSync
+        bridge = CameraCloudBridgeSync()
+        bridge.trigger_ptz_calibration()
+        logger.info("[PTZ] Kalibrierung getriggert")
+
+    def cloud_set_night_mode(self, level):
+        """Weisse LEDs / Night Vision Mode setzen."""
+        if not self._cloud or not self._cloud.connected:
+            return
+        night_modes = {0: 'day', 1: 'auto', 2: 'night', 3: 'night'}
+        mode = night_modes.get(int(level), 'day')
+        self._cloud.run(self._cloud.bridge.set_night(mode))
+        self._cloud_state["led_level"] = int(level)
+        logger.info(f"[CLOUD] Night mode: {mode} (level={level})")
+
+    def cloud_toggle_alarm(self):
+        """Alarm ein/ausschalten."""
+        if not self._cloud or not self._cloud.connected:
+            return
+        self._alarm_on = not self._alarm_on
+        self._cloud.run(self._cloud.bridge.set_alarm(self._alarm_on))
+        self._cloud_state["alarm_active"] = self._alarm_on
+        logger.info(f"[CLOUD] Alarm: {'AN' if self._alarm_on else 'AUS'}")
+
+    def cloud_toggle_status_led(self):
+        """Status LED toglen."""
+        if not self._cloud or not self._cloud.connected:
+            return
+        self._status_led_on = not getattr(self, '_status_led_on', False)
+        self._cloud.run(self._cloud.bridge.set_status_led(self._status_led_on))
+        self._cloud_state["status_led"] = self._status_led_on
+        logger.info(f"[CLOUD] Status LED: {self._status_led_on}")
+
+    def cloud_sync(self):
+        """Cloud-Status synchronisieren."""
+        if not self._cloud or not self._cloud.connected:
+            return
+        params = self._cloud.run(self._cloud.bridge.get_device_params())
+        if params and isinstance(params, dict):
+            nv = int(params.get("nightVision", 1))
+            self._cloud_state["led_level"] = 2 if nv == 2 else 0
+            self._cloud_state["alarm_active"] = bool(params.get("alarmNotify", False))
+            self._cloud_state["status_led"] = bool(params.get("sledOnline", False))
+            logger.info(f"[CLOUD] Sync: nightVision={nv} led_level={self._cloud_state.get('led_level')}")
+
+    def take_snapshot(self):
+        """Snapshot vom aktuellen Frame speichern."""
+        import cv2
+        frame = None
+        with self._annotated_lock:
+            if self._annotated_frame is not None:
+                frame = self._annotated_frame.copy()
+        if frame is None:
+            with self._frame_lock:
+                if self._latest_frame is not None:
+                    frame = self._latest_frame.copy()
+        if frame is None:
+            logger.warning("[SNAPSHOT] Kein Frame verfuegbar")
+            return None
+        snap_dir = os.path.expanduser("~/moloch/snapshots")
+        os.makedirs(snap_dir, exist_ok=True)
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        path = os.path.join(snap_dir, f"moloch_{ts}.jpg")
+        cv2.imwrite(path, frame)
+        logger.info(f"[SNAPSHOT] Gespeichert: {path}")
+        return path
+
     def stop_tracker(self):
         """Tracker sauber stoppen."""
         if self._tracker:

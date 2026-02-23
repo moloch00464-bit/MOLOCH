@@ -28,9 +28,6 @@ import time
 import json
 import threading
 import logging
-import cv2
-import numpy as np
-
 # Moloch path
 sys.path.insert(0, os.path.expanduser("~/moloch"))
 
@@ -147,9 +144,7 @@ class MolochService:
             set_model_flags_callback=self._set_model_flags_cb,
             fps_reset_callback=self._reset_fps,
         )
-        # Aliased mutable Referenzen (Panel Commands brauchen diese)
-        self._frame_lock = self._cam._frame_lock
-        self._annotated_lock = self._cam._annotated_lock
+        # Aliased mutable Referenzen (fuer _write_status_json)
         self._cloud_state = self._cam._cloud_state
 
         # IPC Router (extrahiert aus moloch_service.py, Phase 4)
@@ -204,58 +199,6 @@ class MolochService:
         """Status update via observer pattern."""
         logger.info(f"[STATUS] {text}")
         self._notify("status", {"text": text})
-
-    # =========================================================================
-    # CameraManager Proxy Properties (fuer _write_status_json + Panel Commands)
-    # =========================================================================
-
-    @property
-    def _latest_frame(self):
-        return self._cam._latest_frame
-
-    @property
-    def _annotated_frame(self):
-        return self._cam._annotated_frame
-
-    @_annotated_frame.setter
-    def _annotated_frame(self, value):
-        self._cam._annotated_frame = value
-
-    @property
-    def _moloch_has_control(self):
-        return self._cam._moloch_has_control
-
-    @property
-    def _autonomous_mode(self):
-        return self._cam._autonomous_mode
-
-    @property
-    def _manual_mode(self):
-        return self._cam._manual_mode
-
-    @property
-    def _tentakel_enabled(self):
-        return self._cam._tentakel_enabled
-
-    @property
-    def _cloud(self):
-        return self._cam._cloud
-
-    @property
-    def _alarm_on(self):
-        return self._cam._alarm_on
-
-    @_alarm_on.setter
-    def _alarm_on(self, value):
-        self._cam._alarm_on = value
-
-    @property
-    def _last_frame_write(self):
-        return self._cam._last_frame_write
-
-    @property
-    def _frozen_restart_count(self):
-        return self._cam._frozen_restart_count
 
     # CameraManager Callbacks
 
@@ -482,14 +425,14 @@ class MolochService:
                 "pose_active": _inf.pose_active,
                 "npu_paused": self._orchestrator._npu_paused,
                 "active_models": active_models,
-                "autonomous_mode": self._autonomous_mode,
-                "manual_mode": self._manual_mode,
-                "moloch_has_control": self._moloch_has_control,
-                "tentakel_enabled": self._tentakel_enabled,
+                "autonomous_mode": self._cam._autonomous_mode,
+                "manual_mode": self._cam._manual_mode,
+                "moloch_has_control": self._cam._moloch_has_control,
+                "tentakel_enabled": self._cam._tentakel_enabled,
                 "daily_learner_enabled": self._daily_learner.enabled if self._daily_learner else False,
                 "learner_flash": _inf._learner_flash,
-                "frame_age": round(time.time() - self._last_frame_write, 1) if self._last_frame_write else -1,
-                "frozen_restarts": self._frozen_restart_count,
+                "frame_age": round(time.time() - self._cam._last_frame_write, 1) if self._cam._last_frame_write else -1,
+                "frozen_restarts": self._cam._frozen_restart_count,
                 "fps": {k: round(v, 1) for k, v in fps_snapshot.items()},
                 "thresholds": {
                     "scrfd_conf": _inf.scrfd_conf_val,
@@ -543,7 +486,7 @@ class MolochService:
             self._cam.toggle_smart_tracking()
         elif action == 'toggle_autonomous':
             self.toggle_autonomous_manual()
-            logger.info(f"[IPC] autonomous={self._autonomous_mode} tentakel={self._tentakel_enabled}")
+            logger.info(f"[IPC] autonomous={self._cam._autonomous_mode} tentakel={self._cam._tentakel_enabled}")
         elif action == 'reload_face_db':
             self._inference.reload_face_db()
         elif action == 'set_threshold':
@@ -608,123 +551,21 @@ class MolochService:
             logger.info(f"[IPC] Learner Flash: {'AN' if self._inference._learner_flash else 'AUS'}")
 
         elif action == 'ptz_move':
-            direction = cmd.get('direction', '')
-            try:
-                from core.hardware.camera import get_camera_controller
-                cam = get_camera_controller()
-                if not cam.is_connected:
-                    cam.connect()
-                if direction == 'home':
-                    cam.goto_home()
-                    logger.info("[IPC] PTZ: goto home")
-                elif direction in ('up', 'down', 'left', 'right'):
-                    cam.move_manual(direction, speed=0.3)
-                    logger.info(f"[IPC] PTZ: move {direction}")
-            except Exception as e:
-                logger.error(f"[IPC] PTZ move failed: {e}")
-
+            self._cam.ptz_move(cmd.get('direction', ''), cmd.get('speed', 0.3))
         elif action == 'ptz_goto':
-            position = cmd.get('position', '')
-            positions = {
-                'werkstatt': (0.0, -20.0),
-                'wohnzimmer': (-90.0, 0.0),
-            }
-            try:
-                from core.hardware.camera import get_camera_controller
-                cam = get_camera_controller()
-                if not cam.is_connected:
-                    cam.connect()
-                if position in positions:
-                    pan, tilt = positions[position]
-                    cam.move_absolute(pan=pan, tilt=tilt)
-                    logger.info(f"[IPC] PTZ: goto {position} ({pan}, {tilt})")
-                else:
-                    logger.warning(f"[IPC] PTZ: unknown position '{position}'")
-            except Exception as e:
-                logger.error(f"[IPC] PTZ goto failed: {e}")
-
+            self._cam.ptz_goto(cmd.get('position', ''))
         elif action == 'ptz_calibrate':
-            try:
-                from core.hardware.camera_cloud_bridge import CameraCloudBridgeSync
-                bridge = CameraCloudBridgeSync()
-                bridge.trigger_ptz_calibration()
-                logger.info("[IPC] PTZ: calibration triggered")
-            except Exception as e:
-                logger.error(f"[IPC] PTZ calibrate failed: {e}")
-
+            self._cam.ptz_calibrate()
         elif action == 'cloud_led':
-            level = cmd.get('level', 0)
-            try:
-                if self._cloud and self._cloud.connected:
-                    # PT2 weisse LEDs ueber nightVision steuern
-                    # Panel: 0=aus, 2=an. Mapping auf set_night() Modi:
-                    # 'day' -> IR-only (weiss AUS), 'night' -> Farb-Nacht (weiss AN)
-                    night_modes = {0: 'day', 1: 'auto', 2: 'night', 3: 'night'}
-                    mode = night_modes.get(int(level), 'day')
-                    self._cloud.run(self._cloud.bridge.set_night(mode))
-                    self._cloud_state["led_level"] = int(level)
-                    logger.info(f"[IPC] LED/Night mode: {mode} (level={level})")
-            except Exception as e:
-                logger.error(f"[IPC] LED/Night failed: {e}")
-
+            self._cam.cloud_set_night_mode(cmd.get('level', 0))
         elif action == 'cloud_alarm':
-            try:
-                if self._cloud and self._cloud.connected:
-                    self._alarm_on = not self._alarm_on
-                    self._cloud.run(self._cloud.bridge.set_alarm(self._alarm_on))
-                    self._cloud_state["alarm_active"] = self._alarm_on
-                    logger.info(f"[IPC] Alarm: {'AN' if self._alarm_on else 'AUS'}")
-            except Exception as e:
-                logger.error(f"[IPC] Alarm failed: {e}")
-
+            self._cam.cloud_toggle_alarm()
         elif action == 'snapshot':
-            try:
-                frame = None
-                with self._annotated_lock:
-                    if self._annotated_frame is not None:
-                        frame = self._annotated_frame.copy()
-                if frame is None:
-                    with self._frame_lock:
-                        if self._latest_frame is not None:
-                            frame = self._latest_frame.copy()
-                if frame is None:
-                    logger.warning("[IPC] Snapshot: Kein Frame verfuegbar")
-                else:
-                    snap_dir = os.path.expanduser("~/moloch/snapshots")
-                    os.makedirs(snap_dir, exist_ok=True)
-                    ts = time.strftime("%Y%m%d_%H%M%S")
-                    path = os.path.join(snap_dir, f"moloch_{ts}.jpg")
-                    cv2.imwrite(path, frame)
-                    logger.info(f"[IPC] Snapshot gespeichert: {path}")
-            except Exception as e:
-                logger.error(f"[IPC] Snapshot failed: {e}")
-
+            self._cam.take_snapshot()
         elif action == 'cloud_status_led':
-            try:
-                if self._cloud and self._cloud.connected:
-                    # Toggle: aktuellen Status invertieren
-                    self._status_led_on = not getattr(self, '_status_led_on', False)
-                    self._cloud.run(self._cloud.bridge.set_status_led(self._status_led_on))
-                    self._cloud_state["status_led"] = self._status_led_on
-                    logger.info(f"[IPC] Status LED: {self._status_led_on}")
-            except Exception as e:
-                logger.error(f"[IPC] Status LED failed: {e}")
-
+            self._cam.cloud_toggle_status_led()
         elif action == 'cloud_sync':
-            try:
-                if self._cloud and self._cloud.connected:
-                    params = self._cloud.run(self._cloud.bridge.get_device_params())
-                    if params and isinstance(params, dict):
-                        # Sonoff CAM-PT2 nightVision: 0=auto, 1=IR(aus), 2=farb-nacht(an)
-                        # Panel erwartet: led_level 0=aus, 2=an
-                        nv = int(params.get("nightVision", 1))
-                        # Mapping: IR(1)->0(aus), auto(0)->0(aus), farb-nacht(2)->2(an)
-                        self._cloud_state["led_level"] = 2 if nv == 2 else 0
-                        self._cloud_state["alarm_active"] = bool(params.get("alarmNotify", False))
-                        self._cloud_state["status_led"] = bool(params.get("sledOnline", False))
-                    logger.info(f"[IPC] Cloud sync: nightVision={nv} led_level={self._cloud_state.get('led_level')}")
-            except Exception as e:
-                logger.error(f"[IPC] Cloud sync failed: {e}")
+            self._cam.cloud_sync()
 
         # ---- Voice Pipeline Commands ----
 
