@@ -161,6 +161,20 @@ ANTWORT-STIL:
 - Humor wo passend, aber nicht erzwungen
 - Bei technischen Fragen: klar und hilfreich
 - Kein Corporate-Sprech, kein Cheerleader
+
+SPOTIFY-STEUERUNG:
+Du kannst Spotify steuern mit Tags in deiner Antwort (werden automatisch entfernt):
+- [SPOTIFY:play] — Wiedergabe starten
+- [SPOTIFY:pause] — Wiedergabe pausieren
+- [SPOTIFY:toggle] — Play/Pause umschalten
+- [SPOTIFY:skip] — Naechster Track
+- [SPOTIFY:previous] — Vorheriger Track
+- [SPOTIFY:volume=70] — Lautstaerke (0-100)
+- [SPOTIFY:search=Suicide Commando Hellraiser] — Track suchen und abspielen
+- [SPOTIFY:artist=VNV Nation] — Artist spielen
+- [SPOTIFY:mood=shadow] — Musik passend zur Zone (guardian/shadow/berserker)
+Beispiel: "Klar, ich leg Suicide Commando auf! [SPOTIFY:artist=Suicide Commando]"
+Benutze diese Tags wenn Markus nach Musik fragt oder Steuerung will.
 """
 
     # Brain Context laden wenn vorhanden
@@ -374,6 +388,20 @@ class VoicePipeline:
         except Exception as e:
             logger.error(f"[VOICE] Memory save_message(user) fehlgeschlagen: {e}")
 
+        # 1.5 Direkte Spotify-Commands (OHNE Claude API — instant)
+        spotify_response = self._handle_direct_spotify_command(text)
+        if spotify_response:
+            logger.info(f"[VOICE] Spotify-Direct: {spotify_response}")
+            self._emit_message("MOLOCH", spotify_response)
+            try:
+                get_memory().save_message("moloch", spotify_response, source="voice")
+            except Exception:
+                pass
+            if self._voice_enabled:
+                self._speak(spotify_response)
+            self._whisper_status = "Idle"
+            return
+
         # 2. Claude API
         self._whisper_status = "Denke..."
         response = self._chat(text)
@@ -481,6 +509,12 @@ class VoicePipeline:
             except Exception as e:
                 logger.error(f"[VOICE] extract_and_learn fehlgeschlagen: {e}")
 
+            # SPOTIFY-Tags extrahieren und ausfuehren
+            try:
+                text = self._extract_spotify_commands(text)
+            except Exception as e:
+                logger.error(f"[VOICE] Spotify-Commands fehlgeschlagen: {e}")
+
             with self._lock:
                 self._conversation.append({"role": "assistant", "content": text})
             return text
@@ -490,6 +524,204 @@ class VoicePipeline:
                 if self._conversation and self._conversation[-1].get("role") == "user":
                     self._conversation.pop()
             return None
+
+    # =========================================================================
+    # Direkte Spotify Voice Commands (OHNE Claude API)
+    # =========================================================================
+
+    def _handle_direct_spotify_command(self, text: str) -> Optional[str]:
+        """
+        Prueft ob der transkribierte Text ein direkter Spotify-Befehl ist.
+        Wird VOR dem Claude API Call geprueft — spart Latenz.
+
+        Returns: Antwort-String wenn Befehl erkannt, None wenn nicht.
+
+        Keywords:
+          stopp/stop/pause           -> pause()
+          weiter/play/fortsetzen     -> play()
+          naechster/nächster/skip    -> next_track()
+          zurueck/vorheriger         -> previous_track()
+          lauter                     -> volume +10
+          leiser                     -> volume -10
+          spiel/spiele [Artist/Song] -> search_and_play() oder play_artist()
+          musik an/aus               -> play()/pause()
+        """
+        lower = text.lower().strip()
+
+        # Zu kurz? Kein Command
+        if len(lower) < 3:
+            return None
+
+        try:
+            from core.spotify_controller import get_spotify
+            sp = get_spotify()
+        except Exception as e:
+            logger.error(f"[SPOTIFY-DIRECT] Controller nicht verfuegbar: {e}")
+            return None
+
+        # --- Einfache Commands (exakte/teilweise Matches) ---
+
+        # STOP / PAUSE
+        if lower in ("stopp", "stop", "pause", "stopp musik", "stop musik",
+                      "musik stopp", "musik stop", "musik pause", "pause musik",
+                      "halt", "ruhe", "still", "musik aus"):
+            if sp.pause():
+                return "Musik pausiert."
+            return "Spotify reagiert nicht — laeuft gerade was?"
+
+        # WEITER / PLAY (ohne Argument)
+        if lower in ("weiter", "play", "fortsetzen", "weiter spielen",
+                      "musik an", "musik weiter", "weiterspielen"):
+            if sp.play():
+                return "Laeuft wieder."
+            return "Konnte Playback nicht starten."
+
+        # SKIP / NAECHSTER
+        if lower in ("naechster", "nächster", "naechster song", "nächster song",
+                      "naechstes lied", "nächstes lied", "skip", "next",
+                      "ueberspring", "überspring", "weiter skip"):
+            if sp.next_track():
+                time.sleep(0.5)
+                track = sp.get_current_track()
+                if track:
+                    return f"Jetzt: {track['artist']} — {track['track']}"
+                return "Naechster Track."
+            return "Skip fehlgeschlagen."
+
+        # VORHERIGER / ZURUECK
+        if lower in ("zurueck", "zurück", "vorheriger", "vorheriges lied",
+                      "vorheriger song", "nochmal", "previous", "letzter song"):
+            if sp.previous_track():
+                time.sleep(0.5)
+                track = sp.get_current_track()
+                if track:
+                    return f"Zurueck zu: {track['artist']} — {track['track']}"
+                return "Vorheriger Track."
+            return "Zurueck fehlgeschlagen."
+
+        # LAUTER
+        if lower in ("lauter", "laut", "mehr lautstaerke", "mehr lautstärke",
+                      "volume up", "lauter machen"):
+            # Aktuell kein Volume-Read in API, setze relativ
+            sp.set_volume(70)
+            return "Lauter."
+
+        # LEISER
+        if lower in ("leiser", "leise", "weniger lautstaerke", "weniger lautstärke",
+                      "volume down", "leiser machen"):
+            sp.set_volume(30)
+            return "Leiser."
+
+        # WAS LAEUFT? / WELCHER SONG?
+        if any(kw in lower for kw in ("was läuft", "was laeuft", "welcher song",
+                                       "welches lied", "was spielt", "was hör ich",
+                                       "was hoer ich", "aktueller song",
+                                       "aktuelles lied", "welcher track")):
+            track = sp.get_current_track()
+            if track:
+                status = "spielt" if track["is_playing"] else "pausiert"
+                return f"{track['artist']} — {track['track']} ({status})"
+            return "Gerade laeuft nichts."
+
+        # --- "SPIEL ..." Commands (mit Argument) ---
+
+        # Pattern: "spiel(e) [etwas]" / "mach [artist] an" / "musik von [artist]"
+        spiel_match = re.match(
+            r'^(?:spiel|spiele|play)\s+(.+)$', lower
+        )
+        if not spiel_match:
+            spiel_match = re.match(
+                r'^(?:mach|mache)\s+(.+?)\s+an$', lower
+            )
+        if not spiel_match:
+            spiel_match = re.match(
+                r'^musik\s+(?:von\s+)?(.+)$', lower
+            )
+
+        if spiel_match:
+            query = spiel_match.group(1).strip()
+            if not query:
+                return None
+
+            logger.info(f"[SPOTIFY-DIRECT] Suche: '{query}'")
+
+            # Erst als Artist versuchen, dann als allgemeine Suche
+            if sp.play_artist(query):
+                return f"Spiele {query}."
+            if sp.search_and_play(query):
+                track = sp.get_current_track()
+                if track:
+                    return f"Spiele: {track['artist']} — {track['track']}"
+                return f"Spiele etwas fuer '{query}'."
+            return f"Nichts gefunden fuer '{query}'."
+
+        # Kein Spotify-Command erkannt
+        return None
+
+    # =========================================================================
+    # Spotify Tag Extraction
+    # =========================================================================
+
+    def _extract_spotify_commands(self, text: str) -> str:
+        """
+        SPOTIFY-Tags aus Claude-Antwort extrahieren und ausfuehren.
+        Tags werden entfernt bevor der Text gesprochen wird.
+
+        Format: [SPOTIFY:action] oder [SPOTIFY:action=value]
+        """
+        import re
+        pattern = r'\[SPOTIFY:([^\]]+)\]'
+        matches = re.findall(pattern, text)
+        if not matches:
+            return text
+
+        # Tags entfernen
+        clean_text = re.sub(pattern, '', text).strip()
+        # Doppelte Leerzeichen bereinigen
+        clean_text = re.sub(r'  +', ' ', clean_text)
+
+        # Commands ausfuehren (in Background Thread, blockiert TTS nicht)
+        import threading
+        def _execute():
+            try:
+                from core.spotify_controller import get_spotify
+                sp = get_spotify()
+                for cmd_str in matches:
+                    if '=' in cmd_str:
+                        action, value = cmd_str.split('=', 1)
+                    else:
+                        action, value = cmd_str, None
+
+                    action = action.strip().lower()
+                    value = value.strip() if value else None
+
+                    if action == 'play':
+                        sp.play(uri=value)
+                    elif action == 'pause':
+                        sp.pause()
+                    elif action == 'toggle':
+                        sp.toggle()
+                    elif action == 'skip':
+                        sp.next_track()
+                    elif action == 'previous':
+                        sp.previous_track()
+                    elif action == 'volume' and value:
+                        sp.set_volume(int(value))
+                    elif action == 'search' and value:
+                        sp.search_and_play(value)
+                    elif action == 'artist' and value:
+                        sp.play_artist(value)
+                    elif action == 'mood' and value:
+                        sp.play_by_mood(value)
+                    else:
+                        logger.warning(f"[SPOTIFY] Unbekannter Command: {cmd_str}")
+
+                    logger.info(f"[SPOTIFY] Ausgefuehrt: {cmd_str}")
+            except Exception as e:
+                logger.error(f"[SPOTIFY] Command-Ausfuehrung fehlgeschlagen: {e}")
+
+        threading.Thread(target=_execute, daemon=True).start()
+        return clean_text
 
     # =========================================================================
     # Chat Message (Text statt PTT)
@@ -524,6 +756,20 @@ class VoicePipeline:
             get_memory().save_message("user", text, source="text")
         except Exception as e:
             logger.error(f"[VOICE] Memory save_message(user/text) fehlgeschlagen: {e}")
+
+        # Direkte Spotify-Commands (OHNE Claude API — instant)
+        spotify_response = self._handle_direct_spotify_command(text)
+        if spotify_response:
+            logger.info(f"[VOICE] Spotify-Direct: {spotify_response}")
+            self._emit_message("MOLOCH", spotify_response)
+            try:
+                get_memory().save_message("moloch", spotify_response, source="text")
+            except Exception:
+                pass
+            if self._voice_enabled:
+                self._speak(spotify_response)
+            self._whisper_status = "Idle"
+            return
 
         response = self._chat(text)
         if not response:

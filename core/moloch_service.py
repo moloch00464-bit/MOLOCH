@@ -620,6 +620,50 @@ class MolochService:
                 self._voice_pipeline.reset_conversation()
                 logger.info("[IPC] Voice: Konversation zurueckgesetzt")
 
+        # ---- Spotify Commands ----
+        elif action == 'spotify_play':
+            from core.spotify_controller import get_spotify
+            uri = cmd.get('uri')
+            get_spotify().play(uri=uri)
+
+        elif action == 'spotify_pause':
+            from core.spotify_controller import get_spotify
+            get_spotify().pause()
+
+        elif action == 'spotify_toggle':
+            from core.spotify_controller import get_spotify
+            get_spotify().toggle()
+
+        elif action == 'spotify_skip':
+            from core.spotify_controller import get_spotify
+            get_spotify().next_track()
+
+        elif action == 'spotify_previous':
+            from core.spotify_controller import get_spotify
+            get_spotify().previous_track()
+
+        elif action == 'spotify_volume':
+            from core.spotify_controller import get_spotify
+            vol = cmd.get('volume', 50)
+            get_spotify().set_volume(int(vol))
+
+        elif action == 'spotify_search':
+            from core.spotify_controller import get_spotify
+            query = cmd.get('query', '')
+            if query:
+                get_spotify().search_and_play(query)
+
+        elif action == 'spotify_mood':
+            from core.spotify_controller import get_spotify
+            zone = cmd.get('zone', 'shadow')
+            get_spotify().play_by_mood(zone)
+
+        elif action == 'spotify_artist':
+            from core.spotify_controller import get_spotify
+            artist = cmd.get('artist', '')
+            if artist:
+                get_spotify().play_artist(artist)
+
     # ----------------------------------------------------------------
     # Settings Persistence
     # ----------------------------------------------------------------

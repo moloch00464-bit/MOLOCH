@@ -61,3 +61,4 @@ Thumbs.db
 *.bak
 *.bak.*
 state/timeline.jsonl
+.env.spotify

@@ -36,6 +36,7 @@ IDENTITY_PATH = os.path.join(MEMORY_BASE, "identity.json")
 FACTS_PATH = os.path.join(MEMORY_BASE, "facts.json")
 CORE_STATE_PATH = os.path.join(MEMORY_BASE, "core_state.json")
 CONVERSATIONS_DIR = os.path.join(MEMORY_BASE, "conversations")
+SPOTIFY_PROFILE_PATH = os.path.join(MEMORY_BASE, "spotify", "spotify_profile.json")
 
 # Existierende Quellen auf SSD1
 _MOLOCH_HOME = os.path.expanduser("~/moloch")
@@ -376,6 +377,41 @@ class MolochMemory:
             parts.append("Dinge die du dir gemerkt hast (persistent):")
             for key, value in all_facts.items():
                 parts.append(f"- {key}: {value}")
+
+        # === SPOTIFY MUSIKPROFIL ===
+        try:
+            spotify = _safe_read_json(SPOTIFY_PROFILE_PATH)
+            if spotify:
+                parts.append("\n=== MARKUS MUSIKPROFIL (Spotify 2015-2025) ===")
+                parts.append(spotify.get("summary", ""))
+                # Top 5 Artists kompakt
+                top5 = spotify.get("top_artists", [])[:5]
+                if top5:
+                    artists_str = ", ".join(
+                        f"{a['name']} ({a.get('est_hours', '?')}h)"
+                        for a in top5
+                    )
+                    parts.append(f"Top 5: {artists_str}")
+                # Top 3 Tracks
+                top3t = spotify.get("top_tracks", [])[:3]
+                if top3t:
+                    tracks_str = ", ".join(
+                        f"{t['artist']} - {t['track']} ({t['plays']}x)"
+                        for t in top3t
+                    )
+                    parts.append(f"Top Tracks: {tracks_str}")
+                # Genre-Ueberblick
+                genres = spotify.get("genre_profile", {})
+                if genres.get("primary_genres"):
+                    genre_str = ", ".join(
+                        f"{g['genre']} ({g['share_pct']}%)"
+                        for g in genres["primary_genres"][:4]
+                    )
+                    parts.append(f"Genres: {genre_str}")
+                parts.append(f"Szene: {genres.get('scene', 'Schwarze Szene')}")
+                parts.append("(Detailliertes Profil: /mnt/moloch-data/memory/spotify/spotify_profile.json)")
+        except Exception as e:
+            logger.debug(f"[MEMORY] Spotify-Profil nicht geladen: {e}")
 
         # === LETZTE KONVERSATIONEN (SSD2, tageweise) ===
         recent = self.get_recent_messages(20)

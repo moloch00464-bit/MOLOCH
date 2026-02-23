@@ -332,6 +332,15 @@ ANTWORT-STIL:
 - Bei technischen Fragen: klar und hilfreich
 - Pumuckl-Sprueche wenn angefragt
 - Klingonisch fuer Rebecca: "Qapla'!"
+
+SPOTIFY-STEUERUNG:
+Du kannst Spotify steuern mit Tags in deiner Antwort (werden automatisch entfernt):
+- [SPOTIFY:play] / [SPOTIFY:pause] / [SPOTIFY:toggle] / [SPOTIFY:skip] / [SPOTIFY:previous]
+- [SPOTIFY:volume=70] — Lautstaerke (0-100)
+- [SPOTIFY:search=Suicide Commando Hellraiser] — Track suchen und abspielen
+- [SPOTIFY:artist=VNV Nation] — Artist spielen
+- [SPOTIFY:mood=shadow] — Musik passend zur Zone (guardian/shadow/berserker)
+Beispiel: "Klar, ich leg Suicide Commando auf! [SPOTIFY:artist=Suicide Commando]"
 """
 
     # Add brain context
@@ -1045,9 +1054,156 @@ class MolochConsole:
             self._print_line("Check: ~/moloch/config/api_keys.json")
             self._print_line("")
 
+    def _extract_spotify_commands(self, text: str) -> str:
+        """SPOTIFY-Tags aus Claude-Antwort extrahieren und ausfuehren."""
+        import re
+        pattern = r'\[SPOTIFY:([^\]]+)\]'
+        matches = re.findall(pattern, text)
+        if not matches:
+            return text
+
+        clean_text = re.sub(pattern, '', text).strip()
+        clean_text = re.sub(r'  +', ' ', clean_text)
+
+        import threading
+        def _execute():
+            try:
+                from core.spotify_controller import get_spotify
+                sp = get_spotify()
+                for cmd_str in matches:
+                    if '=' in cmd_str:
+                        action, value = cmd_str.split('=', 1)
+                    else:
+                        action, value = cmd_str, None
+                    action = action.strip().lower()
+                    value = value.strip() if value else None
+
+                    if action == 'play':
+                        sp.play(uri=value)
+                    elif action == 'pause':
+                        sp.pause()
+                    elif action == 'toggle':
+                        sp.toggle()
+                    elif action == 'skip':
+                        sp.next_track()
+                    elif action == 'previous':
+                        sp.previous_track()
+                    elif action == 'volume' and value:
+                        sp.set_volume(int(value))
+                    elif action == 'search' and value:
+                        sp.search_and_play(value)
+                    elif action == 'artist' and value:
+                        sp.play_artist(value)
+                    elif action == 'mood' and value:
+                        sp.play_by_mood(value)
+                    logger.info(f"[SPOTIFY] Console: {cmd_str}")
+            except Exception as e:
+                logger.error(f"[SPOTIFY] Console Command fehlgeschlagen: {e}")
+
+        threading.Thread(target=_execute, daemon=True).start()
+        return clean_text
+
+    def _handle_direct_spotify_command(self, text: str) -> Optional[str]:
+        """Direkte Spotify-Commands ohne Claude API (Keyword-basiert)."""
+        import re
+        lower = text.lower().strip()
+        if len(lower) < 3:
+            return None
+
+        try:
+            from core.spotify_controller import get_spotify
+            sp = get_spotify()
+        except Exception as e:
+            logger.error(f"[SPOTIFY-DIRECT] Controller nicht verfuegbar: {e}")
+            return None
+
+        if lower in ("stopp", "stop", "pause", "stopp musik", "stop musik",
+                      "musik stopp", "musik stop", "musik pause", "pause musik",
+                      "halt", "ruhe", "still", "musik aus"):
+            return "Musik pausiert." if sp.pause() else "Spotify reagiert nicht."
+
+        if lower in ("weiter", "play", "fortsetzen", "weiter spielen",
+                      "musik an", "musik weiter", "weiterspielen"):
+            return "Laeuft wieder." if sp.play() else "Konnte Playback nicht starten."
+
+        if lower in ("naechster", "nächster", "naechster song", "nächster song",
+                      "naechstes lied", "nächstes lied", "skip", "next",
+                      "ueberspring", "überspring", "weiter skip"):
+            if sp.next_track():
+                import time
+                time.sleep(0.5)
+                track = sp.get_current_track()
+                if track:
+                    return f"Jetzt: {track['artist']} — {track['track']}"
+                return "Naechster Track."
+            return "Skip fehlgeschlagen."
+
+        if lower in ("zurueck", "zurück", "vorheriger", "vorheriges lied",
+                      "vorheriger song", "nochmal", "previous", "letzter song"):
+            if sp.previous_track():
+                import time
+                time.sleep(0.5)
+                track = sp.get_current_track()
+                if track:
+                    return f"Zurueck zu: {track['artist']} — {track['track']}"
+                return "Vorheriger Track."
+            return "Zurueck fehlgeschlagen."
+
+        if lower in ("lauter", "laut", "volume up", "lauter machen"):
+            sp.set_volume(70)
+            return "Lauter."
+
+        if lower in ("leiser", "leise", "volume down", "leiser machen"):
+            sp.set_volume(30)
+            return "Leiser."
+
+        if any(kw in lower for kw in ("was läuft", "was laeuft", "welcher song",
+                                       "welches lied", "was spielt", "aktueller song")):
+            track = sp.get_current_track()
+            if track:
+                status = "spielt" if track["is_playing"] else "pausiert"
+                return f"{track['artist']} — {track['track']} ({status})"
+            return "Gerade laeuft nichts."
+
+        spiel_match = re.match(r'^(?:spiel|spiele|play)\s+(.+)$', lower)
+        if not spiel_match:
+            spiel_match = re.match(r'^(?:mach|mache)\s+(.+?)\s+an$', lower)
+        if not spiel_match:
+            spiel_match = re.match(r'^musik\s+(?:von\s+)?(.+)$', lower)
+
+        if spiel_match:
+            query = spiel_match.group(1).strip()
+            if query:
+                logger.info(f"[SPOTIFY-DIRECT] Console Suche: '{query}'")
+                if sp.play_artist(query):
+                    return f"Spiele {query}."
+                if sp.search_and_play(query):
+                    track = sp.get_current_track()
+                    if track:
+                        return f"Spiele: {track['artist']} — {track['track']}"
+                    return f"Spiele etwas fuer '{query}'."
+                return f"Nichts gefunden fuer '{query}'."
+
+        return None
+
     def _chat_with_claude(self, user_input: str) -> None:
         """Send message to Claude and display response."""
         self._print_line("")
+
+        # Direkte Spotify-Commands (OHNE Claude API)
+        spotify_response = self._handle_direct_spotify_command(user_input)
+        if spotify_response:
+            logger.info(f"[CONSOLE] Spotify-Direct: {spotify_response}")
+            self._print_line(f"M.O.L.O.C.H.: {spotify_response}")
+            self._print_line("")
+            try:
+                get_memory().save_message("user", user_input, source="console")
+                get_memory().save_message("moloch", spotify_response, source="console")
+            except Exception:
+                pass
+            if self.tts.enabled:
+                self.tts.speak(spotify_response, blocking=True)
+            return
 
         # Add user message to history
         self.conversation_history.append({
@@ -1100,6 +1256,12 @@ class MolochConsole:
                 assistant_message = get_memory().extract_and_learn(assistant_message)
             except Exception as e:
                 logger.error(f"extract_and_learn fehlgeschlagen: {e}")
+
+            # SPOTIFY-Tags extrahieren und ausfuehren
+            try:
+                assistant_message = self._extract_spotify_commands(assistant_message)
+            except Exception as e:
+                logger.error(f"Spotify-Commands fehlgeschlagen: {e}")
 
             # Add to history
             self.conversation_history.append({

@@ -181,6 +181,45 @@ class ServiceProxy:
         """Daily Learner an/aus."""
         self._write_command("toggle_daily_learner")
 
+    # ----- Spotify Commands -----
+
+    def spotify_play(self, uri: str = None):
+        """Spotify Play (optional mit Track-URI)."""
+        params = {"uri": uri} if uri else None
+        self._write_command("spotify_play", params)
+
+    def spotify_pause(self):
+        """Spotify Pause."""
+        self._write_command("spotify_pause")
+
+    def spotify_toggle(self):
+        """Spotify Play/Pause umschalten."""
+        self._write_command("spotify_toggle")
+
+    def spotify_skip(self):
+        """Naechster Track."""
+        self._write_command("spotify_skip")
+
+    def spotify_previous(self):
+        """Vorheriger Track."""
+        self._write_command("spotify_previous")
+
+    def spotify_volume(self, volume: int):
+        """Volume setzen (0-100)."""
+        self._write_command("spotify_volume", {"volume": volume})
+
+    def spotify_search(self, query: str):
+        """Suchen und abspielen."""
+        self._write_command("spotify_search", {"query": query})
+
+    def spotify_mood(self, zone: str):
+        """Musik passend zur Zone spielen."""
+        self._write_command("spotify_mood", {"zone": zone})
+
+    def spotify_artist(self, name: str):
+        """Musik von Artist spielen."""
+        self._write_command("spotify_artist", {"artist": name})
+
     # ----- Status lesen -----
 
     def read_status(self) -> Dict[str, Any]:

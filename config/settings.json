@@ -7,19 +7,23 @@
     "yolo_conf": 0.7
   },
   "hand_occlusion": {
+    "enabled": false,
     "timeout": 6.0,
     "streak": 5,
     "recency": 4.0
   },
   "audio": {
     "mic_gain": 1.75,
-    "noise_gate_db": -56.0,
-    "agc_enabled": true
+    "agc_enabled": false,
+    "noise_gate_db": -32.0
   },
   "camera": {
     "ptz_speed": 15.0,
     "led_enabled": false,
     "ir_mode": "Aus"
+  },
+  "learner": {
+    "flash_enabled": true
   },
   "orchestration_mode": "always_on",
   "active_models": [
@@ -29,9 +33,5 @@
     "hand_landmark",
     "pose",
     "face_attr"
-  ],
-  "cpu_detectors": {
-    "enabled": false,
-    "interval_frames": 60
-  }
+  ]
 }
