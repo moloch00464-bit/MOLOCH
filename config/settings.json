@@ -1,10 +1,12 @@
 {
   "version": 1,
   "thresholds": {
-    "scrfd_conf": 0.45,
-    "scrfd_nms": 0.45,
+    "scrfd_conf": 0.5,
+    "scrfd_nms": 0.4,
     "arcface_thresh": 0.6,
-    "yolo_conf": 0.7
+    "yolo_conf": 0.5,
+    "pose_conf": 0.35,
+    "hand_conf": 0.3
   },
   "hand_occlusion": {
     "enabled": false,
@@ -33,5 +35,19 @@
     "hand_landmark",
     "pose",
     "face_attr"
-  ]
+  ],
+  "mpo": {
+    "tension_tau": 300.0,
+    "dominance_drift": 0.01,
+    "zone_hysteresis": 0.15,
+    "berserker_threshold": 0.95,
+    "thermal_damping_start": 70.0
+  },
+  "gestures": {
+    "wave_enabled": true,
+    "thumbs_up_enabled": true,
+    "stop_enabled": true,
+    "point_enabled": true,
+    "sensitivity": 0.5
+  }
 }

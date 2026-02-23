@@ -39,11 +39,17 @@ try:
 except ImportError:
     HardwarePopup = None
 
-# NPU Thresh Popup importieren (optional)
+# NPU Thresh Popup importieren (optional, NEUES Popup mit MPO + Gesten)
 try:
-    from core.gui.popups.popup_npu import NpuThreshPopup
+    from core.gui.popups.popup_npu_thresh import NpuThreshPopup
 except ImportError:
     NpuThreshPopup = None
+
+# Tracker Popup importieren (optional)
+try:
+    from core.gui.popups.popup_tracker import TrackerPopup
+except ImportError:
+    TrackerPopup = None
 
 # Settings Popup importieren (optional)
 try:
@@ -86,6 +92,7 @@ class ModelsModule:
         self.on_popup_audio = self._open_audio_popup
         self.on_popup_hardware = self._open_hardware_popup
         self.on_popup_npu = self._open_npu_popup
+        self.on_popup_tracker = self._open_tracker_popup
         self.on_popup_settings = self._open_settings_popup
 
         # GUI aufbauen
@@ -133,6 +140,13 @@ class ModelsModule:
     # =========================================================================
     # Settings Popup oeffnen
     # =========================================================================
+
+    def _open_tracker_popup(self):
+        """Tracker Settings Popup oeffnen."""
+        if TrackerPopup is not None:
+            TrackerPopup(self._parent, self._service)
+        else:
+            print("FEHLER: popup_tracker.py konnte nicht importiert werden")
 
     def _open_settings_popup(self):
         """Settings Popup oeffnen."""
@@ -275,17 +289,18 @@ class ModelsModule:
         popup_defs = [
             ("AUDIO", lambda: self.on_popup_audio()),
             ("HARDWARE", lambda: self.on_popup_hardware()),
-            ("NPU THRESH", lambda: self.on_popup_npu()),
+            ("NPU/MPO", lambda: self.on_popup_npu()),
+            ("TRACKER", lambda: self.on_popup_tracker()),
             ("SETTINGS", lambda: self.on_popup_settings()),
         ]
 
         for i, (label, cmd) in enumerate(popup_defs):
             tk.Button(
-                row, text=label, width=10,
+                row, text=label, width=9,
                 bg=BG_BUTTON, fg=FG_LABEL, font=FONT_BUTTON,
                 activebackground=BG_FRAME,
                 command=cmd,
-            ).grid(row=0, column=i, padx=3, pady=2)
+            ).grid(row=0, column=i, padx=2, pady=2)
 
     # =========================================================================
     # Status-Polling
