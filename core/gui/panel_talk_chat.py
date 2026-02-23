@@ -110,11 +110,23 @@ class TalkChatModule:
         else:
             tag = "system"
 
+        # Smart Scroll: Nur auto-scrollen wenn User am Ende ist
+        at_bottom = self._txt_chat.yview()[1] >= 0.95
+
         self._txt_chat.config(state=tk.NORMAL)
         self._txt_chat.insert(tk.END, f"[{timestamp}] ", "timestamp")
         self._txt_chat.insert(tk.END, f"{sender}: {text}\n", tag)
-        self._txt_chat.see(tk.END)
+
+        # Max 200 Nachrichten — aelteste loeschen (verhindert RAM-Wachstum)
+        line_count = int(self._txt_chat.index("end-1c").split(".")[0])
+        if line_count > 200:
+            self._txt_chat.delete("1.0", f"{line_count - 200 + 1}.0")
+
         self._txt_chat.config(state=tk.DISABLED)
+
+        # Auto-Scroll NACH state=DISABLED (tkinter-Bug: see() vor DISABLED wird ignoriert)
+        if at_bottom:
+            self._txt_chat.see(tk.END)
 
     # =========================================================================
     # Eingabezeile

@@ -89,14 +89,14 @@ class TrackingConfig:
     # Kamera Motor-Speed: ~30 deg/s (Kalibrierung: 342deg in ~12s)
     fov_horizontal: float = 110.0
     fov_vertical: float = 65.0
-    pan_gain: float = 0.45          # aggressiver (war 0.25)
-    tilt_gain: float = 0.40         # aggressiver (war 0.25)
-    max_step_pan: float = 12.0      # groessere Schritte (was 3.0)
-    max_step_tilt: float = 8.0      # groessere Schritte (was 2.0)
+    pan_gain: float = 0.25          # sanft, kein Ueberschwinger (war 0.45 = zu aggressiv)
+    tilt_gain: float = 0.20         # sanft (war 0.40 = zu aggressiv)
+    max_step_pan: float = 5.0       # max 5 Grad pro Move (war 12.0 = VIEL zu viel)
+    max_step_tilt: float = 3.0      # max 3 Grad pro Move (war 8.0 = zu viel)
     min_step_deg: float = 0.3
-    tracking_speed: float = 1.0     # ONVIF max speed
-    move_cooldown_ms: float = 300.0  # schnellere Moves (was 800)
-    smooth_alpha: float = 0.15      # langsame EMA fuer ruhige Kamera (war 0.5)
+    tracking_speed: float = 0.7     # 70% ONVIF Speed, nie Vollgas (war 1.0)
+    move_cooldown_ms: float = 400.0  # 400ms zwischen Moves (war 300, vorher 800)
+    smooth_alpha: float = 0.20      # EMA etwas schneller fuer bessere Reaktion (war 0.15)
 
     # Kamera Hardware-Limits (SonoffCameraController clampt intern,
     # aber Tracker muss gecachte Position AUCH clampen!)
@@ -108,19 +108,18 @@ class TrackingConfig:
     # Search mode parameters
     search_speed: float = 0.3
     search_direction_interval: float = 4.0
-    search_reset_to_center: bool = False  # NICHT zurueck auf (0,0) - bleibe wo Tracking war
+    search_reset_to_center: bool = False
     search_patrol_positions: list = field(default_factory=lambda: [
-        (0.0, 0.0),
-        (-84.0, 0.0),
-        (-168.0, 0.0),
-        (-84.0, 30.0),
-        (0.0, 30.0),
-        (84.0, 30.0),
-        (170.0, 0.0),
-        (84.0, 0.0),
+        (0.0, 0.0),        # Home (Markus' Sitzplatz)
+        (-60.0, 0.0),      # Leicht links
+        (-120.0, 0.0),     # Weiter links
+        (0.0, 20.0),       # Mitte hoch
+        (60.0, 0.0),       # Leicht rechts
+        (120.0, 0.0),      # Weiter rechts
     ])
+    search_home_timeout: float = 30.0   # 30s ohne Fund -> Home (war 60s)
 
-    target_lost_timeout: float = 5.0  # 5s coasting bevor Search (war 2.0)
+    target_lost_timeout: float = 5.0  # 5s coasting bevor Search
     frame_width: int = 640
     frame_height: int = 640
 
@@ -149,6 +148,7 @@ class TrackingConfig:
     # === SMOOTHING: Face/Person Wechsel-Daempfung ===
     source_hysteresis_frames: int = 3   # Neuer Source-Typ muss 3 Frames stabil sein
     center_ring_buffer_size: int = 10   # Mittelwert ueber letzte 10 Frame-Zentren (war 5)
+    min_frames_before_move: int = 3     # Mindestens 3 Frames im Buffer bevor Kamera bewegt
 
     # === DEAD ZONE + COAST MODE (Tracker-Beruhigung) ===
     dead_zone_pct: float = 0.15        # 15% - mittlere 30% des Bildes = RUHIG (war 3%)
@@ -240,6 +240,10 @@ class AutonomousTracker:
         # EMA Glaettung fuer smooth tracking
         self._smooth_x = None
         self._smooth_y = None
+        # PD-Regler: vorherigen Fehler speichern fuer Derivative (Bremse)
+        self._prev_error_x = 0.0
+        self._prev_error_y = 0.0
+        self._prev_error_time = 0.0
 
         # === COAST MODE: Kamera einfrieren wenn Ziel stabil ===
         self._stable_start_time = None    # Wann wurde Ziel zuletzt stabil (fuer Coast-Timer)
@@ -713,10 +717,15 @@ class AutonomousTracker:
                 face_center = selected_pose.get("face_center", (0.5, 0.5))
                 track_x, track_y = face_center
             else:
+                # Body-Tracking: Oberes Drittel der Person-Box anpeilen (Kopfhoehe)
+                # statt Mitte der Box (war center_y * 0.85 = kaum Korrektur)
                 bbox_center_x = (bbox[0] + bbox[2]) / 2 / frame_width
-                bbox_center_y = (bbox[1] + bbox[3]) / 2 / frame_height
+                bbox_top_y = bbox[1] / frame_height
+                bbox_bottom_y = bbox[3] / frame_height
+                bbox_height = bbox_bottom_y - bbox_top_y
+                # Ziel: 30% von oben in der Person-Box (= Kopf/Schulterbereich)
                 track_x = bbox_center_x
-                track_y = bbox_center_y * 0.85
+                track_y = bbox_top_y + bbox_height * 0.30
 
             if self.current_target_id == 0:
                 self.current_target_id = self._next_target_id
@@ -925,6 +934,12 @@ class AutonomousTracker:
                 logger.info("[DWELL] Complete - starting tracking")
                 self._set_state(TrackerState.TRACKING)
 
+        # === Minimum Frames: Erst bewegen wenn genug Daten im Ring-Buffer ===
+        if len(self._center_ring) < self.config.min_frames_before_move:
+            if debug_log:
+                logger.info(f"[TRACK] Warte auf Frames: {len(self._center_ring)}/{self.config.min_frames_before_move}")
+            return
+
         # === Error-Magnitude als Prozent vom Bild (fuer Dead Zone / Coast) ===
         error_magnitude_pct = math.sqrt(error_x_norm**2 + error_y_norm**2)
 
@@ -1002,9 +1017,32 @@ class AutonomousTracker:
             else:
                 self._target_wait_start = None
 
-        # Calculate position delta (pre-check fuer min threshold)
-        pan_delta = -error_x_norm * self.config.fov_horizontal * self.config.pan_gain
-        tilt_delta = -error_y_norm * self.config.fov_vertical * self.config.tilt_gain
+        # === PD-REGLER: Proportional + Derivative (Bremse) ===
+        # P-Term: proportional zum Fehler
+        pan_p = -error_x_norm * self.config.fov_horizontal * self.config.pan_gain
+        tilt_p = -error_y_norm * self.config.fov_vertical * self.config.tilt_gain
+
+        # D-Term: Bremse wenn Fehler ABNIMMT (Kamera naehert sich dem Ziel)
+        d_gain = 0.4  # Daempfungsfaktor (0 = kein Bremsen, 1 = starkes Bremsen)
+        dt = now - self._prev_error_time if self._prev_error_time > 0 else 0.2
+        if dt > 0 and dt < 2.0:  # Nur bei plausiblem Zeitintervall
+            d_error_x = (error_x_norm - self._prev_error_x) / dt
+            d_error_y = (error_y_norm - self._prev_error_y) / dt
+            # D-Term: Aenderungsrate * Gain -> bremst ab wenn Fehler schrumpft
+            pan_d = -d_error_x * self.config.fov_horizontal * d_gain * self.config.pan_gain
+            tilt_d = -d_error_y * self.config.fov_vertical * d_gain * self.config.tilt_gain
+        else:
+            pan_d = 0.0
+            tilt_d = 0.0
+
+        # Fehler-Historie aktualisieren
+        self._prev_error_x = error_x_norm
+        self._prev_error_y = error_y_norm
+        self._prev_error_time = now
+
+        # PD-Summe: P bringt uns zum Ziel, D bremst beim Ankommen
+        pan_delta = pan_p + pan_d
+        tilt_delta = tilt_p + tilt_d
         pan_delta = max(-self.config.max_step_pan, min(self.config.max_step_pan, pan_delta))
         tilt_delta = max(-self.config.max_step_tilt, min(self.config.max_step_tilt, tilt_delta))
 
@@ -1014,12 +1052,13 @@ class AutonomousTracker:
             return
 
         # === ADAPTIVE SPEED: proportional zum Error ===
-        # Kleine Korrekturen (5-10%) -> langsam, grosse (>20%) -> volle Speed
+        # Kleine Korrekturen (15-20%) -> langsam, grosse (>30%) -> volle Speed
         speed_range = self.config.tracking_speed - self.config.min_move_speed
-        move_speed = self.config.min_move_speed + speed_range * min(1.0, error_magnitude_pct / 0.20)
+        move_speed = self.config.min_move_speed + speed_range * min(1.0, error_magnitude_pct / 0.30)
 
-        # Execute AbsoluteMove tracking
-        result = self._track_target(error_x_norm, error_y_norm, speed=move_speed)
+        # Execute AbsoluteMove tracking (mit bereits berechnetem PD-Delta)
+        result = self._track_target(error_x_norm, error_y_norm, speed=move_speed,
+                                     pd_pan_delta=pan_delta, pd_tilt_delta=tilt_delta)
 
         if result:
             self.stats["tracking_moves"] += 1
@@ -1029,17 +1068,17 @@ class AutonomousTracker:
                        f"speed={move_speed:.2f} delta=({pan_delta:+.1f},{tilt_delta:+.1f})deg "
                        f"pos=({self.last_known_pan:+.1f},{self.last_known_tilt:+.1f})deg")
 
-    def _track_target(self, error_x_norm: float, error_y_norm: float, speed: float = None) -> bool:
+    def _track_target(self, error_x_norm: float, error_y_norm: float, speed: float = None,
+                       pd_pan_delta: float = None, pd_tilt_delta: float = None) -> bool:
         """
         Track target using AbsoluteMove with real position feedback.
-
-        Converts normalized frame-center error to position delta,
-        reads current position, and sends AbsoluteMove to target position.
 
         Args:
             error_x_norm: Normalized horizontal error (-0.5 to +0.5), positive = target right
             error_y_norm: Normalized vertical error (-0.5 to +0.5), positive = target below
             speed: ONVIF move speed (0.0-1.0), None = config.tracking_speed
+            pd_pan_delta: Vorberechnetes PD-Delta fuer Pan (optional)
+            pd_tilt_delta: Vorberechnetes PD-Delta fuer Tilt (optional)
 
         Returns:
             True if move command sent successfully
@@ -1051,18 +1090,15 @@ class AutonomousTracker:
         if hasattr(self.camera, '_exclusive_owner') and self.camera._exclusive_owner is not None:
             return False
 
-        # Cache-Position nutzen (kein ONVIF-Call - spart 100-200ms pro Cycle!)
-        # last_known_pan/tilt wird nach jedem move_absolute() auf target gesetzt
-
-        # Calculate position delta from error
-        # Positive error_x (target right) -> negative pan delta (move right = decrease pan)
-        # Positive error_y (target below) -> negative tilt delta (move down = decrease tilt)
-        pan_delta = -error_x_norm * self.config.fov_horizontal * self.config.pan_gain
-        tilt_delta = -error_y_norm * self.config.fov_vertical * self.config.tilt_gain
-
-        # Limit step size
-        pan_delta = max(-self.config.max_step_pan, min(self.config.max_step_pan, pan_delta))
-        tilt_delta = max(-self.config.max_step_tilt, min(self.config.max_step_tilt, tilt_delta))
+        # PD-Delta nutzen wenn vorhanden, sonst reiner P-Term als Fallback
+        if pd_pan_delta is not None and pd_tilt_delta is not None:
+            pan_delta = pd_pan_delta
+            tilt_delta = pd_tilt_delta
+        else:
+            pan_delta = -error_x_norm * self.config.fov_horizontal * self.config.pan_gain
+            tilt_delta = -error_y_norm * self.config.fov_vertical * self.config.tilt_gain
+            pan_delta = max(-self.config.max_step_pan, min(self.config.max_step_pan, pan_delta))
+            tilt_delta = max(-self.config.max_step_tilt, min(self.config.max_step_tilt, tilt_delta))
 
         # Calculate target position + Clamping auf Hardware-Limits
         # (verhindert Position-Drift wenn Kamera intern clampt)
@@ -1114,10 +1150,13 @@ class AutonomousTracker:
         Nach 60s ohne Fund: Zurueck zu Home, Presence sinkt.
         CoreIntegrator wird ueber Such-Status informiert.
         """
-        # Smoothing + Coast-Timer zuruecksetzen wenn Ziel verloren
+        # Smoothing + Coast-Timer + PD-State zuruecksetzen wenn Ziel verloren
         self._smooth_x = None
         self._smooth_y = None
         self._stable_start_time = None
+        self._prev_error_x = 0.0
+        self._prev_error_y = 0.0
+        self._prev_error_time = 0.0
         if PERCEPTION_AVAILABLE:
             try:
                 if is_user_visible():
@@ -1156,10 +1195,10 @@ class AutonomousTracker:
         search_duration = now - getattr(self, '_search_start_time', now)
         patrol_positions = self.config.search_patrol_positions
 
-        # Nach 60s ohne Fund: Zurueck zu Home und aufhoeren
-        if search_duration > 60.0:
+        # Nach 30s ohne Fund: Zurueck zu Home und aufhoeren
+        if search_duration > self.config.search_home_timeout:
             if self.search_patrol_index != 0 or self.search_move_time == 0:
-                logger.info(f"[SEARCH] 60s ohne Fund -> Home-Position")
+                logger.info(f"[SEARCH] {self.config.search_home_timeout:.0f}s ohne Fund -> Home-Position")
                 self._send_search_move(0.0, 0.0)
                 self.search_patrol_index = 0
                 # CoreIntegrator: Presence sinkt stark
