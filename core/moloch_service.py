@@ -57,6 +57,9 @@ from core.vision.face_attr_npu import analyze_face as _analyze_face
 from core.cloud_controller import CloudController
 from core.mpo.autonomous_tracker import AutonomousTracker, TrackerState
 from core.longterm_memory import get_memory
+from core.perception.perception_frame import PerceptionFrame, estimate_distance
+from core.perception.perception_buffer import get_perception_buffer
+from core.perception.model_health import get_model_health
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger("MolochService")
@@ -199,6 +202,22 @@ class MolochService:
         self._active_ctx = {}
         self._ctx_lock = threading.Lock()
         self._input_640 = np.empty((640, 640, 3), dtype=np.uint8)
+
+        # === Phase 3: Model Orchestration ===
+        # Perception Buffer (Ring-Buffer fuer Trend-Analyse)
+        self._perception_buffer = get_perception_buffer()
+        # Model Health Monitor
+        self._model_health = get_model_health()
+        # Aktueller PerceptionFrame (letzter aggregierter Zustand)
+        self._current_pframe = PerceptionFrame()
+        # Attention-Level basierte Modell-Aktivierung
+        # "idle" | "normal" | "high" | "teach"
+        self._attention_level = "idle"
+        self._attention_level_lock = threading.Lock()
+        # Adaptive FPS: Target-Delay zwischen Frames (Sekunden)
+        self._target_frame_delay = 0.2  # 5 FPS im Idle
+        # Pose-Energy Tracker (Keypoint-Bewegung Frame-zu-Frame)
+        self._prev_keypoints = None
 
         # Throttling: Emotion/Age/Gender nur alle N Frames (CPU-Sparmode)
         # _cpu_detectors_enabled und _cpu_detect_interval werden in _load_settings() gesetzt
@@ -789,6 +808,7 @@ class MolochService:
                     dt = time.perf_counter() - t0
                     with self._fps_lock:
                         self._fps["scrfd"] = 1.0 / dt if dt > 0 else 0
+                    self._model_health.record_inference("scrfd", dt * 1000)
 
                     if len(boxes) > 0:
                         if "face" in _allowed_draws:
@@ -823,6 +843,7 @@ class MolochService:
                             self._first_detection_event.set()
                 except Exception as e:
                     logger.error(f"SCRFD Fehler: {e}")
+                    self._model_health.record_error("scrfd")
 
 
             # Lazy-configure face_attr (einmalig ~400ms, danach 0ms)
@@ -949,8 +970,10 @@ class MolochService:
                     dt = time.perf_counter() - t0
                     with self._fps_lock:
                         self._fps["arcface"] = 1.0 / dt if dt > 0 else 0
+                    self._model_health.record_inference("arcface", dt * 1000)
                 except Exception as e:
                     logger.error(f"ArcFace Fehler: {e}")
+                    self._model_health.record_error("arcface")
 
             # 3. YOLOv8m Detection (alle COCO Klassen, uebersprungen wenn Face erkannt)
             _detected_objects = []  # Nicht-Person-Objekte fuer Status
@@ -967,6 +990,7 @@ class MolochService:
                     dt = time.perf_counter() - t0
                     with self._fps_lock:
                         self._fps["yolov8m"] = 1.0 / dt if dt > 0 else 0
+                    self._model_health.record_inference("yolov8m", dt * 1000)
 
                     # Personen und andere Objekte trennen
                     persons = [d for d in all_dets if d.get("class_id", -1) == 0]
@@ -1007,6 +1031,7 @@ class MolochService:
                                 logger.debug(f"Tracker YOLOv8m feed: {e}")
                 except Exception as e:
                     logger.error(f"YOLOv8m Fehler: {e}")
+                    self._model_health.record_error("yolov8m")
 
             # 4. Hand Landmark Detection (224x224 Crop aus Person-BBox oder Bildmitte)
             if self.hand_active and "hand_landmark" in self._active_ctx:
@@ -1055,6 +1080,7 @@ class MolochService:
                     dt = time.perf_counter() - t0
                     with self._fps_lock:
                         self._fps["hand_landmark"] = 1.0 / dt if dt > 0 else 0
+                    self._model_health.record_inference("hand_landmark", dt * 1000)
 
                     if hand_result is not None:
                         self._last_hand_detected = True
@@ -1076,6 +1102,7 @@ class MolochService:
 
                 except Exception as e:
                     logger.error(f"Hand Landmark Fehler: {e}")
+                    self._model_health.record_error("hand_landmark")
 
             # 5. Pose Estimation (YOLOv8s Pose - Skeleton + Keypoints)
             _pose_data = []
@@ -1091,6 +1118,7 @@ class MolochService:
                     dt = time.perf_counter() - t0
                     with self._fps_lock:
                         self._fps["pose"] = 1.0 / dt if dt > 0 else 0
+                    self._model_health.record_inference("pose", dt * 1000)
 
                     if _pose_data:
                         draw_poses(annotated, _pose_data, scale_x, scale_y)
@@ -1130,6 +1158,7 @@ class MolochService:
                                 logger.debug(f"Tracker pose feed: {e}")
                 except Exception as e:
                     logger.error(f"Pose Fehler: {e}")
+                    self._model_health.record_error("pose")
 
             # ===== Perception Engine: All-Slot (alle 4 permanent, nur beim Start) =====
             if self._perception:
@@ -1194,27 +1223,54 @@ class MolochService:
                 # LED nur AUS wenn MOLOCH nicht aktiv (Tentakel steuert eigene LED)
                 self._led_indicator_set(False)
 
-            # === Core Integrator fuettern (passiv, parallel zur bestehenden Logik) ===
+            # === Phase 3: Perception Frame aggregieren ===
+            _pf_name = name if 'name' in dir() else None
+            _pf_sim = sim if 'sim' in dir() else 0.0
+            _pf_head = _head_pose if '_head_pose' in dir() else None
+            _pf_persons = persons if 'persons' in dir() and _persons_detected else []
+            pframe = self._build_perception_frame(
+                face_detected=face_detected,
+                face_boxes=face_boxes,
+                _markus_recognized=_markus_recognized,
+                _persons_detected=_persons_detected,
+                persons=_pf_persons,
+                _pose_data=_pose_data,
+                _detected_objects=_detected_objects if '_detected_objects' in dir() else [],
+                name=_pf_name,
+                sim=_pf_sim,
+                fw=fw, fh=fh,
+                _head_pose=_pf_head,
+                t_total=t_total,
+            )
+            self._current_pframe = pframe
+            self._perception_buffer.push(pframe)
+
+            # === Core Integrator fuettern (via PerceptionFrame — reichere Daten) ===
             if self._core_integrator:
                 try:
-                    # Perception-Daten -> Integrator
-                    _ci_face_conf = 0.0
-                    if face_boxes:
-                        _ci_face_conf = float(face_boxes[0][1])  # Confidence der ersten Face
+                    # Perception-Daten -> Integrator (erweitert mit Trends)
                     self._core_integrator.update_inputs("perception", {
-                        "face_detected": 1.0 if face_detected else 0.0,
-                        "face_confidence": _ci_face_conf,
-                        "person_detected": 1.0 if _persons_detected else 0.0,
-                        "markus_recognized": 1.0 if _markus_recognized else 0.0,
-                        "unknown_person": 1.0 if (face_detected and 'name' in dir() and name == "Unbekannt") else 0.0,
+                        "face_detected": 1.0 if pframe.face_detected else 0.0,
+                        "face_confidence": pframe.face_confidence,
+                        "person_detected": 1.0 if pframe.person_detected else 0.0,
+                        "markus_recognized": 1.0 if pframe.markus_recognized else 0.0,
+                        "unknown_person": 1.0 if pframe.unknown_face else 0.0,
+                        "proximity": pframe.distance_ratio,
                     })
                     # Alarm-State
                     self._core_integrator.update_input("system", "alarm_active", 1.0 if self._alarm_on else 0.0)
                     # System-Last (grob: NPU aktiv = etwas Last)
-                    _npu_load = len(self._active_ctx) / 4.0  # 0-4 Modelle -> 0.0-1.0
+                    _npu_load = len(self._active_ctx) / 6.0  # 0-6 Modelle -> 0.0-1.0
                     self._core_integrator.update_input("system", "system_load", _npu_load)
                 except Exception:
                     pass  # Integrator darf NIE die Inference-Loop stoeren
+
+            # === Phase 3: Attention-Level basierte Modell-Orchestrierung ===
+            try:
+                new_level = self._compute_attention_level()
+                self._apply_attention_level(new_level)
+            except Exception as e:
+                logger.debug(f"[ORCHESTRATION] Fehler: {e}")
 
             # Auto-Switch: Hand-Forced zurueck zu Auto wenn keine Hand
             if self.hand_active and self._perception and self._perception._forced:
@@ -1246,6 +1302,11 @@ class MolochService:
 
             # Panel IPC: Preview-Groesse fuer SHM (1080p waere 6MB/Frame)
             self._write_shm(cv2.resize(annotated, (self.PREVIEW_W, self.PREVIEW_H)))
+
+            # === Phase 3: Adaptive FPS — Throttle bei niedrigem Attention-Level ===
+            if dt_total < self._target_frame_delay:
+                _sleep = self._target_frame_delay - dt_total
+                time.sleep(_sleep)
 
     # =========================================================================
     # Cross-Process NPU Coordination
@@ -2116,6 +2177,228 @@ class MolochService:
         self.hand_active = "hand_landmark" in self._active_ctx
         self.pose_active = "pose" in self._active_ctx
         self.face_attr_active = "face_attr" in self._active_ctx
+
+    # =========================================================================
+    # Phase 3: Attention-basierte Modell-Orchestrierung
+    # =========================================================================
+
+    def _compute_attention_level(self) -> str:
+        """Attention-Level aus CoreIntegrator ableiten.
+
+        Returns:
+            "idle"   (Attention 0.0-0.2) — keiner da
+            "normal" (Attention 0.2-0.6) — jemand erkannt
+            "high"   (Attention 0.6-1.0) — Markus erkannt / Voice aktiv
+            "teach"  (Override)          — DailyLearner aktiv
+        """
+        # Teach-Mode Override
+        if self._daily_learner and self._daily_learner.enabled:
+            return "teach"
+
+        if not self._core_integrator:
+            return "normal"  # Fallback wenn kein Integrator
+
+        attention = self._core_integrator.get_attention()
+
+        if attention < 0.2:
+            return "idle"
+        elif attention < 0.6:
+            return "normal"
+        else:
+            return "high"
+
+    def _get_target_models(self, level: str) -> set:
+        """Welche Modelle sollen bei diesem Attention-Level aktiv sein?
+
+        Args:
+            level: "idle" | "normal" | "high" | "teach"
+
+        Returns:
+            Set von Modell-Namen
+        """
+        if level == "idle":
+            # Nur YOLOv8m scannt langsam (Person-Detection)
+            return {"yolov8m"}
+        elif level == "normal":
+            # Person erkannt: Face-Pipeline dazu
+            return {"yolov8m", "scrfd", "arcface", "face_attr"}
+        elif level == "high":
+            # Volle Wahrnehmung: alle Modelle
+            return {"yolov8m", "scrfd", "arcface", "face_attr", "pose", "hand_landmark"}
+        elif level == "teach":
+            # Teach-Mode: Face-Pipeline + FaceAttr fuer Snapshots
+            return {"scrfd", "arcface", "face_attr"}
+        return {"yolov8m", "scrfd", "arcface", "face_attr"}  # Default = normal
+
+    def _get_target_fps_delay(self, level: str) -> float:
+        """Target-Delay zwischen Frames fuer Adaptive FPS.
+
+        Returns:
+            Sekunden zwischen Frames (niedriger = schneller)
+        """
+        if level == "idle":
+            return 0.2  # 5 FPS
+        elif level == "normal":
+            return 0.067  # 15 FPS
+        elif level == "high":
+            return 0.033  # 30 FPS
+        elif level == "teach":
+            return 0.067  # 15 FPS (reicht fuer Snapshots)
+        return 0.067
+
+    def _apply_attention_level(self, new_level: str):
+        """Modelle aktivieren/deaktivieren basierend auf Attention-Level.
+
+        Konfiguriert/dekonfiguriert NPU-Modelle sanft. Kein harter Swap —
+        konfigurierte Modelle bleiben geladen, nur configure/unconfigure.
+        """
+        with self._attention_level_lock:
+            old_level = self._attention_level
+            if old_level == new_level:
+                return
+            self._attention_level = new_level
+
+        # Manueller Override aktiv? -> nicht eingreifen
+        if self._perception and self._perception._forced:
+            return
+        if self._manual_mode:
+            return
+
+        wanted = self._get_target_models(new_level)
+        have = set(self._active_ctx.keys())
+
+        to_pause = have - wanted
+        to_resume = wanted - have
+
+        if not to_pause and not to_resume:
+            return
+
+        logger.info(f"[ORCHESTRATION] Level {old_level}->{new_level}: "
+                     f"pause={to_pause or 'none'} resume={to_resume or 'none'}")
+
+        # Pausieren: unconfigure (NPU-Slots frei, Modell bleibt geladen in _models)
+        for m in to_pause:
+            self._unconfigure_model(m)
+            self._model_health.set_paused(m, True)
+            time.sleep(0.1)
+
+        # Resumieren: configure (Modell ist schon in _models geladen)
+        for m in to_resume:
+            if m in self._models and m not in self._active_ctx:
+                self._configure_model(m)
+                self._model_health.set_paused(m, False)
+
+        # Flags synchronisieren
+        self._sync_flags_from_npu()
+
+        # Adaptive FPS
+        self._target_frame_delay = self._get_target_fps_delay(new_level)
+
+        self._notify("attention_level", {"level": new_level, "fps_target": round(1.0 / self._target_frame_delay)})
+
+    def _build_perception_frame(self, face_detected, face_boxes, _markus_recognized,
+                                 _persons_detected, persons, _pose_data, _detected_objects,
+                                 name, sim, fw, fh, _head_pose, t_total) -> PerceptionFrame:
+        """Baut einen aggregierten PerceptionFrame aus allen Modell-Outputs.
+
+        Wird am Ende jedes Inference-Ticks aufgerufen.
+        """
+        pf = PerceptionFrame()
+        pf.timestamp = time.time()
+
+        # Person Detection
+        pf.person_detected = _persons_detected or face_detected
+        person_list = persons if _persons_detected and persons else []
+        pf.person_count = len(person_list) if person_list else (1 if face_detected else 0)
+
+        # Distanz aus groesster Person-BBox
+        if person_list:
+            biggest = max(person_list, key=lambda d: (d["bbox"][2]-d["bbox"][0]) * (d["bbox"][3]-d["bbox"][1]))
+            bbox = biggest["bbox"]
+            area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])  # Normalisiert 0-1
+            pf.distance_ratio = area
+            pf.distance = estimate_distance(area)
+        elif face_boxes:
+            fb = face_boxes[0][0]
+            area = (fb[2] - fb[0]) * (fb[3] - fb[1])
+            pf.distance_ratio = area
+            pf.distance = estimate_distance(area)
+
+        # Face Detection
+        pf.face_detected = face_detected
+        pf.face_count = len(face_boxes)
+        if face_boxes:
+            pf.face_confidence = float(face_boxes[0][1])
+            fb = face_boxes[0][0]
+            pf.face_bbox = (float(fb[0]), float(fb[1]), float(fb[2]), float(fb[3]))
+
+        # Face Recognition
+        if face_detected and name and name not in ("Keine DB", ""):
+            pf.face_id = name.lower() if name != "Unbekannt" else "unknown"
+            pf.face_similarity = sim if sim else 0.0
+
+        # Face Attributes
+        if face_detected and name:
+            pf.gender = self._cached_gender.get(name)
+            pf.age_range = self._cached_age_range.get(name)
+            pf.emotion = self._cached_emotion.get(name)
+
+        # Pose
+        if _pose_data:
+            pf.pose_count = len(_pose_data)
+            pf.pose_energy = self._compute_pose_energy(_pose_data)
+
+        # Hand/Gesture
+        pf.hand_detected = getattr(self, '_last_hand_detected', False)
+        if self._current_gesture:
+            pf.hand_gesture = self._current_gesture.type.value
+
+        # Head Pose
+        if _head_pose is not None:
+            pf.head_pitch = float(_head_pose[0])
+            pf.head_yaw = float(_head_pose[1])
+
+        # Objects
+        pf.objects = _detected_objects if _detected_objects else []
+
+        # Meta
+        pf.inference_ms = (time.perf_counter() - t_total) * 1000
+        pf.active_models = list(self._active_ctx.keys())
+
+        return pf
+
+    def _compute_pose_energy(self, pose_data) -> float:
+        """Pose-Energie aus Keypoint-Bewegung berechnen (0.0-1.0).
+
+        Vergleicht aktuelle Keypoints mit vorherigen. Hohe Bewegung = hohe Energie.
+        """
+        if not pose_data:
+            return 0.0
+
+        # Nimm die Person mit hoechstem Score
+        best = max(pose_data, key=lambda p: p.get("score", 0))
+        kpts = best.get("keypoints")
+        if kpts is None:
+            return 0.0
+
+        # Keypoints: (17, 3) Array [x, y, confidence]
+        current = kpts[:, :2]  # Nur x, y
+
+        if self._prev_keypoints is None:
+            self._prev_keypoints = current.copy()
+            return 0.0
+
+        # Differenz berechnen (nur sichtbare Keypoints)
+        visible = (kpts[:, 2] > 0.3)
+        if visible.sum() < 3:
+            return 0.0
+
+        diffs = np.linalg.norm(current[visible] - self._prev_keypoints[visible], axis=1)
+        # Normalisieren: 640px Bildgroesse, >50px Bewegung = volle Energie
+        energy = min(1.0, float(np.mean(diffs)) / 50.0)
+
+        self._prev_keypoints = current.copy()
+        return energy
 
     def _npu_watchdog(self):
         """Anti-Oszillation. Laeuft jede Inference-Iteration.

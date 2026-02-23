@@ -23,7 +23,7 @@ import os
 import threading
 import logging
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 
 _logger = logging.getLogger("CoreIntegrator")
 
@@ -110,6 +110,12 @@ class CoreIntegrator:
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._tick_count = 0
+
+        # --- Phase 3: Cross-Model Correlation ---
+        # Perception Buffer Referenz (lazy, vermeidet zirkulaere Imports)
+        self._perception_buffer = None
+        # Letzte Trend-Daten (1x/s aktualisiert)
+        self._last_trends: Dict = {}
 
         _logger.info("[CORE] CoreIntegrator initialisiert")
 
@@ -330,6 +336,9 @@ class CoreIntegrator:
                 self._presence * self.DECAY_PRESENCE + presence_impulse * 0.3
             )
 
+            # --- Cross-Model Correlation (Phase 3) ---
+            self._apply_cross_model_patterns(all_inputs)
+
             # --- Nachtsperre: Presence auf 0 druecken (22:00-06:00) ---
             if period == "nachts":
                 self._presence *= 0.8  # Schneller Decay nachts
@@ -379,6 +388,82 @@ class CoreIntegrator:
             return "shadow"
         return "berserker"
 
+    def _get_buffer_trends(self) -> Dict:
+        """Trends aus dem Perception Buffer holen (lazy init)."""
+        if self._perception_buffer is None:
+            try:
+                from core.perception.perception_buffer import get_perception_buffer
+                self._perception_buffer = get_perception_buffer()
+            except Exception:
+                return {}
+        try:
+            return self._perception_buffer.get_trends()
+        except Exception:
+            return {}
+
+    def _apply_cross_model_patterns(self, inputs: Dict):
+        """Cross-Model Correlation: Muster aus kombinierten Inputs erkennen.
+
+        Nicht mehr einzelne Inputs, sondern Muster:
+        - person + unknown_face + close → Tension STEIGT schnell
+        - markus + calm_pose + neutral → Tension SINKT
+        - unknown_face + high_pose_energy → Tension STEIGT stark
+        - markus + happy_emotion → Presence STEIGT
+        - niemand + lange_zeit → Attention SINKT, Idle-Mode
+
+        WICHTIG: Wird innerhalb Lock aufgerufen.
+        """
+        # Trends aus Buffer (1x/s reicht)
+        if self._tick_count % 2 == 0:  # Alle 2 Ticks aktualisieren
+            self._last_trends = self._get_buffer_trends()
+        trends = self._last_trends
+
+        person = inputs.get("person_detected", 0.0) > 0.5
+        face = inputs.get("face_detected", 0.0) > 0.5
+        markus = inputs.get("markus_recognized", 0.0) > 0.5
+        unknown = inputs.get("unknown_person", 0.0) > 0.5
+        proximity = inputs.get("proximity", 0.0)
+        voice = inputs.get("voice_activity", 0.0) > 0.5
+
+        smoothed_emotion = trends.get("smoothed_emotion")
+        pose_energy = trends.get("avg_pose_energy", 0.0)
+        approaching = trends.get("approaching", False)
+        leaving = trends.get("leaving", False)
+        absence = trends.get("absence_duration", 0.0)
+
+        # === Pattern 1: Unbekannter nah dran → Tension BOOST ===
+        if person and unknown and proximity > 0.1:
+            self._tension = _clamp(self._tension + 0.05)
+
+        # === Pattern 2: Unbekannter + hohe Bewegung → Tension STARK ===
+        if unknown and pose_energy > 0.5:
+            self._tension = _clamp(self._tension + 0.08)
+
+        # === Pattern 3: Markus + ruhig + neutral → Tension SINKT ===
+        if markus and pose_energy < 0.2 and smoothed_emotion in (None, "neutral", "happy"):
+            self._tension = _clamp(self._tension - 0.02)
+
+        # === Pattern 4: Markus + happy → Presence BOOST ===
+        if markus and smoothed_emotion == "happy":
+            self._presence = _clamp(self._presence + 0.03)
+
+        # === Pattern 5: Niemand da + lange Absence → Attention SINKT ===
+        if not person and not face and absence > 10:
+            self._attention *= 0.95  # Schnellerer Attention-Decay
+
+        # === Pattern 6: Person naehert sich → Attention STEIGT ===
+        if approaching and person:
+            self._attention = _clamp(self._attention + 0.04)
+
+        # === Pattern 7: Person entfernt sich → Attention sinkt langsam ===
+        if leaving:
+            self._attention *= 0.97
+
+        # === Pattern 8: Voice + Face → maximale Attention + Presence ===
+        if voice and face:
+            self._attention = _clamp(self._attention + 0.05)
+            self._presence = _clamp(self._presence + 0.03)
+
     def _compute_effects(self) -> Dict[str, float]:
         """Effekte aus den 3 Achsen ableiten (intern, nur innerhalb Lock aufrufen)."""
         t = self._tension
@@ -415,7 +500,7 @@ class CoreIntegrator:
     def get_status_dict(self) -> Dict:
         """Kompaktes Status-Dict fuer SHM-Export."""
         with self._lock:
-            return {
+            result = {
                 "tension": round(self._tension, 4),
                 "attention": round(self._attention, 4),
                 "presence": round(self._presence, 4),
@@ -424,6 +509,10 @@ class CoreIntegrator:
                 "effects": {k: round(v, 3) for k, v in self._effects.items()},
                 "tick": self._tick_count,
             }
+        # Trends ausserhalb des Locks (Buffer hat eigenen Lock)
+        if self._last_trends:
+            result["trends"] = self._last_trends
+        return result
 
     def _persist_state(self):
         """State auf SSD2 persistent speichern (Langzeitgedaechtnis)."""
