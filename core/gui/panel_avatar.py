@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 """
-M.O.L.O.C.H. Panel Avatar — Das Auge (v2)
-============================================
+M.O.L.O.C.H. Panel Avatar — Das Auge (v3 PyGame)
+===================================================
 
-HAL-9000 inspiriertes mechanisches Auge als Core State Visualisierung.
-Tkinter Canvas Widget, 300x300 Pixel. Dark Wave Aesthetik.
+HAL-9000 Auge mit PyGame Off-Screen Rendering in Tkinter eingebettet.
+Nutzt echtes Alpha-Blending und Anti-Aliasing via pygame.gfxdraw.
+
+Rendering-Pipeline: PyGame Surface -> PIL Image -> ImageTk -> Tkinter Label
+Kein separates Fenster — alles inline im Panel.
 
 Blueprint 5.2/5.3 Mapping:
-  TENSION   -> Ring-Puls-Geschwindigkeit + Glow-Intensitaet
+  TENSION   -> Ring-Puls-Geschwindigkeit + Glow-Intensitaet + Pupillengroesse
   DOMINANCE -> Farbe (Guardian=Blau, Neutral=Weiss, Shadow=Rot)
-  CPU-TEMP  -> Puls verlangsamt sich bei Hitze
+  CPU-TEMP  -> Puls verlangsamt sich bei Hitze, Auge wird "muede"
 
 Hysterese: Farbwechsel erst bei 0.15 dominance-Delta.
-300ms kubische Interpolation fuer alle visuellen Aenderungen.
+300ms Interpolation fuer alle visuellen Aenderungen.
 
 Rein passiv — liest NUR Core State, schreibt NICHTS.
 """
@@ -21,94 +24,125 @@ import tkinter as tk
 import math
 import random
 import time
+import logging
 
 from core.gui.panel_styles import BG_FRAME, FG_DIM
 
+# PyGame + PIL (graceful fallback)
+try:
+    import pygame
+    import pygame.gfxdraw
+    _PYGAME_OK = True
+except ImportError:
+    _PYGAME_OK = False
+
+try:
+    from PIL import Image, ImageTk
+    _PIL_OK = True
+except ImportError:
+    _PIL_OK = False
+
 
 # =============================================================================
-# Farb-Konstanten (Dominance-Achse)
+# Konstanten
 # =============================================================================
-COLOR_GUARDIAN = "#00AAFF"        # Leuchtendes Blau (+1.0)
-COLOR_NEUTRAL = "#FFFFFF"         # Weiss (0.0)
-COLOR_SHADOW = "#FF2200"          # Intensives Rot (-1.0)
 
-COLOR_GUARDIAN_DIM = "#005588"
-COLOR_NEUTRAL_DIM = "#888888"
-COLOR_SHADOW_DIM = "#881100"
-
-COLOR_GUARDIAN_IRIS = "#44CCFF"
-COLOR_NEUTRAL_IRIS = "#DDDDDD"
-COLOR_SHADOW_IRIS = "#FF4433"
-
-# Berserker Override
-COLOR_BERSERKER = "#FF2200"
-COLOR_BERSERKER_DIM = "#881100"
-COLOR_BERSERKER_IRIS = "#FF4433"
+AVATAR_SIZE = 300
+CX = AVATAR_SIZE // 2
+CY = AVATAR_SIZE // 2
+ANIM_INTERVAL_MS = 33   # ~30 FPS
 
 # Hintergrund
 BG_AVATAR = "#0A0A14"
-GRID_COLOR = "#111120"
+BG_RGB = (10, 10, 20)
+GRID_RGB = (17, 17, 32)
 
-# Animation
-ANIM_INTERVAL_MS = 50
-BERSERKER_FLASH_MS = 200
+# Zone-Farben (RGB)
+COL_GUARDIAN = (0, 170, 255)
+COL_NEUTRAL = (255, 255, 255)
+COL_SHADOW = (255, 34, 0)
+COL_BERSERKER = (255, 34, 0)
 
-# Canvas-Groesse
-AVATAR_SIZE = 300
-CENTER = AVATAR_SIZE // 2
-
-# Hysterese fuer visuelle Dominance
-VISUAL_DOMINANCE_HYSTERESIS = 0.15
+# Hysterese
+DOM_HYSTERESIS = 0.15
 
 
-def _lerp_color(c1: str, c2: str, t: float) -> str:
-    """Lineares Interpolieren zwischen zwei Hex-Farben."""
+# =============================================================================
+# Farb-Hilfsfunktionen
+# =============================================================================
+
+def _lerp(c1, c2, t):
+    """Lineare Interpolation zwischen zwei RGB-Tupeln."""
     t = max(0.0, min(1.0, t))
-    r1, g1, b1 = int(c1[1:3], 16), int(c1[3:5], 16), int(c1[5:7], 16)
-    r2, g2, b2 = int(c2[1:3], 16), int(c2[3:5], 16), int(c2[5:7], 16)
-    r = int(r1 + (r2 - r1) * t)
-    g = int(g1 + (g2 - g1) * t)
-    b = int(b1 + (b2 - b1) * t)
-    return f"#{r:02x}{g:02x}{b:02x}"
+    return tuple(int(c1[i] + (c2[i] - c1[i]) * t) for i in range(3))
 
 
-def _scale_color(color: str, factor: float) -> str:
-    """Farbe um Faktor skalieren (Helligkeit)."""
+def _scale(color, factor):
+    """Farbe um Helligkeitsfaktor skalieren."""
+    return tuple(min(255, max(0, int(c * factor))) for c in color)
+
+
+def _dom_color(d):
+    """Dominance -> Hauptfarbe."""
+    if d >= 0:
+        return _lerp(COL_NEUTRAL, COL_GUARDIAN, d)
+    return _lerp(COL_NEUTRAL, COL_SHADOW, -d)
+
+
+def _dom_iris(d):
+    """Dominance -> Iris-Farbe (heller)."""
+    if d >= 0:
+        return _lerp((220, 220, 220), (68, 204, 255), d)
+    return _lerp((220, 220, 220), (255, 68, 51), -d)
+
+
+def _rgb_to_hex(rgb):
+    """RGB-Tupel in Hex-String."""
+    return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
+
+
+def _hex_scale(color_hex, factor):
+    """Hex-Farbe skalieren."""
     factor = max(0.0, factor)
-    r = min(255, int(int(color[1:3], 16) * factor))
-    g = min(255, int(int(color[3:5], 16) * factor))
-    b = min(255, int(int(color[5:7], 16) * factor))
+    r = min(255, int(int(color_hex[1:3], 16) * factor))
+    g = min(255, int(int(color_hex[3:5], 16) * factor))
+    b = min(255, int(int(color_hex[5:7], 16) * factor))
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
-def _dominance_to_colors(dominance: float):
-    """Dominance-Wert (-1 bis +1) in Farben umrechnen.
+# =============================================================================
+# Glow Renderer
+# =============================================================================
 
-    -1.0 = Shadow (Rot), 0.0 = Neutral (Weiss), +1.0 = Guardian (Blau).
-    Smooth Interpolation ueber den gesamten Bereich.
+def _render_glow(radius, color, intensity):
+    """Weichen Glow als Alpha-Surface rendern.
+
+    Quadratischer Alpha-Falloff von Zentrum nach aussen.
+    Das ist der Hauptvorteil gegenueber Tkinter Canvas.
     """
-    if dominance >= 0:
-        # Neutral -> Guardian (0 bis +1)
-        t = dominance
-        main = _lerp_color(COLOR_NEUTRAL, COLOR_GUARDIAN, t)
-        dim = _lerp_color(COLOR_NEUTRAL_DIM, COLOR_GUARDIAN_DIM, t)
-        iris = _lerp_color(COLOR_NEUTRAL_IRIS, COLOR_GUARDIAN_IRIS, t)
-    else:
-        # Neutral -> Shadow (0 bis -1)
-        t = -dominance
-        main = _lerp_color(COLOR_NEUTRAL, COLOR_SHADOW, t)
-        dim = _lerp_color(COLOR_NEUTRAL_DIM, COLOR_SHADOW_DIM, t)
-        iris = _lerp_color(COLOR_NEUTRAL_IRIS, COLOR_SHADOW_IRIS, t)
-    return main, dim, iris
+    size = radius * 2 + 4
+    surf = pygame.Surface((size, size), pygame.SRCALPHA)
+    cx, cy = size // 2, size // 2
+    step = max(3, radius // 25)
+    for r in range(radius, 0, -step):
+        t = r / radius
+        alpha = int(intensity * 255 * (1.0 - t) * (1.0 - t) * 0.15)
+        alpha = min(255, max(0, alpha))
+        if alpha > 0:
+            pygame.gfxdraw.filled_circle(surf, cx, cy, r, (*color, alpha))
+    return surf
 
+
+# =============================================================================
+# AvatarModule
+# =============================================================================
 
 class AvatarModule:
     """
-    M.O.L.O.C.H. Avatar-Auge v2 — Core State Visualisierung.
+    M.O.L.O.C.H. Avatar-Auge v3 — PyGame Off-Screen in Tkinter.
 
-    Blueprint 5.2/5.3: 2 Achsen (tension + dominance) + CPU-Temp.
-    Wird in einen parent_frame eingebettet.
-    Liest Core State via service_proxy.read_status()["core"].
+    Rendering: PyGame Surface -> PIL Image -> ImageTk -> Tkinter Label.
+    Gleiches Interface wie v2 (start/stop/update_from_status).
     """
 
     def __init__(self, parent_frame, service_proxy):
@@ -116,46 +150,65 @@ class AvatarModule:
         self._service = service_proxy
         self._running = False
         self._after_id = None
+        self._logger = logging.getLogger("AvatarPyGame")
+
+        # PyGame + PIL pruefen
+        if not _PYGAME_OK or not _PIL_OK:
+            self._logger.error("PyGame oder PIL nicht verfuegbar")
+            tk.Label(parent_frame, text="Avatar: PyGame/PIL fehlt",
+                     bg=BG_FRAME, fg=FG_DIM).pack(pady=20)
+            self._enabled = False
+            return
+
+        self._enabled = True
+
+        # Off-Screen Surface (kein Display noetig)
+        self._surface = pygame.Surface((AVATAR_SIZE, AVATAR_SIZE))
 
         # --- Core State (Zielwerte) ---
         self._tension = 0.0
-        self._dominance = 0.5        # -1 bis +1
-        self._cpu_temp = 0.0         # normalisiert 0-1
+        self._dominance = 0.5
+        self._cpu_temp = 0.0
         self._cpu_temp_celsius = 0.0
         self._zone = "guardian"
         self._status_text = "Idle"
 
-        # --- Smooth Animation (interpoliert zum Ziel, ~300ms Settling) ---
+        # --- Smooth Interpolation (~300ms Settling) ---
         self._s_tension = 0.0
         self._s_dominance = 0.5
+        self._s_cpu = 0.0
 
         # --- Visuelle Dominance mit Hysterese ---
-        self._visual_dominance = 0.5
-        self._dominance_at_last_change = 0.5
+        self._visual_dom = 0.5
+        self._dom_at_last_change = 0.5
 
         # --- Animation State ---
         self._tick = 0
+        self._pulse_phase = 0.0
         self._blink_progress = 0.0
         self._blinking = False
         self._blink_opening = False
-        self._next_blink_tick = self._random_blink_tick()
+        self._next_blink_tick = random.randint(100, 250)
         self._flash_until = 0.0
         self._pupil_dx = 0.0
         self._pupil_dy = 0.0
         self._target_dx = 0.0
         self._target_dy = 0.0
-        self._pulse_phase = 0.0
+        self._last_time = time.monotonic()
 
-        # --- Canvas ---
-        self._canvas = tk.Canvas(
+        # --- Glow Cache ---
+        self._glow_surface = None
+        self._glow_key = None
+
+        # --- Tkinter: Label fuer Bild-Anzeige ---
+        self._photo = None
+        self._label = tk.Label(
             parent_frame,
+            bg=BG_AVATAR,
             width=AVATAR_SIZE,
             height=AVATAR_SIZE,
-            bg=BG_AVATAR,
-            highlightthickness=0,
-            bd=0,
         )
-        self._canvas.pack(padx=5, pady=5)
+        self._label.pack(padx=5, pady=5)
 
         # --- Info-Bereich unter dem Auge ---
         info = tk.Frame(parent_frame, bg=BG_FRAME)
@@ -179,125 +232,102 @@ class AvatarModule:
         )
         self._status_label.pack(pady=(0, 2))
 
-        # Initialer Draw
-        self._draw_eye()
-
     # =========================================================================
-    # Hilfsfunktionen
+    # Rendering — Hauptfunktion
     # =========================================================================
 
-    def _random_blink_tick(self) -> int:
-        """Naechsten Blink-Zeitpunkt (4-9 Sekunden = 80-180 Ticks bei 20 FPS)."""
-        return self._tick + random.randint(80, 180)
+    def _render(self):
+        """Kompletten Frame auf self._surface rendern."""
+        s = self._surface
+        s.fill(BG_RGB)
 
-    def _get_zone_colors(self):
-        """Farben basierend auf visueller Dominance. Berserker ueberschreibt."""
-        if self._zone == "berserker":
-            return COLOR_BERSERKER, COLOR_BERSERKER_DIM, COLOR_BERSERKER_IRIS
-        return _dominance_to_colors(self._visual_dominance)
-
-    # =========================================================================
-    # Zeichnen — Hauptfunktion
-    # =========================================================================
-
-    def _draw_eye(self):
-        """Komplettes Auge zeichnen (1 Frame)."""
-        c = self._canvas
-        c.delete("all")
-
-        # Smooth Interpolation (~300ms Settling bei 20 FPS, rate=0.25)
-        smooth_rate = 0.25
-        self._s_tension += (self._tension - self._s_tension) * smooth_rate
-        self._s_dominance += (self._dominance - self._s_dominance) * smooth_rate
-
-        # Visuelle Dominance mit Hysterese
-        if abs(self._dominance - self._dominance_at_last_change) > VISUAL_DOMINANCE_HYSTERESIS:
-            self._dominance_at_last_change = self._dominance
-        # Smooth Interpolation der visuellen Dominance zum Ziel
-        self._visual_dominance += (self._dominance_at_last_change - self._visual_dominance) * smooth_rate
-
-        # Basis-Helligkeit (immer mindestens 0.5, tension erhoeht)
-        brightness = 0.5 + self._s_tension * 0.5
-        color_main, color_dim, color_iris = self._get_zone_colors()
-
-        # Berserker-Flash
         now = time.monotonic()
         flash = now < self._flash_until
+
+        # === Farben bestimmen ===
         if flash:
+            main_c = (255, 68, 68)
+            iris_c = (255, 170, 170)
             brightness = 1.0
-            color_main = "#FF4444"
-            color_iris = "#FFAAAA"
+        elif self._zone == "berserker":
+            main_c = COL_BERSERKER
+            iris_c = (255, 68, 51)
+            brightness = 0.6 + self._s_tension * 0.4
+        else:
+            main_c = _dom_color(self._visual_dom)
+            iris_c = _dom_iris(self._visual_dom)
+            brightness = 0.5 + self._s_tension * 0.5
 
-        # === Puls-Faktor: Geschwindigkeit von tension, verlangsamt bei CPU-Hitze ===
-        speed = 1.0 + self._s_tension * 3.0
-        # CPU-Temp Verlangsamung
-        if self._cpu_temp > 0.7:
-            speed *= 0.85   # 15% langsamer
-        if self._cpu_temp > 0.9:
-            speed *= 0.6    # Auge wird "muede"
-
-        self._pulse_phase += speed * 0.1
-        pulse = 1.0 + math.sin(self._pulse_phase) * 0.02
+        pulse = 1.0 + math.sin(self._pulse_phase) * 0.025
         if self._zone == "berserker":
-            pulse = 1.0 + math.sin(self._pulse_phase) * 0.06
+            pulse = 1.0 + math.sin(self._pulse_phase) * 0.07
 
-        # === Glow-Intensitaet von tension (staerker bei hoher Tension) ===
-        glow_str = brightness * (0.4 + self._s_tension * 0.6)
-
-        # --- Hintergrund-Grid (Tron-Style) ---
+        # === Grid (Tron-Style) ===
         for x in range(0, AVATAR_SIZE, 25):
-            c.create_line(x, 0, x, AVATAR_SIZE, fill=GRID_COLOR)
+            pygame.draw.line(s, GRID_RGB, (x, 0), (x, AVATAR_SIZE))
         for y in range(0, AVATAR_SIZE, 25):
-            c.create_line(0, y, AVATAR_SIZE, y, fill=GRID_COLOR)
+            pygame.draw.line(s, GRID_RGB, (0, y), (AVATAR_SIZE, y))
 
-        # --- Glow (mehrere Schichten) ---
-        layers = 7 if self._zone == "berserker" else 5
-        for i in range(layers, 0, -1):
-            r = int(130 * pulse) + i * 16
-            gc = _scale_color(color_main, glow_str * (0.04 + i * 0.025))
-            c.create_oval(CENTER - r, CENTER - r, CENTER + r, CENTER + r,
-                          fill=gc, outline="")
+        # === Glow (Alpha-Blending — Hauptvorteil gegenueber Tkinter) ===
+        glow_str = brightness * (0.5 + self._s_tension * 0.5)
+        glow_r = int(130 * pulse)
+        glow_key = (main_c, int(glow_str * 4), glow_r // 8)
+        if glow_key != self._glow_key:
+            self._glow_surface = _render_glow(glow_r, main_c, glow_str)
+            self._glow_key = glow_key
+        if self._glow_surface:
+            gr = self._glow_surface.get_rect(center=(CX, CY))
+            s.blit(self._glow_surface, gr)
 
-        # --- Aeusserer Ring (Pulsiert mit Tension) ---
-        ro = int(120 * pulse)
-        ring_c = _scale_color(color_main, brightness * 0.8)
-        c.create_oval(CENTER - ro, CENTER - ro, CENTER + ro, CENTER + ro,
-                      fill="", outline=ring_c, width=4)
+        # === Aeusserer Ring (Anti-Aliased, 3px dick) ===
+        ro = int(90 * pulse)
+        rc = _scale(main_c, brightness * 0.8)
+        rc_dim = _scale(main_c, brightness * 0.4)
+        for dr in (-1, 0, 1):
+            r = ro + dr
+            if r > 2:
+                c = rc if dr == 0 else rc_dim
+                pygame.gfxdraw.aacircle(s, CX, CY, r, c)
 
-        # 12 Tick-Marks
+        # === 12 Tick-Marks ===
         for i in range(12):
             angle = math.radians(i * 30 - 90)
-            tl = 12 if i % 3 == 0 else 6
+            tl = 11 if i % 3 == 0 else 5
             tw = 2 if i % 3 == 0 else 1
-            x1 = CENTER + math.cos(angle) * (ro - tl)
-            y1 = CENTER + math.sin(angle) * (ro - tl)
-            x2 = CENTER + math.cos(angle) * (ro + 5)
-            y2 = CENTER + math.sin(angle) * (ro + 5)
-            tc = _scale_color(color_main, brightness * 0.55)
-            c.create_line(x1, y1, x2, y2, fill=tc, width=tw)
+            x1 = CX + math.cos(angle) * (ro - tl)
+            y1 = CY + math.sin(angle) * (ro - tl)
+            x2 = CX + math.cos(angle) * (ro + 5)
+            y2 = CY + math.sin(angle) * (ro + 5)
+            tc = _scale(main_c, brightness * 0.6)
+            pygame.draw.line(s, tc, (int(x1), int(y1)), (int(x2), int(y2)), tw)
 
-        # --- Innerer Ring (pulsiert staerker mit Tension) ---
-        ip = 1.0 + math.sin(self._pulse_phase * 1.5) * 0.02 * (1 + self._s_tension * 2)
-        ri = int(95 * ip)
-        ic = _scale_color(color_main, brightness * 0.55)
-        c.create_oval(CENTER - ri, CENTER - ri, CENTER + ri, CENTER + ri,
-                      fill="", outline=ic, width=2)
+        # === Innerer Ring (pulsiert staerker mit Tension) ===
+        ip = 1.0 + math.sin(self._pulse_phase * 1.5) * 0.025 * (1 + self._s_tension * 2)
+        ri = int(72 * ip)
+        ic = _scale(main_c, brightness * 0.55)
+        pygame.gfxdraw.aacircle(s, CX, CY, ri, ic)
 
-        # --- Iris (mit Strahlen-Muster) ---
-        ir = int(62 * brightness)
-        ix = CENTER + self._pupil_dx
-        iy = CENTER + self._pupil_dy
+        # === Iris mit Gradient ===
+        ir = int(50 * (0.8 + brightness * 0.2))
+        ix = int(CX + self._pupil_dx)
+        iy = int(CY + self._pupil_dy)
 
-        iris_fill = _scale_color(color_iris, brightness * 0.4)
-        iris_edge = _scale_color(color_main, brightness * 0.7)
-        c.create_oval(ix - ir, iy - ir, ix + ir, iy + ir,
-                      fill=iris_fill, outline=iris_edge, width=2)
+        # Iris Gradient (8 Stufen von aussen nach innen)
+        for r in range(ir, max(ir - 8, 0), -1):
+            t = (ir - r) / 8.0
+            c = _lerp(_scale(iris_c, brightness * 0.35),
+                      _scale(main_c, brightness * 0.65), t)
+            pygame.gfxdraw.filled_circle(s, ix, iy, r, c)
+        # Iris-Rand (Anti-Aliased)
+        pygame.gfxdraw.aacircle(s, ix, iy, ir,
+                                _scale(main_c, brightness * 0.7))
 
-        # 16 radiale Strahlen
-        pupil_ratio = 0.3 + self._s_tension * 0.3
+        # === 16 radiale Strahlen (langsame Rotation) ===
+        pupil_ratio = 0.25 + self._s_tension * 0.35
         pupil_inner = ir * pupil_ratio + 3
+        ray_c = _scale(iris_c, brightness * 0.25)
         for j in range(16):
-            a = math.radians(j * 22.5 + self._tick * 0.3)
+            a = math.radians(j * 22.5 + self._tick * 0.12)
             r_in = pupil_inner
             r_out = ir - 3
             if r_in < r_out:
@@ -305,146 +335,155 @@ class AvatarModule:
                 ry1 = iy + math.sin(a) * r_in
                 rx2 = ix + math.cos(a) * r_out
                 ry2 = iy + math.sin(a) * r_out
-                ray_c = _scale_color(color_iris, brightness * 0.22)
-                c.create_line(rx1, ry1, rx2, ry2, fill=ray_c, width=1)
+                pygame.draw.aaline(s, ray_c, (rx1, ry1), (rx2, ry2))
 
-        # --- Pupille (30-60% der Iris, Tension = engere Pupille) ---
+        # === Pupille (Tension = engere Pupille) ===
         pr = int(ir * pupil_ratio)
         if flash:
-            pr = int(ir * 0.15)
-        c.create_oval(ix - pr, iy - pr, ix + pr, iy + pr,
-                      fill="#000000", outline="")
+            pr = int(ir * 0.12)
+        pygame.gfxdraw.filled_circle(s, ix, iy, pr, (0, 0, 0))
+        pygame.gfxdraw.aacircle(s, ix, iy, pr, (0, 0, 0))
 
-        # Lichtreflex oben rechts
+        # Hauptreflex (oben rechts)
         hr = max(3, pr // 3)
-        hx, hy = ix + pr * 0.3, iy - pr * 0.35
-        hc = _scale_color("#FFFFFF", brightness * 0.75)
-        c.create_oval(hx - hr, hy - hr, hx + hr, hy + hr,
-                      fill=hc, outline="")
+        hx = int(ix + pr * 0.3)
+        hy = int(iy - pr * 0.35)
+        hc = _scale((255, 255, 255), brightness * 0.8)
+        pygame.gfxdraw.filled_circle(s, hx, hy, hr, hc)
+        pygame.gfxdraw.aacircle(s, hx, hy, hr, hc)
 
-        # Kleiner Reflex unten links
+        # Kleiner Reflex (unten links)
         h2r = max(2, pr // 5)
-        h2x, h2y = ix - pr * 0.2, iy + pr * 0.25
-        h2c = _scale_color("#FFFFFF", brightness * 0.3)
-        c.create_oval(h2x - h2r, h2y - h2r, h2x + h2r, h2y + h2r,
-                      fill=h2c, outline="")
+        h2x = int(ix - pr * 0.2)
+        h2y = int(iy + pr * 0.25)
+        h2c = _scale((255, 255, 255), brightness * 0.35)
+        pygame.gfxdraw.filled_circle(s, h2x, h2y, h2r, h2c)
 
-        # --- Augenlider ---
+        # === Augenlider ===
         if self._blink_progress > 0.01:
-            self._draw_lids(c, brightness, color_main)
-        elif self._cpu_temp > 0.85:
-            # "Muede" bei hoher CPU-Temp (statt attention-basiert)
-            self._draw_droopy(c, brightness, color_main, self._cpu_temp)
+            self._render_lids(s, brightness, main_c)
+        elif self._s_cpu > 0.85:
+            self._render_droopy(s, brightness, main_c)
 
     # =========================================================================
-    # Zeichnen — Augenlider
+    # Lider
     # =========================================================================
 
-    def _draw_lids(self, c, brightness, color_main):
-        """Blinzel-Lider mit gewoelbter Kante."""
+    def _render_lids(self, s, brightness, color):
+        """Blinzel-Lider mit geschwungener Leucht-Kante."""
         h = int(AVATAR_SIZE * 0.5 * self._blink_progress)
         if h < 2:
             return
+        pygame.draw.rect(s, BG_RGB, (0, 0, AVATAR_SIZE, h))
+        pygame.draw.rect(s, BG_RGB, (0, AVATAR_SIZE - h, AVATAR_SIZE, h))
 
-        curve = min(15, h // 2)
+        edge_c = _scale(color, brightness * 0.5)
+        curve = min(10, h // 3)
+        top_pts = []
+        bot_pts = []
+        for px in range(0, AVATAR_SIZE + 1, 4):
+            dx = (px - CX) / CX
+            c_off = int(curve * (1.0 - dx * dx))
+            top_pts.append((px, h + c_off))
+            bot_pts.append((px, (AVATAR_SIZE - h) - c_off))
+        if len(top_pts) > 1:
+            pygame.draw.lines(s, edge_c, False, top_pts, 2)
+        if len(bot_pts) > 1:
+            pygame.draw.lines(s, edge_c, False, bot_pts, 2)
 
-        pts_top = [0, 0, AVATAR_SIZE, 0]
-        for px in range(AVATAR_SIZE, -1, -10):
-            dx = (px - CENTER) / CENTER
-            cy = h + int(curve * (1.0 - dx * dx))
-            pts_top.extend([px, cy])
-        c.create_polygon(*pts_top, fill=BG_AVATAR, outline="")
-
-        base = AVATAR_SIZE - h
-        pts_bot = [0, AVATAR_SIZE, AVATAR_SIZE, AVATAR_SIZE]
-        for px in range(AVATAR_SIZE, -1, -10):
-            dx = (px - CENTER) / CENTER
-            cy = base - int(curve * (1.0 - dx * dx))
-            pts_bot.extend([px, cy])
-        c.create_polygon(*pts_bot, fill=BG_AVATAR, outline="")
-
-        edge = _scale_color(color_main, brightness * 0.45)
-
-        top_edge = []
-        for px in range(0, AVATAR_SIZE + 1, 8):
-            dx = (px - CENTER) / CENTER
-            cy = h + int(curve * (1.0 - dx * dx))
-            top_edge.extend([px, cy])
-        if len(top_edge) >= 4:
-            c.create_line(*top_edge, fill=edge, width=2, smooth=True)
-
-        bot_edge = []
-        for px in range(0, AVATAR_SIZE + 1, 8):
-            dx = (px - CENTER) / CENTER
-            cy = base - int(curve * (1.0 - dx * dx))
-            bot_edge.extend([px, cy])
-        if len(bot_edge) >= 4:
-            c.create_line(*bot_edge, fill=edge, width=2, smooth=True)
-
-    def _draw_droopy(self, c, brightness, color_main, cpu_temp):
-        """Halb-geschlossene Lider bei hoher CPU-Temperatur — Auge wird 'muede'."""
-        # Stärke proportional zur CPU-Temp ueber 0.85
-        droop_factor = (cpu_temp - 0.85) / 0.15  # 0.85->0, 1.0->1
+    def _render_droopy(self, s, brightness, color):
+        """Halb-geschlossene Lider bei hoher CPU-Temperatur."""
+        droop_factor = (self._s_cpu - 0.85) / 0.15
         droop = int(max(0, droop_factor) * AVATAR_SIZE * 0.22)
         if droop < 3:
             return
+        pygame.draw.rect(s, BG_RGB, (0, 0, AVATAR_SIZE, droop))
+        pygame.draw.rect(s, BG_RGB, (0, AVATAR_SIZE - droop, AVATAR_SIZE, droop))
+        edge = _scale(color, brightness * 0.3)
+        pygame.draw.line(s, edge, (0, droop), (AVATAR_SIZE, droop), 1)
+        pygame.draw.line(s, edge,
+                         (0, AVATAR_SIZE - droop), (AVATAR_SIZE, AVATAR_SIZE - droop), 1)
 
-        c.create_rectangle(0, 0, AVATAR_SIZE, droop,
-                           fill=BG_AVATAR, outline="")
-        c.create_rectangle(0, AVATAR_SIZE - droop, AVATAR_SIZE, AVATAR_SIZE,
-                           fill=BG_AVATAR, outline="")
+    # =========================================================================
+    # Surface -> Tkinter Konvertierung
+    # =========================================================================
 
-        edge = _scale_color(color_main, brightness * 0.3)
-        c.create_line(0, droop, AVATAR_SIZE, droop, fill=edge, width=1)
-        c.create_line(0, AVATAR_SIZE - droop, AVATAR_SIZE, AVATAR_SIZE - droop,
-                      fill=edge, width=1)
+    def _blit_to_tkinter(self):
+        """PyGame Surface -> PIL Image -> ImageTk -> Label."""
+        data = pygame.image.tostring(self._surface, 'RGB')
+        img = Image.frombytes('RGB', (AVATAR_SIZE, AVATAR_SIZE), data)
+        self._photo = ImageTk.PhotoImage(img)
+        self._label.config(image=self._photo)
 
     # =========================================================================
     # Animation Loop
     # =========================================================================
 
     def _update_animation(self):
-        """Animation-Tick: Blinzeln, Mikro-Bewegung, Status lesen."""
+        """Ein Animation-Frame: Update State -> Render -> Display."""
         if not self._running:
             return
 
+        now = time.monotonic()
+        dt = min(now - self._last_time, 0.1)
+        self._last_time = now
         self._tick += 1
 
-        # Core State lesen (alle 10 Ticks = 500ms)
-        if self._tick % 10 == 0:
+        # Core State lesen (alle 15 Ticks ~ 500ms bei 30 FPS)
+        if self._tick % 15 == 0:
             self._read_core_state()
 
+        # Smooth Interpolation (rate=dt*6 ~ 300ms Settling)
+        rate = min(1.0, dt * 6.0)
+        self._s_tension += (self._tension - self._s_tension) * rate
+        self._s_dominance += (self._dominance - self._s_dominance) * rate
+        self._s_cpu += (self._cpu_temp - self._s_cpu) * rate
+
+        # Visuelle Dominance mit Hysterese
+        if abs(self._dominance - self._dom_at_last_change) > DOM_HYSTERESIS:
+            self._dom_at_last_change = self._dominance
+        self._visual_dom += (self._dom_at_last_change - self._visual_dom) * rate
+
+        # Puls-Phase: Geschwindigkeit von Tension, gedaempft bei CPU-Hitze
+        speed = 1.0 + self._s_tension * 3.0
+        if self._s_cpu > 0.7:
+            speed *= 0.85
+        if self._s_cpu > 0.9:
+            speed *= 0.6
+        self._pulse_phase += speed * dt * math.tau / 3.0
+
         # Blinzel-Logik
+        blink_speed = 4.0 * dt
         if self._blinking:
             if not self._blink_opening:
-                self._blink_progress += 0.25
+                self._blink_progress += blink_speed
                 if self._blink_progress >= 1.0:
                     self._blink_progress = 1.0
                     self._blink_opening = True
             else:
-                self._blink_progress -= 0.25
+                self._blink_progress -= blink_speed
                 if self._blink_progress <= 0.0:
                     self._blink_progress = 0.0
                     self._blinking = False
                     self._blink_opening = False
-                    self._next_blink_tick = self._random_blink_tick()
+                    self._next_blink_tick = self._tick + random.randint(100, 250)
         elif self._tick >= self._next_blink_tick:
-            # Bei hoher Tension seltener blinzeln
-            if self._tension > 0.7 and random.random() < 0.5:
-                self._next_blink_tick = self._random_blink_tick()
+            if self._s_tension > 0.7 and random.random() < 0.5:
+                self._next_blink_tick = self._tick + random.randint(100, 250)
             else:
                 self._blinking = True
                 self._blink_opening = False
 
-        # Mikro-Bewegung (Pupille wandert langsam)
-        if self._tick % 20 == 0:
-            self._target_dx = random.uniform(-3, 3)
-            self._target_dy = random.uniform(-3, 3)
-        self._pupil_dx += (self._target_dx - self._pupil_dx) * 0.1
-        self._pupil_dy += (self._target_dy - self._pupil_dy) * 0.1
+        # Mikro-Bewegung Pupille
+        if self._tick % 60 == 0:
+            self._target_dx = random.uniform(-4, 4)
+            self._target_dy = random.uniform(-4, 4)
+        self._pupil_dx += (self._target_dx - self._pupil_dx) * 0.03
+        self._pupil_dy += (self._target_dy - self._pupil_dy) * 0.03
 
-        # Zeichnen
-        self._draw_eye()
+        # Rendern + Display
+        self._render()
+        self._blit_to_tkinter()
 
         self._after_id = self._parent.after(ANIM_INTERVAL_MS, self._update_animation)
 
@@ -453,8 +492,8 @@ class AvatarModule:
     # =========================================================================
 
     def update_from_status(self, status: dict):
-        """Core State v2 aus uebergebenem Status-Dict lesen."""
-        if not status:
+        """Core State v2 aus Panel-Status aktualisieren."""
+        if not self._enabled or not status:
             return
 
         core = status.get("core", {})
@@ -469,69 +508,71 @@ class AvatarModule:
         self._cpu_temp_celsius = float(core.get("cpu_temp", 0.0))
         self._zone = core.get("zone", "guardian")
 
-        # Status-Text aus Detections (falls vorhanden)
-        detections = status.get("detections", {})
-        faces = detections.get("faces", []) if isinstance(detections, dict) else []
-        persons = detections.get("persons", 0) if isinstance(detections, dict) else 0
-
-        if faces:
-            known = [f for f in faces if isinstance(f, dict)
-                     and f.get("name", "unknown") != "unknown"]
-            if known:
-                names = ", ".join(f["name"].capitalize() for f in known[:3])
-                self._status_text = f"{names} erkannt"
+        # Status-Text aus Detections
+        det = status.get("detections", {})
+        if isinstance(det, dict):
+            faces = det.get("faces", [])
+            persons = det.get("persons", 0)
+            if faces:
+                known = [f for f in faces if isinstance(f, dict)
+                         and f.get("name", "unknown") != "unknown"]
+                if known:
+                    names = ", ".join(f["name"].capitalize() for f in known[:3])
+                    self._status_text = f"{names} erkannt"
+                else:
+                    self._status_text = f"{len(faces)} Gesicht(er)"
+            elif persons:
+                self._status_text = f"{persons} Person(en)"
+            elif self._tension > 0.1:
+                self._status_text = "Suche..."
             else:
-                self._status_text = f"{len(faces)} Gesicht(er)"
-        elif persons:
-            self._status_text = f"{persons} Person(en)"
-        elif self._tension > 0.1:
-            self._status_text = "Suche..."
-        else:
-            self._status_text = "Idle"
+                self._status_text = "Idle"
 
-        # CPU-Temp in Status
-        cpu_str = f"CPU: {self._cpu_temp_celsius:.0f}°C" if self._cpu_temp_celsius > 0 else ""
-
-        # Labels aktualisieren
-        color_main, _, _ = self._get_zone_colors()
+        # Info-Labels aktualisieren
+        main_hex = _rgb_to_hex(_dom_color(self._visual_dom))
         bright = max(0.5, 0.5 + self._s_tension * 0.5)
 
         zone_name = {"guardian": "GUARDIAN", "shadow": "SHADOW",
                      "berserker": "BERSERKER"}.get(self._zone, "OFFLINE")
         self._zone_label.config(text=zone_name,
-                                fg=_scale_color(color_main, bright))
+                                fg=_hex_scale(main_hex, bright))
 
-        # Zeile 2: T + D Werte
         self._state_label.config(
             text=f"T:{self._tension:.2f} | D:{self._dominance:+.2f}",
-            fg=_scale_color(color_main, bright * 0.7),
+            fg=_hex_scale(main_hex, bright * 0.7),
         )
 
-        # Zeile 3: CPU + Status
-        status_parts = []
+        cpu_str = f"CPU: {self._cpu_temp_celsius:.0f}\u00b0C" if self._cpu_temp_celsius > 0 else ""
+        parts = []
         if cpu_str:
-            status_parts.append(cpu_str)
-        status_parts.append(self._status_text)
+            parts.append(cpu_str)
+        parts.append(self._status_text)
         self._status_label.config(
-            text=" | ".join(status_parts),
-            fg=_scale_color(color_main, bright * 0.6),
+            text=" | ".join(parts),
+            fg=_hex_scale(main_hex, bright * 0.6),
         )
 
-        # Berserker-Flash bei Eintritt
+        # Berserker Flash bei Eintritt
         if self._zone == "berserker" and old_zone != "berserker":
-            self._flash_until = time.monotonic() + BERSERKER_FLASH_MS / 1000.0
+            self._flash_until = time.monotonic() + 0.3
 
     def _read_core_state(self):
-        """Core State aus Status-JSON lesen (Fallback)."""
+        """Core State via ServiceProxy lesen (Fallback)."""
         status = self._service.read_status()
         self.update_from_status(status)
 
+    # =========================================================================
+    # Start / Stop
+    # =========================================================================
+
     def start(self):
         """Animation starten."""
-        if self._running:
+        if not self._enabled or self._running:
             return
         self._running = True
+        self._last_time = time.monotonic()
         self._update_animation()
+        self._logger.info("Avatar PyGame gestartet (off-screen -> Tkinter)")
 
     def stop(self):
         """Animation stoppen."""
