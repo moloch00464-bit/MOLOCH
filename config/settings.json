@@ -28,6 +28,6 @@
   ],
   "cpu_detectors": {
     "enabled": false,
-    "interval_frames": 30
+    "interval_frames": 60
   }
 }

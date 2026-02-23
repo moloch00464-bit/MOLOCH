@@ -53,6 +53,7 @@ from core.perception.hailo_postprocess import (
 )
 from core.hardware.hailo_manager import get_hailo_manager
 from core.vision.gesture_detector import GestureDetector, KeypointPosition
+from core.vision.face_attr_npu import analyze_face as _analyze_face
 from core.cloud_controller import CloudController
 from core.mpo.autonomous_tracker import AutonomousTracker, TrackerState
 from core.longterm_memory import get_memory
@@ -75,6 +76,7 @@ MODEL_PATHS = {
     "yolov8m": f"{MODEL_DIR}/yolov8m_h10.hef",
     "hand_landmark": f"{MODEL_DIR}/hand_landmark_lite.hef",
     "pose": f"{MODEL_DIR}/yolov8s_pose_h10.hef",
+    "face_attr": f"{MODEL_DIR}/face_attr_resnet_v1_18.hef",
 }
 
 FACE_DB_PATH = os.path.expanduser("~/moloch/data/face_embeddings.json")
@@ -140,36 +142,11 @@ class MolochService:
         except Exception as e:
             logger.warning(f"[INIT] CoreIntegrator nicht verfuegbar: {e}")
 
-        # CPU Detectors Default (wird in _load_settings ueberschrieben, aber
-        # _load_settings laeuft NACH __init__ in init(), daher Default hier setzen)
-        if not hasattr(self, '_cpu_detectors_enabled'):
-            self._cpu_detectors_enabled = False
-
-        # Emotion Detection (CPU, kein NPU — nur laden wenn cpu_detectors.enabled)
+        # CPU Detectors: Lazy-loaded beim ersten Aufruf (siehe _ensure_cpu_detectors)
+        # _load_settings() setzt _cpu_detectors_enabled + _cpu_detect_interval
         self._emotion_detector = None
-        if self._cpu_detectors_enabled:
-            try:
-                from core.vision.emotion_detector import get_emotion_detector
-                self._emotion_detector = get_emotion_detector()
-                if self._emotion_detector and self._emotion_detector.available:
-                    logger.info("[INIT] Emotion Detection bereit (FER+ CPU, throttled)")
-            except Exception as e:
-                logger.warning(f"[INIT] Emotion Detection nicht verfuegbar: {e}")
-        else:
-            logger.info("[INIT] Emotion Detection DEAKTIVIERT (cpu_detectors.enabled=false)")
-
-        # Age + Gender Detection (CPU, kein NPU — nur laden wenn cpu_detectors.enabled)
         self._age_gender_detector = None
-        if self._cpu_detectors_enabled:
-            try:
-                from core.vision.age_gender_detector import get_age_gender_detector
-                self._age_gender_detector = get_age_gender_detector()
-                if self._age_gender_detector and self._age_gender_detector.available:
-                    logger.info("[INIT] Age+Gender Detection bereit (Caffe CPU, throttled)")
-            except Exception as e:
-                logger.warning(f"[INIT] Age+Gender Detection nicht verfuegbar: {e}")
-        else:
-            logger.info("[INIT] Age+Gender Detection DEAKTIVIERT (cpu_detectors.enabled=false)")
+        self._cpu_detectors_loaded = False
 
         # Gesture Detection (aus Pose-Keypoints)
         self._gesture_detector = GestureDetector()
@@ -324,6 +301,7 @@ class MolochService:
         self.yolo_active = False
         self.hand_active = False
         self.pose_active = False
+        self.face_attr_active = False
 
         # Watchdog: Anti-Oszillation Swap-Log
         self._swap_log = []
@@ -743,7 +721,7 @@ class MolochService:
                     }
                     _new_slots = self._perception.tick(_idle_ctx)
                     if _new_slots:
-                        _want = set(_new_slots)
+                        _want = set(_new_slots) | {"face_attr"}
                         _have = set(self._active_ctx.keys())
                         _to_remove = _have - _want
                         _to_add = _want - _have
@@ -847,6 +825,11 @@ class MolochService:
                     logger.error(f"SCRFD Fehler: {e}")
 
 
+            # Lazy-configure face_attr (einmalig ~400ms, danach 0ms)
+            if not self.face_attr_active and "face_attr" in self._models and face_boxes:
+                self._configure_model("face_attr")
+                self.face_attr_active = "face_attr" in self._active_ctx
+
             # 2. ArcFace (nur wenn SCRFD aktiv + Faces gefunden)
             if (self.arcface_active and self.scrfd_active
                     and face_boxes and "arcface" in self._active_ctx):
@@ -890,23 +873,21 @@ class MolochService:
                             if name.lower() == "markus":
                                 _markus_recognized = True
 
-                            # Emotion Detection (CPU, throttled alle N Frames)
+                            # Face Attributes (NPU, ~2926 FPS — Gender/Age/Emotion)
                             emotion = self._cached_emotion.get(name)
-                            if _run_cpu_detectors and self._emotion_detector and crop is not None:
-                                try:
-                                    emotion, _ = self._emotion_detector.detect(crop)
-                                    self._cached_emotion[name] = emotion
-                                except Exception:
-                                    pass
-
-                            # Age + Gender Detection (CPU, throttled alle N Frames)
                             gender = self._cached_gender.get(name)
                             age_range = self._cached_age_range.get(name)
-                            if _run_cpu_detectors and self._age_gender_detector and crop is not None:
+                            if self.face_attr_active and crop is not None:
                                 try:
-                                    gender, age_range, _ = self._age_gender_detector.detect(crop)
-                                    self._cached_gender[name] = gender
-                                    self._cached_age_range[name] = age_range
+                                    fa_crop = cv2.resize(crop, (178, 218))
+                                    fa_rgb = cv2.cvtColor(fa_crop, cv2.COLOR_BGR2RGB)
+                                    fa_out = self._run_model("face_attr", fa_rgb)
+                                    if fa_out:
+                                        fa_key = self._output_names["face_attr"][0]
+                                        gender, age_range, emotion = _analyze_face(fa_out[fa_key])
+                                        self._cached_gender[name] = gender
+                                        self._cached_age_range[name] = age_range
+                                        self._cached_emotion[name] = emotion
                                 except Exception:
                                     pass
 
@@ -1183,7 +1164,7 @@ class MolochService:
                 }
                 _new_slots = self._perception.tick(_perc_ctx)
                 if _new_slots:
-                    _want = set(_new_slots)
+                    _want = set(_new_slots) | {"face_attr"}
                     _have = set(self._active_ctx.keys())
                     _to_remove = _have - _want
                     _to_add = _want - _have
@@ -2013,6 +1994,28 @@ class MolochService:
         if self._daily_learner:
             self._daily_learner.set_face_db(self._face_db, FACE_DB_PATH)
 
+    def _ensure_cpu_detectors(self):
+        """Lazy-load CPU Detektoren (Emotion + Age/Gender) beim ersten Aufruf."""
+        if self._cpu_detectors_loaded:
+            return
+        self._cpu_detectors_loaded = True
+        try:
+            from core.vision.emotion_detector import get_emotion_detector
+            det = get_emotion_detector()
+            if det and det.available:
+                self._emotion_detector = det
+                logger.info("[CPU-DET] Emotion Detection geladen (FER+ CPU)")
+        except Exception as e:
+            logger.warning(f"[CPU-DET] Emotion nicht verfuegbar: {e}")
+        try:
+            from core.vision.age_gender_detector import get_age_gender_detector
+            det = get_age_gender_detector()
+            if det and det.available:
+                self._age_gender_detector = det
+                logger.info("[CPU-DET] Age+Gender Detection geladen (Caffe CPU)")
+        except Exception as e:
+            logger.warning(f"[CPU-DET] Age+Gender nicht verfuegbar: {e}")
+
     def _write_face_state(self, name, similarity, person_count, emotion=None, gender=None, age_range=None, head_pose=None, detected_objects=None):
         """Schreibe Face-Recognition-State fuer IPC mit push_to_talk."""
         try:
@@ -2112,6 +2115,7 @@ class MolochService:
         self.yolo_active = "yolov8m" in self._active_ctx
         self.hand_active = "hand_landmark" in self._active_ctx
         self.pose_active = "pose" in self._active_ctx
+        self.face_attr_active = "face_attr" in self._active_ctx
 
     def _npu_watchdog(self):
         """Anti-Oszillation. Laeuft jede Inference-Iteration.
