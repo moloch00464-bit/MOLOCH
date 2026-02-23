@@ -27,7 +27,6 @@ import sys
 import time
 import json
 import gc
-import struct
 import asyncio
 import threading
 import logging
@@ -57,6 +56,7 @@ from core.vision.hand_gesture_detector import HandGestureDetector
 from core.vision.face_attr_npu import analyze_face as _analyze_face
 from core.cloud_controller import CloudController
 from core.led_controller import LEDController
+from core.ipc_router import IPCRouter
 from core.mpo.autonomous_tracker import AutonomousTracker, TrackerState
 from core.longterm_memory import get_memory
 from core.perception.perception_frame import PerceptionFrame, estimate_distance
@@ -122,9 +122,6 @@ class MolochService:
     GUI-Aufrufe (root.after, BooleanVar) sind durch
     self._notify() Callbacks ersetzt.
     """
-
-    PREVIEW_W = 640
-    PREVIEW_H = 360
 
     def __init__(self):
         # State
@@ -343,7 +340,9 @@ class MolochService:
         # FPS Tracking
         self._fps = {"scrfd": 0, "arcface": 0, "yolov8m": 0, "hand_landmark": 0, "pose": 0, "total": 0}
         self._fps_lock = threading.Lock()
-        self._status_write_lock = threading.Lock()  # W6 Audit-Fix: Zwei Writer gleichzeitig
+
+        # IPC Router (extrahiert aus moloch_service.py, Phase 4)
+        self._ipc = IPCRouter()
 
         # Smart Tracking State
         self._smart_tracking_on = False
@@ -772,7 +771,8 @@ class MolochService:
                 with self._annotated_lock:
                     self._annotated_frame = frame.copy()
                 # SHM: Preview-Groesse fuer Panel IPC (1080p waere 6MB/Frame)
-                self._write_shm(cv2.resize(frame, (self.PREVIEW_W, self.PREVIEW_H)))
+                self._ipc.write_frame(cv2.resize(frame, (IPCRouter.PREVIEW_W, IPCRouter.PREVIEW_H)))
+                self._write_status_json()
                 time.sleep(0.03)
                 continue
 
@@ -923,7 +923,7 @@ class MolochService:
                             draw_name(annotated, box, name, sim, fh, fw,
                                       emotion=emotion, gender=gender, age_range=age_range,
                                       head_pose=_head_pose if '_head_pose' in dir() else None)
-                            self._write_face_state(name, sim, len(face_boxes),
+                            self._ipc.write_face_state(name, sim, len(face_boxes),
                                                    emotion=emotion, gender=gender, age_range=age_range,
                                                    head_pose=_head_pose if '_head_pose' in dir() else None,
                                                    detected_objects=_detected_objects if '_detected_objects' in dir() else [])
@@ -1311,7 +1311,8 @@ class MolochService:
                 self._annotated_frame = annotated
 
             # Panel IPC: Preview-Groesse fuer SHM (1080p waere 6MB/Frame)
-            self._write_shm(cv2.resize(annotated, (self.PREVIEW_W, self.PREVIEW_H)))
+            self._ipc.write_frame(cv2.resize(annotated, (IPCRouter.PREVIEW_W, IPCRouter.PREVIEW_H)))
+            self._write_status_json()
 
             # === Phase 3: Adaptive FPS — Throttle bei niedrigem Attention-Level ===
             if dt_total < self._target_frame_delay:
@@ -1982,29 +1983,6 @@ class MolochService:
         except Exception as e:
             logger.warning(f"[CPU-DET] Age+Gender nicht verfuegbar: {e}")
 
-    def _write_face_state(self, name, similarity, person_count, emotion=None, gender=None, age_range=None, head_pose=None, detected_objects=None):
-        """Schreibe Face-Recognition-State fuer IPC mit push_to_talk."""
-        try:
-            state = {
-                "name": name,
-                "similarity": round(similarity, 3),
-                "person_count": person_count,
-                "emotion": emotion,
-                "gender": gender,
-                "age_range": age_range,
-                "head_pose": {"pitch": head_pose[0], "yaw": head_pose[1], "roll": head_pose[2]} if head_pose else None,
-                "detected_objects": detected_objects or [],
-                "timestamp": time.time(),
-                "source": "moloch_service"
-            }
-            # Atomic write (W3 Audit-Fix) — verhindert halb-geschriebene JSON
-            tmp = str(FACE_STATE_PATH) + ".tmp"
-            with open(tmp, "w") as f:
-                json.dump(state, f)
-            os.rename(tmp, str(FACE_STATE_PATH))
-        except Exception:
-            pass
-
     def _announce_person(self, name):
         """Person erkannt - Log (LED wird vom Indikator gesteuert)."""
         logger.info(f"[FACE] Person erkannt: {name}")
@@ -2555,125 +2533,76 @@ class MolochService:
                 pass
 
         # IPC cleanup
-        for path in [NPU_VISION_PAUSED,
-                     '/dev/shm/moloch_frame', '/dev/shm/moloch_frame.tmp',
-                     '/dev/shm/moloch_status.json', '/dev/shm/moloch_status.tmp']:
-            try:
-                os.unlink(path)
-            except FileNotFoundError:
-                pass
+        self._ipc.cleanup()
+        try:
+            os.unlink(NPU_VISION_PAUSED)
+        except FileNotFoundError:
+            pass
 
         logger.info("M.O.L.O.C.H. Service gestoppt")
 
 
     # =========================================================================
-    # Panel IPC via /dev/shm
+    # Status-JSON (baut Dict aus Service-State, schreibt via IPCRouter)
     # =========================================================================
 
-    _shm_seq = 0
-
-    def _write_shm(self, frame):
-        """Write frame + status to /dev/shm for Panel IPC."""
-        self._last_frame_write = time.time()
-        try:
-            MolochService._shm_seq = (MolochService._shm_seq + 1) & 0xFFFFFFFF
-            h, w = frame.shape[:2]
-            c = frame.shape[2] if len(frame.shape) > 2 else 1
-            header = struct.pack('<IIII', h, w, c, MolochService._shm_seq)
-            with open('/dev/shm/moloch_frame.tmp', 'wb') as f:
-                f.write(header)
-                f.write(frame.tobytes())
-            os.rename('/dev/shm/moloch_frame.tmp', '/dev/shm/moloch_frame')
-        except Exception:
-            pass
-
-        # Status-JSON immer mitschreiben wenn Frame da
-        self._write_status_json()
-
     def _write_status_json(self):
-        """Status-JSON nach /dev/shm schreiben (unabhaengig von Frame).
-        Wird von _write_shm und _cam_status_loop aufgerufen,
-        damit Panel auch bei NPU-Ausfall funktioniert."""
+        """Status-JSON zusammenbauen und via IPCRouter schreiben."""
         try:
-            with self._status_write_lock:
-                self._write_status_json_inner()
+            with self._fps_lock:
+                fps_snapshot = dict(self._fps)
+            with self._ctx_lock:
+                active_models = list(self._active_ctx.keys())
+
+            status = {
+                "scrfd_active": self.scrfd_active,
+                "arcface_active": self.arcface_active,
+                "yolo_active": self.yolo_active,
+                "hand_active": self.hand_active,
+                "pose_active": self.pose_active,
+                "npu_paused": self._npu_paused,
+                "active_models": active_models,
+                "autonomous_mode": self._autonomous_mode,
+                "manual_mode": self._manual_mode,
+                "moloch_has_control": self._moloch_has_control,
+                "tentakel_enabled": self._tentakel_enabled,
+                "daily_learner_enabled": self._daily_learner.enabled if self._daily_learner else False,
+                "learner_flash": self._learner_flash,
+                "frame_age": round(time.time() - self._last_frame_write, 1) if self._last_frame_write else -1,
+                "frozen_restarts": self._frozen_restart_count,
+                "fps": {k: round(v, 1) for k, v in fps_snapshot.items()},
+                "thresholds": {
+                    "scrfd_conf": self.scrfd_conf_val,
+                    "scrfd_nms": self.scrfd_nms_val,
+                    "arcface_thresh": self.arcface_thresh_val,
+                    "yolo_conf": self.yolo_conf_val,
+                },
+                "led_markus_on": self._led.markus_on,
+                "cloud": self._cloud_state,
+                "audio": {
+                    "mic_gain": self._saved_mic_gain,
+                    "noise_gate_db": self._saved_noise_gate,
+                    "agc_enabled": self._saved_agc,
+                    "level": self._audio_level,
+                },
+                "voice": self._voice_pipeline.get_state() if self._voice_pipeline else {},
+            }
+            if self._perception:
+                status["perception"] = self._perception.get_state()
+            if self._core_integrator:
+                status["core"] = self._core_integrator.get_status_dict()
+            self._ipc.write_status(status)
         except Exception:
             pass
-
-    def _write_status_json_inner(self):
-        """Innerer Status-Write (unter _status_write_lock aufgerufen)."""
-        # Snapshots unter Lock holen (W6-W7 Audit-Fix)
-        with self._fps_lock:
-            fps_snapshot = dict(self._fps)
-        with self._ctx_lock:
-            active_models = list(self._active_ctx.keys())
-
-        status = {
-            "scrfd_active": self.scrfd_active,
-            "arcface_active": self.arcface_active,
-            "yolo_active": self.yolo_active,
-            "hand_active": self.hand_active,
-            "pose_active": self.pose_active,
-            "npu_paused": self._npu_paused,
-            "active_models": active_models,
-            "autonomous_mode": self._autonomous_mode,
-            "manual_mode": self._manual_mode,
-            "moloch_has_control": self._moloch_has_control,
-            "tentakel_enabled": self._tentakel_enabled,
-            "daily_learner_enabled": self._daily_learner.enabled if self._daily_learner else False,
-            "learner_flash": self._learner_flash,
-            "frame_age": round(time.time() - self._last_frame_write, 1) if self._last_frame_write else -1,
-            "frozen_restarts": self._frozen_restart_count,
-            "fps": {k: round(v, 1) for k, v in fps_snapshot.items()},
-            "thresholds": {
-                "scrfd_conf": self.scrfd_conf_val,
-                "scrfd_nms": self.scrfd_nms_val,
-                "arcface_thresh": self.arcface_thresh_val,
-                "yolo_conf": self.yolo_conf_val,
-            },
-            "led_markus_on": self._led.markus_on,
-            "cloud": self._cloud_state,
-            "audio": {
-                "mic_gain": self._saved_mic_gain,
-                "noise_gate_db": self._saved_noise_gate,
-                "agc_enabled": self._saved_agc,
-                "level": self._audio_level,
-            },
-            "voice": self._voice_pipeline.get_state() if self._voice_pipeline else {},
-        }
-        if self._perception:
-            status["perception"] = self._perception.get_state()
-        if self._core_integrator:
-            status["core"] = self._core_integrator.get_status_dict()
-        with open('/dev/shm/moloch_status.tmp', 'w') as f:
-            json.dump(status, f)
-        os.rename('/dev/shm/moloch_status.tmp', '/dev/shm/moloch_status.json')
 
     def _poll_panel_cmds(self):
-        """Poll for commands from Panel via IPC files (nummeriert)."""
-        import glob as _glob
+        """Poll for commands from Panel via IPCRouter."""
         while self.running:
-            try:
-                # Alle cmd-Files lesen (sortiert = chronologisch)
-                cmd_files = sorted(_glob.glob('/tmp/moloch_cmd_*.json'))
-                # Legacy single-file auch noch unterstuetzen
-                legacy = '/tmp/moloch_cmd.json'
-                if os.path.exists(legacy):
-                    cmd_files.insert(0, legacy)
-                for cf in cmd_files:
-                    try:
-                        with open(cf) as f:
-                            cmd = json.load(f)
-                        os.unlink(cf)
-                        self._execute_panel_cmd(cmd)
-                    except Exception as e:
-                        logger.debug(f"Panel cmd poll ({cf}): {e}")
-                        try:
-                            os.unlink(cf)
-                        except FileNotFoundError:
-                            pass
-            except Exception:
-                pass
+            for cmd in self._ipc.poll_commands():
+                try:
+                    self._execute_panel_cmd(cmd)
+                except Exception as e:
+                    logger.error(f"[IPC] Command execution failed: {e}")
             time.sleep(0.2)
 
     def _execute_panel_cmd(self, cmd):
