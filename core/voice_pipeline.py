@@ -65,6 +65,81 @@ def _load_api_key() -> Optional[str]:
     return None
 
 
+def _perception_to_text() -> str:
+    """Aktuellen Wahrnehmungs-Kontext als Text fuer System-Prompt."""
+    try:
+        from core.perception.perception_buffer import get_perception_buffer
+        buf = get_perception_buffer()
+        frame = buf.latest
+        if not frame or (time.time() - frame.timestamp) > 5.0:
+            return ""
+
+        trends = buf.get_trends()
+        lines = []
+
+        # Wer ist da?
+        if frame.face_detected and frame.face_id:
+            name = frame.face_id.capitalize()
+            lines.append(f"Du siehst: {name} (Aehnlichkeit {frame.face_similarity:.0%})")
+            details = []
+            if frame.gender:
+                details.append(frame.gender)
+            if frame.age_range:
+                details.append(frame.age_range)
+            if details:
+                lines.append(f"  {', '.join(details)}")
+            if frame.emotion:
+                lines.append(f"  Emotion: {frame.emotion}")
+            if frame.head_pitch is not None:
+                lines.append(f"  Kopf: Pitch {frame.head_pitch:.0f}°, Yaw {frame.head_yaw:.0f}°")
+        elif frame.person_detected:
+            lines.append(f"Du siehst: {frame.person_count} Person(en), nicht erkannt")
+        else:
+            lines.append("Du siehst: Niemanden")
+
+        # Distanz
+        if frame.distance and frame.distance != "none":
+            dist_map = {"close": "nah", "medium": "mittel", "far": "weit weg"}
+            lines.append(f"Distanz: {dist_map.get(frame.distance, frame.distance)}")
+
+        # Objekte
+        if frame.objects:
+            obj_names = [o["class"] for o in frame.objects[:5]]
+            lines.append(f"Objekte: {', '.join(obj_names)}")
+
+        # Pose
+        if frame.pose_count > 0:
+            energy = frame.pose_energy
+            if energy < 0.1:
+                activity = "ruhig/sitzend"
+            elif energy < 0.4:
+                activity = "leichte Bewegung"
+            else:
+                activity = "aktive Bewegung"
+            lines.append(f"Koerper: {activity}")
+
+        # Hand-Geste
+        if frame.hand_detected and frame.hand_gesture and frame.hand_gesture != "none":
+            lines.append(f"Geste: {frame.hand_gesture}")
+
+        # Trends
+        if trends:
+            if trends.get("approaching"):
+                lines.append("Trend: kommt naeher")
+            elif trends.get("leaving"):
+                lines.append("Trend: entfernt sich")
+            dur = trends.get("presence_duration", 0)
+            if dur > 60:
+                mins = int(dur // 60)
+                lines.append(f"Anwesend seit: {mins} Min")
+
+        if not lines:
+            return ""
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
+
 def _build_system_prompt() -> str:
     """System-Prompt fuer Claude API bauen."""
     prompt = """Du bist M.O.L.O.C.H. - Maschinelle Organisation fuer Logische Operationen und Computergestuetzte Hilfe.
@@ -363,6 +438,11 @@ class VoicePipeline:
                     system = system + "\n\n--- LANGZEITGEDAECHTNIS ---\n" + _sanitize_text(memory_ctx)
             except Exception as e:
                 logger.error(f"[VOICE] Memory-Kontext laden fehlgeschlagen: {e}")
+
+            # Wahrnehmungs-Kontext (was sehen die NPU-Modelle gerade?)
+            perception_ctx = _perception_to_text()
+            if perception_ctx:
+                system = system + "\n\n--- AKTUELLE WAHRNEHMUNG ---\n" + _sanitize_text(perception_ctx)
 
             # Personality Zone vom CoreIntegrator
             try:
@@ -727,6 +807,11 @@ Sei natuerlich. Kein erzwungener Humor. Situationsbezogen."""
                 system += "\n\n--- KONTEXT ---\n" + memory_ctx
         except Exception:
             pass
+
+        # Wahrnehmungs-Kontext
+        perception_ctx = _perception_to_text()
+        if perception_ctx:
+            system += "\n\n--- AKTUELLE WAHRNEHMUNG ---\n" + perception_ctx
 
         # Personality Zone
         try:
