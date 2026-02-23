@@ -64,6 +64,7 @@ class TrackerState(Enum):
     LOCKED = "locked"       # Target centered in deadzone
     DWELL = "dwell"         # Target acquired, waiting before movement
     FROZEN = "frozen"       # Target perfectly centered, no movement needed
+    COAST = "coast"         # Ziel stabil seit 2s, Kamera komplett eingefroren
 
 
 class TargetType(Enum):
@@ -95,7 +96,7 @@ class TrackingConfig:
     min_step_deg: float = 0.3
     tracking_speed: float = 1.0     # ONVIF max speed
     move_cooldown_ms: float = 300.0  # schnellere Moves (was 800)
-    smooth_alpha: float = 0.5       # schnellere EMA-Reaktion (was 0.2)
+    smooth_alpha: float = 0.15      # langsame EMA fuer ruhige Kamera (war 0.5)
 
     # Kamera Hardware-Limits (SonoffCameraController clampt intern,
     # aber Tracker muss gecachte Position AUCH clampen!)
@@ -147,7 +148,14 @@ class TrackingConfig:
 
     # === SMOOTHING: Face/Person Wechsel-Daempfung ===
     source_hysteresis_frames: int = 3   # Neuer Source-Typ muss 3 Frames stabil sein
-    center_ring_buffer_size: int = 5    # Mittelwert ueber letzte 5 Frame-Zentren
+    center_ring_buffer_size: int = 10   # Mittelwert ueber letzte 10 Frame-Zentren (war 5)
+
+    # === DEAD ZONE + COAST MODE (Tracker-Beruhigung) ===
+    dead_zone_pct: float = 0.03        # 3% - innerhalb = keine Kamerabewegung
+    track_start_pct: float = 0.05      # 5% - ab hier anfangen zu tracken
+    coast_stable_time: float = 2.0     # 2s stabil im Dead Zone -> Kamera einfrieren
+    coast_resume_pct: float = 0.05     # 5% Abweichung zum Aufwachen aus Coast
+    min_move_speed: float = 0.15       # Minimale ONVIF-Speed bei kleinen Korrekturen
 
 
 @dataclass
@@ -232,6 +240,9 @@ class AutonomousTracker:
         # EMA Glaettung fuer smooth tracking
         self._smooth_x = None
         self._smooth_y = None
+
+        # === COAST MODE: Kamera einfrieren wenn Ziel stabil ===
+        self._stable_start_time = None    # Wann wurde Ziel zuletzt stabil (fuer Coast-Timer)
 
         # === Dwell Timer State ===
         self.dwell_start_time = 0.0
@@ -914,29 +925,51 @@ class AutonomousTracker:
                 logger.info("[DWELL] Complete - starting tracking")
                 self._set_state(TrackerState.TRACKING)
 
-        # === FROZEN STATE: Target perfectly centered ===
-        if error_magnitude < self.config.frozen_threshold_pixels:
-            if self.state != TrackerState.FROZEN:
+        # === Error-Magnitude als Prozent vom Bild (fuer Dead Zone / Coast) ===
+        error_magnitude_pct = math.sqrt(error_x_norm**2 + error_y_norm**2)
+
+        # === COAST MODE: Kamera komplett eingefroren wenn Ziel stabil ===
+        if self.state == TrackerState.COAST:
+            if error_magnitude_pct > self.config.coast_resume_pct:
+                # Ziel hat sich signifikant bewegt -> Tracking aufnehmen
+                self._set_state(TrackerState.TRACKING)
+                self._stable_start_time = None
+                logger.info(f"[COAST] Aufgewacht! error={error_magnitude_pct:.3f} > {self.config.coast_resume_pct}")
+            else:
+                # Stabil -> nichts tun
+                if debug_log:
+                    ptz_debug.debug(f"COAST still error={error_magnitude_pct:.3f} < {self.config.coast_resume_pct}")
+                return
+
+        # === DEAD ZONE: < 3% vom Bildzentrum -> keine Kamerabewegung ===
+        if error_magnitude_pct < self.config.dead_zone_pct:
+            if self.state not in (TrackerState.FROZEN, TrackerState.COAST):
                 self._set_state(TrackerState.FROZEN)
-                logger.info(f"[FROZEN] Target perfectly centered (error={error_magnitude:.0f}px)")
+                ptz_debug.debug(f"FROZEN dead_zone error={error_magnitude_pct:.3f} < {self.config.dead_zone_pct}")
+
+            # Coast-Timer: stabil seit wann?
+            if self._stable_start_time is None:
+                self._stable_start_time = now
+            elif (now - self._stable_start_time) >= self.config.coast_stable_time:
+                # 2+ Sekunden stabil im Dead Zone -> COAST Mode
+                self._set_state(TrackerState.COAST)
+                logger.info(f"[COAST] Aktiviert - Ziel stabil seit {self.config.coast_stable_time:.1f}s")
             return
 
-        # === LOCKED STATE WITH HYSTERESIS ===
-        if self.state == TrackerState.LOCKED or self.state == TrackerState.FROZEN:
-            if error_magnitude > self.config.unlock_threshold_pixels:
-                self._set_state(TrackerState.TRACKING)
+        # === HYSTERESE ZONE: 3-5% -> nur bewegen wenn bereits TRACKING ===
+        if error_magnitude_pct < self.config.track_start_pct:
+            if self.state in (TrackerState.FROZEN, TrackerState.LOCKED, TrackerState.COAST):
+                # In der Hysteresezone bleiben wir still
                 if debug_log:
-                    logger.info(f"[TRACK] UNLOCK: error {error_magnitude:.0f}px > {self.config.unlock_threshold_pixels}px")
-            else:
-                if debug_log:
-                    logger.info(f"[TRACK] LOCKED: error {error_magnitude:.0f}px (no move)")
+                    ptz_debug.debug(
+                        f"HYSTERESIS error={error_magnitude_pct:.3f} "
+                        f"zone=[{self.config.dead_zone_pct},{self.config.track_start_pct}]"
+                    )
                 return
-        else:
-            if error_magnitude < self.config.lock_threshold_pixels:
-                self._set_state(TrackerState.LOCKED)
-                if debug_log:
-                    logger.info(f"[TRACK] LOCK: error {error_magnitude:.0f}px < {self.config.lock_threshold_pixels}px")
-                return
+            # Wenn bereits TRACKING -> weitermachen (weiche Abbremsung)
+
+        # Aus Dead Zone raus -> Timer zuruecksetzen
+        self._stable_start_time = None
 
         # === TRACKING MODE: AbsoluteMove ===
         self._set_state(TrackerState.TRACKING)
@@ -948,10 +981,8 @@ class AutonomousTracker:
 
         # Anti-Overshoot: warte bis Kamera am letzten Ziel angekommen ist
         if self._target_pan is not None:
-            # Cache-Position nutzen (kein ONVIF-Call - spart 100-200ms!)
             dist = abs(self.last_known_pan - self._target_pan) + abs(self.last_known_tilt - self._target_tilt)
             if dist > self._target_arrival_thresh:
-                # Timeout: nach 5s aufgeben (Kamera hat Ziel nicht erreicht)
                 if not hasattr(self, '_target_wait_start') or self._target_wait_start is None:
                     self._target_wait_start = time.time()
                 elif time.time() - self._target_wait_start > 5.0:
@@ -971,7 +1002,7 @@ class AutonomousTracker:
             else:
                 self._target_wait_start = None
 
-        # Calculate position delta from error (pre-check for threshold)
+        # Calculate position delta (pre-check fuer min threshold)
         pan_delta = -error_x_norm * self.config.fov_horizontal * self.config.pan_gain
         tilt_delta = -error_y_norm * self.config.fov_vertical * self.config.tilt_gain
         pan_delta = max(-self.config.max_step_pan, min(self.config.max_step_pan, pan_delta))
@@ -982,17 +1013,23 @@ class AutonomousTracker:
                 logger.info(f"[TRACK] delta below threshold (pan={pan_delta:+.2f}, tilt={tilt_delta:+.2f})")
             return
 
+        # === ADAPTIVE SPEED: proportional zum Error ===
+        # Kleine Korrekturen (5-10%) -> langsam, grosse (>20%) -> volle Speed
+        speed_range = self.config.tracking_speed - self.config.min_move_speed
+        move_speed = self.config.min_move_speed + speed_range * min(1.0, error_magnitude_pct / 0.20)
+
         # Execute AbsoluteMove tracking
-        result = self._track_target(error_x_norm, error_y_norm)
+        result = self._track_target(error_x_norm, error_y_norm, speed=move_speed)
 
         if result:
             self.stats["tracking_moves"] += 1
 
         if self.stats["tracking_moves"] % 15 == 0:
-            logger.info(f"TRACK: err=({error_x:+.0f},{error_y:+.0f})px delta=({pan_delta:+.1f},{tilt_delta:+.1f})deg "
+            logger.info(f"TRACK: err=({error_x:+.0f},{error_y:+.0f})px err_pct={error_magnitude_pct:.3f} "
+                       f"speed={move_speed:.2f} delta=({pan_delta:+.1f},{tilt_delta:+.1f})deg "
                        f"pos=({self.last_known_pan:+.1f},{self.last_known_tilt:+.1f})deg")
 
-    def _track_target(self, error_x_norm: float, error_y_norm: float) -> bool:
+    def _track_target(self, error_x_norm: float, error_y_norm: float, speed: float = None) -> bool:
         """
         Track target using AbsoluteMove with real position feedback.
 
@@ -1002,6 +1039,7 @@ class AutonomousTracker:
         Args:
             error_x_norm: Normalized horizontal error (-0.5 to +0.5), positive = target right
             error_y_norm: Normalized vertical error (-0.5 to +0.5), positive = target below
+            speed: ONVIF move speed (0.0-1.0), None = config.tracking_speed
 
         Returns:
             True if move command sent successfully
@@ -1044,8 +1082,11 @@ class AutonomousTracker:
             f"target=({target_pan:+.1f},{target_tilt:+.1f})deg"
         )
 
+        # Adaptive Speed: uebergeben oder Default
+        move_speed = speed if speed is not None else self.config.tracking_speed
+
         # SonoffCameraController.move_absolute() clamps to calibrated limits internally
-        result = self.camera.move_absolute(target_pan, target_tilt, speed=self.config.tracking_speed)
+        result = self.camera.move_absolute(target_pan, target_tilt, speed=move_speed)
 
         if result:
             self.last_move_time = time.time()
@@ -1073,9 +1114,10 @@ class AutonomousTracker:
         Nach 60s ohne Fund: Zurueck zu Home, Presence sinkt.
         CoreIntegrator wird ueber Such-Status informiert.
         """
-        # Smoothing zuruecksetzen wenn Ziel verloren
+        # Smoothing + Coast-Timer zuruecksetzen wenn Ziel verloren
         self._smooth_x = None
         self._smooth_y = None
+        self._stable_start_time = None
         if PERCEPTION_AVAILABLE:
             try:
                 if is_user_visible():
