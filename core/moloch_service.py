@@ -26,8 +26,6 @@ import os
 import sys
 import time
 import json
-import gc
-import asyncio
 import threading
 import logging
 import subprocess
@@ -39,7 +37,6 @@ import numpy as np
 # Moloch path
 sys.path.insert(0, os.path.expanduser("~/moloch"))
 
-from hailo_platform import HEF, VDevice, FormatType
 from core.perception.hailo_postprocess import (
     decode_scrfd, decode_yolov8_nms,
     normalize_arcface, match_face,
@@ -57,6 +54,7 @@ from core.vision.face_attr_npu import analyze_face as _analyze_face
 from core.cloud_controller import CloudController
 from core.led_controller import LEDController
 from core.ipc_router import IPCRouter
+from core.model_orchestrator import ModelOrchestrator, MODEL_PATHS
 from core.mpo.autonomous_tracker import AutonomousTracker, TrackerState
 from core.longterm_memory import get_memory
 from core.perception.perception_frame import PerceptionFrame, estimate_distance
@@ -70,21 +68,7 @@ logger.setLevel(logging.INFO)
 # RTSP URL
 RTSP_URL = os.environ.get("MOLOCH_RTSP_URL", "")
 
-# Modell-Pfade auf SSD2
-MODEL_DIR = "/mnt/moloch-data/hailo/models"
-MODEL_PATHS = {
-    "scrfd": f"{MODEL_DIR}/scrfd_10g.hef",
-    "arcface": f"{MODEL_DIR}/arcface_mobilefacenet.hef",
-    "yolov8m": f"{MODEL_DIR}/yolov8m_h10.hef",
-    "hand_landmark": f"{MODEL_DIR}/hand_landmark_lite.hef",
-    "pose": f"{MODEL_DIR}/yolov8s_pose_h10.hef",
-    "face_attr": f"{MODEL_DIR}/face_attr_resnet_v1_18.hef",
-}
-
 FACE_DB_PATH = os.path.expanduser("~/moloch/data/face_embeddings.json")
-FACE_STATE_PATH = "/tmp/moloch_face_state.json"
-NPU_VOICE_REQUEST = "/tmp/moloch_npu_voice_request"
-NPU_VISION_PAUSED = "/tmp/moloch_npu_vision_paused"
 SETTINGS_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config", "settings.json")
 
 
@@ -127,9 +111,6 @@ class MolochService:
         # State
         self.running = True
         self._hailo_manager = None
-        self._vdevice = None
-        self._models = {}
-        self._output_names = {}
         self._face_db = {}
 
         # Core Integrator (Zentrales Zustandsmodell: Tension/Attention/Presence)
@@ -195,9 +176,6 @@ class MolochService:
         except Exception as e:
             logger.warning(f"[INIT] Voice Pipeline nicht verfuegbar: {e}")
 
-        # Persistent Model Contexts
-        self._active_ctx = {}
-        self._ctx_lock = threading.Lock()
         self._input_640 = np.empty((640, 640, 3), dtype=np.uint8)
 
         # === Phase 3: Model Orchestration ===
@@ -207,12 +185,25 @@ class MolochService:
         self._model_health = get_model_health()
         # Aktueller PerceptionFrame (letzter aggregierter Zustand)
         self._current_pframe = PerceptionFrame()
-        # Attention-Level basierte Modell-Aktivierung
-        # "idle" | "normal" | "high" | "teach"
-        self._attention_level = "idle"
-        self._attention_level_lock = threading.Lock()
-        # Adaptive FPS: Target-Delay zwischen Frames (Sekunden)
-        self._target_frame_delay = 0.2  # 5 FPS im Idle
+
+        # ModelOrchestrator (NPU Pipeline + Modell-Lifecycle, Phase 4)
+        self._orchestrator = ModelOrchestrator(
+            perception_engine=self._perception,
+            core_integrator=self._core_integrator,
+            daily_learner=self._daily_learner,
+            model_health=self._model_health,
+            notify_callback=self._notify,
+        )
+        # Aliased Referenzen auf Orchestrator-Objekte
+        # (Inference Loop greift bis Schritt 5 noch auf self.xxx zu)
+        self._active_ctx = self._orchestrator._active_ctx
+        self._ctx_lock = self._orchestrator._ctx_lock
+        self._configuring = self._orchestrator._configuring
+        self._models = self._orchestrator._models
+        self._output_names = self._orchestrator._output_names
+
+        # Adaptive FPS (Orchestrator berechnet, Inference Loop liest)
+        self._target_frame_delay = self._orchestrator.target_frame_delay
         # Pose-Energy Tracker (Keypoint-Bewegung Frame-zu-Frame)
         self._prev_keypoints = None
 
@@ -239,14 +230,6 @@ class MolochService:
         # Cloud wird spaeter in _connect_cloud() gesetzt (Hintergrund-Thread)
         self._led = LEDController(core_integrator=self._core_integrator)
 
-        # Cross-process NPU pause
-        self._paused_models = []
-        self._npu_paused = False
-
-        # Configure Event
-        self._configuring = threading.Event()
-        self._configuring.set()
-
 
 
         # Autonomous Tracking
@@ -254,7 +237,7 @@ class MolochService:
         self._manual_autonomous = False
         self._manual_mode = False  # MANUELL: Service beobachtet, aber keine Kamera-Kontrolle
         self._tracker = None
-        self._models_preloaded = False  # Idle Pre-Load Guard
+        # _models_preloaded wird via Property auf Orchestrator delegiert
 
         # Guardian/Tentakel Mode
         self._guardian_mode = True
@@ -316,7 +299,7 @@ class MolochService:
         self.pose_active = False
         self.face_attr_active = False
 
-        # Watchdog: Anti-Oszillation Swap-Log
+        # Watchdog: Anti-Oszillation Swap-Log (bleibt auf Service, Inference Loop schreibt hier)
         self._swap_log = []
         # Auto-Switch: Zaehlt Frames ohne Hand-Detection
         self._hand_no_detect = 0
@@ -376,6 +359,46 @@ class MolochService:
         """Status update via observer pattern."""
         logger.info(f"[STATUS] {text}")
         self._notify("status", {"text": text})
+
+    # =========================================================================
+    # Orchestrator Proxy Properties (Uebergangsphase bis Schritt 5)
+    # =========================================================================
+
+    @property
+    def _vdevice(self):
+        return self._orchestrator._vdevice
+
+    @_vdevice.setter
+    def _vdevice(self, value):
+        self._orchestrator._vdevice = value
+
+    @_vdevice.deleter
+    def _vdevice(self):
+        self._orchestrator._vdevice = None
+
+    @property
+    def _npu_paused(self):
+        return self._orchestrator._npu_paused
+
+    @_npu_paused.setter
+    def _npu_paused(self, value):
+        self._orchestrator._npu_paused = value
+
+    @property
+    def _paused_models(self):
+        return self._orchestrator._paused_models
+
+    @_paused_models.setter
+    def _paused_models(self, value):
+        self._orchestrator._paused_models = value
+
+    @property
+    def _models_preloaded(self):
+        return self._orchestrator._models_preloaded
+
+    @_models_preloaded.setter
+    def _models_preloaded(self, value):
+        self._orchestrator._models_preloaded = value
 
     # =========================================================================
     # RTSP Capture
@@ -505,103 +528,16 @@ class MolochService:
     # =========================================================================
 
     def _configure_model(self, name):
-        """Konfiguriere Modell persistent (einmalig ~400ms, danach 0ms)."""
-        with self._ctx_lock:
-            already_active = name in self._active_ctx
-        if already_active:
-            logger.info(f"[CONFIGURE] {name}: bereits konfiguriert, skip")
-            return
-        if name not in self._models:
-            logger.warning(f"[CONFIGURE] {name}: nicht in self._models")
-            return
-
-        infer_model = self._models[name]
-        out_names = self._output_names[name]
-
-        active_before = list(self._active_ctx.keys())
-        logger.info(f"[CONFIGURE] {name}: aktive Modelle VORHER: {active_before}")
-
-        # Inference pausieren - NPU kann nicht configure + run gleichzeitig
-        self._configuring.clear()
-        time.sleep(0.15)
-
-        try:
-            ctx_mgr = infer_model.configure()
-            configured = ctx_mgr.__enter__()
-
-            output_buffers = {
-                oname: np.empty(infer_model.output(oname).shape, dtype=np.float32)
-                for oname in out_names
-            }
-            bindings = configured.create_bindings(output_buffers=output_buffers)
-
-            with self._ctx_lock:
-                self._active_ctx[name] = {
-                    "ctx_mgr": ctx_mgr,
-                    "configured": configured,
-                    "bindings": bindings,
-                    "output_buffers": output_buffers,
-                    "out_names": out_names,
-                }
-
-            active_after = list(self._active_ctx.keys())
-            logger.info(f"[CONFIGURE] {name}: OK. Aktive Modelle NACHHER: {active_after}")
-        except Exception as e:
-            crash_log = os.path.expanduser("~/moloch/logs/panel_crash.log")
-            crash_info = (
-                f"\n{'='*60}\n"
-                f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] CONFIGURE CRASH: {name}\n"
-                f"Aktive Modelle vorher: {active_before}\n"
-                f"Alle geladenen Modelle: {list(self._models.keys())}\n"
-                f"Exception: {type(e).__name__}: {e}\n"
-                f"Traceback:\n{traceback.format_exc()}\n"
-                f"{'='*60}\n"
-            )
-            logger.error(crash_info)
-            try:
-                with open(crash_log, "a", encoding="utf-8") as f:
-                    f.write(crash_info)
-            except Exception:
-                pass
-            self._update_status(f"CRASH: {name} ({type(e).__name__})")
-        finally:
-            self._configuring.set()
+        """Thin Wrapper -> ModelOrchestrator.configure()."""
+        self._orchestrator.configure(name)
 
     def _unconfigure_model(self, name):
-        """Gib Modell-Konfiguration frei."""
-        self._configuring.clear()
-        time.sleep(0.1)
-        try:
-            with self._ctx_lock:
-                ctx = self._active_ctx.pop(name, None)
-
-            if ctx:
-                try:
-                    ctx["ctx_mgr"].__exit__(None, None, None)
-                except Exception:
-                    pass
-                logger.info(f"Modell freigegeben: {name}")
-        finally:
-            self._configuring.set()
+        """Thin Wrapper -> ModelOrchestrator.unconfigure()."""
+        self._orchestrator.unconfigure(name)
 
     def _run_model(self, name, input_data):
-        """Fuehre Modell aus mit persistenter Konfiguration (~21ms statt ~450ms).
-
-        Returns: Dict mit Output-Name -> numpy array
-        """
-        # Lock fuer gesamte Inference-Dauer halten (K3 Audit-Fix)
-        # Verhindert dass _unconfigure_model() ctx freigibt waehrend run() laeuft
-        with self._ctx_lock:
-            ctx = self._active_ctx.get(name)
-            if not ctx:
-                return {}
-
-            bindings = ctx["bindings"]
-            bindings.input().set_buffer(np.ascontiguousarray(input_data))
-            ctx["configured"].run([bindings], timeout=10000)
-
-            return {oname: ctx["output_buffers"][oname].copy()
-                    for oname in ctx["out_names"]}
+        """Thin Wrapper -> ModelOrchestrator.run()."""
+        return self._orchestrator.run(name, input_data)
 
     # =========================================================================
     # Inference Loop
@@ -644,77 +580,12 @@ class MolochService:
         """Eigentliche Inference Loop (GUI-frei)."""
         while self.running:
             # Cross-process NPU coordination: Voice hat Vorrang
-            if os.path.exists(NPU_VOICE_REQUEST):
-                # Stale File Check: PID noch am Leben?
-                try:
-                    with open(NPU_VOICE_REQUEST, "r") as f:
-                        req = json.load(f)
-                    voice_pid = req.get("pid", 0)
-                    if voice_pid and not os.path.exists(f"/proc/{voice_pid}"):
-                        logger.warning(f"[NPU_IPC] Stale voice request von PID {voice_pid} - aufgeraeumt")
-                        try:
-                            os.unlink(NPU_VOICE_REQUEST)
-                        except FileNotFoundError:
-                            pass
-                        continue
-                except (json.JSONDecodeError, FileNotFoundError):
-                    try:
-                        os.unlink(NPU_VOICE_REQUEST)
-                    except FileNotFoundError:
-                        pass
-                    continue
-                if not self._npu_paused:
-                    try:
-                        self._pause_for_voice()
-                    except Exception as e:
-                        logger.error(f"[NPU_IPC] Pause failed: {e}")
-                        self._npu_paused = True  # Force flag so resume can fire
+            if self._orchestrator.check_voice_request():
                 time.sleep(0.1)
                 continue
-            if self._npu_paused:
-                try:
-                    self._resume_after_voice()
-                except Exception as e:
-                    logger.error(f"[NPU_IPC] Resume crashed: {e}")
-                    self._npu_paused = False
-                continue
 
-            # Safety: models empty but not paused = dead state -> auto-recover
-            if not self._models and not self._npu_paused:
-                if not hasattr(self, '_recovery_count'):
-                    self._recovery_count = 0
-                self._recovery_count += 1
-                if self._recovery_count <= 3:
-                    logger.warning(f"[NPU] Models empty (attempt {self._recovery_count}/3) - auto-recovery...")
-                    try:
-                        if self._hailo_manager and not self._hailo_manager.is_device_free():
-                            logger.info("[NPU] Device busy - waiting 2s...")
-                            time.sleep(2)
-                        if self._hailo_manager:
-                            self._hailo_manager.acquire_for_vision(timeout=10.0)
-                        self._reload_models()
-                        for name in (self._paused_models or []):
-                            if name in self._models:
-                                self._configure_model(name)
-                        logger.info(f"[NPU] Auto-recovery OK: {list(self._models.keys())}")
-                        self._recovery_count = 0
-                    except Exception as e:
-                        logger.error(f"[NPU] Auto-recovery failed: {e}")
-                        if self._vdevice:
-                            try:
-                                del self._vdevice
-                            except Exception:
-                                pass
-                            self._vdevice = None
-                        self._models.clear()
-                        gc.collect()
-                        time.sleep(5)
-                    continue
-                elif self._recovery_count == 4:
-                    logger.error("[NPU] Auto-recovery exhausted (3 attempts) - running without NPU")
-                    self._update_status("NPU: Recovery fehlgeschlagen")
-                # After 3 failures, just run without models (no spam)
-                time.sleep(1)
+            # Safety: models empty = auto-recover
+            if self._orchestrator.auto_recover_models():
                 continue
 
             # Frame holen
@@ -1320,138 +1191,6 @@ class MolochService:
                 time.sleep(_sleep)
 
     # =========================================================================
-    # Cross-Process NPU Coordination
-    # =========================================================================
-
-    def _reload_models(self):
-        """(Re-)load all HEF models into a fresh VDevice.
-
-        Creates new VDevice and loads all model files from disk.
-        Used by init() and _resume_after_voice() for recovery.
-        Raises on failure (caller handles retry).
-        """
-        params = VDevice.create_params()
-        self._vdevice = VDevice(params)
-        self._models.clear()
-        self._output_names.clear()
-
-        for name, path in MODEL_PATHS.items():
-            if not os.path.exists(path):
-                continue
-            hef = HEF(path)
-            infer_model = self._vdevice.create_infer_model(path)
-            infer_model.input().set_format_type(FormatType.UINT8)
-            out_names = [o.name for o in hef.get_output_vstream_infos()]
-            for oname in out_names:
-                infer_model.output(oname).set_format_type(FormatType.FLOAT32)
-            self._models[name] = infer_model
-            self._output_names[name] = out_names
-
-        logger.info(f"[NPU] Models loaded: {list(self._models.keys())}")
-
-    def _pause_for_voice(self):
-        """Pause inference - release VDevice so voice process can use NPU."""
-        logger.info("[NPU_IPC] Voice requested - pausing vision...")
-        self._update_status("NPU: Pausiert fuer Sprache...")
-
-        self._models_preloaded = False
-        self._paused_models = list(self._active_ctx.keys())
-
-        for name in list(self._active_ctx.keys()):
-            self._unconfigure_model(name)
-
-        self._models.clear()
-        if self._vdevice:
-            try:
-                del self._vdevice
-            except Exception:
-                pass
-            self._vdevice = None
-
-        if self._hailo_manager:
-            try:
-                self._hailo_manager.release_vision()
-            except Exception:
-                pass
-
-        gc.collect()
-        time.sleep(0.3)
-
-        try:
-            with open(NPU_VISION_PAUSED, "w") as f:
-                json.dump({"pid": os.getpid(), "timestamp": time.time()}, f)
-        except Exception:
-            pass
-
-        self._npu_paused = True
-        logger.info("[NPU_IPC] Vision paused, VDevice released")
-
-    def _resume_after_voice(self):
-        """Resume inference after voice process released NPU."""
-        logger.info("[NPU_IPC] Voice done - resuming vision...")
-        self._update_status("NPU: Wiederherstellung...")
-
-        for path in [NPU_VISION_PAUSED]:
-            try:
-                os.unlink(path)
-            except FileNotFoundError:
-                pass
-
-        time.sleep(0.5)
-
-        # Wait for Whisper VDevice to be fully released (lsof check)
-        if self._hailo_manager:
-            logger.info("[NPU_IPC] Waiting for device to be free...")
-            for i in range(25):  # 5s max
-                if self._hailo_manager.is_device_free():
-                    logger.info(f"[NPU_IPC] Device free after {i * 0.2:.1f}s")
-                    break
-                time.sleep(0.2)
-            else:
-                logger.warning("[NPU_IPC] Device not free after 5s - forcing GC")
-                gc.collect()
-                time.sleep(1.0)
-
-            if not self._hailo_manager.acquire_for_vision(timeout=10.0):
-                self._update_status("NPU nicht verfuegbar nach Voice!")
-                self._npu_paused = False
-                return
-
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                if attempt > 0:
-                    logger.info(f"[NPU_IPC] Resume retry {attempt + 1}/{max_retries}...")
-                    time.sleep(1.0 + attempt)  # 2s, 3s backoff
-
-                self._reload_models()
-
-                for name in self._paused_models:
-                    if name in self._models:
-                        self._configure_model(name)
-
-                self._npu_paused = False
-                self._update_status("RTSP + NPU aktiv")
-                logger.info("[NPU_IPC] Vision resumed successfully")
-                return
-            except Exception as e:
-                logger.error(f"[NPU_IPC] Resume attempt {attempt + 1} failed: {e}")
-                # Clean up failed VDevice before retry
-                if self._vdevice:
-                    try:
-                        del self._vdevice
-                    except Exception:
-                        pass
-                    self._vdevice = None
-                self._models.clear()
-                gc.collect()
-
-        # All retries failed
-        self._update_status("NPU Resume FEHLGESCHLAGEN nach 3 Versuchen")
-        logger.error("[NPU_IPC] Resume failed after all retries - models unavailable")
-        self._npu_paused = False
-
-    # =========================================================================
     # Tentakel-Logik (Smart Tracking <-> MOLOCH Takeover)
     # =========================================================================
 
@@ -1884,15 +1623,9 @@ class MolochService:
 
 
     def _all_models_off(self):
-        """Alle Modelle deaktivieren und unconfigurieren."""
-        self._models_preloaded = False
-        self.scrfd_active = False
-        self.arcface_active = False
-        self.yolo_active = False
-        self.hand_active = False
-        self._notify("model_toggle", {"scrfd": False, "arcface": False, "yolov8m": False, "hand_landmark": False})
-        for name in list(self._active_ctx.keys()):
-            self._unconfigure_model(name)
+        """Thin Wrapper -> ModelOrchestrator.all_models_off() + FPS Reset."""
+        self._orchestrator.all_models_off()
+        self._sync_flags_from_npu()
         with self._fps_lock:
             self._fps = {"scrfd": 0, "arcface": 0, "yolov8m": 0, "hand_landmark": 0, "pose": 0, "total": 0}
 
@@ -2004,10 +1737,11 @@ class MolochService:
             self._memory = None
             logger.error(f"[INIT] Memory fehlgeschlagen: {e}")
 
-        # 1. Hailo VDevice + Models
+        # 1. Hailo VDevice + Models (via ModelOrchestrator)
         self._hailo_manager = get_hailo_manager()
+        self._orchestrator._hailo_manager = self._hailo_manager
         self._hailo_manager.acquire_for_vision(timeout=10.0)
-        self._reload_models()
+        self._orchestrator.load_models()
         for name in self._models:
             logger.info(f"Modell geladen: {name} ({len(self._output_names[name])} outputs)")
 
@@ -2015,7 +1749,7 @@ class MolochService:
         try:
             from core.speech.hailo_whisper import get_whisper
             whisper = get_whisper()
-            whisper.set_vdevice(self._vdevice)
+            whisper.set_vdevice(self._orchestrator.vdevice)
         except Exception as e:
             logger.error(f"[INIT] Whisper NPU init fehlgeschlagen: {e}")
 
@@ -2046,122 +1780,20 @@ class MolochService:
         self.face_attr_active = "face_attr" in self._active_ctx
 
     # =========================================================================
-    # Phase 3: Attention-basierte Modell-Orchestrierung
+    # Phase 3: Attention-basierte Modell-Orchestrierung (Thin Wrappers)
     # =========================================================================
 
     def _compute_attention_level(self) -> str:
-        """Attention-Level aus CoreIntegrator ableiten.
-
-        Returns:
-            "idle"   (Attention 0.0-0.2) — keiner da
-            "normal" (Attention 0.2-0.6) — jemand erkannt
-            "high"   (Attention 0.6-1.0) — Markus erkannt / Voice aktiv
-            "teach"  (Override)          — DailyLearner aktiv
-        """
-        # Teach-Mode Override
-        if self._daily_learner and self._daily_learner.enabled:
-            return "teach"
-
-        if not self._core_integrator:
-            return "normal"  # Fallback wenn kein Integrator
-
-        attention = self._core_integrator.get_attention()
-
-        if attention < 0.2:
-            return "idle"
-        elif attention < 0.6:
-            return "normal"
-        else:
-            return "high"
-
-    def _get_target_models(self, level: str) -> set:
-        """Welche Modelle sollen bei diesem Attention-Level aktiv sein?
-
-        Args:
-            level: "idle" | "normal" | "high" | "teach"
-
-        Returns:
-            Set von Modell-Namen
-        """
-        if level == "idle":
-            # Nur YOLOv8m scannt langsam (Person-Detection)
-            return {"yolov8m"}
-        elif level == "normal":
-            # Person erkannt: Face-Pipeline dazu
-            return {"yolov8m", "scrfd", "arcface", "face_attr"}
-        elif level == "high":
-            # Volle Wahrnehmung: alle Modelle
-            return {"yolov8m", "scrfd", "arcface", "face_attr", "pose", "hand_landmark"}
-        elif level == "teach":
-            # Teach-Mode: Face-Pipeline + FaceAttr fuer Snapshots
-            return {"scrfd", "arcface", "face_attr"}
-        return {"yolov8m", "scrfd", "arcface", "face_attr"}  # Default = normal
-
-    def _get_target_fps_delay(self, level: str) -> float:
-        """Target-Delay zwischen Frames fuer Adaptive FPS.
-
-        Returns:
-            Sekunden zwischen Frames (niedriger = schneller)
-        """
-        if level == "idle":
-            return 0.2  # 5 FPS
-        elif level == "normal":
-            return 0.067  # 15 FPS
-        elif level == "high":
-            return 0.033  # 30 FPS
-        elif level == "teach":
-            return 0.067  # 15 FPS (reicht fuer Snapshots)
-        return 0.067
+        """Thin Wrapper -> ModelOrchestrator.compute_attention_level()."""
+        return self._orchestrator.compute_attention_level()
 
     def _apply_attention_level(self, new_level: str):
-        """Modelle aktivieren/deaktivieren basierend auf Attention-Level.
-
-        Konfiguriert/dekonfiguriert NPU-Modelle sanft. Kein harter Swap —
-        konfigurierte Modelle bleiben geladen, nur configure/unconfigure.
-        """
-        with self._attention_level_lock:
-            old_level = self._attention_level
-            if old_level == new_level:
-                return
-            self._attention_level = new_level
-
-        # Manueller Override aktiv? -> nicht eingreifen
-        if self._perception and self._perception._forced:
-            return
+        """Thin Wrapper -> ModelOrchestrator.apply_attention_level() + Flag-Sync."""
         if self._manual_mode:
             return
-
-        wanted = self._get_target_models(new_level)
-        have = set(self._active_ctx.keys())
-
-        to_pause = have - wanted
-        to_resume = wanted - have
-
-        if not to_pause and not to_resume:
-            return
-
-        logger.info(f"[ORCHESTRATION] Level {old_level}->{new_level}: "
-                     f"pause={to_pause or 'none'} resume={to_resume or 'none'}")
-
-        # Pausieren: unconfigure (NPU-Slots frei, Modell bleibt geladen in _models)
-        for m in to_pause:
-            self._unconfigure_model(m)
-            self._model_health.set_paused(m, True)
-            time.sleep(0.1)
-
-        # Resumieren: configure (Modell ist schon in _models geladen)
-        for m in to_resume:
-            if m in self._models and m not in self._active_ctx:
-                self._configure_model(m)
-                self._model_health.set_paused(m, False)
-
-        # Flags synchronisieren
+        self._orchestrator.apply_attention_level(new_level)
         self._sync_flags_from_npu()
-
-        # Adaptive FPS
-        self._target_frame_delay = self._get_target_fps_delay(new_level)
-
-        self._notify("attention_level", {"level": new_level, "fps_target": round(1.0 / self._target_frame_delay)})
+        self._target_frame_delay = self._orchestrator.target_frame_delay
 
     def _build_perception_frame(self, face_detected, face_boxes, _markus_recognized,
                                  _persons_detected, persons, _pose_data, _detected_objects,
@@ -2382,39 +2014,8 @@ class MolochService:
     # =========================================================================
 
     def toggle_model(self, model_key, enabled):
-        """Toggle model on/off via Perception Engine force_models()."""
-        if not self._perception:
-            logger.warning(f"[TOGGLE] Perception Engine nicht verfuegbar, ignoriere {model_key}={enabled}")
-            return
-
-        active_map = {"scrfd": "scrfd_active", "arcface": "arcface_active",
-                      "yolov8m": "yolo_active",
-                      "hand_landmark": "hand_active",
-                      "pose": "pose_active"}
-        if model_key not in active_map:
-            return
-
-        # Aktuelle gewuenschte Modelle ermitteln (8GB NPU — kein Limit)
-        current = set(self._active_ctx.keys())
-        if enabled:
-            wanted = current | {model_key}
-            # ArcFace braucht SCRFD
-            if "arcface" in wanted and "scrfd" not in wanted:
-                wanted.add("scrfd")
-            logger.info(f"[TOGGLE] wanted={wanted}")
-        else:
-            wanted = current - {model_key}
-            # SCRFD weg -> ArcFace auch weg
-            if model_key == "scrfd":
-                wanted.discard("arcface")
-
-        if wanted:
-            self._perception.force_models(list(wanted))
-            logger.info(f"[TOGGLE] force_models({list(wanted)}) via Panel")
-        else:
-            # Alles aus -> zurueck zu Auto-Scoring
-            self._perception.force_models(None)
-            logger.info("[TOGGLE] Alle Modelle aus -> Perception Auto-Modus")
+        """Thin Wrapper -> ModelOrchestrator.toggle_model()."""
+        self._orchestrator.toggle_model(model_key, enabled)
 
     def toggle_autonomous_manual(self):
         """Toggle AUTONOM/MANUELL von GUI-Button.
@@ -2512,32 +2113,11 @@ class MolochService:
             except Exception:
                 pass
 
-        # Alle Modelle unconfigurieren
-        for name in list(self._active_ctx.keys()):
-            self._unconfigure_model(name)
-
-        # VDevice schliessen
-        if self._vdevice:
-            try:
-                self._models.clear()
-                del self._vdevice
-                self._vdevice = None
-            except Exception:
-                pass
-
-        # Hailo freigeben
-        if self._hailo_manager:
-            try:
-                self._hailo_manager.release_vision()
-            except Exception:
-                pass
+        # NPU: Alle Modelle freigeben + VDevice schliessen
+        self._orchestrator.release_all()
 
         # IPC cleanup
         self._ipc.cleanup()
-        try:
-            os.unlink(NPU_VISION_PAUSED)
-        except FileNotFoundError:
-            pass
 
         logger.info("M.O.L.O.C.H. Service gestoppt")
 
