@@ -151,10 +151,10 @@ class TrackingConfig:
     center_ring_buffer_size: int = 10   # Mittelwert ueber letzte 10 Frame-Zentren (war 5)
 
     # === DEAD ZONE + COAST MODE (Tracker-Beruhigung) ===
-    dead_zone_pct: float = 0.03        # 3% - innerhalb = keine Kamerabewegung
-    track_start_pct: float = 0.05      # 5% - ab hier anfangen zu tracken
-    coast_stable_time: float = 2.0     # 2s stabil im Dead Zone -> Kamera einfrieren
-    coast_resume_pct: float = 0.05     # 5% Abweichung zum Aufwachen aus Coast
+    dead_zone_pct: float = 0.15        # 15% - mittlere 30% des Bildes = RUHIG (war 3%)
+    track_start_pct: float = 0.18      # 18% - erst ab hier Tracking starten (war 5%)
+    coast_stable_time: float = 1.5     # 1.5s stabil im Dead Zone -> Coast (war 2.0)
+    coast_resume_pct: float = 0.12     # 12% Abweichung zum Aufwachen aus Coast (war 5%)
     min_move_speed: float = 0.15       # Minimale ONVIF-Speed bei kleinen Korrekturen
 
 
