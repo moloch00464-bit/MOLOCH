@@ -185,7 +185,7 @@ class AudioManager:
         if "Battery Percentage:" in result:
             try:
                 battery = int(result.split("Battery Percentage:")[1].split("(")[1].split(")")[0])
-            except:
+            except (ValueError, IndexError):
                 pass
 
         # Get PipeWire device ID
@@ -208,7 +208,7 @@ class AudioManager:
                                 source_id = int(num)
                             elif "Audio/Sink" in line or "bluez_output" in line:
                                 sink_id = int(num)
-                except:
+                except (ValueError, IndexError):
                     pass
 
         # Get current profile

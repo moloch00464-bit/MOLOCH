@@ -146,7 +146,8 @@ class CameraManager:
 
     @property
     def moloch_has_control(self) -> bool:
-        return self._moloch_has_control
+        with self._transition_lock:
+            return self._moloch_has_control
 
     @property
     def autonomous_mode(self) -> bool:

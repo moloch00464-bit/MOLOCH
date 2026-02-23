@@ -807,18 +807,61 @@ class MolochService:
         except Exception as e:
             logger.warning(f"[SETTINGS] Active-Models-Fehler: {e}")
 
+        # MPO (auf CoreIntegrator Klassen-Konstanten)
+        try:
+            mpo = data.get("mpo", {})
+            if mpo:
+                import math as _math
+                from core.core_integrator import get_core_integrator
+                ci = get_core_integrator()
+                if ci and "tension_tau" in mpo:
+                    ci.TENSION_TAU = float(mpo["tension_tau"])
+                    ci._TENSION_DECAY_FACTOR = _math.exp(-1.0 / ci.TENSION_TAU)
+                if ci and "dominance_drift" in mpo:
+                    ci.DOMINANCE_DRIFT_RATE = float(mpo["dominance_drift"]) / 60.0
+                if ci and "zone_hysteresis" in mpo:
+                    ci.ZONE_HYSTERESIS = float(mpo["zone_hysteresis"])
+                if ci and "berserker_threshold" in mpo:
+                    ci.BERSERKER_TENSION_THRESHOLD = float(mpo["berserker_threshold"])
+                logger.info(f"[SETTINGS] MPO: tau={mpo.get('tension_tau')} "
+                            f"drift={mpo.get('dominance_drift')} hyst={mpo.get('zone_hysteresis')}")
+        except Exception as e:
+            logger.warning(f"[SETTINGS] MPO-Fehler: {e}")
+
+        # Gesten (Flags speichern, Anwendung spaeter wenn GestureDetector aktiv)
+        try:
+            gest = data.get("gestures", {})
+            if gest:
+                self._saved_gestures = dict(gest)
+                logger.info(f"[SETTINGS] Gestures: {list(gest.keys())}")
+        except Exception as e:
+            logger.warning(f"[SETTINGS] Gestures-Fehler: {e}")
+
     def _save_settings(self):
-        """Speichere aktuelle Settings nach config/settings.json (atomic write)."""
+        """Speichere aktuelle Settings nach config/settings.json (atomic merge-write).
+
+        Liest bestehende JSON zuerst, merged unsere Keys drueber.
+        So bleiben Popup-eigene Keys (mpo, gestures, pose_conf, hand_conf) erhalten.
+        """
+        # Bestehende Datei lesen (Merge statt Overwrite)
         data = {"version": 1}
+        try:
+            if os.path.exists(SETTINGS_PATH):
+                with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                data["version"] = 1
+        except Exception:
+            data = {"version": 1}
+
         _inf = self._inference
 
-        # Thresholds (von InferenceEngine)
-        data["thresholds"] = {
-            "scrfd_conf": round(_inf.scrfd_conf_val, 3),
-            "scrfd_nms": round(_inf.scrfd_nms_val, 3),
-            "arcface_thresh": round(_inf.arcface_thresh_val, 3),
-            "yolo_conf": round(_inf.yolo_conf_val, 3),
-        }
+        # Thresholds (von InferenceEngine) — bestehende Keys (pose_conf etc.) erhalten
+        th = data.get("thresholds", {})
+        th["scrfd_conf"] = round(_inf.scrfd_conf_val, 3)
+        th["scrfd_nms"] = round(_inf.scrfd_nms_val, 3)
+        th["arcface_thresh"] = round(_inf.arcface_thresh_val, 3)
+        th["yolo_conf"] = round(_inf.yolo_conf_val, 3)
+        data["thresholds"] = th
 
         # Hand-Occlusion (von InferenceEngine + Perception)
         if self._perception:
@@ -855,6 +898,24 @@ class MolochService:
         # Aktive Modelle (von ModelOrchestrator)
         with self._ctx_lock:
             data["active_models"] = list(self._active_ctx.keys())
+
+        # MPO (von CoreIntegrator — aktuelle Werte zurueckschreiben)
+        try:
+            from core.core_integrator import get_core_integrator
+            ci = get_core_integrator()
+            if ci:
+                mpo = data.get("mpo", {})
+                mpo["tension_tau"] = round(ci.TENSION_TAU, 1)
+                mpo["dominance_drift"] = round(ci.DOMINANCE_DRIFT_RATE * 60.0, 3)
+                mpo["zone_hysteresis"] = round(ci.ZONE_HYSTERESIS, 2)
+                mpo["berserker_threshold"] = round(ci.BERSERKER_TENSION_THRESHOLD, 2)
+                data["mpo"] = mpo
+        except Exception:
+            pass  # CoreIntegrator noch nicht verfuegbar
+
+        # Gestures (gespeicherte Flags zurueckschreiben)
+        if hasattr(self, '_saved_gestures') and self._saved_gestures:
+            data["gestures"] = self._saved_gestures
 
         # Atomic write
         try:

@@ -354,11 +354,13 @@ class VoicePipeline:
 
     def _process_recording(self):
         """Aufnahme verarbeiten: Whisper -> Claude -> TTS."""
-        self._processing = True  # W2 Audit-Fix: Doppel-TTS verhindern
+        with self._lock:
+            self._processing = True
         try:
             self._process_recording_inner()
         finally:
-            self._processing = False
+            with self._lock:
+                self._processing = False
 
     def _process_recording_inner(self):
         """Eigentliche Recording-Verarbeitung."""
@@ -739,11 +741,13 @@ class VoicePipeline:
 
     def _process_text(self, text: str):
         """Text -> Claude -> TTS in Background."""
-        self._processing = True  # W2 Audit-Fix: Doppel-TTS verhindern
+        with self._lock:
+            self._processing = True
         try:
             self._process_text_inner(text)
         finally:
-            self._processing = False
+            with self._lock:
+                self._processing = False
 
     def _process_text_inner(self, text: str):
         """Eigentliche Text-Verarbeitung."""
@@ -831,7 +835,8 @@ class VoicePipeline:
         if not sentences:
             return
 
-        self._speaking = True
+        with self._lock:
+            self._speaking = True
         t0 = time.time()
 
         try:
@@ -863,7 +868,8 @@ class VoicePipeline:
         except Exception as e:
             logger.error(f"[VOICE] TTS Fehler: {e}")
         finally:
-            self._speaking = False
+            with self._lock:
+                self._speaking = False
 
     def _piper_synthesize(self, text: str, model_path) -> bytes:
         """Einzelnen Text-Chunk mit Piper in raw PCM generieren (in RAM)."""
@@ -1001,7 +1007,9 @@ class VoicePipeline:
             return
 
         # Nicht waehrend Recording/Speaking/Processing
-        if self._recording or self._speaking or self._processing:
+        with self._lock:
+            busy = self._recording or self._speaking or self._processing
+        if busy:
             return
 
         # CoreIntegrator pruefen

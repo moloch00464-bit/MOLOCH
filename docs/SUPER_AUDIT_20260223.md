@@ -4,19 +4,19 @@
 
 ---
 
-## GESAMTBEWERTUNG: 8/10
+## GESAMTBEWERTUNG: 9/10 (nach Fixes)
 
-| Kategorie | Status | Score |
-|-----------|--------|-------|
-| Code-Qualitaet | OK | 9/10 |
-| Integration (5.2/5.3) | OK | 10/10 |
-| Thread Safety | WARNUNG | 8/10 |
-| Settings Konsistenz | WARNUNG | 6/10 |
-| Memory/Persistence | OK | 9/10 |
-| NPU | OK | 9/10 |
-| Encoding | OK | 10/10 |
-| Spotify | WARNUNG | 7/10 |
-| Git Hygiene | WARNUNG | 5/10 |
+| Kategorie | Status | Score | Fix |
+|-----------|--------|-------|-----|
+| Code-Qualitaet | OK | 10/10 | bare excepts gefixt |
+| Integration (5.2/5.3) | OK | 10/10 | — |
+| Thread Safety | OK | 9/10 | VoicePipeline + CameraManager gefixt |
+| Settings Konsistenz | OK | 9/10 | Merge statt Overwrite + mpo/gestures laden |
+| Memory/Persistence | OK | 9/10 | — |
+| NPU | OK | 9/10 | — |
+| Encoding | OK | 10/10 | — |
+| Spotify | OK | 8/10 | .env.spotify war schon in .gitignore |
+| Git Hygiene | WARNUNG | 5/10 | 135 Commits noch unpushed |
 
 ---
 
