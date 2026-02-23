@@ -462,6 +462,14 @@ class MolochService:
                 status["perception"] = self._perception.get_state()
             if self._core_integrator:
                 status["core"] = self._core_integrator.get_status_dict()
+            # Spotify Status (lazy — nur wenn bereits initialisiert)
+            try:
+                from core.spotify_controller import get_spotify
+                sp = get_spotify()
+                if sp._initialized:
+                    status["spotify"] = sp.get_status()
+            except Exception:
+                pass
             self._ipc.write_status(status)
         except Exception:
             pass
@@ -663,6 +671,39 @@ class MolochService:
             artist = cmd.get('artist', '')
             if artist:
                 get_spotify().play_artist(artist)
+
+        elif action == 'spotify_auto_dj':
+            from core.spotify_controller import get_spotify
+            state = cmd.get('state')
+            sp = get_spotify()
+            if state == 'on':
+                sp.auto_dj_start()
+            elif state == 'off':
+                sp.auto_dj_stop()
+            else:
+                sp.auto_dj_toggle()
+
+        elif action == 'spotify_shuffle':
+            from core.spotify_controller import get_spotify
+            state = cmd.get('state', True)
+            get_spotify().shuffle(bool(state))
+
+        elif action == 'spotify_similar':
+            from core.spotify_controller import get_spotify
+            get_spotify().play_similar()
+
+        elif action == 'spotify_top_tracks':
+            from core.spotify_controller import get_spotify
+            get_spotify().play_top_tracks()
+
+        elif action == 'spotify_new_music':
+            from core.spotify_controller import get_spotify
+            get_spotify().play_new_music()
+
+        elif action == 'spotify_from_year':
+            from core.spotify_controller import get_spotify
+            year = cmd.get('year', 2020)
+            get_spotify().play_from_year(int(year))
 
     # ----------------------------------------------------------------
     # Settings Persistence

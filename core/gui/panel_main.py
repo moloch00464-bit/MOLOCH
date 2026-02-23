@@ -73,6 +73,12 @@ try:
 except Exception:
     _AVATAR_OK = False
 
+try:
+    from core.gui.panel_spotify import SpotifyModule
+    _SPOTIFY_OK = True
+except Exception:
+    _SPOTIFY_OK = False
+
 
 # =============================================================================
 # ServiceProxy — IPC zum M.O.L.O.C.H. Backend
@@ -219,6 +225,30 @@ class ServiceProxy:
     def spotify_artist(self, name: str):
         """Musik von Artist spielen."""
         self._write_command("spotify_artist", {"artist": name})
+
+    def spotify_auto_dj(self, state: str = "toggle"):
+        """Auto-DJ steuern. state: 'on', 'off', 'toggle'."""
+        self._write_command("spotify_auto_dj", {"state": state})
+
+    def spotify_shuffle(self, state: bool = True):
+        """Shuffle ein/ausschalten."""
+        self._write_command("spotify_shuffle", {"state": state})
+
+    def spotify_similar(self):
+        """Aehnliche Musik zum aktuellen Track spielen."""
+        self._write_command("spotify_similar")
+
+    def spotify_top_tracks(self):
+        """Markus' Top Tracks spielen."""
+        self._write_command("spotify_top_tracks")
+
+    def spotify_new_music(self):
+        """Neue Musik entdecken basierend auf Profil."""
+        self._write_command("spotify_new_music")
+
+    def spotify_from_year(self, year: int):
+        """Tracks aus bestimmtem Jahr spielen."""
+        self._write_command("spotify_from_year", {"year": year})
 
     # ----- Status lesen -----
 
@@ -502,6 +532,19 @@ class MolochPanel:
                          bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL).pack(pady=5)
         else:
             tk.Label(self.frame_chat, text="Modul nicht geladen: Voice",
+                     bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL).pack(pady=5)
+
+        # (G) Spotify -> frame_chat (unter Voice)
+        if _SPOTIFY_OK:
+            try:
+                SpotifyModule(self.frame_chat, self.service)
+                self.logger.info("Modul geladen: Spotify")
+            except Exception as e:
+                self.logger.error(f"Spotify fehlgeschlagen: {e}")
+                tk.Label(self.frame_chat, text="Modul nicht geladen: Spotify",
+                         bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL).pack(pady=5)
+        else:
+            tk.Label(self.frame_chat, text="Modul nicht geladen: Spotify",
                      bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL).pack(pady=5)
 
     def _on_close(self):
