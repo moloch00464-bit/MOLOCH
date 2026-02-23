@@ -67,6 +67,12 @@ try:
 except Exception:
     _VOICE_OK = False
 
+try:
+    from core.gui.panel_avatar import AvatarModule
+    _AVATAR_OK = True
+except Exception:
+    _AVATAR_OK = False
+
 
 # =============================================================================
 # ServiceProxy — IPC zum M.O.L.O.C.H. Backend
@@ -380,6 +386,19 @@ class MolochPanel:
             tk.Label(self.frame_kamera, text="Modul nicht geladen: Preview",
                      bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL).pack(pady=20)
 
+        # (A2) Avatar -> frame_kamera (unter Preview)
+        self._avatar = None
+        if _AVATAR_OK:
+            try:
+                self._avatar = AvatarModule(self.frame_kamera, self.service)
+                self._avatar.start()
+                self.logger.info("Modul geladen: Avatar")
+            except Exception as e:
+                self.logger.error(f"Avatar fehlgeschlagen: {e}")
+        if self._avatar is None:
+            tk.Label(self.frame_kamera, text="Modul nicht geladen: Avatar",
+                     bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL).pack(pady=5)
+
         # (B) PTZ -> frame_steuerung (oben)
         if _PTZ_OK:
             try:
@@ -447,10 +466,15 @@ class MolochPanel:
                      bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL).pack(pady=5)
 
     def _on_close(self):
-        """Fenster schliessen: Preview stoppen, dann beenden."""
+        """Fenster schliessen: Preview + Avatar stoppen, dann beenden."""
         if self._preview is not None:
             try:
                 self._preview.stop()
+            except Exception:
+                pass
+        if self._avatar is not None:
+            try:
+                self._avatar.stop()
             except Exception:
                 pass
         self.root.destroy()
