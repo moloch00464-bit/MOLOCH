@@ -256,7 +256,7 @@ class TelemetryEngine:
                 try:
                     with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
                         temp = float(f.read().strip()) / 1000.0
-                except:
+                except Exception:
                     pass
 
             # Usage
@@ -314,7 +314,7 @@ class TelemetryEngine:
                 rp1_temp_path = Path("/sys/class/hwmon/hwmon1/temp1_input")
                 if rp1_temp_path.exists():
                     temp = int(rp1_temp_path.read_text().strip()) / 1000.0
-            except:
+            except Exception:
                 pass
 
             # Estimate utilization (placeholder - real monitoring needs hailo-monitor)
@@ -378,7 +378,7 @@ class TelemetryEngine:
 
                     setattr(self, stats_key, current_stats)
                     setattr(self, time_key, current_time)
-            except:
+            except Exception:
                 pass
 
             # Temperature (try hwmon)
@@ -393,7 +393,7 @@ class TelemetryEngine:
                             if temp_file.exists():
                                 temp = float(temp_file.read_text().strip()) / 1000.0
                                 break
-            except:
+            except Exception:
                 pass
 
             status = self.limits.check_storage_temp(temp) if temp > 0 else Status.OK
@@ -495,7 +495,7 @@ class TelemetryEngine:
                                     status=status,
                                     volume_percent=volume
                                 ))
-                            except:
+                            except Exception:
                                 continue
 
             # Pad to 8 channels
@@ -573,7 +573,7 @@ class TelemetryEngine:
                 if result.returncode == 0:
                     temp_str = result.stdout.strip().replace("temp=", "").replace("'C", "")
                     temp_c = float(temp_str)
-            except:
+            except Exception:
                 pass
 
             # Determine status based on temperature

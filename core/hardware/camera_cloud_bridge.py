@@ -412,7 +412,7 @@ class CameraCloudBridge:
                 # Extract response body
                 try:
                     response_body = await response.json()
-                except:
+                except Exception:
                     # If not JSON, get text
                     response_text = await response.text()
                     response_body = {'raw_text': response_text}
@@ -707,7 +707,7 @@ class CameraCloudBridge:
                         try:
                             error_data = await response.json()
                             error_msg = error_data.get('message', error_msg)
-                        except:
+                        except Exception:
                             pass
 
                         # Retry on server errors (5xx)
@@ -1063,7 +1063,7 @@ class CameraCloudBridgeSync:
         future = asyncio.run_coroutine_threadsafe(coro, self.loop)
         try:
             return future.result(timeout=self.config.timeout + 1.0)
-        except:
+        except Exception:
             return False
 
     def connect(self) -> bool:

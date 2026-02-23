@@ -18,10 +18,10 @@ ein kaputter GestureDetector, und ~15 Warnungen.
 ```python
 RTSP_URL = os.environ.get(
     "MOLOCH_RTSP_URL",
-    "rtsp://Moloch_4.5:Auge666@192.168.178.25:554/av_stream/ch0"
+    "rtsp://***:***@192.168.178.25:554/av_stream/ch0"
 )
 ```
-Username `Moloch_4.5`, Passwort `Auge666` steht im Code UND in der Git-History.
+Username `***`, Passwort `***` steht im Code UND in der Git-History.
 Auch wenn die Zeile geändert wird — `git log -p` zeigt es für immer.
 
 **Fix**: Kamera-Passwort JETZT ändern. Default-Fallback durch leeren String ersetzen,

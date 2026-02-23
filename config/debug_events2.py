@@ -5,7 +5,8 @@ from onvif import ONVIFCamera
 from zeep.helpers import serialize_object
 from lxml import etree
 
-cam = ONVIFCamera("192.168.178.25", 80, "Moloch_4.5", "Auge666")
+import os
+cam = ONVIFCamera("192.168.178.25", 80, os.environ.get("MOLOCH_CAMERA_USER", ""), os.environ.get("MOLOCH_CAMERA_PASS", ""))
 
 # Fresh subscription
 print("Creating fresh PullPoint subscription...")

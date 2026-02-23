@@ -502,7 +502,7 @@ class HailoManager:
                     logger.error(f"[HAILO_MGR] Vision restart error (attempt {attempt + 1}): {e}")
                     try:
                         self.release_vision()
-                    except:
+                    except Exception:
                         pass
                     time.sleep(0.5)
             else:

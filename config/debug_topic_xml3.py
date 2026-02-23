@@ -6,7 +6,8 @@ from lxml import etree
 
 history = HistoryPlugin()
 
-cam = ONVIFCamera("192.168.178.25", 80, "Moloch_4.5", "Auge666")
+import os
+cam = ONVIFCamera("192.168.178.25", 80, os.environ.get("MOLOCH_CAMERA_USER", ""), os.environ.get("MOLOCH_CAMERA_PASS", ""))
 pullpoint = cam.create_pullpoint_service()
 
 # Add history plugin to the actual zeep Client

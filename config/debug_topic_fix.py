@@ -4,7 +4,8 @@ import json
 from onvif import ONVIFCamera
 from zeep.helpers import serialize_object
 
-cam = ONVIFCamera("192.168.178.25", 80, "Moloch_4.5", "Auge666")
+import os
+cam = ONVIFCamera("192.168.178.25", 80, os.environ.get("MOLOCH_CAMERA_USER", ""), os.environ.get("MOLOCH_CAMERA_PASS", ""))
 pullpoint = cam.create_pullpoint_service()
 
 print("Pulling with 10s timeout...")

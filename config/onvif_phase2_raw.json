@@ -520,7 +520,7 @@
       "_attr_1": null
     },
     "Profile_1": {
-      "Uri": "rtsp://Moloch_4.5:554/av_stream/ch0",
+      "Uri": "rtsp://CAM_USER:554/av_stream/ch0",
       "InvalidAfterConnect": false,
       "InvalidAfterReboot": false,
       "Timeout": "0:00:00",

@@ -335,14 +335,14 @@ class TTSEngine:
             try:
                 cmd = ["aplay", "-r", str(sample_rate), "-f", "S16_LE", "-c", "1", "-q"]
                 subprocess.run(cmd, input=raw_audio, check=True)
-            except:
+            except Exception:
                 raise
         finally:
             # Cleanup temp files
             try:
                 wav_file.unlink(missing_ok=True)
                 pitched_file.unlink(missing_ok=True)
-            except:
+            except Exception:
                 pass
 
 

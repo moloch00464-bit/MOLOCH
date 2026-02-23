@@ -12,8 +12,8 @@ from lxml import etree
 
 CAM_IP = "192.168.178.25"
 CAM_PORT = 80
-CAM_USER = "Moloch_4.5"
-CAM_PASS = "Auge666"
+CAM_USER = os.environ.get("MOLOCH_CAMERA_USER", "")
+CAM_PASS = os.environ.get("MOLOCH_CAMERA_PASS", "")
 HA_URL = "http://192.168.178.32:8123"
 HA_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJmZDgyNWI1MDNjMTY0ZDY0YWY0Y2U0NjRkZjkyMTFlNiIsImlhdCI6MTc3MDU0MTg1MCwiZXhwIjoyMDg1OTAxODUwfQ.hlvHR8U3pZ-1kiLDw64YMHBqdROs4j2TsxnbcKhrj5Q"
 HA_HEADERS = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}

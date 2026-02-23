@@ -56,10 +56,7 @@ logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger("EyeControl")
 
 # RTSP URL fallback
-RTSP_URL = os.environ.get(
-    "MOLOCH_RTSP_URL",
-    "rtsp://Moloch_4.5:Auge666@192.168.178.25:554/av_stream/ch0"
-)
+RTSP_URL = os.environ.get("MOLOCH_RTSP_URL", "")
 
 
 class CloudController:

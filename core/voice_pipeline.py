@@ -340,6 +340,14 @@ class VoicePipeline:
 
     def _process_recording(self):
         """Aufnahme verarbeiten: Whisper -> Claude -> TTS."""
+        self._processing = True  # W2 Audit-Fix: Doppel-TTS verhindern
+        try:
+            self._process_recording_inner()
+        finally:
+            self._processing = False
+
+    def _process_recording_inner(self):
+        """Eigentliche Recording-Verarbeitung."""
         wav_path = os.path.join(TEMP_DIR, "moloch_ptt_recording.wav")
 
         if not os.path.exists(wav_path) or os.path.getsize(wav_path) < 1000:
@@ -422,12 +430,12 @@ class VoicePipeline:
         # Surrogates entfernen (Whisper/Bluetooth liefert manchmal kaputte Umlaute)
         user_text = _sanitize_text(user_text)
 
-        # Konversation aufbauen
-        self._conversation.append({"role": "user", "content": user_text})
-
-        # Maximal 10 Nachrichten behalten
-        if len(self._conversation) > 10:
-            self._conversation = self._conversation[-10:]
+        # Konversation thread-safe aufbauen (K2 Audit-Fix)
+        with self._lock:
+            self._conversation.append({"role": "user", "content": user_text})
+            if len(self._conversation) > 10:
+                self._conversation = self._conversation[-10:]
+            msgs = list(self._conversation)  # Kopie fuer API-Call
 
         try:
             # System-Prompt mit Memory-Kontext und Personality-Zone anreichern
@@ -463,7 +471,7 @@ class VoicePipeline:
                 model="claude-sonnet-4-20250514",
                 max_tokens=512,
                 system=system,
-                messages=self._conversation,
+                messages=msgs,
             )
             text = response.content[0].text
 
@@ -473,14 +481,14 @@ class VoicePipeline:
             except Exception as e:
                 logger.error(f"[VOICE] extract_and_learn fehlgeschlagen: {e}")
 
-            self._conversation.append({"role": "assistant", "content": text})
+            with self._lock:
+                self._conversation.append({"role": "assistant", "content": text})
             return text
         except Exception as e:
             logger.error(f"[VOICE] Claude API Fehler: {e}")
-            # User-Message wieder entfernen damit Konversation nicht kaputt geht
-            # (zwei user-Messages hintereinander = ungueltig fuer Claude API)
-            if self._conversation and self._conversation[-1].get("role") == "user":
-                self._conversation.pop()
+            with self._lock:
+                if self._conversation and self._conversation[-1].get("role") == "user":
+                    self._conversation.pop()
             return None
 
     # =========================================================================
@@ -499,6 +507,14 @@ class VoicePipeline:
 
     def _process_text(self, text: str):
         """Text -> Claude -> TTS in Background."""
+        self._processing = True  # W2 Audit-Fix: Doppel-TTS verhindern
+        try:
+            self._process_text_inner(text)
+        finally:
+            self._processing = False
+
+    def _process_text_inner(self, text: str):
+        """Eigentliche Text-Verarbeitung."""
         text = _sanitize_text(text)
         self._whisper_status = "Denke..."
         self._emit_message("Du", text)
@@ -700,7 +716,8 @@ class VoicePipeline:
 
     def reset_conversation(self):
         """Konversation zuruecksetzen."""
-        self._conversation.clear()
+        with self._lock:
+            self._conversation.clear()
         logger.info("[VOICE] Konversation zurueckgesetzt")
 
     # =========================================================================
@@ -765,7 +782,7 @@ class VoicePipeline:
                 with open(face_state_path, "r") as f:
                     fs = json.load(f)
                 # Markus muss in den letzten 30s erkannt worden sein
-                if fs.get("name") == "Markus" and time.time() - fs.get("timestamp", 0) < 30:
+                if fs.get("name", "").lower() == "markus" and time.time() - fs.get("timestamp", 0) < 30:
                     markus_visible = True
         except Exception:
             pass

@@ -425,14 +425,14 @@ class GstHailoPoseDetector:
                 try:
                     self._pipeline.set_state(Gst.State.NULL)
                     self._pipeline = None
-                except:
+                except Exception:
                     pass
             if self._main_loop is not None:
                 try:
                     if self._main_loop.is_running():
                         self._main_loop.quit()
                     self._main_loop = None
-                except:
+                except Exception:
                     pass
 
             # === DEBUG: Log startup parameters ===

@@ -133,7 +133,7 @@ class EnvironmentSnapshot:
                     try:
                         device_name = name_file.read_text().strip()
                         self.video_devices.add(f"{dev_name}: {device_name}")
-                    except:
+                    except Exception:
                         self.video_devices.add(dev_name)
                 else:
                     self.video_devices.add(dev_name)
@@ -152,7 +152,7 @@ class EnvironmentSnapshot:
                     try:
                         card_name = card_id.read_text().strip()
                         self.audio_devices.add(f"{item.name}: {card_name}")
-                    except:
+                    except Exception:
                         self.audio_devices.add(item.name)
 
     def _capture_models(self):
@@ -198,7 +198,7 @@ class EnvironmentSnapshot:
                         manufacturer = manufacturer_file.read_text().strip()
                         product = product_file.read_text().strip()
                         self.usb_devices.add(f"{device.name}: {manufacturer} {product}")
-                    except:
+                    except Exception:
                         pass
 
     def to_dict(self) -> Dict[str, Any]:

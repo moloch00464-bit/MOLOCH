@@ -4,7 +4,8 @@ from onvif import ONVIFCamera
 from zeep.helpers import serialize_object
 import json
 
-cam = ONVIFCamera("192.168.178.25", 80, "Moloch_4.5", "Auge666")
+import os
+cam = ONVIFCamera("192.168.178.25", 80, os.environ.get("MOLOCH_CAMERA_USER", ""), os.environ.get("MOLOCH_CAMERA_PASS", ""))
 ptz = cam.create_ptz_service()
 media = cam.create_media_service()
 profiles = media.GetProfiles()

@@ -390,7 +390,7 @@
   ],
   "stream_uris": {
     "Profile_0": "rtsp://192.168.178.25:554/av_stream/ch0",
-    "Profile_1": "rtsp://Moloch_4.5:554/av_stream/ch0"
+    "Profile_1": "rtsp://CAM_USER:554/av_stream/ch0"
   },
   "ptz_nodes": [
     {

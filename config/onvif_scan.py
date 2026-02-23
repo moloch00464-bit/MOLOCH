@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Phase 2: ONVIF Discovery for Sonoff CAM-PT2 — M.O.L.O.C.H. Eye"""
-import json, sys, traceback
+import json, sys, os, traceback
 from datetime import datetime
 
 CAM_IP = "192.168.178.25"
 CAM_PORT = 80
-CAM_USER = "Moloch_4.5"
-CAM_PASS = "Auge666"
+CAM_USER = os.environ.get("MOLOCH_CAMERA_USER", "")
+CAM_PASS = os.environ.get("MOLOCH_CAMERA_PASS", "")
 
 results = {
     "scan_timestamp": datetime.now().isoformat(),

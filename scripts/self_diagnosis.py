@@ -138,7 +138,8 @@ def test_camera_onvif():
 
     cam = ONVIFCamera(
         "192.168.178.25", 80,
-        "Moloch_4.5", "Auge666",
+        os.environ.get("MOLOCH_CAMERA_USER", ""),
+        os.environ.get("MOLOCH_CAMERA_PASS", ""),
         wsdl_dir=os.path.expanduser("~/.local/lib/python3.13/site-packages/wsdl/")
     )
     media = cam.create_media_service()
@@ -164,7 +165,7 @@ def test_camera_rtsp():
     """Lies ein Frame vom RTSP Stream via OpenCV."""
     import cv2
 
-    rtsp_url = "rtsp://Moloch_4.5:Auge666@192.168.178.25:554/av_stream/ch0"
+    rtsp_url = os.environ.get("MOLOCH_RTSP_URL", "")
     cap = cv2.VideoCapture(rtsp_url)
 
     if not cap.isOpened():

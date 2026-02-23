@@ -790,7 +790,7 @@ class CameraControlPanel:
                         self.controller.release_exclusive(self.OWNER_ID)
                         self.controller.set_mode(ControlMode.AUTONOMOUS)
                         logger.info("Watchdog released exclusive lock")
-                    except:
+                    except Exception:
                         pass
                     break
 

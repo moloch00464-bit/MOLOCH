@@ -53,6 +53,7 @@ from core.perception.hailo_postprocess import (
 )
 from core.hardware.hailo_manager import get_hailo_manager
 from core.vision.gesture_detector import GestureDetector, KeypointPosition
+from core.vision.hand_gesture_detector import HandGestureDetector
 from core.vision.face_attr_npu import analyze_face as _analyze_face
 from core.cloud_controller import CloudController
 from core.mpo.autonomous_tracker import AutonomousTracker, TrackerState
@@ -66,10 +67,7 @@ logger = logging.getLogger("MolochService")
 logger.setLevel(logging.INFO)
 
 # RTSP URL
-RTSP_URL = os.environ.get(
-    "MOLOCH_RTSP_URL",
-    "rtsp://Moloch_4.5:Auge666@192.168.178.25:554/av_stream/ch0"
-)
+RTSP_URL = os.environ.get("MOLOCH_RTSP_URL", "")
 
 # Modell-Pfade auf SSD2
 MODEL_DIR = "/mnt/moloch-data/hailo/models"
@@ -153,6 +151,7 @@ class MolochService:
 
         # Gesture Detection (aus Pose-Keypoints)
         self._gesture_detector = GestureDetector()
+        self._hand_gesture_detector = HandGestureDetector()
         self._current_gesture = None
         logger.info("[INIT] GestureDetector bereit")
 
@@ -347,12 +346,19 @@ class MolochService:
         self.arcface_thresh_val = 0.60
         self.yolo_conf_val = 0.50
 
+        # Audio-Defaults VOR _load_settings() (W4 Audit-Fix)
+        self._saved_mic_gain = 1.0
+        self._saved_noise_gate = -36.0
+        self._saved_agc = True
+        self._audio_level = 0.0
+
         # Settings aus config/settings.json laden (ueberschreibt Defaults)
         self._load_settings()
 
         # FPS Tracking
         self._fps = {"scrfd": 0, "arcface": 0, "yolov8m": 0, "hand_landmark": 0, "pose": 0, "total": 0}
         self._fps_lock = threading.Lock()
+        self._status_write_lock = threading.Lock()  # W6 Audit-Fix: Zwei Writer gleichzeitig
 
         # Smart Tracking State
         self._smart_tracking_on = False
@@ -516,7 +522,9 @@ class MolochService:
 
     def _configure_model(self, name):
         """Konfiguriere Modell persistent (einmalig ~400ms, danach 0ms)."""
-        if name in self._active_ctx:
+        with self._ctx_lock:
+            already_active = name in self._active_ctx
+        if already_active:
             logger.info(f"[CONFIGURE] {name}: bereits konfiguriert, skip")
             return
         if name not in self._models:
@@ -597,17 +605,19 @@ class MolochService:
 
         Returns: Dict mit Output-Name -> numpy array
         """
+        # Lock fuer gesamte Inference-Dauer halten (K3 Audit-Fix)
+        # Verhindert dass _unconfigure_model() ctx freigibt waehrend run() laeuft
         with self._ctx_lock:
             ctx = self._active_ctx.get(name)
-        if not ctx:
-            return {}
+            if not ctx:
+                return {}
 
-        bindings = ctx["bindings"]
-        bindings.input().set_buffer(np.ascontiguousarray(input_data))
-        ctx["configured"].run([bindings], timeout=10000)
+            bindings = ctx["bindings"]
+            bindings.input().set_buffer(np.ascontiguousarray(input_data))
+            ctx["configured"].run([bindings], timeout=10000)
 
-        return {oname: ctx["output_buffers"][oname].copy()
-                for oname in ctx["out_names"]}
+            return {oname: ctx["output_buffers"][oname].copy()
+                    for oname in ctx["out_names"]}
 
     # =========================================================================
     # Inference Loop
@@ -1104,9 +1114,12 @@ class MolochService:
                                 crop_w=crop_w, crop_h=crop_h,
                                 scale_x=scale_x, scale_y=scale_y,
                             )
-                        # Gesture Detection aus Landmarks
+                        # Hand-Gesture Detection aus 21 MediaPipe Landmarks (W1 Audit-Fix)
                         try:
-                            gesture = self._gesture_detector.detect(hand_result["landmarks"])
+                            gesture = self._hand_gesture_detector.detect(
+                                hand_result["landmarks"],
+                                hand_result.get("handedness", "R")
+                            )
                             self._current_gesture = gesture
                         except Exception:
                             pass
@@ -2123,8 +2136,11 @@ class MolochService:
                 "timestamp": time.time(),
                 "source": "moloch_service"
             }
-            with open(FACE_STATE_PATH, "w") as f:
+            # Atomic write (W3 Audit-Fix) — verhindert halb-geschriebene JSON
+            tmp = str(FACE_STATE_PATH) + ".tmp"
+            with open(tmp, "w") as f:
                 json.dump(state, f)
+            os.rename(tmp, str(FACE_STATE_PATH))
         except Exception:
             pass
 
@@ -2737,48 +2753,59 @@ class MolochService:
         Wird von _write_shm und _cam_status_loop aufgerufen,
         damit Panel auch bei NPU-Ausfall funktioniert."""
         try:
-            status = {
-                "scrfd_active": self.scrfd_active,
-                "arcface_active": self.arcface_active,
-                "yolo_active": self.yolo_active,
-                "hand_active": self.hand_active,
-                "pose_active": self.pose_active,
-                "npu_paused": self._npu_paused,
-                "active_models": list(self._active_ctx.keys()),
-                "autonomous_mode": self._autonomous_mode,
-                "manual_mode": self._manual_mode,
-                "moloch_has_control": self._moloch_has_control,
-                "tentakel_enabled": self._tentakel_enabled,
-                "daily_learner_enabled": self._daily_learner.enabled if self._daily_learner else False,
-                "learner_flash": self._learner_flash,
-                "frame_age": round(time.time() - self._last_frame_write, 1) if self._last_frame_write else -1,
-                "frozen_restarts": self._frozen_restart_count,
-                "fps": {k: round(v, 1) for k, v in self._fps.items()},
-                "thresholds": {
-                    "scrfd_conf": self.scrfd_conf_val,
-                    "scrfd_nms": self.scrfd_nms_val,
-                    "arcface_thresh": self.arcface_thresh_val,
-                    "yolo_conf": self.yolo_conf_val,
-                },
-                "led_markus_on": self._led_markus_on,
-                "cloud": self._cloud_state,
-                "audio": {
-                    "mic_gain": getattr(self, '_saved_mic_gain', 1.0),
-                    "noise_gate_db": getattr(self, '_saved_noise_gate', -60.0),
-                    "agc_enabled": getattr(self, '_saved_agc', False),
-                    "level": getattr(self, '_audio_level', 0.0),
-                },
-                "voice": self._voice_pipeline.get_state() if self._voice_pipeline else {},
-            }
-            if self._perception:
-                status["perception"] = self._perception.get_state()
-            if self._core_integrator:
-                status["core"] = self._core_integrator.get_status_dict()
-            with open('/dev/shm/moloch_status.tmp', 'w') as f:
-                json.dump(status, f)
-            os.rename('/dev/shm/moloch_status.tmp', '/dev/shm/moloch_status.json')
+            with self._status_write_lock:
+                self._write_status_json_inner()
         except Exception:
             pass
+
+    def _write_status_json_inner(self):
+        """Innerer Status-Write (unter _status_write_lock aufgerufen)."""
+        # Snapshots unter Lock holen (W6-W7 Audit-Fix)
+        with self._fps_lock:
+            fps_snapshot = dict(self._fps)
+        with self._ctx_lock:
+            active_models = list(self._active_ctx.keys())
+
+        status = {
+            "scrfd_active": self.scrfd_active,
+            "arcface_active": self.arcface_active,
+            "yolo_active": self.yolo_active,
+            "hand_active": self.hand_active,
+            "pose_active": self.pose_active,
+            "npu_paused": self._npu_paused,
+            "active_models": active_models,
+            "autonomous_mode": self._autonomous_mode,
+            "manual_mode": self._manual_mode,
+            "moloch_has_control": self._moloch_has_control,
+            "tentakel_enabled": self._tentakel_enabled,
+            "daily_learner_enabled": self._daily_learner.enabled if self._daily_learner else False,
+            "learner_flash": self._learner_flash,
+            "frame_age": round(time.time() - self._last_frame_write, 1) if self._last_frame_write else -1,
+            "frozen_restarts": self._frozen_restart_count,
+            "fps": {k: round(v, 1) for k, v in fps_snapshot.items()},
+            "thresholds": {
+                "scrfd_conf": self.scrfd_conf_val,
+                "scrfd_nms": self.scrfd_nms_val,
+                "arcface_thresh": self.arcface_thresh_val,
+                "yolo_conf": self.yolo_conf_val,
+            },
+            "led_markus_on": self._led_markus_on,
+            "cloud": self._cloud_state,
+            "audio": {
+                "mic_gain": self._saved_mic_gain,
+                "noise_gate_db": self._saved_noise_gate,
+                "agc_enabled": self._saved_agc,
+                "level": self._audio_level,
+            },
+            "voice": self._voice_pipeline.get_state() if self._voice_pipeline else {},
+        }
+        if self._perception:
+            status["perception"] = self._perception.get_state()
+        if self._core_integrator:
+            status["core"] = self._core_integrator.get_status_dict()
+        with open('/dev/shm/moloch_status.tmp', 'w') as f:
+            json.dump(status, f)
+        os.rename('/dev/shm/moloch_status.tmp', '/dev/shm/moloch_status.json')
 
     def _poll_panel_cmds(self):
         """Poll for commands from Panel via IPC files (nummeriert)."""

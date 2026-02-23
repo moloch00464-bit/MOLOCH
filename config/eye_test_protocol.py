@@ -13,8 +13,8 @@ from collections import defaultdict
 
 CAM_IP = "192.168.178.25"
 CAM_PORT = 80
-CAM_USER = "Moloch_4.5"
-CAM_PASS = "Auge666"
+CAM_USER = os.environ.get("MOLOCH_CAMERA_USER", "")
+CAM_PASS = os.environ.get("MOLOCH_CAMERA_PASS", "")
 OUTPUT_DIR = "C:/Users/49179/moloch/config"
 
 # ---- Globals ----

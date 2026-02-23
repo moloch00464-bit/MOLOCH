@@ -8,7 +8,10 @@ from lxml import etree
 
 history = HistoryPlugin()
 
-cam = ONVIFCamera("192.168.178.25", 80, "Moloch_4.5", "Auge666")
+import os
+_CAM_USER = os.environ.get("MOLOCH_CAMERA_USER", "")
+_CAM_PASS = os.environ.get("MOLOCH_CAMERA_PASS", "")
+cam = ONVIFCamera("192.168.178.25", 80, _CAM_USER, _CAM_PASS)
 
 # Access the underlying zeep transport client and add plugin
 # The pullpoint service creates its own client, so we need to hook in there
@@ -53,7 +56,7 @@ try:
         "http://192.168.178.25/onvif/events_service",
         data=soap_body,
         headers=headers,
-        auth=HTTPDigestAuth("Moloch_4.5", "Auge666"),
+        auth=HTTPDigestAuth(_CAM_USER, _CAM_PASS),
         timeout=10
     )
     print(f"CreatePullPoint status: {r.status_code}")
@@ -86,7 +89,7 @@ try:
             sub_addr,
             data=pull_body,
             headers=headers,
-            auth=HTTPDigestAuth("Moloch_4.5", "Auge666"),
+            auth=HTTPDigestAuth(_CAM_USER, _CAM_PASS),
             timeout=15
         )
         print(f"\nPullMessages status: {r2.status_code}")

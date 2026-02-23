@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """M.O.L.O.C.H. Eye - Einzelaufzeichnung. Argument: Dauer in Sekunden."""
-import json, sys, time, threading
+import json, sys, time, os, threading
 from datetime import datetime
 from onvif import ONVIFCamera
 from zeep.plugins import HistoryPlugin
@@ -13,7 +13,7 @@ label = sys.argv[2] if len(sys.argv) > 2 else "recording"
 def ts():
     return datetime.now().isoformat(timespec='milliseconds')
 
-cam = ONVIFCamera(CAM_IP, 80, "Moloch_4.5", "Auge666")
+cam = ONVIFCamera(CAM_IP, 80, os.environ.get("MOLOCH_CAMERA_USER", ""), os.environ.get("MOLOCH_CAMERA_PASS", ""))
 media = cam.create_media_service()
 ptz = cam.create_ptz_service()
 profiles = media.GetProfiles()

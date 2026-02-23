@@ -1083,7 +1083,7 @@ class AutonomousTracker:
                         logger.info("[SEARCH] Aborted: user_visible=True in perception")
                     self._do_coast()
                     return
-            except:
+            except Exception:
                 pass
 
         now = time.time()
@@ -1192,7 +1192,7 @@ class AutonomousTracker:
                     ps = get_perception_state()
                     snap = ps.get_snapshot()
                     perception_info = f" | perception: user={snap.user_visible}, face={snap.face_visible}, gesture={snap.gesture_type}"
-                except:
+                except Exception:
                     pass
 
             logger.info(f"[TRACKER STATE] {old_state.value} -> {new_state.value}{perception_info}")
