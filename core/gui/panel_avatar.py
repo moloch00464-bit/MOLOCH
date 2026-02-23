@@ -148,8 +148,8 @@ class AvatarModule:
         c = self._canvas
         c.delete("all")
 
-        # Presence steuert Gesamthelligkeit (0.15 minimum damit nie ganz unsichtbar)
-        brightness = 0.15 + self._presence * 0.85
+        # Presence steuert Gesamthelligkeit (0.35 minimum damit Zonenfarben immer sichtbar)
+        brightness = 0.35 + self._presence * 0.65
 
         color_main, color_dim, color_iris = self._get_zone_colors()
 
@@ -345,9 +345,8 @@ class AvatarModule:
         # Naechster Tick
         self._after_id = self._parent.after(ANIM_INTERVAL_MS, self._update_animation)
 
-    def _read_core_state(self):
-        """Core State aus Status-JSON lesen."""
-        status = self._service.read_status()
+    def update_from_status(self, status: dict):
+        """Core State aus uebergebenem Status-Dict lesen (aufgerufen von panel_main)."""
         if not status:
             return
 
@@ -365,6 +364,11 @@ class AvatarModule:
         # Berserker-Flash bei Eintritt in Berserker-Zone
         if self._zone == "berserker" and old_zone != "berserker":
             self._flash_until = time.monotonic() + BERSERKER_FLASH_MS / 1000.0
+
+    def _read_core_state(self):
+        """Core State aus Status-JSON lesen (Fallback, falls poll nicht aktiv)."""
+        status = self._service.read_status()
+        self.update_from_status(status)
 
     def start(self):
         """Animation starten."""

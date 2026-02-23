@@ -499,9 +499,11 @@ class MolochPanel:
                 fg=STATUS_GREEN,
             )
 
-            # ERKANNT-Indikator im eWeLink-Modul aktualisieren
+            # Module mit aktuellem Status aktualisieren
             if self._ewelink is not None:
                 self._ewelink.update_from_status(status)
+            if self._avatar is not None:
+                self._avatar.update_from_status(status)
         else:
             self.status_bar.config(
                 text="Service: nicht verbunden",
