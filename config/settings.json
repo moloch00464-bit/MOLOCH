@@ -21,9 +21,14 @@
     "led_enabled": false,
     "ir_mode": "Aus"
   },
+  "orchestration_mode": "always_on",
   "active_models": [
+    "scrfd",
+    "arcface",
     "yolov8m",
-    "hand_landmark"
+    "hand_landmark",
+    "pose",
+    "face_attr"
   ],
   "cpu_detectors": {
     "enabled": false,

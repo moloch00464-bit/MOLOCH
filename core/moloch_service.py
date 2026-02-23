@@ -696,6 +696,15 @@ class MolochService:
         except Exception as e:
             logger.warning(f"[SETTINGS] Learner-Fehler: {e}")
 
+        # Orchestration Mode (always_on = alle Modelle immer aktiv, Default)
+        try:
+            om = data.get("orchestration_mode", "always_on")
+            if self._orchestrator:
+                self._orchestrator.orchestration_mode = om
+                logger.info(f"[SETTINGS] Orchestration Mode: {om}")
+        except Exception as e:
+            logger.warning(f"[SETTINGS] Orchestration-Mode-Fehler: {e}")
+
         # Aktive Modelle (fuer force_models nach Perception-Init)
         try:
             am = data.get("active_models")
@@ -745,6 +754,10 @@ class MolochService:
         data["learner"] = {
             "flash_enabled": _inf._learner_flash,
         }
+
+        # Orchestration Mode
+        if self._orchestrator:
+            data["orchestration_mode"] = self._orchestrator.orchestration_mode
 
         # Aktive Modelle (von ModelOrchestrator)
         with self._ctx_lock:

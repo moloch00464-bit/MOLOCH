@@ -147,7 +147,7 @@ class InferenceEngine:
         # NPU Watchdog: Anti-Oszillation Swap-Log
         self._swap_log = []
 
-        # Adaptive FPS
+        # FPS (aus Orchestrator, bei always_on = 0.033 = 30 FPS)
         self._target_frame_delay = self._orchestrator.target_frame_delay
 
         # Model Enable Flags (werden von sync_flags_from_npu gesetzt)

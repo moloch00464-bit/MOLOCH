@@ -96,9 +96,13 @@ class ModelOrchestrator:
         self.yolo_conf_val = 0.50
 
         # Attention-Level basierte Modell-Aktivierung
-        self._attention_level = "idle"
+        self._attention_level = "high"
         self._attention_level_lock = threading.Lock()
-        self._target_frame_delay = 0.2  # 5 FPS im Idle
+        self._target_frame_delay = 0.033  # 30 FPS Default
+
+        # Orchestration Mode: "always_on" = alle Modelle immer aktiv (Default)
+        #                     "adaptive" = dynamische Level-basierte Aktivierung
+        self._orchestration_mode = "always_on"
 
         # NPU Watchdog: Anti-Oszillation
         self._swap_log = []
@@ -143,6 +147,24 @@ class ModelOrchestrator:
     @property
     def target_frame_delay(self) -> float:
         return self._target_frame_delay
+
+    @property
+    def orchestration_mode(self) -> str:
+        return self._orchestration_mode
+
+    @orchestration_mode.setter
+    def orchestration_mode(self, mode: str):
+        """Orchestration Mode setzen: 'always_on' oder 'adaptive'."""
+        if mode not in ("always_on", "adaptive"):
+            logger.warning(f"[ORCHESTRATION] Unbekannter Modus: {mode}, bleibe bei {self._orchestration_mode}")
+            return
+        old = self._orchestration_mode
+        self._orchestration_mode = mode
+        logger.info(f"[ORCHESTRATION] Modus: {old} -> {mode}")
+        if mode == "always_on":
+            # Sofort alle Modelle aktivieren, 30 FPS
+            self._attention_level = "high"
+            self._target_frame_delay = 0.033
 
     # =================================================================
     # Model Loading
@@ -490,7 +512,18 @@ class ModelOrchestrator:
     # =================================================================
 
     def compute_attention_level(self) -> str:
-        """Attention-Level aus CoreIntegrator ableiten."""
+        """Attention-Level aus CoreIntegrator ableiten.
+
+        Bei orchestration_mode='always_on': Immer 'high' (alle Modelle, 30 FPS).
+        Bei orchestration_mode='adaptive': Dynamisch basierend auf CoreIntegrator.
+        """
+        # Always-On: Alle Modelle immer aktiv, kein Stromsparen bei 8GB NPU-RAM
+        if self._orchestration_mode == "always_on":
+            if self._daily_learner and self._daily_learner.enabled:
+                return "teach"
+            return "high"
+
+        # Adaptive Modus (Legacy, fuer spaeter)
         if self._daily_learner and self._daily_learner.enabled:
             return "teach"
         if not self._core_integrator:
@@ -521,7 +554,33 @@ class ModelOrchestrator:
         return delays.get(level, 0.067)
 
     def apply_attention_level(self, new_level: str):
-        """Modelle aktivieren/deaktivieren basierend auf Attention-Level."""
+        """Modelle aktivieren/deaktivieren basierend auf Attention-Level.
+
+        Bei always_on: Stellt sicher dass ALLE Modelle konfiguriert sind (30 FPS).
+        Bei adaptive: Dynamisches Switching wie bisher.
+        """
+        if self._orchestration_mode == "always_on":
+            # Always-On: Alle geladenen Modelle muessen konfiguriert sein
+            all_models = set(self._models.keys())
+            have = set(self._active_ctx.keys())
+            missing = all_models - have
+            if missing:
+                logger.info(f"[ORCHESTRATION] Always-On: Konfiguriere fehlende Modelle: {missing}")
+                for m in missing:
+                    if m not in self._active_ctx:
+                        self.configure(m)
+                        if self._model_health:
+                            self._model_health.set_paused(m, False)
+                self.sync_flags()
+            # FPS immer auf 30
+            self._target_frame_delay = 0.033
+            with self._attention_level_lock:
+                if self._attention_level != new_level:
+                    self._attention_level = new_level
+                    self._notify("attention_level", {"level": new_level, "fps_target": 30})
+            return
+
+        # Adaptive Modus (Legacy)
         with self._attention_level_lock:
             old_level = self._attention_level
             if old_level == new_level:
