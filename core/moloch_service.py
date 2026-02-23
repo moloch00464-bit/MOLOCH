@@ -51,11 +51,10 @@ from core.hardware.hailo_manager import get_hailo_manager
 from core.vision.gesture_detector import GestureDetector, KeypointPosition
 from core.vision.hand_gesture_detector import HandGestureDetector
 from core.vision.face_attr_npu import analyze_face as _analyze_face
-from core.cloud_controller import CloudController
 from core.led_controller import LEDController
 from core.ipc_router import IPCRouter
 from core.model_orchestrator import ModelOrchestrator, MODEL_PATHS
-from core.mpo.autonomous_tracker import AutonomousTracker, TrackerState
+from core.camera_manager import CameraManager
 from core.longterm_memory import get_memory
 from core.perception.perception_frame import PerceptionFrame, estimate_distance
 from core.perception.perception_buffer import get_perception_buffer
@@ -64,9 +63,6 @@ from core.perception.model_health import get_model_health
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger("MolochService")
 logger.setLevel(logging.INFO)
-
-# RTSP URL
-RTSP_URL = os.environ.get("MOLOCH_RTSP_URL", "")
 
 FACE_DB_PATH = os.path.expanduser("~/moloch/data/face_embeddings.json")
 SETTINGS_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config", "settings.json")
@@ -220,76 +216,26 @@ class MolochService:
         # TTS Announcement Cooldown
         self._last_announce = {}
 
-        # Alarm State
-        self._alarm_on = False
-
-        # Cloud State (LED/Night/Alarm - fuer Panel Sync)
-        self._cloud_state = {"led_level": 0, "alarm_active": False, "status_led": False}
-
         # LED Controller (extrahiert aus moloch_service.py, Phase 4)
-        # Cloud wird spaeter in _connect_cloud() gesetzt (Hintergrund-Thread)
+        # Cloud wird spaeter via CameraManager.connect_cloud() gesetzt
         self._led = LEDController(core_integrator=self._core_integrator)
 
-
-
-        # Autonomous Tracking
-        self._autonomous_mode = False
-        self._manual_autonomous = False
-        self._manual_mode = False  # MANUELL: Service beobachtet, aber keine Kamera-Kontrolle
-        self._tracker = None
-        # _models_preloaded wird via Property auf Orchestrator delegiert
-
-        # Guardian/Tentakel Mode
-        self._guardian_mode = True
-        self._tentakel_enabled = True  # Tentakel-Modus aktiv (Status-Flag)
-        self._moloch_has_control = False
-        self._takeover_reason = ""
-        self._takeover_time = 0
-        self._last_interesting_time = 0
-        self._search_start_time = 0
-        self.TAKEOVER_TIMEOUT = 30
-        self.SEARCH_TIMEOUT = 20
-        self._guardian_last_pan = None
-        self._guardian_last_tilt = None
-        self._guardian_move_thresh = 5.0
-        self._guardian_move_count = 0
-        self._guardian_move_required = 2
-        self._takeover_cooldown_until = 0
-        self.RELEASE_COOLDOWN = 60
-        self.MAX_COOLDOWN = 180
-        self.STARTUP_GRACE = 60
-        self._failed_takeovers = 0
-        self._takeover_found_something = False
-        self._takeover_cooldown_until = time.time() + self.STARTUP_GRACE
-        self._transitioning = False
-        self._transition_lock = threading.Lock()
-        self._waiting_for_first_detection = False
-        self._first_detection_event = threading.Event()
-
-        # Home Position (fuer Release -> Home -> ST)
-        self._home_position = {"pan": 0.0, "tilt": -15.0}
-        try:
-            _home_cfg = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config", "camera_home.json")
-            if os.path.exists(_home_cfg):
-                with open(_home_cfg) as f:
-                    self._home_position = json.load(f)
-                logger.info(f"[INIT] Home Position geladen: {self._home_position}")
-        except Exception as e:
-            logger.debug(f"[INIT] camera_home.json nicht geladen: {e}")
-
-        # Frame Locks
-        self._latest_frame = None
-        self._frame_lock = threading.Lock()
-        self._annotated_frame = None
-        self._annotated_lock = threading.Lock()
-
-        # Frozen Frame Watchdog
-        self._last_frame_write = time.time()
-        self._frozen_restart_count = 0
-        self._rtsp_frame_hash = None
-        self._rtsp_identical_count = 0
-        self._rtsp_stop_reader = threading.Event()
-        self._rtsp_thread = None
+        # CameraManager (RTSP + Cloud + Tentakel + Autonomer Modus, Phase 4)
+        self._cam = CameraManager(
+            model_orchestrator=self._orchestrator,
+            perception_engine=self._perception,
+            led_controller=self._led,
+            notify_callback=self._notify,
+            sync_flags_callback=self._sync_flags_from_npu,
+            set_model_flags_callback=self._set_model_flags_cb,
+            fps_reset_callback=self._reset_fps,
+        )
+        # Aliased mutable Referenzen (Inference Loop greift bis Schritt 5 noch auf self.xxx zu)
+        self._frame_lock = self._cam._frame_lock
+        self._annotated_lock = self._cam._annotated_lock
+        self._first_detection_event = self._cam._first_detection_event
+        self._transition_lock = self._cam._transition_lock
+        self._cloud_state = self._cam._cloud_state
 
         # Model enable flags (plain bools, NOT tk.BooleanVar)
         self.scrfd_active = False
@@ -326,14 +272,6 @@ class MolochService:
 
         # IPC Router (extrahiert aus moloch_service.py, Phase 4)
         self._ipc = IPCRouter()
-
-        # Smart Tracking State
-        self._smart_tracking_on = False
-        self._st_lock = threading.Lock()
-
-        # Cloud Controller
-        self._cloud = None
-        self._has_calibrated = False
 
         # Callback: GUI kann sich hier einklinken
         # Signature: _notify(event: str, data: dict)
@@ -401,127 +339,105 @@ class MolochService:
         self._orchestrator._models_preloaded = value
 
     # =========================================================================
+    # CameraManager Proxy Properties (Uebergangsphase bis Schritt 5)
+    # =========================================================================
+
+    @property
+    def _latest_frame(self):
+        return self._cam._latest_frame
+
+    @property
+    def _annotated_frame(self):
+        return self._cam._annotated_frame
+
+    @_annotated_frame.setter
+    def _annotated_frame(self, value):
+        self._cam._annotated_frame = value
+
+    @property
+    def _moloch_has_control(self):
+        return self._cam._moloch_has_control
+
+    @property
+    def _autonomous_mode(self):
+        return self._cam._autonomous_mode
+
+    @property
+    def _manual_mode(self):
+        return self._cam._manual_mode
+
+    @property
+    def _tentakel_enabled(self):
+        return self._cam._tentakel_enabled
+
+    @property
+    def _smart_tracking_on(self):
+        return self._cam._smart_tracking_on
+
+    @property
+    def _cloud(self):
+        return self._cam._cloud
+
+    @property
+    def _alarm_on(self):
+        return self._cam._alarm_on
+
+    @_alarm_on.setter
+    def _alarm_on(self, value):
+        self._cam._alarm_on = value
+
+    @property
+    def _waiting_for_first_detection(self):
+        return self._cam._waiting_for_first_detection
+
+    @property
+    def _takeover_found_something(self):
+        return self._cam._takeover_found_something
+
+    @_takeover_found_something.setter
+    def _takeover_found_something(self, value):
+        self._cam._takeover_found_something = value
+
+    @property
+    def _last_interesting_time(self):
+        return self._cam._last_interesting_time
+
+    @_last_interesting_time.setter
+    def _last_interesting_time(self, value):
+        self._cam._last_interesting_time = value
+
+    @property
+    def _tracker(self):
+        return self._cam._tracker
+
+    @property
+    def _last_frame_write(self):
+        return self._cam._last_frame_write
+
+    @property
+    def _frozen_restart_count(self):
+        return self._cam._frozen_restart_count
+
+    # CameraManager Callbacks
+
+    def _set_model_flags_cb(self, flags_dict):
+        """Callback fuer CameraManager: Model-Flags auf Service setzen."""
+        for attr, val in flags_dict.items():
+            setattr(self, attr, val)
+
+    def _reset_fps(self):
+        """Callback fuer CameraManager: FPS Tracking zuruecksetzen."""
+        with self._fps_lock:
+            self._fps = {"scrfd": 0, "arcface": 0, "yolov8m": 0,
+                         "hand_landmark": 0, "pose": 0, "total": 0}
+
+    # =========================================================================
     # RTSP Capture
     # =========================================================================
 
     def _start_rtsp(self):
-        """Starte RTSP Background Reader (mit Frozen-Frame-Detection + Auto-Reconnect)."""
-        # Alten Reader-Thread SAUBER beenden
-        if hasattr(self, '_rtsp_stop_reader'):
-            self._rtsp_stop_reader.set()
-
-        # Auf alten Thread warten (max 5s)
-        if hasattr(self, '_rtsp_thread') and self._rtsp_thread is not None:
-            self._rtsp_thread.join(timeout=5)
-            if self._rtsp_thread.is_alive():
-                logger.warning("[RTSP] Alter Reader-Thread lebt noch nach 5s join")
-            self._rtsp_thread = None
-
-        # Alten Cap freigeben
-        if hasattr(self, '_rtsp_cap') and self._rtsp_cap is not None:
-            try:
-                self._rtsp_cap.release()
-            except Exception:
-                pass
-            self._rtsp_cap = None
-
-        # Frische State-Variablen
-        self._rtsp_stop_reader = threading.Event()
-        self._rtsp_frame_hash = None
-        self._rtsp_identical_count = 0
-        stop_event = self._rtsp_stop_reader
-
-        def _rtsp_connect():
-            """Neuen RTSP VideoCapture erstellen."""
-            os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
-                "rtsp_transport;udp|fflags;nobuffer|flags;low_delay"
-            )
-            cap = cv2.VideoCapture(RTSP_URL, cv2.CAP_FFMPEG)
-            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            return cap
-
-        def rtsp_reader():
-            cap = _rtsp_connect()
-            self._rtsp_cap = cap
-
-            if not cap.isOpened():
-                self._update_status(f"RTSP FEHLER: {RTSP_URL}")
-                return
-
-            self._update_status("RTSP aktiv")
-            self._last_frame_write = time.time()
-            identical_count = 0
-            prev_hash = None
-
-            while self.running and not stop_event.is_set():
-                grabbed = cap.grab()
-                if grabbed:
-                    ret, frame = cap.retrieve()
-                    if ret and frame is not None:
-                        # Frame bleibt 1920x1080 — Full Resolution Pipeline
-                        # Resize fuer Modelle passiert spaeter (input_640)
-
-                        # Frozen Frame Detection via Hash (jeden 20. Pixel samplen)
-                        frame_hash = hash(frame[::20, ::20].tobytes())
-                        if frame_hash == prev_hash:
-                            identical_count += 1
-                            if identical_count >= 10:
-                                self._frozen_restart_count += 1
-                                logger.warning(
-                                    f"[WATCHDOG] RTSP reconnect — "
-                                    f"{identical_count} identical frames detected"
-                                )
-                                cap.release()
-                                if stop_event.wait(2):
-                                    break
-                                cap = _rtsp_connect()
-                                self._rtsp_cap = cap
-                                identical_count = 0
-                                prev_hash = None
-                                if cap.isOpened():
-                                    logger.info("[RTSP] Stream wiederhergestellt (frozen-detect)")
-                                    self._last_frame_write = time.time()
-                                else:
-                                    logger.warning("[RTSP] Reconnect fehlgeschlagen, retry...")
-                                continue
-                        else:
-                            prev_hash = frame_hash
-                            identical_count = 0
-
-                        with self._frame_lock:
-                            self._latest_frame = frame
-                        self._last_frame_write = time.time()
-                    else:
-                        if stop_event.wait(0.05):
-                            break
-                else:
-                    # grab() fehlgeschlagen - Stream offline
-                    self._frozen_restart_count += 1
-                    logger.warning(
-                        f"[RTSP] grab() fehlgeschlagen - Reconnect "
-                        f"#{self._frozen_restart_count} in 2s..."
-                    )
-                    cap.release()
-                    if stop_event.wait(2):
-                        break
-                    cap = _rtsp_connect()
-                    self._rtsp_cap = cap
-                    identical_count = 0
-                    prev_hash = None
-                    if cap.isOpened():
-                        logger.info("[RTSP] Stream wiederhergestellt (grab-fail)")
-                        self._last_frame_write = time.time()
-                    else:
-                        logger.warning("[RTSP] Reconnect fehlgeschlagen, retry in 5s...")
-                        if stop_event.wait(5):
-                            break
-
-            cap.release()
-            logger.info("[RTSP] Reader-Thread beendet")
-
-        t = threading.Thread(target=rtsp_reader, daemon=True, name="RTSPReader")
-        t.start()
-        self._rtsp_thread = t
+        """Thin Wrapper -> CameraManager.start_rtsp()."""
+        self._cam.start_rtsp()
 
     # =========================================================================
     # NPU Pipeline
@@ -1191,492 +1107,38 @@ class MolochService:
                 time.sleep(_sleep)
 
     # =========================================================================
-    # Tentakel-Logik (Smart Tracking <-> MOLOCH Takeover)
+    # CameraManager Thin Wrappers (Uebergangsphase bis Schritt 5)
     # =========================================================================
 
     def _moloch_takeover(self, reason: str):
-        """MOLOCH uebernimmt: NPU Modelle AN -> Warte auf Detection -> ST AUS -> Tracker AN.
-
-        Fliessender Uebergang: Smart Tracking bleibt AN waehrend NPU Modelle laden
-        und Frames analysieren. Erst bei echter Detection wird ST abgeschaltet.
-        """
-        with self._transition_lock:
-            if self._moloch_has_control or not self._guardian_mode or self._transitioning or self._manual_mode:
-                self._last_interesting_time = time.time()
-                return
-            self._transitioning = True
-        logger.info(f"[TENTAKEL] MOLOCH uebernimmt Kamera: {reason}")
-        self._moloch_has_control = True
-        self._takeover_time = time.time()
-        self._takeover_reason = reason
-        self._takeover_found_something = False
-        self._last_interesting_time = time.time()
-        self._search_start_time = 0
-
-        def do_takeover():
-            try:
-                # User hat Modelle manuell gewaehlt? -> NPU nicht antasten!
-                if self._perception and self._perception._forced:
-                    logger.info(f"[TENTAKEL] User forced_models={self._perception._forced} - NPU bleibt!")
-                    # Takeover-Flags setzen fuer Kamera-Kontrolle
-                    self._sync_flags_from_npu()
-                    self._first_detection_event.set()  # Skip Detection-Wait
-                    self._transitioning = False
-                    return
-
-                # 1. Alle NPU Modelle aktivieren (8GB — alle passen gleichzeitig)
-                all_loaded = all(m in self._active_ctx for m in MODEL_PATHS)
-                if all_loaded:
-                    logger.info("[TENTAKEL] Alle Modelle bereits auf NPU")
-                else:
-                    self._update_status("Takeover: NPU Modelle laden...")
-                    logger.info("[TENTAKEL] Lade alle NPU Modelle (ST laeuft weiter)")
-                    for _m in MODEL_PATHS:
-                        if _m not in self._active_ctx:
-                            self._configure_model(_m)
-                            time.sleep(0.2)
-
-                # 2. Inference starten - Flags aus NPU-Realitaet
-                self._sync_flags_from_npu()
-                self._notify("model_toggle", {
-                    "scrfd": self.scrfd_active, "arcface": self.arcface_active,
-                    "yolov8m": self.yolo_active,
-                    "hand_landmark": self.hand_active})
-
-                # 3. Warte auf erste Detection (max 10s, ST laeuft weiter)
-                self._first_detection_event.clear()
-                self._waiting_for_first_detection = True
-                self._update_status("Takeover: Warte auf Detection...")
-                logger.info("[TENTAKEL] NPU aktiv, warte auf Detection (ST laeuft weiter)...")
-
-                got_detection = self._first_detection_event.wait(timeout=10.0)
-                self._waiting_for_first_detection = False
-
-                if not got_detection:
-                    # Timeout - nichts erkannt, alles zurueck
-                    logger.info("[TENTAKEL] 10s keine Detection - Takeover abgebrochen")
-                    self.scrfd_active = False
-                    self.yolo_active = False
-                    self._notify("model_toggle", {"scrfd": False, "yolov8m": False})
-                    self._moloch_has_control = False
-                    self._takeover_found_something = False
-                    # Cooldown: war ein Fehlversuch
-                    self._failed_takeovers += 1
-                    cooldown = min(self.RELEASE_COOLDOWN * (1.5 ** self._failed_takeovers), self.MAX_COOLDOWN)
-                    self._takeover_cooldown_until = time.time() + cooldown
-                    self._update_status("Tentakel scannt wieder")
-                    logger.info(f"[TENTAKEL] Fehlversuch #{self._failed_takeovers}, Cooldown {cooldown:.0f}s")
-                    # ST war NIE aus - kein Toggle noetig!
-                    return
-
-                # 4. Detection da! JETZT ST AUS (nahtloser Uebergang)
-                logger.info("[TENTAKEL] Detection erkannt! ST AUS + Tracker AN")
-                self._update_status("Takeover: ST AUS...")
-                st_off = False
-                if self._cloud and self._cloud.connected:
-                    for attempt in range(3):
-                        if self._cloud.set_smart_tracking(False):
-                            self._set_smart_tracking_state(False)
-                            st_off = True
-                            break
-                        logger.warning(f"[TENTAKEL] ST AUS Versuch {attempt+1}/3 fehlgeschlagen")
-                        time.sleep(0.5)
-
-                if not st_off:
-                    logger.error("[TENTAKEL] ST AUS fehlgeschlagen - Takeover ABBRUCH")
-                    self.scrfd_active = False
-                    self.yolo_active = False
-                    self._notify("model_toggle", {"scrfd": False, "yolov8m": False})
-                    self._moloch_has_control = False
-                    self._update_status("Takeover abgebrochen: ST nicht erreichbar")
-                    return
-
-                # 5. Tracker AN (Detection bereits vorhanden -> sofortige Uebernahme!)
-                self._enable_autonomous()
-
-                # 6. LED AN
-                self._led.on()
-
-                self._update_status(f"MOLOCH: {reason}")
-                logger.info(f"[TENTAKEL] Takeover komplett (fliessend): {reason}")
-            except Exception as e:
-                logger.error(f"[TENTAKEL] Takeover Fehler: {e}")
-                self._moloch_has_control = False
-            finally:
-                self._waiting_for_first_detection = False
-                self._transitioning = False
-
-        threading.Thread(target=do_takeover, daemon=True).start()
+        """Thin Wrapper -> CameraManager.moloch_takeover()."""
+        self._cam.moloch_takeover(reason)
 
     def _moloch_release(self):
-        """MOLOCH gibt zurueck: Tracker STOP -> ST AN -> Aufraumen."""
-        with self._transition_lock:
-            if not self._moloch_has_control or self._transitioning:
-                return
-            self._transitioning = True
-        try:
-            # Unblock fliessender Takeover falls noch wartend
-            self._waiting_for_first_detection = False
-            self._first_detection_event.set()
-
-            logger.info("[TENTAKEL] MOLOCH gibt Kamera zurueck an Smart Tracking")
-
-            # VOR dem Release: Kamera auf Home Position fahren
-            try:
-                from core.hardware.camera import get_camera_controller
-                cam = get_camera_controller()
-                if cam.is_connected:
-                    home_pan = self._home_position.get("pan", 0.0)
-                    home_tilt = self._home_position.get("tilt", -15.0)
-                    cam.move_absolute(home_pan, home_tilt, speed=15.0)
-                    logger.info(f"[RELEASE] Home Position: pan={home_pan}, tilt={home_tilt}")
-            except Exception as e:
-                logger.debug(f"[RELEASE] Home move failed: {e}")
-
-            self._moloch_has_control = False
-            self._takeover_reason = ""
-            self._search_start_time = 0
-
-            # 1. LED AUS (MOLOCH gibt ab)
-            self._led.off()
-
-            # 2. Tracker SOFORT stoppen
-            self._autonomous_mode = False
-            if self._tracker:
-                self._tracker.disable()
-            logger.info("[TENTAKEL] Tracker gestoppt")
-            self._notify("auto_mode", {"state": "disabled"})
-
-            # 3. Smart Tracking SOFORT AN (minimaler Gap!)
-            if self._cloud and self._cloud.connected:
-                if self._cloud.set_smart_tracking(True):
-                    self._set_smart_tracking_state(True)
-                    logger.info("[TENTAKEL] Smart Tracking wiederhergestellt")
-
-            # 4. Inference-Flags: Wenn User Modelle forced hat, Flags aus NPU synchen!
-            if self._perception and self._perception._forced:
-                self._sync_flags_from_npu()
-                logger.info(f"[TENTAKEL] User forced={self._perception._forced} - Flags aus NPU: {list(self._active_ctx.keys())}")
-            else:
-                self.scrfd_active = False
-                self.arcface_active = False
-                self.yolo_active = False
-                self.hand_active = False
-            self._notify("model_toggle", {
-                "scrfd": self.scrfd_active, "arcface": self.arcface_active,
-                "yolov8m": self.yolo_active,
-                "hand_landmark": self.hand_active})
-            with self._fps_lock:
-                self._fps = {"scrfd": 0, "arcface": 0, "yolov8m": 0, "hand_landmark": 0, "pose": 0, "total": 0}
-            logger.info(f"[TENTAKEL] Inference gestoppt, Modelle auf NPU: {list(self._active_ctx.keys())}")
-
-            # Position-Tracking zuruecksetzen
-            self._guardian_last_pan = None
-            self._guardian_last_tilt = None
-            self._guardian_move_count = 0
-
-            # Progressive Backoff (1.5x, max 180s)
-            if self._takeover_found_something:
-                self._failed_takeovers = 0
-                cooldown = self.RELEASE_COOLDOWN
-            else:
-                self._failed_takeovers += 1
-                cooldown = min(self.RELEASE_COOLDOWN * (1.5 ** self._failed_takeovers), self.MAX_COOLDOWN)
-            self._takeover_found_something = False
-            self._takeover_cooldown_until = time.time() + cooldown
-
-            self._update_status("Tentakel scannt wieder")
-            logger.info(f"[TENTAKEL] Release komplett - Cooldown {cooldown:.0f}s")
-        finally:
-            self._transitioning = False
-
-    def _check_guardian_timeout(self):
-        """Pruefe ob MOLOCH die Kamera zurueckgeben soll (kein Interest mehr)."""
-        if not self._guardian_mode or self._transitioning or self._manual_mode:
-            return
-        # Safety: verwaister autonomer Modus
-        if self._autonomous_mode and not self._moloch_has_control and not self._manual_autonomous and (time.time() - getattr(self, "_autonomous_enabled_at", 0)) > self.STARTUP_GRACE:
-            logger.warning("[SAFETY] Orphaned autonomous mode detected - disabling")
-            self._disable_autonomous()
-            return
-        if not self._moloch_has_control:
-            return
-        now = time.time()
-        # Timeout: zu lange nichts Interessantes
-        if now - self._last_interesting_time > self.TAKEOVER_TIMEOUT:
-            logger.info(f"[TENTAKEL] Takeover timeout ({self.TAKEOVER_TIMEOUT}s) - zurueckgeben")
-            threading.Thread(target=self._moloch_release, daemon=True).start()
-            return
-        # Tracker sucht zu lange ohne Ergebnis
-        if self._tracker and self._autonomous_mode:
-            if self._tracker.state == TrackerState.SEARCHING:
-                if self._search_start_time == 0:
-                    self._search_start_time = now
-                elif now - self._search_start_time > self.SEARCH_TIMEOUT:
-                    logger.info(f"[TENTAKEL] Search timeout ({self.SEARCH_TIMEOUT}s) - zurueckgeben")
-                    threading.Thread(target=self._moloch_release, daemon=True).start()
-                    return
-            else:
-                self._search_start_time = 0
-
-    # =========================================================================
-    # Kamera-Status Polling (ersetzt root.after(3000, ...))
-    # =========================================================================
-
-    def _cam_status_loop(self):
-        """Kamera-Status + IPC Status-JSON polling loop (1.5s Intervall).
-        Schreibt Status-JSON auch wenn NPU/Frames ausfallen."""
-        while self.running:
-            try:
-                self._update_cam_status()
-            except Exception as e:
-                logger.error(f"Cam status error: {e}")
-            # Status-JSON IMMER schreiben — Panel braucht Voice/Chat auch ohne NPU
-            try:
-                self._write_status_json()
-            except Exception:
-                pass
-            time.sleep(1.5)
-
-    def _update_cam_status(self):
-        """Kamera-Status pruefen + Tentakel-Bewegungserkennung."""
-        self._check_guardian_timeout()
-
-        onvif_ok = False
-        ptz_text = "--"
-        try:
-            from core.hardware.camera import get_camera_controller
-            cam = get_camera_controller()
-            if not cam.is_connected:
-                cam.connect()
-            if cam.is_connected:
-                onvif_ok = True
-                pos = cam.get_position()
-                if pos:
-                    pan, tilt = pos.pan, pos.tilt
-                    ptz_text = f"Pan: {pan:.1f}  Tilt: {tilt:.1f}"
-
-                    # Tentakel: Kamera-Bewegung erkennen
-                    if (self._guardian_mode and self._smart_tracking_on
-                            and not self._moloch_has_control
-                            and not self._transitioning
-                            and not self._manual_mode):
-                        if self._guardian_last_pan is not None:
-                            delta = abs(pan - self._guardian_last_pan) + abs(tilt - self._guardian_last_tilt)
-                            if delta > self._guardian_move_thresh:
-                                self._guardian_move_count += 1
-                                logger.info(f"[TENTAKEL] Bewegung {self._guardian_move_count}/{self._guardian_move_required} delta={delta:.1f}")
-                                if self._guardian_move_count >= self._guardian_move_required:
-                                    if time.time() >= self._takeover_cooldown_until:
-                                        logger.info(f"[TENTAKEL] Sustained movement ({self._guardian_move_count}x) -> MOLOCH uebernimmt")
-                                        self._guardian_move_count = 0
-                                        self._moloch_takeover("Kamera trackt etwas")
-                                    else:
-                                        remaining = self._takeover_cooldown_until - time.time()
-                                        logger.info(f"[TENTAKEL] Cooldown aktiv, noch {remaining:.0f}s")
-                                        self._guardian_move_count = 0
-                            else:
-                                self._guardian_move_count = max(0, self._guardian_move_count - 1)
-                                # Idle Pre-Load: Kamera steht still -> NPU Modelle vorladen
-                                if (not self._models_preloaded
-                                        and not self._active_ctx
-                                        and time.time() >= self._takeover_cooldown_until
-                                        and self._configuring.is_set()):
-                                    self._models_preloaded = True  # Guard: nur einmal
-                                    def _idle_preload():
-                                        try:
-                                            logger.info("[TENTAKEL] Idle Pre-Load: Alle NPU Modelle vorladen...")
-                                            for _m in MODEL_PATHS:
-                                                if _m not in self._active_ctx:
-                                                    self._configure_model(_m)
-                                                    time.sleep(0.2)
-                                            if all(m in self._active_ctx for m in MODEL_PATHS):
-                                                logger.info("[TENTAKEL] Idle Pre-Load: Alle 4 Modelle ready auf NPU")
-                                            else:
-                                                logger.warning(f"[TENTAKEL] Idle Pre-Load: Nur {list(self._active_ctx.keys())} konfiguriert!")
-                                                self._models_preloaded = False
-                                        except Exception as e:
-                                            logger.error(f"[TENTAKEL] Idle Pre-Load Fehler: {e}")
-                                            self._models_preloaded = False
-                                    threading.Thread(target=_idle_preload, daemon=True).start()
-                        self._guardian_last_pan = pan
-                        self._guardian_last_tilt = tilt
-        except Exception:
-            pass
-
-        # Status Notification
-        smart = "AUS" if not self._smart_tracking_on else "AN"
-        onvif_str = "OK" if onvif_ok else "---"
-
-        if self._manual_mode:
-            mode = "manual"
-            ctrl_text = "MANUELL"
-        elif self._moloch_has_control:
-            mode = "moloch"
-            ctrl_text = f"MOLOCH: {self._takeover_reason[:20]}"
-        elif self._smart_tracking_on:
-            mode = "tentakel"
-            ctrl_text = "TENTAKEL SCANNT"
-        elif onvif_ok:
-            mode = "manual"
-            ctrl_text = "MANUELL"
-        else:
-            mode = "offline"
-            ctrl_text = "OFFLINE"
-
-        self._notify("cam_status", {
-            "mode": mode, "ctrl_text": ctrl_text,
-            "smart": smart, "onvif": onvif_str, "ptz": ptz_text,
-            "frame_age": round(time.time() - self._last_frame_write, 1),
-        })
-
-    # =========================================================================
-    # Frozen Frame Watchdog
-    # =========================================================================
-
-    def _frozen_frame_watchdog(self):
-        """Backup-Watchdog: Erkennt wenn Reader-Thread kein Frame mehr liefert.
-
-        Primaere Detection ist jetzt Hash-basiert im Reader selbst (10 identische
-        Frames -> Reconnect). Dieser Watchdog ist Fallback fuer den Fall dass
-        der Reader-Thread komplett haengt oder crashed.
-        """
-        while self.running:
-            try:
-                time.sleep(10)
-
-                frame_age = time.time() - self._last_frame_write
-
-                if frame_age > 30:
-                    logger.warning(
-                        f"[WATCHDOG] RTSP reconnect — "
-                        f"kein Frame seit {frame_age:.0f}s (Reader haengt)"
-                    )
-
-                    try:
-                        self._start_rtsp()
-                        logger.info("[WATCHDOG] RTSP Stream neu gestartet")
-                    except Exception as e:
-                        logger.error(f"[WATCHDOG] RTSP Reconnect Error: {e}")
-
-                    # Max 5 Versuche, danach loggen und warten
-                    if self._frozen_restart_count >= 5:
-                        logger.error("[WATCHDOG] 5 Reconnects fehlgeschlagen, warte 60s")
-                        time.sleep(60)
-                        self._frozen_restart_count = 0
-
-            except Exception as e:
-                logger.error(f"[WATCHDOG] Error: {e}")
-
-    # =========================================================================
-    # Autonomous Mode
-    # =========================================================================
+        """Thin Wrapper -> CameraManager.moloch_release()."""
+        self._cam.moloch_release()
 
     def _enable_autonomous(self):
-        """AUTONOM aktivieren (idempotent)."""
-        if self._autonomous_mode:
-            logger.debug("[AUTONOM] Already enabled, skip")
-            return
-        self._notify("auto_mode", {"state": "starting"})
-
-        def do_start():
-            try:
-                from core.mpo.autonomous_tracker import get_autonomous_tracker
-                from core.hardware.camera import get_camera_controller, ControlMode
-                if not self._tracker:
-                    self._tracker = get_autonomous_tracker()
-                cam = get_camera_controller()
-                if not cam.is_connected:
-                    cam.connect()
-                if not cam.is_connected:
-                    self._update_status("AUTONOM fehlgeschlagen: Kamera offline")
-                    self._notify("auto_mode", {"state": "failed"})
-                    return
-                self._tracker.set_camera(cam)
-                cam.set_mode(ControlMode.AUTONOMOUS)
-                if not self._tracker._running:
-                    self._tracker.start()
-                self._tracker.enable()
-                self._autonomous_mode = True
-                self._autonomous_enabled_at = time.time()
-                self._update_status("Modus: AUTONOM - MOLOCH sucht...")
-                logger.info("Switched to AUTONOMOUS mode")
-                self._notify("auto_mode", {"state": "active"})
-            except Exception as e:
-                logger.error(f"Autonomous start failed: {e}")
-                self._update_status(f"AUTONOM Fehler: {e}")
-                self._notify("auto_mode", {"state": "failed"})
-
-        threading.Thread(target=do_start, daemon=True).start()
+        """Thin Wrapper -> CameraManager.enable_autonomous()."""
+        self._cam.enable_autonomous()
 
     def _disable_autonomous(self):
-        """AUTONOM deaktivieren (idempotent)."""
-        if not self._autonomous_mode:
-            logger.debug("[AUTONOM] Already disabled, skip")
-            return
-        self._autonomous_mode = False
-        if self._tracker:
-            self._tracker.disable()
-        self._update_status("Modus: MANUELL")
-        logger.info("Switched to MANUAL mode")
-        self._notify("auto_mode", {"state": "disabled"})
-
+        """Thin Wrapper -> CameraManager.disable_autonomous()."""
+        self._cam.disable_autonomous()
 
     def _all_models_off(self):
         """Thin Wrapper -> ModelOrchestrator.all_models_off() + FPS Reset."""
         self._orchestrator.all_models_off()
         self._sync_flags_from_npu()
-        with self._fps_lock:
-            self._fps = {"scrfd": 0, "arcface": 0, "yolov8m": 0, "hand_landmark": 0, "pose": 0, "total": 0}
-
-    # =========================================================================
-    # Cloud / Camera
-    # =========================================================================
+        self._reset_fps()
 
     def _connect_cloud(self):
-        """Connect to eWeLink cloud."""
-        try:
-            self._cloud = CloudController()
-            self._cloud.start()
-            # LEDController bekommt Cloud-Referenz
-            self._led.set_cloud(self._cloud)
-            if self._cloud.connected:
-                logger.info("eWeLink Cloud verbunden")
-                if self._cloud.set_smart_tracking(True):
-                    self._set_smart_tracking_state(True)
-                    logger.info("Smart Tracking aktiviert - Kamera scannt autonom (Tentakel-Modus)")
-                # LED AUS beim Start (sauberer Zustand)
-                try:
-                    self._cloud.run(self._cloud.bridge.set_status_led(False))
-                except Exception:
-                    pass
-                self._notify("cloud_status", {"connected": True})
-            else:
-                logger.warning("eWeLink Cloud nicht erreichbar")
-                self._notify("cloud_status", {"connected": False, "error": "nicht erreichbar"})
-        except Exception as e:
-            logger.error(f"Cloud connect: {e}")
-            self._notify("cloud_status", {"connected": False, "error": str(e)})
-
-    def _set_smart_tracking_state(self, value: bool):
-        """Einziger Schreibzugriff auf _smart_tracking_on (thread-safe)."""
-        with self._st_lock:
-            self._smart_tracking_on = value
-        self._notify("smart_tracking", {"on": value})
+        """Thin Wrapper -> CameraManager.connect_cloud()."""
+        self._cam.connect_cloud()
 
     def _toggle_smart_tracking(self):
-        """Smart Tracking toggle via persistent cloud connection."""
-        new_state = not self._smart_tracking_on
-        if not self._cloud or not self._cloud.connected:
-            self._update_status("Cloud nicht verbunden")
-            return
-        def do_toggle():
-            if self._cloud.set_smart_tracking(new_state):
-                self._set_smart_tracking_state(new_state)
-                self._update_status(f"Smart Tracking {'AN' if new_state else 'AUS'}")
-            else:
-                self._update_status("Smart Tracking Fehler")
-        threading.Thread(target=do_toggle, daemon=True).start()
+        """Thin Wrapper -> CameraManager.toggle_smart_tracking()."""
+        self._cam.toggle_smart_tracking()
 
     # =========================================================================
     # Face Recognition
@@ -1762,11 +1224,11 @@ class MolochService:
         if self._daily_learner:
             self._daily_learner.set_face_db(self._face_db, FACE_DB_PATH)
 
-        # 3. RTSP
-        self._start_rtsp()
+        # 3. RTSP (via CameraManager)
+        self._cam.start_rtsp()
 
-        # 4. Cloud (im Hintergrund)
-        threading.Thread(target=self._connect_cloud, daemon=True).start()
+        # 4. Cloud (via CameraManager, im Hintergrund)
+        threading.Thread(target=self._cam.connect_cloud, daemon=True).start()
 
         self._update_status("M.O.L.O.C.H. Service bereit")
 
@@ -1927,30 +1389,30 @@ class MolochService:
         # Inference Loop
         threading.Thread(target=self._inference_loop, daemon=True, name="InferenceLoop").start()
 
-        # Kamera-Status Polling (ersetzt root.after(3000, ...))
-        threading.Thread(target=self._cam_status_loop, daemon=True, name="CamStatusLoop").start()
+        # Kamera-Status + IPC Polling (via CameraManager)
+        self._cam.start_cam_status_loop(write_status_callback=self._write_status_json)
 
         # Panel IPC Command Polling
         threading.Thread(target=self._poll_panel_cmds, daemon=True, name="PanelCmdPoll").start()
 
-        # Frozen Frame Watchdog
-        # Default: Autonomous Mode nach Boot aktivieren
-        self._enable_autonomous()
+        # Autonomous Mode + Watchdog (via CameraManager)
+        self._cam.enable_autonomous()
         logger.info("[START] Autonomous Mode aktiviert (Default nach Boot)")
 
         # nightVision auf day setzen (verhindert IR-Modus nach Reboot)
         def _reset_night_vision():
             try:
                 time.sleep(5)  # Warten bis Cloud-Bridge bereit
-                if self._cloud and self._cloud.connected:
-                    self._cloud.run(self._cloud.bridge.set_night('day'))
+                cloud = self._cam.cloud
+                if cloud and cloud.connected:
+                    cloud.run(cloud.bridge.set_night('day'))
                     self._cloud_state["led_level"] = 0
                     logger.info("[START] nightVision auf 'day' gesetzt")
             except Exception as e:
                 logger.debug(f"[START] nightVision Reset fehlgeschlagen: {e}")
         threading.Thread(target=_reset_night_vision, daemon=True, name="NightVisionReset").start()
 
-        threading.Thread(target=self._frozen_frame_watchdog, daemon=True, name="FrozenWatchdog").start()
+        self._cam.start_watchdog()
 
         # Spontane Kommentare Monitor starten (CoreIntegrator-gesteuert)
         if self._voice_pipeline:
@@ -2018,76 +1480,14 @@ class MolochService:
         self._orchestrator.toggle_model(model_key, enabled)
 
     def toggle_autonomous_manual(self):
-        """Toggle AUTONOM/MANUELL von GUI-Button.
-
-        MANUELL: Service beobachtet weiter (Inference, Detection, Logs),
-                 aber KEINE Kamera-Kontrolle. Nur Panel-Buttons steuern.
-        AUTONOM: Service uebernimmt Kamera (Tentakel-Modus).
-        """
-        if not self._manual_mode:
-            # -> MANUELL: Kamera-Kontrolle sperren
-            logger.info("[MODUS] Wechsel zu MANUELL - Kamera-Kontrolle gesperrt")
-            self._manual_mode = True
-            self._tentakel_enabled = False
-
-            # Tracker stoppen (falls aktiv)
-            if self._autonomous_mode:
-                self._disable_autonomous()
-
-            # Takeover-State zuruecksetzen
-            self._moloch_has_control = False
-            self._manual_autonomous = False
-            self._takeover_reason = ""
-            self._guardian_move_count = 0
-
-            # Perception: aktuelle Modelle einfrieren (kein Auto-Swap im Manual Mode)
-            if self._perception:
-                frozen = list(self._active_ctx.keys())
-                self._perception.force_models(frozen)
-                logger.info(f"[MODUS] MANUELL -> force_models({frozen}) - Modell-Swap gesperrt")
-
-            # Smart Tracking AUS (wuerde sonst Kamera bewegen)
-            def stop_cam_control():
-                if self._cloud and self._cloud.connected:
-                    if self._cloud.set_smart_tracking(False):
-                        self._set_smart_tracking_state(False)
-                self._led.off()
-            threading.Thread(target=stop_cam_control, daemon=True).start()
-
-            self._notify("auto_mode", {"state": "manual"})
-            self._update_status("MANUELL - Service beobachtet")
-        else:
-            # -> AUTONOM: Kamera-Kontrolle freigeben
-            logger.info("[MODUS] Wechsel zu AUTONOM - Kamera-Kontrolle freigegeben")
-            self._manual_mode = False
-            self._tentakel_enabled = True
-
-            # Perception: Auto-Swap wieder freigeben
-            if self._perception:
-                self._perception.force_models(None)
-                logger.info("[MODUS] AUTONOM -> force_models(None) - Perception Auto-Modus")
-
-            # Smart Tracking AN (Tentakel-Default)
-            def start_cam_control():
-                if self._cloud and self._cloud.connected:
-                    if self._cloud.set_smart_tracking(True):
-                        self._set_smart_tracking_state(True)
-                        logger.info("[TENTAKEL] Smart Tracking aktiviert")
-            threading.Thread(target=start_cam_control, daemon=True).start()
-
-            # Guardian-State zuruecksetzen (frischer Start)
-            self._guardian_last_pan = None
-            self._guardian_last_tilt = None
-            self._guardian_move_count = 0
-            self._takeover_cooldown_until = time.time() + 10  # 10s Grace nach Moduswechsel
-
-            self._notify("auto_mode", {"state": "autonomous"})
-            self._update_status("AUTONOM - Tentakel scannt")
+        """Thin Wrapper -> CameraManager.toggle_autonomous_manual()."""
+        self._cam.toggle_autonomous_manual()
 
     def stop(self):
         """Sauberes Herunterfahren."""
         logger.info("M.O.L.O.C.H. Service wird gestoppt...")
         self.running = False
+        self._cam.running = False
 
         # Langzeitgedaechtnis: Core State SOFORT sichern
         if self._memory and self._core_integrator:
@@ -2106,12 +1506,8 @@ class MolochService:
             except Exception:
                 pass
 
-        # Tracker stoppen
-        if self._tracker:
-            try:
-                self._tracker.stop()
-            except Exception:
-                pass
+        # CameraManager: Tracker stoppen
+        self._cam.stop_tracker()
 
         # NPU: Alle Modelle freigeben + VDevice schliessen
         self._orchestrator.release_all()
