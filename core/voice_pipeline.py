@@ -14,6 +14,7 @@ Kommuniziert NICHT direkt mit GUI.
 """
 
 import os
+import re
 import sys
 import json
 import time
@@ -36,6 +37,20 @@ MODELS_DIR = Path.home() / "moloch" / "models" / "voices"
 PIPER_PATH = Path.home() / ".local" / "bin" / "piper"
 API_KEYS_PATH = Path.home() / "moloch" / "config" / "api_keys.json"
 TEMP_DIR = "/tmp"
+
+# Regex fuer UTF-16 Surrogates (U+D800..U+DFFF) — ungueltig in UTF-8
+_SURROGATE_RE = re.compile(r'[\ud800-\udfff]')
+
+
+def _sanitize_text(text: str) -> str:
+    """Surrogate-Zeichen entfernen die UTF-8 Encoding crashen.
+
+    Whisper/Bluetooth kann kaputte Umlaute liefern (z.B. \\udcfc statt ü).
+    Ersetzt Surrogates durch '?' damit API-Calls nicht crashen.
+    """
+    if not text:
+        return text
+    return _SURROGATE_RE.sub('?', text)
 
 
 def _load_api_key() -> Optional[str]:
@@ -266,6 +281,7 @@ class VoicePipeline:
             self._whisper_status = "Idle"
             return
 
+        text = _sanitize_text(text)
         logger.info(f"[VOICE] Transkription: {text}")
         self._emit_message("Du", text)
 
@@ -328,6 +344,9 @@ class VoicePipeline:
             logger.warning("[VOICE] Claude API nicht verfuegbar")
             return None
 
+        # Surrogates entfernen (Whisper/Bluetooth liefert manchmal kaputte Umlaute)
+        user_text = _sanitize_text(user_text)
+
         # Konversation aufbauen
         self._conversation.append({"role": "user", "content": user_text})
 
@@ -337,11 +356,11 @@ class VoicePipeline:
 
         try:
             # System-Prompt mit Memory-Kontext und Personality-Zone anreichern
-            system = self._system_prompt
+            system = _sanitize_text(self._system_prompt)
             try:
                 memory_ctx = get_memory().get_memory_context()
                 if memory_ctx:
-                    system = system + "\n\n--- LANGZEITGEDAECHTNIS ---\n" + memory_ctx
+                    system = system + "\n\n--- LANGZEITGEDAECHTNIS ---\n" + _sanitize_text(memory_ctx)
             except Exception as e:
                 logger.error(f"[VOICE] Memory-Kontext laden fehlgeschlagen: {e}")
 
@@ -352,7 +371,7 @@ class VoicePipeline:
                 pe.update_from_integrator()  # Zone aktualisieren
                 zone_addon = pe.get_zone_system_prompt_addon()
                 if zone_addon:
-                    system = system + zone_addon
+                    system = system + _sanitize_text(zone_addon)
                 # Stimme an aktuelle Zone anpassen
                 vc = pe.voice_config
                 self._current_voice = vc.voice_id
@@ -362,7 +381,7 @@ class VoicePipeline:
 
             response = self._claude_client.messages.create(
                 model="claude-sonnet-4-20250514",
-                max_tokens=256,
+                max_tokens=512,
                 system=system,
                 messages=self._conversation,
             )
@@ -378,6 +397,10 @@ class VoicePipeline:
             return text
         except Exception as e:
             logger.error(f"[VOICE] Claude API Fehler: {e}")
+            # User-Message wieder entfernen damit Konversation nicht kaputt geht
+            # (zwei user-Messages hintereinander = ungueltig fuer Claude API)
+            if self._conversation and self._conversation[-1].get("role") == "user":
+                self._conversation.pop()
             return None
 
     # =========================================================================
@@ -396,6 +419,7 @@ class VoicePipeline:
 
     def _process_text(self, text: str):
         """Text -> Claude -> TTS in Background."""
+        text = _sanitize_text(text)
         self._whisper_status = "Denke..."
         self._emit_message("Du", text)
 

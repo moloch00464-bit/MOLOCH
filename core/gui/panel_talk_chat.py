@@ -147,7 +147,8 @@ class TalkChatModule:
             return
 
         self._service._write_command("chat_message", {"text": text})
-        self.add_message("Markus", text)
+        # KEIN add_message hier! Service emittiert "Du"-Message,
+        # die kommt ueber _poll_status() zurueck. Sonst doppelt.
         self._entry.delete(0, tk.END)
 
     # =========================================================================
