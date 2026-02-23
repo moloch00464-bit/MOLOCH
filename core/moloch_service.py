@@ -56,6 +56,7 @@ from core.vision.gesture_detector import GestureDetector, KeypointPosition
 from core.vision.hand_gesture_detector import HandGestureDetector
 from core.vision.face_attr_npu import analyze_face as _analyze_face
 from core.cloud_controller import CloudController
+from core.led_controller import LEDController
 from core.mpo.autonomous_tracker import AutonomousTracker, TrackerState
 from core.longterm_memory import get_memory
 from core.perception.perception_frame import PerceptionFrame, estimate_distance
@@ -237,25 +238,9 @@ class MolochService:
         # Cloud State (LED/Night/Alarm - fuer Panel Sync)
         self._cloud_state = {"led_level": 0, "alarm_active": False, "status_led": False}
 
-        # LED Erkennungs-Indikator State
-        self._led_indicator_state = False  # Aktueller Zustand (vermeidet doppelte API-Calls)
-        self._led_markus_on = False  # Standlicht: LED an weil Markus sichtbar
-        self._led_markus_last_seen = 0  # Letzter Erkennungs-Timestamp
-        self._LED_MARKUS_TIMEOUT = 30  # Sekunden bis LED aus nach letzter Erkennung
-        self._led_markus_timer = None  # Timer-Thread fuer Timeout
-
-        # LED Hysterese (Frame-Counter gegen Flackern)
-        self._led_markus_on_streak = 0   # Consecutive Frames mit Markus erkannt
-        self._led_markus_off_streak = 0  # Consecutive Frames OHNE Markus
-        self._LED_ON_THRESHOLD = 3       # Frames bis LED angeht
-        self._LED_OFF_THRESHOLD = 30     # Frames (~1s bei 30fps) bis LED ausgeht
-        self._led_detect_on_streak = 0   # Generelle Detection: Frames an
-        self._led_detect_off_streak = 0  # Generelle Detection: Frames aus
-        self._LED_DETECT_ON_THRESH = 3   # Frames bis generelle LED angeht
-        self._LED_DETECT_OFF_THRESH = 15 # Frames bis generelle LED ausgeht
-        # API Rate-Limit: mindestens 2s zwischen LED-Calls
-        self._led_last_api_call = 0
-        self._LED_API_MIN_INTERVAL = 2.0
+        # LED Controller (extrahiert aus moloch_service.py, Phase 4)
+        # Cloud wird spaeter in _connect_cloud() gesetzt (Hintergrund-Thread)
+        self._led = LEDController(core_integrator=self._core_integrator)
 
         # Cross-process NPU pause
         self._paused_models = []
@@ -974,7 +959,7 @@ class MolochService:
                                     # LED-Blitz bei erfolgreichem Snapshot
                                     if _saved and self._learner_flash:
                                         threading.Thread(
-                                            target=self._flash_white_led,
+                                            target=self._led.flash_white,
                                             daemon=True
                                         ).start()
                                 except Exception as e:
@@ -1240,36 +1225,13 @@ class MolochService:
                             "yolov8m": self.yolo_active,
                             "hand_landmark": self.hand_active})
 
-            # === LED Erkennungs-Indikator (mit Hysterese gegen Flackern) ===
-            if _markus_recognized:
-                self._led_markus_on_streak += 1
-                self._led_markus_off_streak = 0
-                # Erst nach N aufeinanderfolgenden Frames LED einschalten
-                if self._led_markus_on_streak >= self._LED_ON_THRESHOLD:
-                    self._led_indicator_markus_seen()
-            else:
-                self._led_markus_on_streak = 0
-                if self._led_markus_on:
-                    self._led_markus_off_streak += 1
-                    # Erst nach N Frames OHNE Markus LED ausschalten
-                    if self._led_markus_off_streak >= self._LED_OFF_THRESHOLD:
-                        self._led_markus_off_streak = 0
-                        self._led_markus_on = False
-                        self._led_indicator_set(False)
-                        logger.info("[LED] Markus Hysterese: Off-Streak erreicht -> LED AUS")
-
-            # Generelle Detection (nicht-Markus) — auch mit Hysterese
-            if not self._led_markus_on:
-                if face_detected or _persons_detected:
-                    self._led_detect_on_streak += 1
-                    self._led_detect_off_streak = 0
-                    if self._led_detect_on_streak >= self._LED_DETECT_ON_THRESH:
-                        self._led_indicator_set(True)
-                elif not self._moloch_has_control:
-                    self._led_detect_off_streak += 1
-                    self._led_detect_on_streak = 0
-                    if self._led_detect_off_streak >= self._LED_DETECT_OFF_THRESH:
-                        self._led_indicator_set(False)
+            # === LED Erkennungs-Indikator (Hysterese im LEDController) ===
+            self._led.update_hysteresis(
+                markus_recognized=_markus_recognized,
+                face_detected=face_detected,
+                persons_detected=_persons_detected,
+                moloch_has_control=self._moloch_has_control,
+            )
 
             # === Phase 3: Perception Frame aggregieren ===
             _pf_name = name if 'name' in dir() else None
@@ -1593,7 +1555,7 @@ class MolochService:
                 self._enable_autonomous()
 
                 # 6. LED AN
-                self._led_on()
+                self._led.on()
 
                 self._update_status(f"MOLOCH: {reason}")
                 logger.info(f"[TENTAKEL] Takeover komplett (fliessend): {reason}")
@@ -1636,7 +1598,7 @@ class MolochService:
             self._search_start_time = 0
 
             # 1. LED AUS (MOLOCH gibt ab)
-            self._led_off()
+            self._led.off()
 
             # 2. Tracker SOFORT stoppen
             self._autonomous_mode = False
@@ -1942,6 +1904,8 @@ class MolochService:
         try:
             self._cloud = CloudController()
             self._cloud.start()
+            # LEDController bekommt Cloud-Referenz
+            self._led.set_cloud(self._cloud)
             if self._cloud.connected:
                 logger.info("eWeLink Cloud verbunden")
                 if self._cloud.set_smart_tracking(True):
@@ -1979,109 +1943,6 @@ class MolochService:
             else:
                 self._update_status("Smart Tracking Fehler")
         threading.Thread(target=do_toggle, daemon=True).start()
-
-    # =========================================================================
-    # LED Signaling (Status-LED via eWeLink Cloud)
-    # =========================================================================
-
-    def _led_on(self):
-        """Status-LED AN (blau, sichtbar)."""
-        if not self._cloud or not self._cloud.connected:
-            return
-        try:
-            self._cloud.run(self._cloud.bridge.set_status_led(True))
-        except Exception:
-            pass
-
-    def _led_off(self):
-        """Status-LED AUS."""
-        if not self._cloud or not self._cloud.connected:
-            return
-        try:
-            self._cloud.run(self._cloud.bridge.set_status_led(False))
-        except Exception:
-            pass
-
-    def _led_blink(self, count=6, interval=0.3):
-        """Status-LED blinken, danach AN lassen (MOLOCH hat noch Kontrolle)."""
-        def do_blink():
-            for _ in range(count):
-                self._led_off()
-                time.sleep(interval)
-                self._led_on()
-                time.sleep(interval)
-        threading.Thread(target=do_blink, daemon=True).start()
-
-    def _led_indicator_set(self, on: bool):
-        """LED Indikator: Setzt LED nur bei State-Aenderung (vermeidet API-Spam).
-
-        Markus-Standlicht hat Prioritaet: wenn _led_markus_on, wird LED nicht ausgeschaltet.
-        CoreIntegrator: led_feedback_frequency steuert ob LED sofort oder verzoegert reagiert.
-        API Rate-Limit: mindestens _LED_API_MIN_INTERVAL zwischen Calls.
-        """
-        if not on and self._led_markus_on:
-            return
-        if on == self._led_indicator_state:
-            return
-
-        # API Rate-Limit: nicht oefter als alle 2s
-        now = time.time()
-        if now - self._led_last_api_call < self._LED_API_MIN_INTERVAL:
-            return
-
-        # CoreIntegrator: Bei niedriger Attention LED-Feedback verzoegern
-        if on and self._core_integrator:
-            try:
-                led_freq = self._core_integrator.get_effects().get("led_feedback_frequency", 0.5)
-                if led_freq < 0.3:
-                    return
-            except Exception:
-                pass
-
-        self._led_indicator_state = on
-        self._led_last_api_call = now
-        if on:
-            self._led_on()
-        else:
-            self._led_off()
-
-    def _led_indicator_markus_seen(self):
-        """Markus erkannt (nach Hysterese-Pruefung): LED an (Standlicht).
-
-        Wird NUR aufgerufen wenn _led_markus_on_streak >= _LED_ON_THRESHOLD.
-        CoreIntegrator: Berserker-Zone -> LED blinkt statt Standlicht.
-        LED-Aus wird NICHT mehr per Timer gesteuert, sondern per Frame-Counter
-        (_led_markus_off_streak) in der Inference-Loop.
-        """
-        self._led_markus_last_seen = time.time()
-        self._led_markus_off_streak = 0  # Reset Off-Streak bei jeder Erkennung
-
-        # Berserker-Zone: LED blinken statt Standlicht (Rate-Limit beachten)
-        if self._core_integrator:
-            try:
-                zone = self._core_integrator.get_personality_zone()
-                if zone == "berserker":
-                    now = time.time()
-                    if now - self._led_last_api_call >= self._LED_API_MIN_INTERVAL:
-                        self._led_last_api_call = now
-                        self._led_blink(count=3, interval=0.15)
-                    return
-            except Exception:
-                pass
-
-        if not self._led_markus_on:
-            # API Rate-Limit
-            now = time.time()
-            if now - self._led_last_api_call < self._LED_API_MIN_INTERVAL:
-                self._led_markus_on = True  # State setzen, API-Call beim naechsten Mal
-                self._led_indicator_state = True
-                return
-
-            self._led_markus_on = True
-            self._led_indicator_state = True
-            self._led_last_api_call = now
-            self._led_on()
-            logger.info("[LED] Markus Hysterese: On-Streak erreicht -> Standlicht AN")
 
     # =========================================================================
     # Face Recognition
@@ -2143,25 +2004,6 @@ class MolochService:
             os.rename(tmp, str(FACE_STATE_PATH))
         except Exception:
             pass
-
-    def _flash_white_led(self):
-        """Kurzer Blitz der weissen LED (200ms) - laeuft in Daemon-Thread."""
-        if not self._cloud or not self._cloud.connected:
-            return
-        try:
-            self._cloud.run(self._cloud.bridge.set_night('night'))
-            self._cloud_state["led_level"] = 2
-            time.sleep(0.2)
-        except Exception as e:
-            logger.warning(f"[LEARNER] Flash-LED AN Fehler: {e}")
-        finally:
-            # IMMER zuruecksetzen - verhindert haengende weisse LED
-            try:
-                self._cloud.run(self._cloud.bridge.set_night('day'))
-                self._cloud_state["led_level"] = 0
-            except Exception as e2:
-                logger.error(f"[LEARNER] Flash-LED AUS Fehler (LED koennte haengen!): {e2}")
-        logger.info("[LEARNER] Flash-LED Blitz")
 
     def _announce_person(self, name):
         """Person erkannt - Log (LED wird vom Indikator gesteuert)."""
@@ -2630,7 +2472,7 @@ class MolochService:
                 if self._cloud and self._cloud.connected:
                     if self._cloud.set_smart_tracking(False):
                         self._set_smart_tracking_state(False)
-                self._led_off()
+                self._led.off()
             threading.Thread(target=stop_cam_control, daemon=True).start()
 
             self._notify("auto_mode", {"state": "manual"})
@@ -2789,7 +2631,7 @@ class MolochService:
                 "arcface_thresh": self.arcface_thresh_val,
                 "yolo_conf": self.yolo_conf_val,
             },
-            "led_markus_on": self._led_markus_on,
+            "led_markus_on": self._led.markus_on,
             "cloud": self._cloud_state,
             "audio": {
                 "mic_gain": self._saved_mic_gain,
