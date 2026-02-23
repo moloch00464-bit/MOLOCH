@@ -105,11 +105,11 @@ class MolochMemory:
         self._facts = _safe_read_json(FACTS_PATH, {})
         self._merge_persistent_knowledge()
 
-        # Core State laden
+        # Core State laden (v2: tension + dominance)
         self._core_state = _safe_read_json(CORE_STATE_PATH, {
             "tension": 0.0,
-            "attention": 0.0,
-            "presence": 0.0,
+            "dominance": 0.5,
+            "cpu_temp": 0.0,
             "personality_zone": "guardian",
             "last_updated": None,
             "uptime_seconds": 0,
@@ -304,14 +304,14 @@ class MolochMemory:
 
     def save_core_state(self, state: Dict):
         """
-        Core Integrator State persistent speichern.
+        Core Integrator State persistent speichern (v2: tension + dominance).
         Wird alle 60 Sekunden aufgerufen + bei Service-Stop.
         """
         with self._state_lock:
             self._core_state = {
                 "tension": state.get("tension", 0.0),
-                "attention": state.get("attention", 0.0),
-                "presence": state.get("presence", 0.0),
+                "dominance": state.get("dominance", 0.5),
+                "cpu_temp": state.get("cpu_temp", 0.0),
                 "personality_zone": state.get("personality_zone", "guardian"),
                 "last_updated": datetime.now().isoformat(),
                 "uptime_seconds": state.get("uptime_seconds", 0),
@@ -434,8 +434,8 @@ class MolochMemory:
             zone = state.get("personality_zone", "guardian")
             parts.append(f"\nAktueller Zustand: Zone={zone}, "
                          f"Tension={state.get('tension', 0):.2f}, "
-                         f"Attention={state.get('attention', 0):.2f}, "
-                         f"Presence={state.get('presence', 0):.2f}")
+                         f"Dominance={state.get('dominance', 0.5):+.2f}, "
+                         f"CPU={state.get('cpu_temp', 0):.2f}")
 
         # === REMEMBER INSTRUKTION ===
         parts.append("""

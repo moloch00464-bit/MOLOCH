@@ -1014,10 +1014,10 @@ class VoicePipeline:
             return
 
         spontaneous = effects.get("spontaneous_comments", 0.0)
-        presence = state.get("presence", 0.0)
+        tension = state.get("tension", 0.0)
 
-        # Schwellwerte: spontaneous > 0.7 UND presence > 0.5
-        if spontaneous < 0.7 or presence < 0.5:
+        # Schwellwerte: spontaneous > 0.7 UND tension > 0.1 (System aktiv)
+        if spontaneous < 0.7 or tension < 0.1:
             return
 
         # Nur wenn Markus erkannt (aus Face State pruefen)
@@ -1043,7 +1043,7 @@ class VoicePipeline:
             return
 
         # Claude API fuer spontanen Kommentar nutzen
-        logger.info(f"[SPONTAN] Bedingungen erfuellt: spontaneous={spontaneous:.2f} presence={presence:.2f}")
+        logger.info(f"[SPONTAN] Bedingungen erfuellt: spontaneous={spontaneous:.2f} tension={tension:.2f}")
         self._generate_spontaneous_comment(state)
 
     def _generate_spontaneous_comment(self, integrator_state: dict):

@@ -21,6 +21,8 @@ import sys
 import json
 import time
 import enum
+import math
+import random
 import logging
 import asyncio
 import threading
@@ -173,6 +175,34 @@ class MolochEvent(enum.Enum):
 
 
 # ============================================================
+# MICRO-VARIATION (Blueprint 5.3)
+# ============================================================
+
+class PinkNoise:
+    """Simple 1/f Noise Generator fuer organische Micro-Variationen.
+
+    Erzeugt langsamere, weniger zufaellige Schwankungen als White Noise.
+    Max ±3% Expression-Randomness (Anti-Complexity Regel).
+    """
+
+    def __init__(self, num_octaves: int = 4):
+        self._octaves = [0.0] * num_octaves
+        self._counters = [0] * num_octaves
+
+    def next(self) -> float:
+        """Naechsten Noise-Wert (-1.0 bis +1.0)."""
+        total = 0.0
+        for i in range(len(self._octaves)):
+            self._counters[i] += 1
+            # Tiefere Oktaven updaten seltener: 1, 2, 4, 8 Ticks
+            if self._counters[i] >= (1 << i):
+                self._counters[i] = 0
+                self._octaves[i] = random.uniform(-1.0, 1.0)
+            total += self._octaves[i]
+        return total / len(self._octaves)
+
+
+# ============================================================
 # PERSONALITY ENGINE
 # ============================================================
 
@@ -218,6 +248,14 @@ class PersonalityEngine:
         # Event listeners
         self._listeners: List[Callable] = []
 
+        # === Blueprint 5.3: Micro-Variation ===
+        self._noise = PinkNoise()
+        self._noise_led = PinkNoise()  # Separater Noise fuer LED
+
+        # === Blueprint 5.3: Voice Integrity ===
+        # None = Auto (Stimme folgt Zone), sonst voice_id String
+        self._user_voice_override: Optional[str] = None
+
         logger.info(f"PersonalityEngine initialized. Mode: {self.mode.value}")
 
     @staticmethod
@@ -255,7 +293,21 @@ class PersonalityEngine:
 
     @property
     def voice_config(self) -> VoiceConfig:
-        """Get current voice configuration from identity config."""
+        """Get current voice configuration.
+
+        Voice Integrity (Blueprint 5.3): User-gewaehlte Stimme hat ABSOLUTE Prioritaet.
+        Kein Auto-Reset bei Zone-Wechsel. Nur "Auto" folgt der Zone.
+        """
+        # User-Override hat absolute Prioritaet
+        if self._user_voice_override:
+            default = VOICE_CONFIGS[self.mode]
+            return VoiceConfig(
+                voice_id=self._user_voice_override,
+                speed=default.speed,
+                pitch_shift=default.pitch_shift,
+                prefix_sound=default.prefix_sound,
+            )
+
         default = VOICE_CONFIGS[self.mode]
         key = "guardian" if self.is_guardian else ("berserker" if self.is_berserker else "shadow")
         profile = self._identity.get("personalities", {}).get(key, {}).get("voice_profile")
@@ -268,6 +320,17 @@ class PersonalityEngine:
             pitch_shift=int(profile.get("pitch_shift", 0)) * 100,  # semitones -> cents
             prefix_sound=default.prefix_sound,
         )
+
+    def set_user_voice(self, voice_id: Optional[str]):
+        """User-Stimme setzen. None = Auto (folgt Zone), sonst feste Stimme.
+
+        Voice Integrity: User-Wahl ueberschreibt ALLES.
+        """
+        self._user_voice_override = voice_id
+        if voice_id:
+            logger.info(f"Voice Override gesetzt: {voice_id}")
+        else:
+            logger.info("Voice Override entfernt -> Auto-Modus")
 
     @property
     def led_pattern(self) -> LEDPattern:
@@ -395,12 +458,10 @@ class PersonalityEngine:
     # ---- Core Integrator Anbindung ----
 
     def update_from_integrator(self):
-        """Personality-Zone vom CoreIntegrator lesen und Modus automatisch anpassen.
+        """Personality-Zone vom CoreIntegrator v2 lesen und Modus automatisch anpassen.
 
-        Wird periodisch aufgerufen (z.B. 1x/s aus dem Service oder Voice Pipeline).
-        Guardian (tension < 0.4): Ruhig, sachlich
-        Shadow (0.4-0.75): Direkt, knapp, ironisch
-        Berserker (> 0.75): Kurz, scharf, aggressiv — Auto-Decay zurueck
+        v2: Zone basiert auf dominance (-1=Shadow, +1=Guardian) mit Hysterese (0.15).
+        Berserker nur bei tension > 0.95 UND externem Impulse.
         """
         if not self.auto_mode:
             return  # Manueller Override aktiv -> kein Auto-Switch
@@ -424,7 +485,10 @@ class PersonalityEngine:
             self.switch(target_mode, f"integrator_zone_{zone}")
 
     def get_zone_system_prompt_addon(self) -> str:
-        """Zusaetzlicher System-Prompt basierend auf aktueller Zone fuer Claude API."""
+        """Zusaetzlicher System-Prompt basierend auf Core State v2 fuer Claude API.
+
+        Nutzt tension + dominance statt T/A/P.
+        """
         try:
             from core.core_integrator import get_core_integrator
             ci = get_core_integrator()
@@ -434,16 +498,21 @@ class PersonalityEngine:
             return ""
 
         tension = state.get("tension", 0.0)
-        attention = state.get("attention", 0.0)
-        presence = state.get("presence", 0.0)
+        dominance = state.get("dominance", 0.5)
 
         addon = f"\n--- INNERER ZUSTAND ---\n"
-        addon += f"Zone: {zone.upper()} | Tension: {tension:.2f} | Attention: {attention:.2f} | Presence: {presence:.2f}\n"
+        addon += f"Zone: {zone.upper()} | Tension: {tension:.2f} | Dominance: {dominance:+.2f}\n"
 
         if zone == "guardian":
-            addon += "Sei ruhig, ueberlegt, praezise. Laengere Antworten erlaubt.\n"
+            if tension < 0.2:
+                addon += "Sei ruhig, ueberlegt, praezise. Laengere Antworten erlaubt.\n"
+            else:
+                addon += "Sei wachsam, fokussiert, sachlich. Tension spuerbar aber kontrolliert.\n"
         elif zone == "shadow":
-            addon += "Sei direkt, knapp, leicht ironisch. Kurze Antworten.\n"
+            if tension < 0.3:
+                addon += "Sei direkt, knapp, leicht ironisch. Kurze Antworten.\n"
+            else:
+                addon += "Sei scharf, sarkastisch, provokant. Hohe Energie.\n"
         elif zone == "berserker":
             addon += "MAXIMALE SCHAERFE. Ein Satz. Provokant. Kein Smalltalk. Dieser Zustand ist temporaer.\n"
 
@@ -606,15 +675,36 @@ class PersonalityEngine:
     # ---- TTS Integration ----
 
     def speak(self, text: str) -> bool:
-        """
-        Speak text in current personality's voice.
-        Uses the runtime TTS engine (core/tts.py) with personality-specific settings.
+        """Speak text mit Micro-Variationen (Blueprint 5.3).
+
+        - Pink Noise Jitter: ±2% TTS Pitch
+        - Onset-Delay: 20-60ms zufaellig
+        - Atem-Pause: Vor langen Saetzen (>60 Zeichen)
+        - Shadow: Latenz-Injection 100-400ms skaliert mit |dominance|
         """
         if self.muted:
             return False
 
         # Emergentis drift-layer: post-process before TTS
         text = self._apply_drift(text)
+
+        # === Micro-Variation: Onset-Delay (20-60ms) ===
+        onset_delay = random.uniform(0.02, 0.06)
+
+        # === Shadow Latenz-Injection (100-400ms skaliert mit |dominance|) ===
+        if self.is_shadow:
+            try:
+                from core.core_integrator import get_core_integrator
+                dom = abs(get_core_integrator().get_dominance())
+                onset_delay += random.uniform(0.1, 0.4) * dom
+            except Exception:
+                onset_delay += random.uniform(0.1, 0.2)
+
+        time.sleep(onset_delay)
+
+        # === Atem-Pause vor langen Saetzen ===
+        if len(text) > 60:
+            time.sleep(random.uniform(0.15, 0.35))
 
         try:
             # Import the RUNTIME tts.py (not the tts/ package)
@@ -629,21 +719,31 @@ class PersonalityEngine:
             engine = tts_module.get_tts_engine()
             vc = self.voice_config
 
+            # === Micro-Variation: Pink Noise Pitch Jitter (±2%) ===
+            noise_val = self._noise.next()
+            try:
+                from core.core_integrator import get_core_integrator
+                tension = get_core_integrator().get_tension()
+            except Exception:
+                tension = 0.0
+
+            # Formel: pitch = base * (1 + noise * 0.02 * tension)
+            # ±2% bei voller Tension, weniger bei niedriger
+            pitch_jitter = noise_val * 0.02 * tension
+            jitter_cents = int(pitch_jitter * 100)  # In Sox-Cents
+
             # Apply personality voice settings
             engine.set_voice(vc.voice_id)
-            tts_module.PITCH_SHIFT = abs(vc.pitch_shift) if vc.pitch_shift < 0 else vc.pitch_shift
-            tts_module.LENGTH_SCALE = vc.speed
+            base_pitch = vc.pitch_shift
+            tts_module.PITCH_SHIFT = base_pitch + jitter_cents
 
-            # For negative pitch (deeper), sox needs positive value with 'pitch' lowering
-            # Sox pitch: positive = higher, negative = lower
-            # We store negative in config for "deeper", but sox 'pitch' command
-            # accepts negative values directly
-            if vc.pitch_shift < 0:
-                tts_module.PITCH_SHIFT = vc.pitch_shift  # Sox handles negative
+            # Speed Micro-Variation: ±1%
+            speed_jitter = 1.0 + self._noise.next() * 0.01 * tension
+            tts_module.LENGTH_SCALE = vc.speed * speed_jitter
 
             success = engine.speak(text)
 
-            # Restore defaults (1.0 = neutrale Geschwindigkeit)
+            # Restore defaults
             tts_module.PITCH_SHIFT = 0
             tts_module.LENGTH_SCALE = 1.0
 
@@ -780,6 +880,22 @@ class PersonalityEngine:
         self.unknown_person = detected
         self.evaluate_auto_switch()
 
+    # ---- Micro-Variation API (Blueprint 5.3) ----
+
+    def get_led_jitter(self) -> float:
+        """LED Puls Micro-Variation: ±3% skaliert mit tension.
+
+        Formel: output = base * (1 + noise * 0.03 * tension)
+        Fuer LED Intensitaets-Drift gekoppelt an Tension-Decay.
+        """
+        try:
+            from core.core_integrator import get_core_integrator
+            tension = get_core_integrator().get_tension()
+        except Exception:
+            tension = 0.0
+        noise = self._noise_led.next()
+        return 1.0 + noise * 0.03 * tension
+
     # ---- Serialization ----
 
     def get_state(self) -> Dict:
@@ -791,6 +907,7 @@ class PersonalityEngine:
             "alarm_active": self.alarm_active,
             "wgt_mode": self.wgt_mode,
             "voice": self.voice_config.voice_id,
+            "voice_override": self._user_voice_override,
             "led_pattern": self.led_pattern.value,
             "drift_tension": self._last_tension,
         }

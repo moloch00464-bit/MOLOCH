@@ -1,12 +1,25 @@
 #!/usr/bin/env python3
 """
-M.O.L.O.C.H. Core Integrator — Zentrales Zustandsmodell
+M.O.L.O.C.H. Core Integrator v2 — Blueprint 5.2 + 5.3
 =========================================================
 
-3 State-Achsen (alle 0.0 - 1.0):
-  1. TENSION   — Anspannung (steuert Personality Zone, Voice Intensity)
-  2. ATTENTION — Aufmerksamkeit (steuert Kamera-Stabilitaet, LED Feedback)
-  3. PRESENCE  — Praesenz (steuert spontane Kommentare, Ambient-Verhalten)
+2 State-Variablen:
+  1. TENSION    (0.0 - 1.0)   — Anspannung/Arousal. Spike bei Trigger,
+                                 exponentieller Decay (tau=300s).
+  2. DOMINANCE  (-1.0 - +1.0) — Persoenlichkeits-Achse.
+                                 -1 = Shadow, +1 = Guardian.
+
+Physiologisches Feedback (Blueprint 5.3):
+  - CPU-Temperatur: Daempft Tension-Spikes, verlangsamt PTZ bei Hitze.
+  - NPU-Last: Leichte Latenz-Variation bei hoher Auslastung.
+
+Zonen-Logik:
+  - Guardian:  dominance > +0.15 (mit Hysterese)
+  - Shadow:    dominance < -0.15 (mit Hysterese)
+  - Berserker: tension > 0.95 UND externer Impulse-Flag. Auto-Reset 10s.
+
+Homoeostatischer Drift: dominance -> +0.5 (0.01/min).
+Anti-Complexity: Max 2 State-Variablen, max ±3% Expression-Randomness.
 
 REGEL: Module beeinflussen NUR den Core State.
        Module loesen NIEMALS direkt Aktionen aus.
@@ -14,21 +27,21 @@ REGEL: Module beeinflussen NUR den Core State.
 
 Tick-Rate: 1 Hz (1x pro Sekunde State neu berechnen)
 Thread-safe: Lock fuer jeden State-Zugriff.
-Logging: State-Changes > 0.1 Delta werden geloggt.
 """
 
+import math
 import time
-import json
-import os
 import threading
 import logging
 from datetime import datetime
-from typing import Dict, Optional, List
+from typing import Dict, Optional
 
 _logger = logging.getLogger("CoreIntegrator")
 
 # Status-Datei in Shared Memory (Panel IPC)
 _STATUS_PATH = "/dev/shm/moloch_status.json"
+# CPU-Temperatur Sensor
+_CPU_TEMP_PATH = "/sys/class/thermal/thermal_zone0/temp"
 
 
 def _clamp(val: float, lo: float = 0.0, hi: float = 1.0) -> float:
@@ -38,86 +51,96 @@ def _clamp(val: float, lo: float = 0.0, hi: float = 1.0) -> float:
 
 class CoreIntegrator:
     """
-    Zentrales Zustandsmodell mit 3 Achsen.
+    Core Integrator v2 — 2-Achsen-Modell mit physiologischem Feedback.
 
     Module fuettern Inputs via update_input().
     Consumer lesen State via get_state() / get_effects() / get_personality_zone().
     Der Integrator-Thread berechnet 1x/s den neuen State.
     """
 
-    # --- Decay-Raten pro Tick (1 Hz) ---
-    DECAY_TENSION = 0.95
-    DECAY_ATTENTION = 0.98
-    DECAY_PRESENCE = 0.99
+    # === Tension Decay ===
+    TENSION_TAU = 300.0  # Sekunden, exponentieller Zerfall
+    _TENSION_DECAY_FACTOR = math.exp(-1.0 / 300.0)  # ~0.99667 pro Tick
 
-    # --- Personality-Zone-Schwellen ---
-    TENSION_GUARDIAN_MAX = 0.4      # < 0.4 = Guardian
-    TENSION_SHADOW_MAX = 0.75       # 0.4 - 0.75 = Shadow
-    # > 0.75 = Berserker (auto-decay zurueck)
+    # === Dominance Drift ===
+    DOMINANCE_DRIFT_TARGET = 0.5    # Homoeostatisches Ziel (leicht Guardian)
+    DOMINANCE_DRIFT_RATE = 0.01 / 60.0  # 0.01 pro Minute, aufgeloest in 1-Hz-Ticks
 
-    # --- Input-Gewichte fuer jede Achse ---
-    # Tension-Inputs
+    # === Hysterese ===
+    ZONE_HYSTERESIS = 0.15  # Mindest-Delta fuer Zone-Wechsel
+
+    # === Berserker ===
+    BERSERKER_TENSION_THRESHOLD = 0.95
+    BERSERKER_DURATION = 10.0  # Sekunden bis Auto-Reset
+    BERSERKER_DOMINANCE_RESET = 0.2  # Dominance nach Berserker
+
+    # === CPU-Temperatur Normalisierung ===
+    CPU_TEMP_MIN = 40.0   # °C -> 0.0
+    CPU_TEMP_MAX = 85.0   # °C -> 1.0
+
+    # === Tension-Inputs (treiben Tension hoch) ===
     TENSION_WEIGHTS = {
-        "respect_score": -0.3,          # Hoher Respekt -> WENIGER Tension
-        "disrespect_spike": 0.8,        # Respektlosigkeit -> Berserker-Spike
-        "system_load": 0.15,            # CPU/RAM Auslastung
+        "respect_score": -0.3,          # Hoher Respekt senkt Tension
+        "disrespect_spike": 0.8,        # Respektlosigkeit -> Spike
         "conflict_input": 0.5,          # Unbekannte Person, Alarm etc.
-        "environmental_stress": 0.2,    # Laerm, Temperatur etc.
         "unknown_person": 0.4,          # Unbekannter erkannt
         "alarm_active": 0.9,            # Alarm -> maximale Tension
+        "environmental_stress": 0.2,    # Laerm, Temperatur etc.
+        "system_load": 0.15,            # CPU/RAM Auslastung
     }
 
-    # Attention-Inputs
-    ATTENTION_WEIGHTS = {
-        "teach_mode": 0.7,              # Lern-Modus aktiv
-        "proximity": 0.3,               # Naehere Person -> mehr Attention
-        "voice_activity": 0.6,          # Jemand spricht
-        "face_confidence": 0.5,         # Gesicht klar erkannt
-        "face_detected": 0.4,           # Ueberhaupt ein Gesicht da
-        "person_detected": 0.2,         # Person im Bild
-        "markus_recognized": 0.6,       # Markus erkannt -> volle Aufmerksamkeit
-    }
-
-    # Presence-Inputs
-    PRESENCE_WEIGHTS = {
-        "time_since_interaction": -0.3,  # Lange nichts passiert -> weniger praesent
-        "user_proximity": 0.4,           # Jemand in der Naehe
-        "festival_mode": 0.8,            # WGT/Festival -> maximale Praesenz
-        "manual_activation": 1.0,        # Manuell aktiviert
-        "voice_activity": 0.3,           # Stimme gehoert -> mehr Praesenz
+    # === Dominance-Inputs (positiv=Guardian, negativ=Shadow) ===
+    DOMINANCE_WEIGHTS = {
+        "markus_recognized": 0.3,       # Markus -> Guardian
+        "face_confidence": 0.1,         # Klares Gesicht -> leicht Guardian
+        "voice_activity": 0.15,         # Sprachkontakt -> Guardian
+        "teach_mode": 0.2,              # Lern-Modus -> Guardian
+        "unknown_person": -0.3,         # Unbekannter -> Shadow
+        "conflict_input": -0.4,         # Konflikt -> Shadow
+        "alarm_active": -0.5,           # Alarm -> Shadow
+        "disrespect_spike": -0.6,       # Respektlosigkeit -> Shadow
+        "festival_mode": -0.4,          # WGT -> Shadow
     }
 
     def __init__(self):
-        # --- State-Achsen ---
+        # === State-Achsen ===
         self._tension = 0.0
-        self._attention = 0.0
-        self._presence = 0.0
+        self._dominance = 0.5  # Start: leicht Guardian
 
-        # --- Vorheriger State (fuer Delta-Logging) ---
+        # === Vorheriger State (Delta-Logging) ===
         self._prev_tension = 0.0
-        self._prev_attention = 0.0
-        self._prev_presence = 0.0
+        self._prev_dominance = 0.5
 
-        # --- Input-Puffer: {source: {key: value}} ---
-        # Jede Quelle (Modul) hat eigenen Namespace
+        # === Zone mit Hysterese ===
+        self._current_zone = "guardian"
+
+        # === Berserker State ===
+        self._impulse_flag = False
+        self._berserker_active = False
+        self._berserker_until = 0.0
+
+        # === Physiologisches Feedback ===
+        self._cpu_temp_raw = 0.0        # Celsius
+        self._cpu_temp_normalized = 0.0  # 0.0-1.0
+        self._npu_load = 0.0            # 0.0-1.0
+
+        # === Input-Puffer: {source: {key: value}} ===
         self._inputs: Dict[str, Dict[str, float]] = {}
         self._lock = threading.Lock()
 
-        # --- Effekt-Cache (wird pro Tick berechnet) ---
+        # === Effekt-Cache ===
         self._effects: Dict[str, float] = {}
 
-        # --- Thread-Steuerung ---
+        # === Thread-Steuerung ===
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._tick_count = 0
 
-        # --- Phase 3: Cross-Model Correlation ---
-        # Perception Buffer Referenz (lazy, vermeidet zirkulaere Imports)
+        # === Perception Buffer (lazy init) ===
         self._perception_buffer = None
-        # Letzte Trend-Daten (1x/s aktualisiert)
         self._last_trends: Dict = {}
 
-        _logger.info("[CORE] CoreIntegrator initialisiert")
+        _logger.info("[CORE] CoreIntegrator v2 initialisiert (tension + dominance)")
 
     # =========================================================================
     # Public API
@@ -144,64 +167,87 @@ class CoreIntegrator:
             for key, value in data.items():
                 self._inputs[source][key] = _clamp(value)
 
+    def set_impulse_flag(self):
+        """Externen Impulse setzen — Voraussetzung fuer Berserker-Aktivierung.
+
+        Muss von aussen gesetzt werden (z.B. Alarm, schwere Respektlosigkeit).
+        Berserker triggert NUR wenn impulse UND tension > 0.95.
+        """
+        with self._lock:
+            self._impulse_flag = True
+            _logger.info("[CORE] Impulse-Flag gesetzt")
+
+    def set_npu_load(self, load: float):
+        """NPU-Auslastung setzen (0.0-1.0). Aus Model Health Monitoring."""
+        with self._lock:
+            self._npu_load = _clamp(load)
+
     def get_state(self) -> Dict[str, float]:
-        """Aktueller State aller 3 Achsen."""
+        """Aktueller State der 2 Achsen + CPU-Temp."""
         with self._lock:
             return {
                 "tension": round(self._tension, 4),
-                "attention": round(self._attention, 4),
-                "presence": round(self._presence, 4),
+                "dominance": round(self._dominance, 4),
+                "cpu_temp": round(self._cpu_temp_normalized, 4),
             }
 
     def get_personality_zone(self) -> str:
-        """Aktuelle Personality-Zone basierend auf Tension.
+        """Aktuelle Personality-Zone (mit Hysterese).
 
         Returns:
             "guardian" | "shadow" | "berserker"
         """
         with self._lock:
-            t = self._tension
-        if t < self.TENSION_GUARDIAN_MAX:
-            return "guardian"
-        elif t < self.TENSION_SHADOW_MAX:
-            return "shadow"
-        else:
-            return "berserker"
+            return self._current_zone
 
     def get_effects(self) -> Dict[str, float]:
         """Alle aktuellen Effekt-Werte (abgeleitet aus State).
 
         Returns:
-            Dict mit Effekten wie:
-              - voice_intensity (0.0-1.0)
-              - response_latency (0.0-1.0, hoeher = schneller antworten)
-              - micro_ptz_movement (0.0-1.0)
-              - language_sharpness (0.0-1.0)
-              - camera_stability (0.0-1.0, hoeher = ruhiger)
-              - led_feedback_frequency (0.0-1.0)
-              - speech_focus (0.0-1.0)
-              - snapshot_probability (0.0-1.0)
-              - spontaneous_comments (0.0-1.0)
-              - ambient_ptz_behavior (0.0-1.0)
-              - manifestation_intensity (0.0-1.0)
+            Dict mit Effekten:
+              - voice_intensity, response_latency, language_sharpness
+              - micro_ptz_movement, camera_stability
+              - led_feedback_frequency, snapshot_probability
+              - guardian_influence, shadow_influence
+              - speech_focus, spontaneous_comments
+              - manifestation_intensity, ambient_ptz_behavior
+              - jitter_damping, ptz_speed_factor (CPU-Temp)
+              - cpu_temp, npu_load
         """
         with self._lock:
             return dict(self._effects)
 
     def get_tension(self) -> float:
-        """Direkt-Zugriff auf Tension (fuer PersonalityEngine Kompatibilitaet)."""
+        """Direkt-Zugriff auf Tension (0.0-1.0)."""
         with self._lock:
             return self._tension
 
-    def get_attention(self) -> float:
-        """Direkt-Zugriff auf Attention."""
+    def get_dominance(self) -> float:
+        """Direkt-Zugriff auf Dominance (-1.0 bis +1.0)."""
         with self._lock:
-            return self._attention
+            return self._dominance
+
+    def get_cpu_temp(self) -> float:
+        """CPU-Temperatur normalisiert (0.0-1.0). 40°C=0.0, 85°C=1.0."""
+        with self._lock:
+            return self._cpu_temp_normalized
+
+    def get_cpu_temp_celsius(self) -> float:
+        """CPU-Temperatur in Celsius."""
+        with self._lock:
+            return self._cpu_temp_raw
+
+    # --- Kompatibilitaets-Shims (Legacy-Module) ---
+
+    def get_attention(self) -> float:
+        """DEPRECATED: Abgeleitet aus tension + dominance."""
+        with self._lock:
+            return _clamp(self._tension * 0.7 + 0.3 * abs(self._dominance))
 
     def get_presence(self) -> float:
-        """Direkt-Zugriff auf Presence."""
+        """DEPRECATED: Abgeleitet aus dominance + tension."""
         with self._lock:
-            return self._presence
+            return _clamp(abs(self._dominance) * 0.6 + self._tension * 0.3)
 
     # =========================================================================
     # Lifecycle
@@ -218,10 +264,19 @@ class CoreIntegrator:
             saved = get_memory().load_core_state()
             if saved and saved.get("last_updated"):
                 self._tension = float(saved.get("tension", 0.0))
-                self._attention = float(saved.get("attention", 0.0))
-                self._presence = float(saved.get("presence", 0.0))
-                _logger.info(f"[CORE] State aus Langzeitgedaechtnis geladen: "
-                             f"T={self._tension:.2f} A={self._attention:.2f} P={self._presence:.2f} "
+                # Migration: alte States hatten attention/presence statt dominance
+                if "dominance" in saved:
+                    self._dominance = float(saved.get("dominance", 0.5))
+                else:
+                    self._dominance = 0.5
+                    _logger.info("[CORE] Altes State-Format erkannt, dominance auf 0.5 gesetzt")
+                zone = saved.get("personality_zone", "guardian")
+                if zone in ("guardian", "shadow"):
+                    self._current_zone = zone
+                else:
+                    self._current_zone = "guardian"
+                _logger.info(f"[CORE] State geladen: T={self._tension:.2f} "
+                             f"D={self._dominance:+.2f} zone={self._current_zone} "
                              f"(gespeichert: {saved.get('last_updated', '?')})")
         except Exception as e:
             _logger.warning(f"[CORE] Persistenter State nicht verfuegbar: {e}")
@@ -231,7 +286,7 @@ class CoreIntegrator:
             target=self._tick_loop, daemon=True, name="CoreIntegrator"
         )
         self._thread.start()
-        _logger.info("[CORE] Integrator-Thread gestartet (1 Hz)")
+        _logger.info("[CORE] Integrator v2 gestartet (1 Hz)")
 
     def stop(self):
         """Integrator-Thread stoppen + State persistent sichern."""
@@ -239,9 +294,8 @@ class CoreIntegrator:
         if self._thread:
             self._thread.join(timeout=3)
             self._thread = None
-        # Letzten State auf Disk sichern
         self._persist_state()
-        _logger.info("[CORE] Integrator-Thread gestoppt (State persistent gesichert)")
+        _logger.info("[CORE] Integrator gestoppt (State gesichert)")
 
     # =========================================================================
     # Tick-Loop (1 Hz)
@@ -253,7 +307,6 @@ class CoreIntegrator:
         while self._running:
             try:
                 self._tick()
-                # Alle 60 Ticks (~60 Sekunden): State persistent speichern
                 _persist_counter += 1
                 if _persist_counter >= 60:
                     _persist_counter = 0
@@ -261,6 +314,19 @@ class CoreIntegrator:
             except Exception as e:
                 _logger.error(f"[CORE] Tick-Fehler: {e}")
             time.sleep(1.0)
+
+    def _read_cpu_temp(self) -> tuple:
+        """CPU-Temperatur lesen. Returns (celsius, normalized 0-1)."""
+        try:
+            with open(_CPU_TEMP_PATH) as f:
+                raw = int(f.read().strip())
+            celsius = raw / 1000.0
+            normalized = _clamp(
+                (celsius - self.CPU_TEMP_MIN) / (self.CPU_TEMP_MAX - self.CPU_TEMP_MIN)
+            )
+            return celsius, normalized
+        except Exception:
+            return 0.0, 0.0
 
     def _get_time_period(self) -> str:
         """Aktuelle Tageszeit-Periode bestimmen."""
@@ -271,122 +337,159 @@ class CoreIntegrator:
             return "mittags"
         elif 17 <= hour < 22:
             return "abends"
-        else:
-            return "nachts"
+        return "nachts"
 
     def _tick(self):
         """Ein Tick: Inputs sammeln, Achsen berechnen, Effekte ableiten."""
         with self._lock:
-            # Tageszeit-Input automatisch einspeisen
-            hour = datetime.now().hour
+            now = time.monotonic()
             period = self._get_time_period()
 
-            # Zeit-basierte Modifikatoren
+            # === CPU-Temperatur lesen (alle 5 Ticks = 5s) ===
+            if self._tick_count % 5 == 0:
+                self._cpu_temp_raw, self._cpu_temp_normalized = self._read_cpu_temp()
+
+            # === Tageszeit-Input automatisch einspeisen ===
             if "time" not in self._inputs:
                 self._inputs["time"] = {}
-
             if period == "nachts":
-                # Nachts: Presence auf 0, Tension sinkt
-                self._inputs["time"]["time_since_interaction"] = 1.0  # Presence soll sinken
-                self._inputs["time"]["user_proximity"] = 0.0
-            elif period == "morgens":
-                # Morgens: Langsam hochfahren, Guardian bevorzugt
-                self._inputs["time"]["environmental_stress"] = 0.0
-            elif period == "abends":
-                # Abends: Ruhiger, Tension sinkt natuerlich
                 self._inputs["time"]["environmental_stress"] = 0.0
 
-            # Snapshot der Inputs (Thread-safe)
+            # Alle Inputs zusammenfuehren
             all_inputs = {}
             for source, data in self._inputs.items():
                 all_inputs.update(data)
 
-            # --- 1. TENSION berechnen ---
+            # =============================================================
+            # 1. TENSION berechnen (exponentieller Decay + Impulse)
+            # =============================================================
             tension_impulse = 0.0
             for key, weight in self.TENSION_WEIGHTS.items():
                 val = all_inputs.get(key, 0.0)
                 tension_impulse += val * weight
 
-            # Decay + Impuls
-            self._tension = _clamp(
-                self._tension * self.DECAY_TENSION + tension_impulse * 0.3
-            )
+            # CPU-Temperatur Daempfung: Spikes -20% bei >0.7
+            if self._cpu_temp_normalized > 0.7:
+                tension_impulse *= 0.8
 
-            # Berserker Auto-Decay: schnellerer Zerfall ueber 0.75
-            if self._tension > self.TENSION_SHADOW_MAX:
-                self._tension *= 0.90  # Zusaetzlicher 10% Decay
+            # Exponentieller Decay (tau=300s)
+            self._tension *= self._TENSION_DECAY_FACTOR
 
-            # --- 2. ATTENTION berechnen ---
-            attention_impulse = 0.0
-            for key, weight in self.ATTENTION_WEIGHTS.items():
+            # Impuls addieren
+            self._tension = _clamp(self._tension + tension_impulse * 0.3)
+
+            # CPU Selbstschutz: Tension deckeln bei Ueberhitzung
+            if self._cpu_temp_normalized > 0.9:
+                self._tension = min(self._tension, 0.8)
+
+            # Nacht: zusaetzlicher Decay
+            if period == "nachts":
+                self._tension *= 0.98
+
+            # Abends: leicht schnellerer Decay
+            if period == "abends":
+                self._tension *= 0.995
+
+            # =============================================================
+            # 2. DOMINANCE berechnen (Drift + Impulse)
+            # =============================================================
+            dominance_impulse = 0.0
+            for key, weight in self.DOMINANCE_WEIGHTS.items():
                 val = all_inputs.get(key, 0.0)
-                attention_impulse += val * weight
+                dominance_impulse += val * weight
 
-            self._attention = _clamp(
-                self._attention * self.DECAY_ATTENTION + attention_impulse * 0.3
-            )
+            # Homoeostatischer Drift Richtung +0.5
+            drift = self.DOMINANCE_DRIFT_RATE
+            if self._dominance < self.DOMINANCE_DRIFT_TARGET:
+                self._dominance += drift
+            elif self._dominance > self.DOMINANCE_DRIFT_TARGET:
+                self._dominance -= drift
 
-            # --- 3. PRESENCE berechnen ---
-            presence_impulse = 0.0
-            for key, weight in self.PRESENCE_WEIGHTS.items():
-                val = all_inputs.get(key, 0.0)
-                presence_impulse += val * weight
+            # Impuls addieren (gedaempft — langsame Persoenlichkeits-Shifts)
+            self._dominance += dominance_impulse * 0.05
+            self._dominance = _clamp(self._dominance, -1.0, 1.0)
 
-            self._presence = _clamp(
-                self._presence * self.DECAY_PRESENCE + presence_impulse * 0.3
-            )
+            # Nacht: leichter Shadow-Drift
+            if period == "nachts":
+                self._dominance -= 0.0003  # ~-0.018/min
+                self._dominance = max(-1.0, self._dominance)
 
-            # --- Cross-Model Correlation (Phase 3) ---
+            # =============================================================
+            # 3. Cross-Model Correlation
+            # =============================================================
             self._apply_cross_model_patterns(all_inputs)
 
-            # --- Nachtsperre: Presence auf 0 druecken (22:00-06:00) ---
-            if period == "nachts":
-                self._presence *= 0.8  # Schneller Decay nachts
-                if self._presence < 0.05:
-                    self._presence = 0.0
+            # =============================================================
+            # 4. BERSERKER-Logik
+            # =============================================================
+            if self._berserker_active:
+                # Berserker laeuft — pruefen ob Auto-Reset
+                if now > self._berserker_until:
+                    self._berserker_active = False
+                    self._dominance = max(self._dominance, self.BERSERKER_DOMINANCE_RESET)
+                    _logger.info("[CORE] Berserker Auto-Reset: D -> %.2f", self._dominance)
+                else:
+                    # Waehrend Berserker: dominance geclampt auf min 0.2
+                    self._dominance = max(self._dominance, self.BERSERKER_DOMINANCE_RESET)
+            elif (self._impulse_flag
+                  and self._tension > self.BERSERKER_TENSION_THRESHOLD
+                  and self._cpu_temp_normalized < 0.9):
+                # Berserker aktivieren
+                self._berserker_active = True
+                self._berserker_until = now + self.BERSERKER_DURATION
+                self._impulse_flag = False
+                _logger.warning("[CORE] === BERSERKER AKTIVIERT === T=%.3f", self._tension)
 
-            # --- Abends: Tension sinkt natuerlich schneller ---
-            if period == "abends":
-                self._tension *= 0.97  # Zusaetzlicher Decay abends
+            # =============================================================
+            # 5. Zone mit Hysterese bestimmen
+            # =============================================================
+            if self._berserker_active:
+                self._current_zone = "berserker"
+            elif self._current_zone == "guardian" and self._dominance < -self.ZONE_HYSTERESIS:
+                self._current_zone = "shadow"
+                _logger.info(f"[CORE] Zone: GUARDIAN -> SHADOW (D={self._dominance:+.3f})")
+            elif self._current_zone == "shadow" and self._dominance > self.ZONE_HYSTERESIS:
+                self._current_zone = "guardian"
+                _logger.info(f"[CORE] Zone: SHADOW -> GUARDIAN (D={self._dominance:+.3f})")
+            elif self._current_zone == "berserker" and not self._berserker_active:
+                # Berserker endet -> Zone basierend auf dominance
+                self._current_zone = "guardian" if self._dominance > 0 else "shadow"
+                _logger.info(f"[CORE] Zone: BERSERKER -> {self._current_zone.upper()}")
 
-            # --- Effekte ableiten ---
+            # =============================================================
+            # 6. Effekte ableiten
+            # =============================================================
             self._effects = self._compute_effects()
 
-            # --- Delta-Logging ---
+            # =============================================================
+            # 7. Logging
+            # =============================================================
             self._tick_count += 1
             d_t = abs(self._tension - self._prev_tension)
-            d_a = abs(self._attention - self._prev_attention)
-            d_p = abs(self._presence - self._prev_presence)
+            d_d = abs(self._dominance - self._prev_dominance)
 
-            if d_t > 0.1 or d_a > 0.1 or d_p > 0.1:
-                zone = self._zone_unlocked()
+            if d_t > 0.1 or d_d > 0.1:
                 _logger.info(
-                    f"[CORE] State: T={self._tension:.3f} A={self._attention:.3f} "
-                    f"P={self._presence:.3f} zone={zone} "
-                    f"(dT={d_t:+.3f} dA={d_a:+.3f} dP={d_p:+.3f})"
+                    f"[CORE] T={self._tension:.3f} D={self._dominance:+.3f} "
+                    f"zone={self._current_zone} CPU={self._cpu_temp_raw:.0f}°C "
+                    f"(dT={d_t:+.3f} dD={d_d:+.3f})"
                 )
 
-            # Alle 60 Ticks (1 Minute) State loggen, auch ohne grosse Aenderung
+            # Heartbeat alle 60 Ticks
             if self._tick_count % 60 == 0:
-                zone = self._zone_unlocked()
                 _logger.info(
                     f"[CORE] Heartbeat #{self._tick_count}: "
-                    f"T={self._tension:.3f} A={self._attention:.3f} "
-                    f"P={self._presence:.3f} zone={zone} "
-                    f"inputs={len(all_inputs)}"
+                    f"T={self._tension:.3f} D={self._dominance:+.3f} "
+                    f"zone={self._current_zone} CPU={self._cpu_temp_raw:.0f}°C "
+                    f"NPU={self._npu_load:.2f}"
                 )
 
             self._prev_tension = self._tension
-            self._prev_attention = self._attention
-            self._prev_presence = self._presence
+            self._prev_dominance = self._dominance
 
-    def _zone_unlocked(self) -> str:
-        """Personality Zone OHNE Lock (intern, nur innerhalb Lock aufrufen)."""
-        if self._tension < self.TENSION_GUARDIAN_MAX:
-            return "guardian"
-        elif self._tension < self.TENSION_SHADOW_MAX:
-            return "shadow"
-        return "berserker"
+    # =========================================================================
+    # Cross-Model Patterns (angepasst auf tension + dominance)
+    # =========================================================================
 
     def _get_buffer_trends(self) -> Dict:
         """Trends aus dem Perception Buffer holen (lazy init)."""
@@ -404,17 +507,11 @@ class CoreIntegrator:
     def _apply_cross_model_patterns(self, inputs: Dict):
         """Cross-Model Correlation: Muster aus kombinierten Inputs erkennen.
 
-        Nicht mehr einzelne Inputs, sondern Muster:
-        - person + unknown_face + close → Tension STEIGT schnell
-        - markus + calm_pose + neutral → Tension SINKT
-        - unknown_face + high_pose_energy → Tension STEIGT stark
-        - markus + happy_emotion → Presence STEIGT
-        - niemand + lange_zeit → Attention SINKT, Idle-Mode
-
+        Patterns treiben tension UND dominance basierend auf Sensormustern.
         WICHTIG: Wird innerhalb Lock aufgerufen.
         """
-        # Trends aus Buffer (1x/s reicht)
-        if self._tick_count % 2 == 0:  # Alle 2 Ticks aktualisieren
+        # Trends alle 2 Ticks aktualisieren
+        if self._tick_count % 2 == 0:
             self._last_trends = self._get_buffer_trends()
         trends = self._last_trends
 
@@ -431,81 +528,122 @@ class CoreIntegrator:
         leaving = trends.get("leaving", False)
         absence = trends.get("absence_duration", 0.0)
 
-        # === Pattern 1: Unbekannter nah dran → Tension BOOST ===
+        # === Pattern 1: Unbekannter nah -> Tension + Shadow ===
         if person and unknown and proximity > 0.1:
             self._tension = _clamp(self._tension + 0.05)
+            self._dominance = _clamp(self._dominance - 0.02, -1.0, 1.0)
 
-        # === Pattern 2: Unbekannter + hohe Bewegung → Tension STARK ===
+        # === Pattern 2: Unbekannter + hohe Bewegung -> Tension stark + Shadow ===
         if unknown and pose_energy > 0.5:
             self._tension = _clamp(self._tension + 0.08)
+            self._dominance = _clamp(self._dominance - 0.03, -1.0, 1.0)
 
-        # === Pattern 3: Markus + ruhig + neutral → Tension SINKT ===
+        # === Pattern 3: Markus + ruhig + neutral/happy -> Tension sinkt, Guardian ===
         if markus and pose_energy < 0.2 and smoothed_emotion in (None, "neutral", "happy"):
             self._tension = _clamp(self._tension - 0.02)
+            self._dominance = _clamp(self._dominance + 0.01, -1.0, 1.0)
 
-        # === Pattern 4: Markus + happy → Presence BOOST ===
+        # === Pattern 4: Markus + happy -> Guardian Boost ===
         if markus and smoothed_emotion == "happy":
-            self._presence = _clamp(self._presence + 0.03)
+            self._dominance = _clamp(self._dominance + 0.02, -1.0, 1.0)
 
-        # === Pattern 5: Niemand da + lange Absence → Attention SINKT ===
+        # === Pattern 5: Niemand + lange Absence -> Tension sinkt ===
         if not person and not face and absence > 10:
-            self._attention *= 0.95  # Schnellerer Attention-Decay
+            self._tension *= 0.95
 
-        # === Pattern 6: Person naehert sich → Attention STEIGT ===
+        # === Pattern 6: Person naehert sich -> Tension leicht hoch ===
         if approaching and person:
-            self._attention = _clamp(self._attention + 0.04)
+            self._tension = _clamp(self._tension + 0.03)
 
-        # === Pattern 7: Person entfernt sich → Attention sinkt langsam ===
+        # === Pattern 7: Person entfernt sich -> Tension sinkt ===
         if leaving:
-            self._attention *= 0.97
+            self._tension *= 0.97
 
-        # === Pattern 8: Voice + Face → maximale Attention + Presence ===
+        # === Pattern 8: Voice + Face -> Guardian Interaktion ===
         if voice and face:
-            self._attention = _clamp(self._attention + 0.05)
-            self._presence = _clamp(self._presence + 0.03)
+            self._dominance = _clamp(self._dominance + 0.02, -1.0, 1.0)
+            self._tension = _clamp(self._tension + 0.01)
+
+    # =========================================================================
+    # Effekt-Berechnung
+    # =========================================================================
 
     def _compute_effects(self) -> Dict[str, float]:
-        """Effekte aus den 3 Achsen ableiten (intern, nur innerhalb Lock aufrufen)."""
+        """Effekte aus tension + dominance + CPU-Temp ableiten.
+
+        Intern, nur innerhalb Lock aufrufen.
+        """
         t = self._tension
-        a = self._attention
-        p = self._presence
+        d = self._dominance
+        cpu = self._cpu_temp_normalized
+        npu = self._npu_load
+
+        # Guardian-Anteil (0-1): -1->0, 0->0.5, +1->1
+        guardian_influence = _clamp((d + 1.0) / 2.0)
+        shadow_influence = 1.0 - guardian_influence
+
+        # CPU-Temperatur Modifikatoren
+        jitter_damping = 1.0
+        ptz_speed_factor = 1.0
+        if cpu > 0.7:
+            jitter_damping = 0.5      # -50% Jitter
+            ptz_speed_factor = 0.7    # PTZ langsamer
+        if cpu > 0.9:
+            jitter_damping = 0.2
+            ptz_speed_factor = 0.4
+
+        # NPU-Last: Latenz-Variation
+        latency_variation = 1.0
+        if npu > 0.8:
+            latency_variation = 1.05  # +5%
 
         return {
-            # --- Tension-Effekte ---
+            # --- Tension-basierte Effekte ---
             "voice_intensity": _clamp(0.3 + t * 0.7),
-            "response_latency": _clamp(1.0 - t * 0.5),    # Hoehere Tension -> schnellere Antwort
-            "micro_ptz_movement": _clamp(t * 0.4),          # Nervoeser bei Tension
-            "language_sharpness": _clamp(t * 0.8),          # Schaerferer Ton
+            "response_latency": _clamp((1.0 - t * 0.5) * latency_variation),
+            "micro_ptz_movement": _clamp(t * 0.4 * jitter_damping),
+            "language_sharpness": _clamp(t * 0.8),
 
-            # --- Attention-Effekte ---
-            "camera_stability": _clamp(1.0 - a * 0.3),     # Mehr Attention -> weniger Wackeln
-            "led_feedback_frequency": _clamp(0.1 + a * 0.9),
-            "speech_focus": _clamp(a * 0.8),
-            "snapshot_probability": _clamp(a * 0.6),
+            # --- Dominance-basierte Effekte ---
+            "guardian_influence": guardian_influence,
+            "shadow_influence": shadow_influence,
 
-            # --- Presence-Effekte ---
-            "spontaneous_comments": _clamp(p * 0.5),
-            "ambient_ptz_behavior": _clamp(p * 0.4),
-            "manifestation_intensity": _clamp(0.2 + p * 0.8),
+            # --- Kombinierte Effekte ---
+            "camera_stability": _clamp((1.0 - t * 0.4) * ptz_speed_factor),
+            "led_feedback_frequency": _clamp(0.2 + t * 0.8),
+            "speech_focus": _clamp(0.3 + abs(d) * 0.5),
+            "snapshot_probability": _clamp(t * 0.6),
+            "spontaneous_comments": _clamp(max(t, abs(d)) * 0.5),
+            "ambient_ptz_behavior": _clamp(t * 0.3 + abs(d) * 0.2),
+            "manifestation_intensity": _clamp(0.3 + t * 0.4 + abs(d) * 0.3),
+
+            # --- Physiologische Modifikatoren ---
+            "jitter_damping": jitter_damping,
+            "ptz_speed_factor": ptz_speed_factor,
+            "cpu_temp": cpu,
+            "npu_load": npu,
         }
 
     # =========================================================================
-    # Status-Export (fuer /dev/shm/moloch_status.json)
+    # Status-Export
     # =========================================================================
 
     def get_time_period(self) -> str:
-        """Aktuelle Tageszeit als Public API (morgens/mittags/abends/nachts)."""
+        """Aktuelle Tageszeit als Public API."""
         return self._get_time_period()
 
     def get_status_dict(self) -> Dict:
-        """Kompaktes Status-Dict fuer SHM-Export."""
+        """Kompaktes Status-Dict fuer SHM-Export und Panel IPC."""
         with self._lock:
             result = {
                 "tension": round(self._tension, 4),
-                "attention": round(self._attention, 4),
-                "presence": round(self._presence, 4),
-                "zone": self._zone_unlocked(),
+                "dominance": round(self._dominance, 4),
+                "zone": self._current_zone,
                 "time_period": self._get_time_period(),
+                "cpu_temp": round(self._cpu_temp_raw, 1),
+                "cpu_temp_norm": round(self._cpu_temp_normalized, 3),
+                "npu_load": round(self._npu_load, 3),
+                "berserker_active": self._berserker_active,
                 "effects": {k: round(v, 3) for k, v in self._effects.items()},
                 "tick": self._tick_count,
             }
