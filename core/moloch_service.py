@@ -245,6 +245,19 @@ class MolochService:
         self._LED_MARKUS_TIMEOUT = 30  # Sekunden bis LED aus nach letzter Erkennung
         self._led_markus_timer = None  # Timer-Thread fuer Timeout
 
+        # LED Hysterese (Frame-Counter gegen Flackern)
+        self._led_markus_on_streak = 0   # Consecutive Frames mit Markus erkannt
+        self._led_markus_off_streak = 0  # Consecutive Frames OHNE Markus
+        self._LED_ON_THRESHOLD = 3       # Frames bis LED angeht
+        self._LED_OFF_THRESHOLD = 30     # Frames (~1s bei 30fps) bis LED ausgeht
+        self._led_detect_on_streak = 0   # Generelle Detection: Frames an
+        self._led_detect_off_streak = 0  # Generelle Detection: Frames aus
+        self._LED_DETECT_ON_THRESH = 3   # Frames bis generelle LED angeht
+        self._LED_DETECT_OFF_THRESH = 15 # Frames bis generelle LED ausgeht
+        # API Rate-Limit: mindestens 2s zwischen LED-Calls
+        self._led_last_api_call = 0
+        self._LED_API_MIN_INTERVAL = 2.0
+
         # Cross-process NPU pause
         self._paused_models = []
         self._npu_paused = False
@@ -1214,14 +1227,36 @@ class MolochService:
                             "yolov8m": self.yolo_active,
                             "hand_landmark": self.hand_active})
 
-            # === LED Erkennungs-Indikator ===
+            # === LED Erkennungs-Indikator (mit Hysterese gegen Flackern) ===
             if _markus_recognized:
-                self._led_indicator_markus_seen()
-            elif face_detected or _persons_detected:
-                self._led_indicator_set(True)
-            elif not self._moloch_has_control:
-                # LED nur AUS wenn MOLOCH nicht aktiv (Tentakel steuert eigene LED)
-                self._led_indicator_set(False)
+                self._led_markus_on_streak += 1
+                self._led_markus_off_streak = 0
+                # Erst nach N aufeinanderfolgenden Frames LED einschalten
+                if self._led_markus_on_streak >= self._LED_ON_THRESHOLD:
+                    self._led_indicator_markus_seen()
+            else:
+                self._led_markus_on_streak = 0
+                if self._led_markus_on:
+                    self._led_markus_off_streak += 1
+                    # Erst nach N Frames OHNE Markus LED ausschalten
+                    if self._led_markus_off_streak >= self._LED_OFF_THRESHOLD:
+                        self._led_markus_off_streak = 0
+                        self._led_markus_on = False
+                        self._led_indicator_set(False)
+                        logger.info("[LED] Markus Hysterese: Off-Streak erreicht -> LED AUS")
+
+            # Generelle Detection (nicht-Markus) — auch mit Hysterese
+            if not self._led_markus_on:
+                if face_detected or _persons_detected:
+                    self._led_detect_on_streak += 1
+                    self._led_detect_off_streak = 0
+                    if self._led_detect_on_streak >= self._LED_DETECT_ON_THRESH:
+                        self._led_indicator_set(True)
+                elif not self._moloch_has_control:
+                    self._led_detect_off_streak += 1
+                    self._led_detect_on_streak = 0
+                    if self._led_detect_off_streak >= self._LED_DETECT_OFF_THRESH:
+                        self._led_indicator_set(False)
 
             # === Phase 3: Perception Frame aggregieren ===
             _pf_name = name if 'name' in dir() else None
@@ -1969,75 +2004,71 @@ class MolochService:
 
         Markus-Standlicht hat Prioritaet: wenn _led_markus_on, wird LED nicht ausgeschaltet.
         CoreIntegrator: led_feedback_frequency steuert ob LED sofort oder verzoegert reagiert.
+        API Rate-Limit: mindestens _LED_API_MIN_INTERVAL zwischen Calls.
         """
         if not on and self._led_markus_on:
             return
         if on == self._led_indicator_state:
             return
 
+        # API Rate-Limit: nicht oefter als alle 2s
+        now = time.time()
+        if now - self._led_last_api_call < self._LED_API_MIN_INTERVAL:
+            return
+
         # CoreIntegrator: Bei niedriger Attention LED-Feedback verzoegern
         if on and self._core_integrator:
             try:
                 led_freq = self._core_integrator.get_effects().get("led_feedback_frequency", 0.5)
-                # led_freq < 0.3 -> LED nicht sofort anschalten (verzoegern)
                 if led_freq < 0.3:
-                    return  # Ignorieren bei niedriger Attention
+                    return
             except Exception:
                 pass
 
         self._led_indicator_state = on
+        self._led_last_api_call = now
         if on:
             self._led_on()
         else:
             self._led_off()
 
     def _led_indicator_markus_seen(self):
-        """Markus erkannt: LED an (Standlicht), Timer reset.
+        """Markus erkannt (nach Hysterese-Pruefung): LED an (Standlicht).
 
+        Wird NUR aufgerufen wenn _led_markus_on_streak >= _LED_ON_THRESHOLD.
         CoreIntegrator: Berserker-Zone -> LED blinkt statt Standlicht.
+        LED-Aus wird NICHT mehr per Timer gesteuert, sondern per Frame-Counter
+        (_led_markus_off_streak) in der Inference-Loop.
         """
         self._led_markus_last_seen = time.time()
+        self._led_markus_off_streak = 0  # Reset Off-Streak bei jeder Erkennung
 
-        # Berserker-Zone: LED blinken statt Standlicht
+        # Berserker-Zone: LED blinken statt Standlicht (Rate-Limit beachten)
         if self._core_integrator:
             try:
                 zone = self._core_integrator.get_personality_zone()
                 if zone == "berserker":
-                    self._led_blink(count=3, interval=0.15)
+                    now = time.time()
+                    if now - self._led_last_api_call >= self._LED_API_MIN_INTERVAL:
+                        self._led_last_api_call = now
+                        self._led_blink(count=3, interval=0.15)
                     return
             except Exception:
                 pass
 
         if not self._led_markus_on:
+            # API Rate-Limit
+            now = time.time()
+            if now - self._led_last_api_call < self._LED_API_MIN_INTERVAL:
+                self._led_markus_on = True  # State setzen, API-Call beim naechsten Mal
+                self._led_indicator_state = True
+                return
+
             self._led_markus_on = True
             self._led_indicator_state = True
+            self._led_last_api_call = now
             self._led_on()
-            logger.info("[LED] Markus erkannt -> Standlicht AN")
-
-        # Timeout dynamisch anpassen: Hohe Attention -> laengerer Timeout
-        timeout = self._LED_MARKUS_TIMEOUT
-        if self._core_integrator:
-            try:
-                attention = self._core_integrator.get_attention()
-                # Hohe Attention: 45s, Niedrige: 15s
-                timeout = max(15, int(15 + attention * 30))
-            except Exception:
-                pass
-
-        # Timer (re)starten
-        if self._led_markus_timer:
-            self._led_markus_timer.cancel()
-        self._led_markus_timer = threading.Timer(timeout, self._led_markus_timeout)
-        self._led_markus_timer.daemon = True
-        self._led_markus_timer.start()
-
-    def _led_markus_timeout(self):
-        """Timeout ohne Markus: LED aus."""
-        if time.time() - self._led_markus_last_seen >= self._LED_MARKUS_TIMEOUT - 1:
-            self._led_markus_on = False
-            self._led_indicator_state = False
-            self._led_off()
-            logger.info("[LED] Markus nicht mehr gesehen -> Standlicht AUS")
+            logger.info("[LED] Markus Hysterese: On-Streak erreicht -> Standlicht AN")
 
     # =========================================================================
     # Face Recognition
