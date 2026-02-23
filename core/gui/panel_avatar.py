@@ -196,6 +196,13 @@ class AvatarModule:
         self._target_dy = 0.0
         self._last_time = time.monotonic()
 
+        # --- Voice State (TTS/PTT) ---
+        self._tts_active = False
+        self._ptt_active = False
+        self._s_voice_speak = 0.0   # Smooth 0-1 fuer Sprech-Modus
+        self._s_voice_listen = 0.0  # Smooth 0-1 fuer Zuhoer-Modus
+        self._speech_phase = 0.0    # Eigene Phase fuer Sprech-Pulsation
+
         # --- Glow Cache ---
         self._glow_surface = None
         self._glow_key = None
@@ -259,6 +266,8 @@ class AvatarModule:
             brightness = 0.5 + self._s_tension * 0.5
 
         pulse = 1.0 + math.sin(self._pulse_phase) * 0.025
+        # Staerkeres Pulsieren beim Sprechen (Schallwellen-Effekt)
+        pulse += self._s_voice_speak * 0.035 * math.sin(self._speech_phase)
         if self._zone == "berserker":
             pulse = 1.0 + math.sin(self._pulse_phase) * 0.07
 
@@ -270,6 +279,8 @@ class AvatarModule:
 
         # === Glow (Alpha-Blending — Hauptvorteil gegenueber Tkinter) ===
         glow_str = brightness * (0.5 + self._s_tension * 0.5)
+        glow_str *= 1.0 + self._s_voice_speak * 0.7   # Intensiver beim Sprechen
+        glow_str *= 1.0 + self._s_voice_listen * 0.3   # Leicht heller beim Zuhoeren
         glow_r = int(130 * pulse)
         glow_key = (main_c, int(glow_str * 4), glow_r // 8)
         if glow_key != self._glow_key:
@@ -281,6 +292,8 @@ class AvatarModule:
 
         # === Aeusserer Ring (Anti-Aliased, 3px dick) ===
         ro = int(90 * pulse)
+        # Ring-Vibration beim Sprechen (Schallwellen auf den Ringen)
+        ro += int(self._s_voice_speak * 2.5 * math.sin(self._speech_phase * 3.1))
         rc = _scale(main_c, brightness * 0.8)
         rc_dim = _scale(main_c, brightness * 0.4)
         for dr in (-1, 0, 1):
@@ -302,8 +315,12 @@ class AvatarModule:
             pygame.draw.line(s, tc, (int(x1), int(y1)), (int(x2), int(y2)), tw)
 
         # === Innerer Ring (pulsiert staerker mit Tension) ===
-        ip = 1.0 + math.sin(self._pulse_phase * 1.5) * 0.025 * (1 + self._s_tension * 2)
+        inner_amp = 0.025 * (1 + self._s_tension * 2)
+        inner_amp *= 1.0 - self._s_voice_listen * 0.6  # Ruhiger beim Zuhoeren
+        ip = 1.0 + math.sin(self._pulse_phase * 1.5) * inner_amp
         ri = int(72 * ip)
+        # Ring-Vibration beim Sprechen
+        ri += int(self._s_voice_speak * 2.0 * math.sin(self._speech_phase * 2.7))
         ic = _scale(main_c, brightness * 0.55)
         pygame.gfxdraw.aacircle(s, CX, CY, ri, ic)
 
@@ -337,8 +354,13 @@ class AvatarModule:
                 ry2 = iy + math.sin(a) * r_out
                 pygame.draw.aaline(s, ray_c, (rx1, ry1), (rx2, ry2))
 
-        # === Pupille (Tension = engere Pupille) ===
-        pr = int(ir * pupil_ratio)
+        # === Pupille (Tension = engere Pupille, Voice moduliert) ===
+        # Sprechen: Pupille pulsiert leicht mit Sprech-Rhythmus
+        voice_pupil = pupil_ratio
+        voice_pupil += self._s_voice_speak * 0.06 * math.sin(self._speech_phase * 1.5)
+        # Zuhoeren: Pupille wird gross (Aufmerksamkeit/Dilatation)
+        voice_pupil *= 1.0 - self._s_voice_listen * 0.35
+        pr = int(ir * voice_pupil)
         if flash:
             pr = int(ir * 0.12)
         pygame.gfxdraw.filled_circle(s, ix, iy, pr, (0, 0, 0))
@@ -439,22 +461,43 @@ class AvatarModule:
         self._s_dominance += (self._dominance - self._s_dominance) * rate
         self._s_cpu += (self._cpu_temp - self._s_cpu) * rate
 
+        # Voice State Interpolation (smooth fuer weiche Uebergaenge)
+        speak_target = 1.0 if self._tts_active else 0.0
+        listen_target = 1.0 if (self._ptt_active and not self._tts_active) else 0.0
+        self._s_voice_speak += (speak_target - self._s_voice_speak) * rate
+        self._s_voice_listen += (listen_target - self._s_voice_listen) * rate
+
         # Visuelle Dominance mit Hysterese
         if abs(self._dominance - self._dom_at_last_change) > DOM_HYSTERESIS:
             self._dom_at_last_change = self._dominance
         self._visual_dom += (self._dom_at_last_change - self._visual_dom) * rate
 
-        # Puls-Phase: Geschwindigkeit von Tension, gedaempft bei CPU-Hitze
+        # Puls-Phase: Geschwindigkeit von Tension + Voice, gedaempft bei CPU-Hitze
         speed = 1.0 + self._s_tension * 3.0
+        speed *= 1.0 + self._s_voice_speak * 2.5   # Schneller beim Sprechen
+        if self._s_voice_listen > 0.3:
+            speed *= 0.6                            # Ruhiger beim Zuhoeren
         if self._s_cpu > 0.7:
             speed *= 0.85
         if self._s_cpu > 0.9:
             speed *= 0.6
         self._pulse_phase += speed * dt * math.tau / 3.0
 
-        # Blinzel-Logik
+        # Speech-Phase (eigene Frequenz fuer Sprech-Pulsation, ~3.5 Hz)
+        self._speech_phase += self._s_voice_speak * dt * math.tau * 3.5
+
+        # Blinzel-Logik (pausiert beim Sprechen — Auge "spricht dich an")
         blink_speed = 4.0 * dt
-        if self._blinking:
+        speaking = self._s_voice_speak > 0.5
+
+        if speaking and self._blinking:
+            # Beim Sprechen: Auge schnell oeffnen
+            self._blink_progress -= blink_speed * 3
+            if self._blink_progress <= 0.0:
+                self._blink_progress = 0.0
+                self._blinking = False
+                self._blink_opening = False
+        elif self._blinking:
             if not self._blink_opening:
                 self._blink_progress += blink_speed
                 if self._blink_progress >= 1.0:
@@ -467,7 +510,7 @@ class AvatarModule:
                     self._blinking = False
                     self._blink_opening = False
                     self._next_blink_tick = self._tick + random.randint(100, 250)
-        elif self._tick >= self._next_blink_tick:
+        elif not speaking and self._tick >= self._next_blink_tick:
             if self._s_tension > 0.7 and random.random() < 0.5:
                 self._next_blink_tick = self._tick + random.randint(100, 250)
             else:
@@ -499,6 +542,11 @@ class AvatarModule:
         core = status.get("core", {})
         if not core:
             return
+
+        # Voice State lesen (TTS/PTT aus voice_pipeline)
+        voice = status.get("voice", {})
+        self._tts_active = bool(voice.get("speaking", False))
+        self._ptt_active = bool(voice.get("recording", False))
 
         old_zone = self._zone
 
@@ -546,7 +594,13 @@ class AvatarModule:
         parts = []
         if cpu_str:
             parts.append(cpu_str)
-        parts.append(self._status_text)
+        # Voice-Modus anzeigen
+        if self._tts_active:
+            parts.append("Spricht...")
+        elif self._ptt_active:
+            parts.append("Hoert zu...")
+        else:
+            parts.append(self._status_text)
         self._status_label.config(
             text=" | ".join(parts),
             fg=_hex_scale(main_hex, bright * 0.6),
