@@ -260,6 +260,14 @@ class MolochService:
         except Exception as e:
             logger.error(f"[INIT] Whisper NPU init fehlgeschlagen: {e}")
 
+        # 1c. Alle Modelle sofort auf NPU konfigurieren (always_on: 320MB von 8GB)
+        if self._orchestrator.orchestration_mode == "always_on":
+            for name in list(self._orchestrator._models.keys()):
+                self._orchestrator.configure(name)
+            self._orchestrator.sync_flags()
+            self._inference.sync_flags_from_npu()
+            logger.info(f"[INIT] Always-On: {len(self._orchestrator.active_models)} Modelle konfiguriert: {self._orchestrator.active_models}")
+
         # 2. Face DB (via InferenceEngine)
         self._inference.reload_face_db()
 

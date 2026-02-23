@@ -315,6 +315,17 @@ class InferenceEngine:
             any_active = bool(self._orchestrator._active_ctx) and (
                 self.scrfd_active or self.yolo_active or self.hand_active or self.pose_active)
             if not any_active:
+                # Always-On Recovery: Modelle sofort konfigurieren statt auf Perception zu warten
+                if self._orchestrator.orchestration_mode == "always_on":
+                    try:
+                        new_level = self._orchestrator.compute_attention_level()
+                        self._orchestrator.apply_attention_level(new_level)
+                        self.sync_flags_from_npu()
+                        self._target_frame_delay = self._orchestrator.target_frame_delay
+                        if self._orchestrator._active_ctx:
+                            continue  # Sofort mit aktiven Modellen weitermachen
+                    except Exception as e:
+                        logger.debug(f"[ALWAYS-ON] Recovery: {e}")
                 # Perception tick auch ohne aktive Modelle (forced/initial swap)
                 if self._perception:
                     _idle_ctx = {
@@ -779,7 +790,8 @@ class InferenceEngine:
                     "gesture": self._current_gesture.type.value if self._current_gesture else "none",
                 }
                 _new_slots = self._perception.tick(_perc_ctx)
-                if _new_slots:
+                # Always-On: KEINE Modell-Rotation, alle 6 bleiben permanent aktiv
+                if _new_slots and self._orchestrator.orchestration_mode != "always_on":
                     _want = set(_new_slots) | {"face_attr"}
                     _have = set(self._orchestrator._active_ctx.keys())
                     _to_remove = _have - _want
