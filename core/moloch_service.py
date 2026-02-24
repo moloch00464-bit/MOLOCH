@@ -277,6 +277,17 @@ class MolochService:
         # 4. Cloud (via CameraManager, im Hintergrund)
         threading.Thread(target=self._cam.connect_cloud, daemon=True).start()
 
+        # 5. Music Visualizer (Audio-Analyse fuer Avatar, PipeWire Capture)
+        self._music_vis = None
+        try:
+            from core.audio.music_visualizer import get_music_visualizer
+            self._music_vis = get_music_visualizer()
+            self._music_vis.start()
+            logger.info("[INIT] MusicVisualizer gestartet")
+        except Exception as e:
+            self._music_vis = None
+            logger.warning(f"[INIT] MusicVisualizer nicht verfuegbar: {e}")
+
         self._update_status("M.O.L.O.C.H. Service bereit")
 
     def start(self, blocking=True):
@@ -401,6 +412,14 @@ class MolochService:
             except Exception:
                 pass
 
+        # MusicVisualizer stoppen
+        if hasattr(self, '_music_vis') and self._music_vis:
+            try:
+                self._music_vis.stop()
+                logger.info("[STOP] MusicVisualizer gestoppt")
+            except Exception:
+                pass
+
         # CameraManager: Tracker stoppen
         self._cam.stop_tracker()
 
@@ -470,6 +489,20 @@ class MolochService:
                     status["spotify"] = sp.get_status()
             except Exception:
                 pass
+            # Music Visualizer Status
+            if hasattr(self, '_music_vis') and self._music_vis:
+                try:
+                    md = self._music_vis.get_data()
+                    status["music"] = {
+                        "active": md.is_active,
+                        "rms": round(md.rms_volume, 4),
+                        "bass": round(md.bass_energy, 4),
+                        "mid": round(md.mid_energy, 4),
+                        "high": round(md.high_energy, 4),
+                        "beat": md.beat_detected,
+                    }
+                except Exception:
+                    pass
             self._ipc.write_status(status)
         except Exception:
             pass

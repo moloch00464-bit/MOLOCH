@@ -42,6 +42,9 @@ try:
 except ImportError:
     _PIL_OK = False
 
+# Music Visualizer Konstante (muss mit music_visualizer.py uebereinstimmen)
+MAX_VISUAL_AMP = 0.15
+
 
 # =============================================================================
 # Konstanten
@@ -203,6 +206,17 @@ class AvatarModule:
         self._s_voice_listen = 0.0  # Smooth 0-1 fuer Zuhoer-Modus
         self._speech_phase = 0.0    # Eigene Phase fuer Sprech-Pulsation
 
+        # --- Music Reactive State (Daten kommen via update_from_status) ---
+        self._s_music_bass = 0.0
+        self._s_music_mid = 0.0
+        self._s_music_high = 0.0
+        self._s_music_rms = 0.0
+        self._t_music_bass = 0.0   # Zielwerte aus Status-JSON
+        self._t_music_mid = 0.0
+        self._t_music_high = 0.0
+        self._t_music_rms = 0.0
+        self._music_active = False
+
         # --- Glow Cache ---
         self._glow_surface = None
         self._glow_key = None
@@ -239,17 +253,36 @@ class AvatarModule:
         )
         self._status_label.pack(pady=(0, 2))
 
+        # --- Track-Anzeige (Spotify, unter dem Auge) ---
+        self._track_label = tk.Label(
+            parent_frame, text="", bg=BG_FRAME, fg="#1DB954",
+            font=("Helvetica", 9), anchor="w",
+        )
+        # Wird erst gepacked wenn Musik laeuft
+        self._track_text = ""
+        self._track_scroll_offset = 0
+        self._track_scroll_pause = 0
+        self._last_track_name = ""
+        self._track_visible = False
+
     # =========================================================================
     # Rendering — Hauptfunktion
     # =========================================================================
 
     def _render(self):
-        """Kompletten Frame auf self._surface rendern."""
+        """Kompletten Frame auf self._surface rendern.
+
+        Blueprint 5.4: Core State + Music Reactive + Industrial Aesthetic.
+        Musik ADDIERT sich zum Core-Puls, ueberschreibt nie.
+        """
         s = self._surface
         s.fill(BG_RGB)
 
         now = time.monotonic()
         flash = now < self._flash_until
+
+        # === Music TTS Dim (Musik 40% leiser wenn Moloch spricht) ===
+        music_dim = 1.0 - self._s_voice_speak * 0.4
 
         # === Farben bestimmen ===
         if flash:
@@ -266,10 +299,26 @@ class AvatarModule:
             brightness = 0.5 + self._s_tension * 0.5
 
         pulse = 1.0 + math.sin(self._pulse_phase) * 0.025
-        # Staerkeres Pulsieren beim Sprechen (Schallwellen-Effekt)
+        # Voice-Puls
         pulse += self._s_voice_speak * 0.035 * math.sin(self._speech_phase)
         if self._zone == "berserker":
             pulse = 1.0 + math.sin(self._pulse_phase) * 0.07
+
+        # === Music: Bass → Outer Ring Modulation ===
+        bass_mod = self._s_music_bass * music_dim
+        if self._zone == "guardian":
+            # Smooth Sinus
+            bass_offset = bass_mod * 0.08 / MAX_VISUAL_AMP * math.sin(
+                self._pulse_phase * 2.0)
+        elif self._zone == "berserker":
+            # Snap: schneller Anstieg, kein negativer Anteil
+            bass_offset = bass_mod * 0.08 / MAX_VISUAL_AMP * max(
+                0.0, math.sin(self._pulse_phase * 3.0))
+        else:
+            # Shadow: leichte Phase-Asymmetrie
+            bass_offset = bass_mod * 0.08 / MAX_VISUAL_AMP * (
+                math.sin(self._pulse_phase * 2.0) - 0.3 * math.sin(
+                    self._pulse_phase * 4.1))
 
         # === Grid (Tron-Style) ===
         for x in range(0, AVATAR_SIZE, 25):
@@ -277,10 +326,20 @@ class AvatarModule:
         for y in range(0, AVATAR_SIZE, 25):
             pygame.draw.line(s, GRID_RGB, (0, y), (AVATAR_SIZE, y))
 
-        # === Glow (Alpha-Blending — Hauptvorteil gegenueber Tkinter) ===
+        # === Scan-Line (Industrial CRT Effekt, kaum sichtbar) ===
+        scan_y = int((self._tick * 2) % AVATAR_SIZE)
+        scan_surf = pygame.Surface((AVATAR_SIZE, 2), pygame.SRCALPHA)
+        scan_surf.fill((*main_c, 12))
+        s.blit(scan_surf, (0, scan_y))
+
+        # === Glow (Alpha-Blending) ===
         glow_str = brightness * (0.5 + self._s_tension * 0.5)
-        glow_str *= 1.0 + self._s_voice_speak * 0.7   # Intensiver beim Sprechen
-        glow_str *= 1.0 + self._s_voice_listen * 0.3   # Leicht heller beim Zuhoeren
+        glow_str *= 1.0 + self._s_voice_speak * 0.7
+        glow_str *= 1.0 + self._s_voice_listen * 0.3
+        # Music: RMS Volume moduliert Glow 20-100%
+        if self._s_music_rms > 0.001:
+            glow_music = 0.2 + (self._s_music_rms / MAX_VISUAL_AMP) * 0.8
+            glow_str *= glow_music * music_dim
         glow_r = int(130 * pulse)
         glow_key = (main_c, int(glow_str * 4), glow_r // 8)
         if glow_key != self._glow_key:
@@ -290,10 +349,16 @@ class AvatarModule:
             gr = self._glow_surface.get_rect(center=(CX, CY))
             s.blit(self._glow_surface, gr)
 
-        # === Aeusserer Ring (Anti-Aliased, 3px dick) ===
-        ro = int(90 * pulse)
-        # Ring-Vibration beim Sprechen (Schallwellen auf den Ringen)
+        # === Aeusserer Halo-Ring (dezent, hauchduenn) ===
+        halo_r = int(100 * (pulse + bass_offset * 0.3))
+        halo_c = _scale(main_c, brightness * 0.15)
+        if halo_r > 5:
+            pygame.gfxdraw.aacircle(s, CX, CY, halo_r, halo_c)
+
+        # === Aeusserer Ring (Anti-Aliased, 3px dick + Bass-Puls) ===
+        ro = int(90 * (pulse + bass_offset))
         ro += int(self._s_voice_speak * 2.5 * math.sin(self._speech_phase * 3.1))
+        ro = max(10, ro)
         rc = _scale(main_c, brightness * 0.8)
         rc_dim = _scale(main_c, brightness * 0.4)
         for dr in (-1, 0, 1):
@@ -302,39 +367,78 @@ class AvatarModule:
                 c = rc if dr == 0 else rc_dim
                 pygame.gfxdraw.aacircle(s, CX, CY, r, c)
 
-        # === 12 Tick-Marks ===
-        for i in range(12):
-            angle = math.radians(i * 30 - 90)
-            tl = 11 if i % 3 == 0 else 5
-            tw = 2 if i % 3 == 0 else 1
-            x1 = CX + math.cos(angle) * (ro - tl)
-            y1 = CY + math.sin(angle) * (ro - tl)
-            x2 = CX + math.cos(angle) * (ro + 5)
-            y2 = CY + math.sin(angle) * (ro + 5)
-            tc = _scale(main_c, brightness * 0.6)
+        # === 32 Tick-Marks (Industrial, mit High-Energy Flicker) ===
+        for i in range(32):
+            angle = math.radians(i * (360.0 / 32.0) - 90)
+            if i % 8 == 0:
+                tl, tw, bri_f = 12, 2, 0.7
+            elif i % 4 == 0:
+                tl, tw, bri_f = 7, 1, 0.5
+            else:
+                tl, tw, bri_f = 4, 1, 0.3
+
+            # High-Energy Micro-Flicker ±3%
+            flicker = 0.0
+            if self._s_music_high > 0.005:
+                tick_phase = self._pulse_phase * 4.0 + i * 0.5
+                flicker = (self._s_music_high / MAX_VISUAL_AMP) * 0.03 * math.sin(
+                    tick_phase) * music_dim
+            tl_mod = tl * (1.0 + flicker)
+
+            x1 = CX + math.cos(angle) * (ro - tl_mod)
+            y1 = CY + math.sin(angle) * (ro - tl_mod)
+            x2 = CX + math.cos(angle) * (ro + 4)
+            y2 = CY + math.sin(angle) * (ro + 4)
+            tc = _scale(main_c, brightness * bri_f)
             pygame.draw.line(s, tc, (int(x1), int(y1)), (int(x2), int(y2)), tw)
+
+        # === Mittlerer Ring (semi-transparent, pulsiert mit Mid-Energy) ===
+        mid_mod = self._s_music_mid * music_dim
+        mid_ring_r = int(81 * pulse)
+        mid_ring_r += int((mid_mod / MAX_VISUAL_AMP) * 2.0 * math.sin(
+            self._pulse_phase * 1.3))
+        mid_ring_r = max(5, mid_ring_r)
+        mid_ring_c = _scale(main_c, brightness * 0.3)
+        pygame.gfxdraw.aacircle(s, CX, CY, mid_ring_r, mid_ring_c)
 
         # === Innerer Ring (pulsiert staerker mit Tension) ===
         inner_amp = 0.025 * (1 + self._s_tension * 2)
-        inner_amp *= 1.0 - self._s_voice_listen * 0.6  # Ruhiger beim Zuhoeren
+        inner_amp *= 1.0 - self._s_voice_listen * 0.6
         ip = 1.0 + math.sin(self._pulse_phase * 1.5) * inner_amp
         ri = int(72 * ip)
-        # Ring-Vibration beim Sprechen
         ri += int(self._s_voice_speak * 2.0 * math.sin(self._speech_phase * 2.7))
+        ri = max(5, ri)
         ic = _scale(main_c, brightness * 0.55)
         pygame.gfxdraw.aacircle(s, CX, CY, ri, ic)
 
-        # === Iris mit Gradient ===
-        ir = int(50 * (0.8 + brightness * 0.2))
+        # === Iris mit Micro-Ringen (Sci-Fi Textur) + Mid-Energy ===
+        mid_iris = (mid_mod / MAX_VISUAL_AMP) * 0.05 * math.sin(
+            self._pulse_phase * 1.7) if MAX_VISUAL_AMP > 0 else 0
+        ir = int(50 * (0.8 + brightness * 0.2 + mid_iris))
+        ir = max(8, ir)
         ix = int(CX + self._pupil_dx)
         iy = int(CY + self._pupil_dy)
 
-        # Iris Gradient (8 Stufen von aussen nach innen)
-        for r in range(ir, max(ir - 8, 0), -1):
-            t = (ir - r) / 8.0
+        # Iris Base Fill (dunkel)
+        pygame.gfxdraw.filled_circle(s, ix, iy, ir,
+                                     _scale(iris_c, brightness * 0.25))
+
+        # Konzentrische Micro-Ringe (6 Ringe, Industrial-Textur)
+        for ring_i in range(6):
+            ring_r = ir - ring_i * 6
+            if ring_r <= 5:
+                break
+            ring_alpha = brightness * (0.5 - ring_i * 0.07)
+            ring_c = _scale(iris_c, max(0.05, ring_alpha))
+            pygame.gfxdraw.aacircle(s, ix, iy, ring_r, ring_c)
+
+        # Iris Gradient Overlay (4 Stufen, semi-transparent)
+        for r in range(ir, max(ir - 4, 0), -1):
+            t = (ir - r) / 4.0
             c = _lerp(_scale(iris_c, brightness * 0.35),
-                      _scale(main_c, brightness * 0.65), t)
+                      _scale(main_c, brightness * 0.55), t)
             pygame.gfxdraw.filled_circle(s, ix, iy, r, c)
+
         # Iris-Rand (Anti-Aliased)
         pygame.gfxdraw.aacircle(s, ix, iy, ir,
                                 _scale(main_c, brightness * 0.7))
@@ -354,15 +458,15 @@ class AvatarModule:
                 ry2 = iy + math.sin(a) * r_out
                 pygame.draw.aaline(s, ray_c, (rx1, ry1), (rx2, ry2))
 
-        # === Pupille (Tension = engere Pupille, Voice moduliert) ===
-        # Sprechen: Pupille pulsiert leicht mit Sprech-Rhythmus
+        # === Pupille (Tension + Voice) ===
         voice_pupil = pupil_ratio
-        voice_pupil += self._s_voice_speak * 0.06 * math.sin(self._speech_phase * 1.5)
-        # Zuhoeren: Pupille wird gross (Aufmerksamkeit/Dilatation)
+        voice_pupil += self._s_voice_speak * 0.06 * math.sin(
+            self._speech_phase * 1.5)
         voice_pupil *= 1.0 - self._s_voice_listen * 0.35
         pr = int(ir * voice_pupil)
         if flash:
             pr = int(ir * 0.12)
+        pr = max(2, pr)
         pygame.gfxdraw.filled_circle(s, ix, iy, pr, (0, 0, 0))
         pygame.gfxdraw.aacircle(s, ix, iy, pr, (0, 0, 0))
 
@@ -461,6 +565,19 @@ class AvatarModule:
         self._s_dominance += (self._dominance - self._s_dominance) * rate
         self._s_cpu += (self._cpu_temp - self._s_cpu) * rate
 
+        # Music Data interpolieren (Zielwerte kommen via update_from_status)
+        if self._music_active:
+            self._s_music_bass += (self._t_music_bass - self._s_music_bass) * rate
+            self._s_music_mid += (self._t_music_mid - self._s_music_mid) * rate
+            self._s_music_high += (self._t_music_high - self._s_music_high) * rate
+            self._s_music_rms += (self._t_music_rms - self._s_music_rms) * rate
+        else:
+            # Smooth Decay wenn keine Musik
+            self._s_music_bass *= 0.95
+            self._s_music_mid *= 0.95
+            self._s_music_high *= 0.95
+            self._s_music_rms *= 0.95
+
         # Voice State Interpolation (smooth fuer weiche Uebergaenge)
         speak_target = 1.0 if self._tts_active else 0.0
         listen_target = 1.0 if (self._ptt_active and not self._tts_active) else 0.0
@@ -523,6 +640,25 @@ class AvatarModule:
             self._target_dy = random.uniform(-4, 4)
         self._pupil_dx += (self._target_dx - self._pupil_dx) * 0.03
         self._pupil_dy += (self._target_dy - self._pupil_dy) * 0.03
+
+        # Track-Text Scrolling (alle 2 Ticks bei 30 FPS)
+        if self._track_visible and self._track_text and self._tick % 2 == 0:
+            max_vis = 35
+            if len(self._track_text) > max_vis:
+                if self._track_scroll_pause > 0:
+                    self._track_scroll_pause -= 1
+                    self._track_label.config(text=self._track_text[:max_vis])
+                else:
+                    self._track_scroll_offset += 1
+                    if self._track_scroll_offset > len(self._track_text) - max_vis + 10:
+                        self._track_scroll_offset = 0
+                        self._track_scroll_pause = 45  # ~3s bei halber Rate
+                    start = max(0, min(self._track_scroll_offset,
+                                       len(self._track_text) - max_vis))
+                    self._track_label.config(
+                        text=self._track_text[start:start + max_vis])
+            else:
+                self._track_label.config(text=self._track_text)
 
         # Rendern + Display
         self._render()
@@ -609,6 +745,52 @@ class AvatarModule:
         # Berserker Flash bei Eintritt
         if self._zone == "berserker" and old_zone != "berserker":
             self._flash_until = time.monotonic() + 0.3
+
+        # Music-Daten aus Status-JSON lesen
+        music = status.get("music", {})
+        self._music_active = bool(music.get("active", False))
+        if self._music_active:
+            self._t_music_bass = float(music.get("bass", 0.0))
+            self._t_music_mid = float(music.get("mid", 0.0))
+            self._t_music_high = float(music.get("high", 0.0))
+            self._t_music_rms = float(music.get("rms", 0.0))
+        else:
+            self._t_music_bass = 0.0
+            self._t_music_mid = 0.0
+            self._t_music_high = 0.0
+            self._t_music_rms = 0.0
+
+        # Track-Anzeige aktualisieren
+        spotify = status.get("spotify", {})
+        track_info = spotify.get("current_track")
+        if track_info and track_info.get("is_playing"):
+            artist = track_info.get("artist", "")
+            track_name = track_info.get("track", "")
+            display_text = f"\u266b {artist} \u2014 {track_name}"
+
+            if display_text != self._last_track_name:
+                self._last_track_name = display_text
+                self._track_text = display_text
+                self._track_scroll_offset = 0
+                self._track_scroll_pause = 45
+
+            # Zone-Farbe
+            track_colors = {
+                "guardian": "#00aaff",
+                "shadow": "#ff2200",
+                "berserker": "#ff2200",
+            }
+            self._track_label.config(
+                fg=track_colors.get(self._zone, "#1DB954"))
+
+            if not self._track_visible:
+                self._track_label.pack(fill="x", padx=5, pady=(0, 2))
+                self._track_visible = True
+        else:
+            if self._track_visible:
+                self._track_label.pack_forget()
+                self._track_visible = False
+                self._last_track_name = ""
 
     def _read_core_state(self):
         """Core State via ServiceProxy lesen (Fallback)."""
