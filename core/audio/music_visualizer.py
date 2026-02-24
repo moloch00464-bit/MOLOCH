@@ -57,19 +57,20 @@ HDMI_SINK_NAME = "alsa_output.platform-107c706400.hdmi.hdmi-stereo"
 
 # Audio-Parameter
 SAMPLE_RATE = 44100
-BUFFER_SIZE = 2048          # Samples pro Chunk (~46ms bei 44.1kHz)
-ANALYSIS_HZ = 30            # Ziel-Analyse-Rate
+BUFFER_SIZE = 1024          # Samples pro Chunk (~23ms bei 44.1kHz, weniger Latenz)
+ANALYSIS_HZ = 60            # Ziel-Analyse-Rate (schnellere Updates)
 MAX_VISUAL_AMP = 0.15       # Maximale visuelle Amplitude
 IDLE_TIMEOUT_S = 5.0        # Sekunden ohne Signal → Idle
 CPU_THROTTLE_TEMP = 75.0    # Ab hier 15 Hz statt 30 Hz
 BEAT_COOLDOWN_S = 0.15      # 150ms Cooldown zwischen Beats
 BEAT_THRESHOLD = 1.5        # Bass > 1.5x Durchschnitt = Beat
 
-# Zone-abhaengige Smoothing-Alphas
+# Zone-abhaengige Smoothing-Alphas (hoeher = weniger Latenz, mehr Jitter)
+# Panel uebernimmt Werte DIREKT (kein zweites Smoothing), also hier moderat halten
 ZONE_ALPHAS = {
-    "guardian": 0.15,    # Sanftes Glaetten
-    "shadow": 0.3,       # Mittleres Glaetten
-    "berserker": 0.6,    # Fast ungeglaettet, schnelle Reaktion
+    "guardian": 0.6,     # ~27ms Lag, kein Jitter weil einziges Smoothing
+    "shadow": 0.75,      # ~18ms Lag
+    "berserker": 0.9,    # ~8ms, fast roh
 }
 
 # Frequenz-Baender (Hz)
@@ -88,9 +89,9 @@ NORM_HIGH = 2.0
 # Noise Floor (subtrahiert von Band-Energien, Feintuning)
 NOISE_FLOOR = 0.0
 
-# Silence Gate: Roh-RMS unter diesem Wert = PipeWire Rauschen, kein Signal
-# PipeWire sendet ~0.01-0.02 RMS auch ohne Playback (HDMI analog noise)
-SILENCE_RAW_THRESHOLD = 0.03
+# Silence Gate: Roh-RMS unter diesem Wert = kein echtes Signal
+# spotifyd haelt Kanal offen → Idle-Rauschen bis RMS 0.13, echte Musik > 0.5
+SILENCE_RAW_THRESHOLD = 0.20
 
 # Silence Threshold (normalisierter RMS unter diesem Wert = keine Musik)
 SILENCE_THRESHOLD = 0.05
@@ -137,6 +138,10 @@ class MusicVisualizer:
         self._bass_mask: Optional[np.ndarray] = None
         self._mid_mask: Optional[np.ndarray] = None
         self._high_mask: Optional[np.ndarray] = None
+
+        # Shared Memory Buffer fuer direkte Panel-IPC (22 bytes: 5f+2B)
+        import struct as _struct
+        self._shm_buf = bytearray(_struct.calcsize("=5f2B"))
 
     # =========================================================================
     # Public API
@@ -371,6 +376,26 @@ class MusicVisualizer:
             self._data.beat_detected = beat
             self._data.is_active = is_active
             self._data.timestamp = now
+
+        # Direkte IPC: Music-Daten sofort in /dev/shm/ schreiben (60 Hz)
+        # Panel liest diese Datei direkt — kein Umweg ueber Service Status-JSON
+        try:
+            import struct as _struct
+            # Binary statt JSON fuer Speed: 5 floats + 1 byte active + 1 byte beat
+            _struct.pack_into(
+                "=5f2B", self._shm_buf, 0,
+                self._s_rms * MAX_VISUAL_AMP,
+                self._s_bass * MAX_VISUAL_AMP,
+                self._s_mid * MAX_VISUAL_AMP,
+                self._s_high * MAX_VISUAL_AMP,
+                now,
+                1 if is_active else 0,
+                1 if beat else 0,
+            )
+            with open("/dev/shm/moloch_music.bin", "wb") as f:
+                f.write(self._shm_buf)
+        except Exception:
+            pass
 
     @staticmethod
     def _band_energy(fft_mag: np.ndarray, mask: np.ndarray) -> float:
