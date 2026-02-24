@@ -1,12 +1,12 @@
 {
   "version": 1,
   "thresholds": {
-    "scrfd_conf": 0.5,
-    "scrfd_nms": 0.4,
+    "scrfd_conf": 0.6,
+    "scrfd_nms": 0.55,
     "arcface_thresh": 0.55,
-    "yolo_conf": 0.35,
+    "yolo_conf": 0.4,
     "pose_conf": 0.65,
-    "hand_conf": 0.4
+    "hand_conf": 0.65
   },
   "hand_occlusion": {
     "enabled": false,

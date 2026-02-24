@@ -508,8 +508,10 @@ class MolochService:
         elif action == 'set_threshold':
             attr = cmd.get('attr')
             value = cmd.get('value')
-            if attr and value is not None and hasattr(self._inference, attr):
-                setattr(self._inference, attr, float(value))
+            # Popup sendet "scrfd_conf", InferenceEngine hat "scrfd_conf_val"
+            attr_val = f"{attr}_val" if attr else None
+            if attr_val and value is not None and hasattr(self._inference, attr_val):
+                setattr(self._inference, attr_val, float(value))
                 logger.info(f"[IPC] Threshold: {attr} = {float(value):.3f}")
         elif action == 'set_hand_params':
             if self._perception:
@@ -551,6 +553,8 @@ class MolochService:
                 self._inference.scrfd_nms_val = float(_th.get('scrfd_nms', self._inference.scrfd_nms_val))
                 self._inference.arcface_thresh_val = float(_th.get('arcface_thresh', self._inference.arcface_thresh_val))
                 self._inference.yolo_conf_val = float(_th.get('yolo_conf', self._inference.yolo_conf_val))
+                self._inference.pose_conf_val = float(_th.get('pose_conf', self._inference.pose_conf_val))
+                self._inference.hand_conf_val = float(_th.get('hand_conf', self._inference.hand_conf_val))
             _ho = cmd.get('hand_occlusion')
             if _ho and self._perception:
                 self._perception._HAND_TIMEOUT = float(_ho.get('timeout', 5.0))
@@ -565,6 +569,47 @@ class MolochService:
         elif action == 'toggle_learner_flash':
             self._inference._learner_flash = bool(cmd.get('on', not self._inference._learner_flash))
             logger.info(f"[IPC] Learner Flash: {'AN' if self._inference._learner_flash else 'AUS'}")
+
+        elif action == 'set_mpo_param':
+            # MPO Slider live anwenden (Popup sendet param + value)
+            try:
+                import math as _math
+                from core.core_integrator import get_core_integrator
+                ci = get_core_integrator()
+                param = cmd.get('param')
+                value = float(cmd.get('value', 0))
+                if ci and param:
+                    if param == 'tension_tau':
+                        ci.TENSION_TAU = value
+                        ci._TENSION_DECAY_FACTOR = _math.exp(-1.0 / value)
+                    elif param == 'dominance_drift':
+                        ci.DOMINANCE_DRIFT_RATE = value / 60.0
+                    elif param == 'zone_hysteresis':
+                        ci.ZONE_HYSTERESIS = value
+                    elif param == 'berserker_threshold':
+                        ci.BERSERKER_TENSION_THRESHOLD = value
+                    elif param == 'thermal_damping_start':
+                        ci.THERMAL_DAMPING_START = value
+                    logger.info(f"[IPC] MPO: {param} = {value}")
+            except Exception as e:
+                logger.warning(f"[IPC] MPO-Fehler: {e}")
+
+        elif action == 'set_gesture_params':
+            # Gesten-Checkboxen live anwenden
+            self._saved_gestures = {
+                k: v for k, v in cmd.items() if k != 'action'
+            }
+            logger.info(f"[IPC] Gestures: {self._saved_gestures}")
+
+        elif action == 'set_gesture_param':
+            # Gesten-Sensitivity Slider
+            param = cmd.get('param')
+            value = cmd.get('value')
+            if param and value is not None:
+                if not hasattr(self, '_saved_gestures'):
+                    self._saved_gestures = {}
+                self._saved_gestures[param] = float(value)
+                logger.info(f"[IPC] Gesture: {param} = {value}")
 
         elif action == 'ptz_move':
             self._cam.ptz_move(cmd.get('direction', ''), cmd.get('speed', 0.3))
@@ -733,8 +778,13 @@ class MolochService:
                 _inf.arcface_thresh_val = float(th["arcface_thresh"])
             if "yolo_conf" in th:
                 _inf.yolo_conf_val = float(th["yolo_conf"])
+            if "pose_conf" in th:
+                _inf.pose_conf_val = float(th["pose_conf"])
+            if "hand_conf" in th:
+                _inf.hand_conf_val = float(th["hand_conf"])
             logger.info(f"[SETTINGS] Thresholds: scrfd={_inf.scrfd_conf_val}/{_inf.scrfd_nms_val} "
-                        f"arc={_inf.arcface_thresh_val} yolo={_inf.yolo_conf_val}")
+                        f"arc={_inf.arcface_thresh_val} yolo={_inf.yolo_conf_val} "
+                        f"pose={_inf.pose_conf_val} hand={_inf.hand_conf_val}")
         except Exception as e:
             logger.warning(f"[SETTINGS] Thresholds-Fehler: {e}")
 
@@ -823,8 +873,11 @@ class MolochService:
                     ci.ZONE_HYSTERESIS = float(mpo["zone_hysteresis"])
                 if ci and "berserker_threshold" in mpo:
                     ci.BERSERKER_TENSION_THRESHOLD = float(mpo["berserker_threshold"])
+                if ci and "thermal_damping_start" in mpo:
+                    ci.THERMAL_DAMPING_START = float(mpo["thermal_damping_start"])
                 logger.info(f"[SETTINGS] MPO: tau={mpo.get('tension_tau')} "
-                            f"drift={mpo.get('dominance_drift')} hyst={mpo.get('zone_hysteresis')}")
+                            f"drift={mpo.get('dominance_drift')} hyst={mpo.get('zone_hysteresis')} "
+                            f"thermal={mpo.get('thermal_damping_start')}")
         except Exception as e:
             logger.warning(f"[SETTINGS] MPO-Fehler: {e}")
 
@@ -861,6 +914,8 @@ class MolochService:
         th["scrfd_nms"] = round(_inf.scrfd_nms_val, 3)
         th["arcface_thresh"] = round(_inf.arcface_thresh_val, 3)
         th["yolo_conf"] = round(_inf.yolo_conf_val, 3)
+        th["pose_conf"] = round(_inf.pose_conf_val, 3)
+        th["hand_conf"] = round(_inf.hand_conf_val, 3)
         data["thresholds"] = th
 
         # Hand-Occlusion (von InferenceEngine + Perception)
@@ -909,6 +964,7 @@ class MolochService:
                 mpo["dominance_drift"] = round(ci.DOMINANCE_DRIFT_RATE * 60.0, 3)
                 mpo["zone_hysteresis"] = round(ci.ZONE_HYSTERESIS, 2)
                 mpo["berserker_threshold"] = round(ci.BERSERKER_TENSION_THRESHOLD, 2)
+                mpo["thermal_damping_start"] = round(ci.THERMAL_DAMPING_START, 1)
                 data["mpo"] = mpo
         except Exception:
             pass  # CoreIntegrator noch nicht verfuegbar

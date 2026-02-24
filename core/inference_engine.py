@@ -163,6 +163,8 @@ class InferenceEngine:
         self.scrfd_nms_val = 0.40
         self.arcface_thresh_val = 0.60
         self.yolo_conf_val = 0.50
+        self.pose_conf_val = 0.50
+        self.hand_conf_val = 0.65
 
         # Learner Flash
         self._learner_flash = False
@@ -670,7 +672,7 @@ class InferenceEngine:
                     hand_224 = cv2.resize(hand_crop, (224, 224))
 
                     outputs = self._orchestrator.run("hand_landmark", hand_224)
-                    hand_result = decode_hand_landmark(outputs)
+                    hand_result = decode_hand_landmark(outputs, presence_thresh=self.hand_conf_val)
 
                     dt = time.perf_counter() - t0
                     with self._fps_lock:
@@ -710,7 +712,7 @@ class InferenceEngine:
                     outputs = self._orchestrator.run("pose", input_rgb)
                     _pose_data = decode_yolov8_pose(
                         outputs,
-                        conf_thresh=self.yolo_conf_val,
+                        conf_thresh=self.pose_conf_val,
                         img_h=640, img_w=640,
                     )
                     dt = time.perf_counter() - t0

@@ -78,6 +78,9 @@ class CoreIntegrator:
     CPU_TEMP_MIN = 40.0   # °C -> 0.0
     CPU_TEMP_MAX = 85.0   # °C -> 1.0
 
+    # === Thermal Damping (konfigurierbar via settings.json mpo.thermal_damping_start) ===
+    THERMAL_DAMPING_START = 70.0  # °C ab der Tension gedaempft wird
+
     # === Tension-Inputs (treiben Tension hoch) ===
     TENSION_WEIGHTS = {
         "respect_score": -0.3,          # Hoher Respekt senkt Tension
@@ -368,8 +371,9 @@ class CoreIntegrator:
                 val = all_inputs.get(key, 0.0)
                 tension_impulse += val * weight
 
-            # CPU-Temperatur Daempfung: Spikes -20% bei >0.7
-            if self._cpu_temp_normalized > 0.7:
+            # CPU-Temperatur Daempfung: Spikes -20% ab THERMAL_DAMPING_START
+            _thermal_norm = (self.THERMAL_DAMPING_START - self.CPU_TEMP_MIN) / (self.CPU_TEMP_MAX - self.CPU_TEMP_MIN)
+            if self._cpu_temp_normalized > _thermal_norm:
                 tension_impulse *= 0.8
 
             # Exponentieller Decay (tau=300s)
@@ -585,7 +589,8 @@ class CoreIntegrator:
         # CPU-Temperatur Modifikatoren
         jitter_damping = 1.0
         ptz_speed_factor = 1.0
-        if cpu > 0.7:
+        _thermal_norm = (self.THERMAL_DAMPING_START - self.CPU_TEMP_MIN) / (self.CPU_TEMP_MAX - self.CPU_TEMP_MIN)
+        if cpu > _thermal_norm:
             jitter_damping = 0.5      # -50% Jitter
             ptz_speed_factor = 0.7    # PTZ langsamer
         if cpu > 0.9:
