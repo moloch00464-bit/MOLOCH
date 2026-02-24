@@ -3,14 +3,17 @@
 M.O.L.O.C.H. Spotify Controller
 =================================
 
-Steuert Spotify ueber die Web API (spotipy).
-Integriert sich in Molochs Zone-System fuer stimmungsbasierte Musik.
+ARCHITEKTUR: Lokaler Track-Index ist die EINZIGE Quelle fuer Musikauswahl.
+  - 4941 Artists, 24454 Tracks, 151790 Plays aus Markus' Streaming History
+  - KEINE Spotify-Suche (sp.search), KEINE Recommendations API
+  - Spotify Web API wird NUR fuer Playback-Steuerung genutzt (play/pause/skip)
+  - Track-Index: /mnt/moloch-data/memory/spotify/track_index.json
 
 Features:
   - Auto-DJ: Wechselt automatisch Musik bei Zone-Wechsel (Guardian/Shadow/Berserker)
-  - Genre-Lock: NUR Schwarze Szene, kein Mainstream
   - Zeitbasiert: Morgens ruhiger, abends intensiver, nachts dunkel
-  - Smart Requests: Jahres-Filter, Aehnliches, Top Tracks, Neue Musik
+  - spotifyd Health Check: Automatischer Restart wenn down
+  - API Retry: Token-Refresh, Device-Recovery, Netzwerk-Retry
 
 Singleton: get_spotify() -> globale Instanz
 
@@ -18,16 +21,17 @@ Befehle:
   play() / pause() / toggle() / next_track() / previous_track()
   set_volume(0-100) / get_current_track() / shuffle(on/off)
   search_and_play(query) / play_by_mood(zone)
-  play_artist(name) / play_from_year(year) / play_similar()
+  play_artist(name) / play_similar()
   play_top_tracks() / play_new_music()
   auto_dj_start() / auto_dj_stop() / auto_dj_toggle()
 
-Credentials: ~/.env.spotify oder /home/molochzuhause/moloch/.env.spotify
+Credentials: /home/molochzuhause/moloch/.env.spotify
 """
 
 import os
 import json
 import logging
+import subprocess
 import threading
 import time
 import random
@@ -40,6 +44,7 @@ logger = logging.getLogger("MolochSpotify")
 _ENV_PATH = os.path.expanduser("~/moloch/.env.spotify")
 _TOKEN_CACHE = os.path.expanduser("~/.cache/spotipy/.cache")
 _PROFILE_PATH = "/mnt/moloch-data/memory/spotify/spotify_profile.json"
+_TRACK_INDEX_PATH = "/mnt/moloch-data/memory/spotify/track_index.json"
 
 # =========================================================================
 # Zone-Kuenstler Mapping (aus Markus' Spotify-Profil, 6833 Stunden)
@@ -52,55 +57,25 @@ ZONE_ARTISTS = {
         "Apoptygma Berzerk", "Diva Destruction", "Daniel Deluxe",
         "Perturbator", "S U R V I V E", "Carpenter Brut",
         "Assemblage 23", "Mesh", "De/Vision", "Covenant",
-        "Geistform", "Haujobb", "Front Line Assembly",
+        "Geistform", "Haujobb", "Front Line Assembly", "SIERRA",
     ],
     "shadow": [
         # Dunkle, treibende Musik — Dark Electro, EBM, Industrial Techno
-        "Suicide Commando", "Vomito Negro", "ESA",
-        ":Wumpscut:", "Alien Vampires", "Combichrist",
         "Phase Fatale", "Ancient Methods", "I Hate Models",
-        "Schwefelgelb", "Chainreactor", "Leather Strip",
+        "Schwefelgelb", ":Wumpscut:", "Vomito Negro", "ESA",
+        "Alien Vampires", "Leather Strip",
         "Hocico", "Velvet Acid Christ", "Nitzer Ebb",
         "DAF", "Front 242", "Skinny Puppy",
     ],
     "berserker": [
         # Hart, aggressiv, laut — Aggrotech, Power Noise, Industrial Metal
-        "Ministry", "16Volt", "Prong",
-        "Terrorfakt", "Xotox", "FabrikC", "Orange Sector",
-        "Combichrist", "Ambassador21",
+        "Suicide Commando", "Combichrist", "Ministry", "Chainreactor",
+        "16Volt", "Prong", "Terrorfakt", "Xotox",
+        "FabrikC", "Orange Sector", "Ambassador21",
         "Feindflug", "Agonoize", "Funker Vogt",
         "KMFDM", "Rammstein", "Eisbrecher",
     ],
 }
-
-# Search-Queries fuer Moods (Fallback wenn kein Artist Match)
-ZONE_SEARCH = {
-    "guardian": "futurepop synthwave dark ambient",
-    "shadow": "dark electro EBM industrial",
-    "berserker": "aggrotech power noise industrial metal",
-}
-
-# =========================================================================
-# Genre-Lock: Erlaubte und verbotene Genres
-# =========================================================================
-
-# Alles was erlaubt ist (lowercase, Teilstring-Match)
-ALLOWED_GENRES = [
-    "dark", "ebm", "industrial", "goth", "synth", "wave",
-    "electro", "noise", "aggrotech", "futurepop", "coldwave",
-    "minimal", "techno", "post-punk", "deathrock", "neofolk",
-    "martial", "ambient", "metal", "punk", "alternative",
-    "electronic", "experimental", "new wave", "darksynth",
-]
-
-# Explizit verbotene Genres (lowercase, Teilstring-Match)
-BANNED_GENRES = [
-    "hip hop", "rap", "pop", "schlager", "reggaeton",
-    "country", "latin", "k-pop", "j-pop", "r&b",
-    "soul", "jazz", "blues", "folk", "singer-songwriter",
-    "children", "disney", "christian", "gospel",
-    "tropical", "dancehall", "afrobeat",
-]
 
 # =========================================================================
 # Zeitbasierte Modifikatoren
@@ -183,13 +158,19 @@ class SpotifyController:
       - Smart Requests: Jahresfilter, Aehnliches, Top Tracks, Neue Musik
     """
 
+    # Retry-Konfiguration
+    _AUTH_RETRY_COOLDOWN = 30.0   # Sekunden bis naechster Auth-Versuch
+    _MAX_API_RETRIES = 2          # Max Retries pro API-Call
+    _SPOTIFYD_CHECK_INTERVAL = 60 # Sekunden zwischen spotifyd-Checks
+
     def __init__(self):
         self._sp = None
+        self._auth_manager = None
         self._lock = threading.Lock()
         self._device_id = None
         self._profile = None
         self._initialized = False
-        self._auth_failed = False
+        self._last_auth_attempt = 0.0  # monotonic, kein permanentes Aufgeben
 
         # Auto-DJ State
         self._auto_dj_active = False
@@ -199,29 +180,39 @@ class SpotifyController:
 
         # Profil-Cache (geladene Top-Artists fuer schnelle Suche)
         self._profile_artists = {}      # {artist_name_lower: {rank, plays, genre}}
-        self._profile_top_tracks = []   # [{name, artist, uri}]
+        self._profile_top_tracks = []   # [{name, artist, uri, plays}]
+
+        # Track-Index: {artist_lower -> [{name, artist, uri, plays}]}
+        # Gebaut aus 151K Streaming History — EINZIGE Quelle fuer Musikauswahl
+        self._track_index = {}
+
+        # spotifyd Health Check
+        self._last_spotifyd_check = 0.0
 
     def _ensure_auth(self) -> bool:
-        """Lazy Authentication — erst wenn gebraucht."""
-        if self._auth_failed:
-            return False
+        """Lazy Authentication mit Retry-Cooldown (kein permanentes Aufgeben)."""
         if self._sp is not None:
             return True
+
+        # Cooldown: Nicht staendig retrien
+        now = time.monotonic()
+        if now - self._last_auth_attempt < self._AUTH_RETRY_COOLDOWN:
+            return False
 
         with self._lock:
             if self._sp is not None:
                 return True
 
+            self._last_auth_attempt = now
+
             if not _load_env():
                 logger.error("[SPOTIFY] Credentials nicht geladen")
-                self._auth_failed = True
                 return False
 
             try:
                 import spotipy
                 from spotipy.oauth2 import SpotifyOAuth
 
-                # OAuth mit allen relevanten Scopes
                 scope = (
                     "user-read-playback-state "
                     "user-modify-playback-state "
@@ -233,13 +224,19 @@ class SpotifyController:
 
                 os.makedirs(os.path.dirname(_TOKEN_CACHE), exist_ok=True)
 
-                auth_manager = SpotifyOAuth(
+                self._auth_manager = SpotifyOAuth(
                     scope=scope,
                     cache_path=_TOKEN_CACHE,
                     open_browser=False,
                 )
 
-                self._sp = spotipy.Spotify(auth_manager=auth_manager)
+                # Token pruefen — spotipy refresht automatisch wenn abgelaufen
+                token_info = self._auth_manager.get_cached_token()
+                if not token_info:
+                    logger.error("[SPOTIFY] Kein Token gecached — spotify_auth.py nochmal ausfuehren!")
+                    return False
+
+                self._sp = spotipy.Spotify(auth_manager=self._auth_manager)
 
                 # Device ID von MOLOCH finden
                 self._find_device()
@@ -253,8 +250,98 @@ class SpotifyController:
 
             except Exception as e:
                 logger.error(f"[SPOTIFY] Auth fehlgeschlagen: {e}")
-                self._auth_failed = True
+                self._sp = None
+                self._auth_manager = None
                 return False
+
+    def _api_call(self, func, *args, **kwargs):
+        """Wrapper fuer Spotify API Calls mit Retry und Device-Recovery.
+
+        Fängt Token-Ablauf, Device-Verlust und Netzwerkfehler ab.
+        Returnt das Ergebnis oder raised Exception nach allen Retries.
+        """
+        last_err = None
+        for attempt in range(self._MAX_API_RETRIES + 1):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                last_err = e
+                err_str = str(e).lower()
+
+                # Token abgelaufen — spotipy sollte autorefreshen,
+                # aber manchmal braucht es einen Kick
+                if "token" in err_str or "401" in err_str or "expired" in err_str:
+                    logger.warning(f"[SPOTIFY] Token-Problem (Versuch {attempt + 1}): {e}")
+                    self._force_token_refresh()
+                    continue
+
+                # 403 Restriction (z.B. Shuffle ohne aktiven Context) — nicht retrien
+                if "403" in err_str or "restriction" in err_str:
+                    raise
+
+                # Device nicht gefunden — neu suchen
+                if "no active device" in err_str or "404" in err_str or "not found" in err_str:
+                    logger.warning(f"[SPOTIFY] Device verloren (Versuch {attempt + 1}): {e}")
+                    self._ensure_spotifyd()
+                    time.sleep(2)
+                    self._find_device()
+                    continue
+
+                # Netzwerk/Server-Fehler — kurz warten und retrien
+                if "connection" in err_str or "timeout" in err_str or "50" in err_str:
+                    logger.warning(f"[SPOTIFY] Netzwerk-Fehler (Versuch {attempt + 1}): {e}")
+                    time.sleep(2)
+                    continue
+
+                # Unbekannter Fehler — nicht retrien
+                raise
+
+        raise last_err
+
+    def _force_token_refresh(self):
+        """Erzwingt Token-Refresh ueber auth_manager."""
+        try:
+            if self._auth_manager:
+                token_info = self._auth_manager.get_cached_token()
+                if token_info:
+                    # Refresh erzwingen indem wir den Token als abgelaufen markieren
+                    if self._auth_manager.is_token_expired(token_info):
+                        new_token = self._auth_manager.refresh_access_token(
+                            token_info["refresh_token"]
+                        )
+                        logger.info("[SPOTIFY] Token erfolgreich refreshed")
+        except Exception as e:
+            logger.error(f"[SPOTIFY] Token-Refresh fehlgeschlagen: {e}")
+            # Auth komplett neu aufbauen
+            self._sp = None
+            self._auth_manager = None
+            self._initialized = False
+
+    def _ensure_spotifyd(self):
+        """Prueft ob spotifyd laeuft und startet ihn neu wenn noetig."""
+        now = time.monotonic()
+        if now - self._last_spotifyd_check < self._SPOTIFYD_CHECK_INTERVAL:
+            return
+        self._last_spotifyd_check = now
+
+        try:
+            result = subprocess.run(
+                ["systemctl", "is-active", "spotifyd"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.stdout.strip() == "active":
+                return
+
+            logger.warning("[SPOTIFY] spotifyd ist down — starte neu...")
+            subprocess.run(
+                ["sudo", "systemctl", "restart", "spotifyd"],
+                capture_output=True, timeout=15,
+            )
+            # Warten bis spotifyd sich bei Spotify registriert hat
+            time.sleep(5)
+            logger.info("[SPOTIFY] spotifyd neugestartet")
+        except Exception as e:
+            logger.error(f"[SPOTIFY] spotifyd Health Check fehlgeschlagen: {e}")
 
     def _find_device(self):
         """Finde das MOLOCH Geraet (spotifyd)."""
@@ -279,7 +366,7 @@ class SpotifyController:
             logger.error(f"[SPOTIFY] Device-Suche fehlgeschlagen: {e}")
 
     def _load_profile(self):
-        """Lade Spotify-Profil und baue Lookup-Caches auf."""
+        """Lade Spotify-Profil + Track-Index (151K Tracks mit URIs)."""
         try:
             if os.path.exists(_PROFILE_PATH):
                 with open(_PROFILE_PATH) as f:
@@ -301,13 +388,63 @@ class SpotifyController:
         except Exception as e:
             logger.debug(f"[SPOTIFY] Profil laden fehlgeschlagen: {e}")
 
+        # Track-Index laden (EINZIGE Quelle fuer Musikauswahl)
+        try:
+            if os.path.exists(_TRACK_INDEX_PATH):
+                with open(_TRACK_INDEX_PATH) as f:
+                    self._track_index = json.load(f)
+                total_tracks = sum(len(v) for v in self._track_index.values())
+                logger.info(f"[SPOTIFY] Track-Index geladen: {len(self._track_index)} Artists, "
+                            f"{total_tracks} Tracks")
+            else:
+                logger.warning(f"[SPOTIFY] Track-Index nicht gefunden: {_TRACK_INDEX_PATH}")
+        except Exception as e:
+            logger.error(f"[SPOTIFY] Track-Index laden fehlgeschlagen: {e}")
+
+    def _get_artist_tracks(self, artist_name: str, limit: int = 20) -> List[str]:
+        """Hole Track-URIs fuer einen Artist aus dem lokalen Index.
+
+        KEINE Spotify-Suche — alles aus Markus' 151K Streaming History.
+        Sortiert nach Plays (meistgehoert zuerst).
+        """
+        key = artist_name.lower()
+        # Exakter Match
+        tracks = self._track_index.get(key, [])
+        if tracks:
+            return [t["uri"] for t in tracks[:limit]]
+
+        # Fuzzy: Teilstring-Match (z.B. "ESA" -> "esa (electronic substance abuse)")
+        for idx_key, idx_tracks in self._track_index.items():
+            if key in idx_key or idx_key in key:
+                return [t["uri"] for t in idx_tracks[:limit]]
+
+        return []
+
+    def _get_zone_uris(self, zone: str, count: int = 20) -> List[str]:
+        """Sammle Track-URIs fuer eine Zone aus dem lokalen Index.
+
+        Nimmt Artists aus ZONE_ARTISTS, holt deren Tracks aus dem Index.
+        Mischt die Tracks und gibt 'count' URIs zurueck.
+        """
+        artists = list(ZONE_ARTISTS.get(zone, ZONE_ARTISTS["shadow"]))
+        random.shuffle(artists)
+
+        uris = []
+        for artist_name in artists:
+            artist_uris = self._get_artist_tracks(artist_name, limit=10)
+            uris.extend(artist_uris)
+
+        random.shuffle(uris)
+        return uris[:count]
+
     def _refresh_device(self):
-        """Device-ID auffrischen falls verloren."""
+        """Device-ID auffrischen: sucht neu wenn verloren, checkt spotifyd."""
         if not self._device_id:
+            self._ensure_spotifyd()
             self._find_device()
 
     # =========================================================================
-    # PLAYBACK CONTROLS
+    # PLAYBACK CONTROLS (alle mit _api_call Retry-Wrapper)
     # =========================================================================
 
     def play(self, uri: str = None, context_uri: str = None) -> bool:
@@ -324,11 +461,13 @@ class SpotifyController:
             if context_uri:
                 kwargs["context_uri"] = context_uri
 
-            self._sp.start_playback(**kwargs)
+            self._api_call(self._sp.start_playback, **kwargs)
             logger.info("[SPOTIFY] Play")
             return True
         except Exception as e:
             logger.error(f"[SPOTIFY] Play fehlgeschlagen: {e}")
+            # Device verloren? Beim naechsten Versuch neu suchen
+            self._device_id = None
             return False
 
     def pause(self) -> bool:
@@ -336,7 +475,7 @@ class SpotifyController:
         if not self._ensure_auth():
             return False
         try:
-            self._sp.pause_playback(device_id=self._device_id)
+            self._api_call(self._sp.pause_playback, device_id=self._device_id)
             logger.info("[SPOTIFY] Pause")
             return True
         except Exception as e:
@@ -348,7 +487,7 @@ class SpotifyController:
         if not self._ensure_auth():
             return False
         try:
-            current = self._sp.current_playback()
+            current = self._api_call(self._sp.current_playback)
             if current and current.get("is_playing"):
                 return self.pause()
             else:
@@ -362,7 +501,7 @@ class SpotifyController:
         if not self._ensure_auth():
             return False
         try:
-            self._sp.next_track(device_id=self._device_id)
+            self._api_call(self._sp.next_track, device_id=self._device_id)
             logger.info("[SPOTIFY] Skip >>")
             return True
         except Exception as e:
@@ -374,7 +513,7 @@ class SpotifyController:
         if not self._ensure_auth():
             return False
         try:
-            self._sp.previous_track(device_id=self._device_id)
+            self._api_call(self._sp.previous_track, device_id=self._device_id)
             logger.info("[SPOTIFY] Skip <<")
             return True
         except Exception as e:
@@ -387,7 +526,7 @@ class SpotifyController:
             return False
         try:
             vol = max(0, min(100, int(volume_pct)))
-            self._sp.volume(vol, device_id=self._device_id)
+            self._api_call(self._sp.volume, vol, device_id=self._device_id)
             logger.info(f"[SPOTIFY] Volume: {vol}%")
             return True
         except Exception as e:
@@ -399,7 +538,7 @@ class SpotifyController:
         if not self._ensure_auth():
             return False
         try:
-            self._sp.shuffle(state, device_id=self._device_id)
+            self._api_call(self._sp.shuffle, state, device_id=self._device_id)
             logger.info(f"[SPOTIFY] Shuffle: {'AN' if state else 'AUS'}")
             return True
         except Exception as e:
@@ -415,7 +554,7 @@ class SpotifyController:
         if not self._ensure_auth():
             return None
         try:
-            current = self._sp.current_playback()
+            current = self._api_call(self._sp.current_playback)
             if not current or not current.get("item"):
                 return None
 
@@ -448,139 +587,80 @@ class SpotifyController:
         return f"{t['artist']} - {t['track']} [{progress // 60}:{progress % 60:02d}/{duration // 60}:{duration % 60:02d}] ({status})"
 
     # =========================================================================
-    # GENRE-LOCK: Suchergebnisse filtern
-    # =========================================================================
-
-    def _is_genre_allowed(self, artist_id: str) -> bool:
-        """Prueft ob ein Artist in erlaubte Genres faellt.
-
-        Checkt zuerst ob Artist in Markus' Profil ist (= immer erlaubt).
-        Dann Spotify-Genre-Tags gegen Whitelist/Blacklist.
-        """
-        try:
-            # Profil-Artists sind IMMER erlaubt (Markus hoert sie = gut)
-            artist_info = self._sp.artist(artist_id)
-            name = artist_info.get("name", "").lower()
-            if name in self._profile_artists:
-                return True
-
-            # Genre-Tags vom Artist pruefen
-            genres = [g.lower() for g in artist_info.get("genres", [])]
-            if not genres:
-                # Kein Genre-Tag? Erlauben (besser als blockieren)
-                return True
-
-            # Banned-Check: Ein verbotenes Genre -> raus
-            for genre in genres:
-                for banned in BANNED_GENRES:
-                    if banned in genre:
-                        logger.debug(f"[GENRE-LOCK] Blockiert: {artist_info['name']} ({genre})")
-                        return False
-
-            # Allowed-Check: Mindestens ein erlaubtes Genre muss matchen
-            for genre in genres:
-                for allowed in ALLOWED_GENRES:
-                    if allowed in genre:
-                        return True
-
-            # Kein Match in beiden Listen? Blockieren (sicherheitshalber)
-            logger.debug(f"[GENRE-LOCK] Kein Genre-Match: {artist_info['name']} ({genres})")
-            return False
-
-        except Exception:
-            # API-Fehler? Erlauben um Playback nicht zu blockieren
-            return True
-
-    def _filter_search_results(self, tracks: List[Dict], max_results: int = 5) -> List[Dict]:
-        """Filtert Suchergebnisse durch Genre-Lock.
-
-        Args:
-            tracks: Liste von Spotify Track-Dicts
-            max_results: Maximale Anzahl Ergebnisse
-
-        Returns:
-            Gefilterte Track-Liste
-        """
-        filtered = []
-        for track in tracks:
-            if len(filtered) >= max_results:
-                break
-            artist_id = track.get("artists", [{}])[0].get("id")
-            if artist_id and self._is_genre_allowed(artist_id):
-                filtered.append(track)
-        return filtered
-
-    # =========================================================================
-    # SEARCH & PLAY (mit Genre-Lock)
+    # MUSIK-AUSWAHL (NUR aus lokalem Track-Index, KEINE Spotify-Suche)
     # =========================================================================
 
     def search_and_play(self, query: str) -> bool:
-        """Suche und spiele — mit Genre-Lock Filter."""
+        """Suche im lokalen Index und spiele.
+
+        Sucht in Artist-Namen und Track-Namen. KEINE Spotify-API-Suche.
+        """
         if not self._ensure_auth():
             return False
-        try:
-            # Mehr Ergebnisse holen fuer Genre-Filter
-            results = self._sp.search(q=query, limit=10, type="track")
-            tracks = results.get("tracks", {}).get("items", [])
-            if not tracks:
-                logger.warning(f"[SPOTIFY] Keine Treffer fuer: {query}")
-                return False
-
-            # Genre-Lock anwenden
-            filtered = self._filter_search_results(tracks, max_results=1)
-            if not filtered:
-                logger.warning(f"[SPOTIFY] Alle Treffer geblockt (Genre-Lock): {query}")
-                # Fallback: Ersten Track nehmen wenn nichts durchkommt
-                filtered = tracks[:1]
-
-            track = filtered[0]
-            artist = track["artists"][0]["name"]
-            name = track["name"]
-            logger.info(f"[SPOTIFY] Spiele: {artist} - {name}")
-            return self.play(uri=track["uri"])
-        except Exception as e:
-            logger.error(f"[SPOTIFY] Search fehlgeschlagen: {e}")
+        if not self._track_index:
+            logger.warning("[SPOTIFY] Kein Track-Index geladen")
             return False
+
+        query_lower = query.lower()
+        uris = []
+
+        # 1. Artist-Match: Suche im Index nach Artist-Namen
+        for artist_key, tracks in self._track_index.items():
+            if query_lower in artist_key or artist_key in query_lower:
+                uris.extend(t["uri"] for t in tracks[:15])
+                if len(uris) >= 20:
+                    break
+
+        # 2. Track-Match: Suche in Track-Namen
+        if not uris:
+            for tracks in self._track_index.values():
+                for t in tracks:
+                    if query_lower in t["name"].lower():
+                        uris.append(t["uri"])
+                        if len(uris) >= 20:
+                            break
+                if len(uris) >= 20:
+                    break
+
+        if not uris:
+            logger.warning(f"[SPOTIFY] Nichts im Index fuer: {query}")
+            return False
+
+        random.shuffle(uris)
+        logger.info(f"[SPOTIFY] {len(uris)} Tracks aus Index fuer '{query}'")
+        return self.play(uri=uris[:20])
 
     def play_artist(self, artist_name: str) -> bool:
-        """Spiele Musik von einem Artist (Top Tracks)."""
+        """Spiele Tracks eines Artists aus dem lokalen Index.
+
+        KEINE Spotify-Suche — nur Tracks die Markus tatsaechlich gehoert hat.
+        """
         if not self._ensure_auth():
             return False
-        try:
-            results = self._sp.search(q=f"artist:{artist_name}", limit=1, type="artist")
-            artists = results.get("artists", {}).get("items", [])
-            if not artists:
-                logger.warning(f"[SPOTIFY] Artist nicht gefunden: {artist_name}")
-                return False
 
-            artist_uri = artists[0]["uri"]
-            # Top Tracks des Artists holen und abspielen
-            top = self._sp.artist_top_tracks(artists[0]["id"])
-            uris = [t["uri"] for t in top.get("tracks", [])[:10]]
-            if uris:
-                self.shuffle(True)
-                return self.play(uri=uris)
+        uris = self._get_artist_tracks(artist_name, limit=20)
+        if not uris:
+            logger.debug(f"[SPOTIFY] '{artist_name}' nicht im Index")
             return False
-        except Exception as e:
-            logger.error(f"[SPOTIFY] Artist Play fehlgeschlagen: {e}")
-            return False
+
+        random.shuffle(uris)  # Python-Shuffle statt Spotify-API (vermeidet 403)
+        logger.info(f"[SPOTIFY] {len(uris)} Tracks von {artist_name} aus Index")
+        return self.play(uri=uris)
 
     # =========================================================================
-    # MOOD / ZONE INTEGRATION (mit Zeitmodifikator)
+    # MOOD / ZONE INTEGRATION (mit Zeitmodifikator, NUR lokaler Index)
     # =========================================================================
 
     def play_by_mood(self, zone: str) -> bool:
         """Spiele Musik passend zur Zone + Tageszeit.
 
-        guardian -> Futurepop, Synthwave, atmosphaerisch
-        shadow   -> Dark Electro, EBM, Industrial Techno
-        berserker -> Aggrotech, Power Noise, Industrial Metal
-
-        Zeitmodifikator beeinflusst Artist-Auswahl:
-        - Morgens: Ruhigere Artists bevorzugt
-        - Abends/Nachts: Dunklere Artists bevorzugt
+        Alle Tracks kommen aus Markus' Streaming History (lokaler Index).
+        KEINE Spotify-Suche, KEINE Recommendations API.
         """
         if not self._ensure_auth():
+            return False
+        if not self._track_index:
+            logger.warning("[SPOTIFY] Kein Track-Index geladen")
             return False
 
         time_zone = _get_time_zone()
@@ -590,257 +670,158 @@ class SpotifyController:
         # Zeitbasierte Zone-Verschiebung
         effective_zone = zone
         if zone_weight < 0.3:
-            # Zone passt nicht zur Tageszeit -> Guardian als Fallback
             effective_zone = "guardian"
             logger.info(f"[SPOTIFY] Zone '{zone}' zu intensiv fuer {time_zone}, "
                         f"verwende 'guardian'")
 
-        artists = list(ZONE_ARTISTS.get(effective_zone, ZONE_ARTISTS["shadow"]))
-        random.shuffle(artists)
+        # URIs aus dem lokalen Index holen
+        uris = self._get_zone_uris(effective_zone, count=30)
 
-        # Zeitbasierte Priorisierung: Profil-Artists die zur Tageszeit passen
+        # Zeitbasierte Beimischung
         if time_zone == "morgen" and effective_zone != "guardian":
-            # Morgens Guardian-Artists beimischen
-            guardian_artists = list(ZONE_ARTISTS["guardian"])
-            random.shuffle(guardian_artists)
-            artists = guardian_artists[:3] + artists
+            guardian_uris = self._get_zone_uris("guardian", count=10)
+            uris = guardian_uris[:5] + uris
         elif time_zone == "nacht" and effective_zone == "guardian":
-            # Nachts Shadow-Artists beimischen
-            shadow_artists = list(ZONE_ARTISTS["shadow"])
-            random.shuffle(shadow_artists)
-            artists = artists + shadow_artists[:3]
+            shadow_uris = self._get_zone_uris("shadow", count=10)
+            uris = uris + shadow_uris[:5]
 
-        for artist_name in artists[:5]:
-            if self.play_artist(artist_name):
-                logger.info(f"[SPOTIFY] Mood '{zone}' ({time_zone}): Spiele {artist_name}")
-                return True
+        if not uris:
+            logger.warning(f"[SPOTIFY] Keine Tracks im Index fuer Zone '{zone}'")
+            return False
 
-        # Fallback: Genre-Suche
-        search = ZONE_SEARCH.get(effective_zone, "dark electro EBM")
-        logger.info(f"[SPOTIFY] Mood '{zone}' Fallback: Suche '{search}'")
-        return self.search_and_play(search)
+        random.shuffle(uris)
+        uris = uris[:20]
+        logger.info(f"[SPOTIFY] Mood '{effective_zone}' ({time_zone}): {len(uris)} Tracks aus Index")
+        return self.play(uri=uris)
 
     def get_recommendations_for_zone(self, zone: str, limit: int = 10) -> List[str]:
-        """Empfehlungen basierend auf Zone und Profil."""
-        if not self._ensure_auth():
-            return []
-        try:
-            artists = ZONE_ARTISTS.get(zone, ZONE_ARTISTS["shadow"])[:2]
-            # Artist-IDs holen
-            seed_ids = []
-            for name in artists:
-                results = self._sp.search(q=f"artist:{name}", limit=1, type="artist")
-                items = results.get("artists", {}).get("items", [])
-                if items:
-                    seed_ids.append(items[0]["id"])
-
-            if not seed_ids:
-                return []
-
-            recs = self._sp.recommendations(seed_artists=seed_ids[:5], limit=limit)
-            return [
-                f"{t['artists'][0]['name']} - {t['name']}"
-                for t in recs.get("tracks", [])
-            ]
-        except Exception as e:
-            logger.error(f"[SPOTIFY] Recommendations fehlgeschlagen: {e}")
-            return []
+        """Empfehlungen aus dem lokalen Index (KEINE Spotify Recommendations API)."""
+        artists = ZONE_ARTISTS.get(zone, ZONE_ARTISTS["shadow"])
+        result = []
+        for artist_name in artists:
+            tracks = self._track_index.get(artist_name.lower(), [])
+            for t in tracks[:3]:
+                result.append(f"{t['artist']} - {t['name']}")
+                if len(result) >= limit:
+                    return result
+        return result
 
     # =========================================================================
-    # SMART REQUESTS
+    # SMART REQUESTS (alle aus lokalem Index)
     # =========================================================================
-
-    def play_from_year(self, year: int) -> bool:
-        """Spiele Tracks von Artists die Markus hoert, aus einem bestimmten Jahr.
-
-        Filtert NUR aus Markus' gehoerten Artists die im Jahr aktiv waren.
-        """
-        if not self._ensure_auth():
-            return False
-
-        if not self._profile_artists:
-            logger.warning("[SPOTIFY] Kein Profil geladen, kann nicht nach Jahr filtern")
-            return self.search_and_play(f"year:{year} dark electro EBM")
-
-        try:
-            # Top-Artists aus Profil nehmen und Tracks aus dem Jahr suchen
-            top_artists = sorted(
-                self._profile_artists.values(),
-                key=lambda a: a["plays"],
-                reverse=True,
-            )[:20]
-
-            uris = []
-            for artist_info in top_artists:
-                if len(uris) >= 15:
-                    break
-                query = f"artist:{artist_info['name']} year:{year}"
-                results = self._sp.search(q=query, limit=3, type="track")
-                tracks = results.get("tracks", {}).get("items", [])
-                for t in tracks:
-                    # Nur Tracks die wirklich aus dem Jahr sind
-                    release = t.get("album", {}).get("release_date", "")
-                    if release.startswith(str(year)):
-                        uris.append(t["uri"])
-
-            if uris:
-                random.shuffle(uris)
-                logger.info(f"[SPOTIFY] {len(uris)} Tracks aus {year} gefunden")
-                self.shuffle(True)
-                return self.play(uri=uris[:20])
-
-            logger.warning(f"[SPOTIFY] Keine Tracks aus {year} bei bekannten Artists")
-            return self.search_and_play(f"year:{year} dark electro EBM industrial")
-
-        except Exception as e:
-            logger.error(f"[SPOTIFY] Year-Filter fehlgeschlagen: {e}")
-            return False
 
     def play_similar(self) -> bool:
         """Spiele aehnliche Musik zum aktuell laufenden Track.
 
-        Nutzt Spotify Recommendations API mit Seed aus aktuellem Track.
+        Findet den Artist im lokalen Index und spielt andere Tracks.
+        KEINE Spotify Recommendations API.
         """
         if not self._ensure_auth():
             return False
+        if not self._track_index:
+            return False
 
         try:
-            current = self._sp.current_playback()
+            current = self._api_call(self._sp.current_playback)
             if not current or not current.get("item"):
-                logger.warning("[SPOTIFY] Kein Track laeuft -> kann keine Empfehlung geben")
+                logger.warning("[SPOTIFY] Kein Track laeuft")
                 return False
 
             item = current["item"]
-            track_id = item["id"]
-            artist_id = item["artists"][0]["id"]
+            current_artist = item["artists"][0]["name"].lower()
 
-            # Recommendations basierend auf aktuellem Track + Artist
-            recs = self._sp.recommendations(
-                seed_tracks=[track_id],
-                seed_artists=[artist_id],
-                limit=20,
-            )
+            uris = []
+            # 1. Andere Tracks vom selben Artist
+            artist_uris = self._get_artist_tracks(item["artists"][0]["name"], limit=30)
+            # Aktuellen Track rausfiltern
+            current_uri = item.get("uri", "")
+            uris.extend(u for u in artist_uris if u != current_uri)
 
-            tracks = recs.get("tracks", [])
-            # Genre-Lock anwenden
-            filtered = self._filter_search_results(tracks, max_results=15)
+            # 2. Aus der gleichen Zone andere Artists beimischen
+            for zone_name, zone_artists in ZONE_ARTISTS.items():
+                if current_artist in [a.lower() for a in zone_artists]:
+                    zone_uris = self._get_zone_uris(zone_name, count=20)
+                    uris.extend(u for u in zone_uris if u != current_uri)
+                    break
 
-            if filtered:
-                uris = [t["uri"] for t in filtered]
-                logger.info(f"[SPOTIFY] {len(uris)} aehnliche Tracks zu "
-                            f"'{item['artists'][0]['name']} - {item['name']}'")
-                self.shuffle(True)
-                return self.play(uri=uris)
+            if not uris:
+                logger.warning("[SPOTIFY] Keine aehnlichen Tracks im Index")
+                return False
 
-            logger.warning("[SPOTIFY] Keine passenden Empfehlungen")
-            return False
+            random.shuffle(uris)
+            uris = list(dict.fromkeys(uris))[:20]  # Duplikate entfernen
+            logger.info(f"[SPOTIFY] {len(uris)} aehnliche Tracks zu "
+                        f"'{item['artists'][0]['name']} - {item['name']}'")
+            return self.play(uri=uris)
 
         except Exception as e:
             logger.error(f"[SPOTIFY] Similar fehlgeschlagen: {e}")
             return False
 
     def play_top_tracks(self) -> bool:
-        """Spiele Markus' Top Tracks aus dem Spotify-Profil."""
+        """Spiele Markus' meistgehoerte Tracks aus dem lokalen Index."""
         if not self._ensure_auth():
             return False
-
-        try:
-            # Zuerst Spotify API Top Tracks versuchen
-            top = self._sp.current_user_top_tracks(limit=30, time_range="medium_term")
-            tracks = top.get("items", [])
-
-            if tracks:
-                # Genre-Lock
-                filtered = self._filter_search_results(tracks, max_results=20)
-                if filtered:
-                    uris = [t["uri"] for t in filtered]
-                    random.shuffle(uris)
-                    logger.info(f"[SPOTIFY] {len(uris)} Top Tracks")
-                    self.shuffle(True)
-                    return self.play(uri=uris)
-
-            # Fallback: Profil-Top-Tracks
-            if self._profile_top_tracks:
-                uris = []
-                for tt in self._profile_top_tracks[:20]:
-                    query = f"artist:{tt.get('artist', '')} track:{tt.get('name', '')}"
-                    results = self._sp.search(q=query, limit=1, type="track")
-                    items = results.get("tracks", {}).get("items", [])
-                    if items:
-                        uris.append(items[0]["uri"])
-                if uris:
-                    random.shuffle(uris)
-                    self.shuffle(True)
-                    return self.play(uri=uris)
-
-            logger.warning("[SPOTIFY] Keine Top Tracks gefunden")
+        if not self._track_index:
             return False
 
-        except Exception as e:
-            logger.error(f"[SPOTIFY] Top Tracks fehlgeschlagen: {e}")
+        # Top Tracks aus dem Index: die mit den meisten Plays
+        all_tracks = []
+        for tracks in self._track_index.values():
+            all_tracks.extend(tracks)
+
+        all_tracks.sort(key=lambda t: t["plays"], reverse=True)
+        uris = [t["uri"] for t in all_tracks[:50]]
+
+        if not uris:
+            logger.warning("[SPOTIFY] Keine Top Tracks im Index")
             return False
+
+        random.shuffle(uris)
+        uris = uris[:20]
+        logger.info(f"[SPOTIFY] {len(uris)} Top Tracks aus Index")
+        return self.play(uri=uris)
 
     def play_new_music(self) -> bool:
-        """Entdecke neue Musik basierend auf Markus' Top-Artists.
+        """Spiele weniger gehoerte Tracks aus dem Index.
 
-        Nutzt Recommendations API mit Seeds aus den meistgehoerten Artists.
+        Statt Spotify Recommendations: Tracks die Markus selten gehoert hat
+        (1-5 Plays) von Artists die er sonst viel hoert.
         """
         if not self._ensure_auth():
             return False
-
-        try:
-            # Seeds aus Top-Artists im Profil
-            seed_ids = []
-            top_names = sorted(
-                self._profile_artists.values(),
-                key=lambda a: a["plays"],
-                reverse=True,
-            )[:10]
-
-            for artist_info in top_names:
-                if len(seed_ids) >= 5:
-                    break
-                results = self._sp.search(
-                    q=f"artist:{artist_info['name']}", limit=1, type="artist",
-                )
-                items = results.get("artists", {}).get("items", [])
-                if items:
-                    seed_ids.append(items[0]["id"])
-
-            if not seed_ids:
-                return self.search_and_play("new dark electro EBM 2026")
-
-            recs = self._sp.recommendations(
-                seed_artists=seed_ids[:5],
-                limit=30,
-            )
-
-            tracks = recs.get("tracks", [])
-            # Genre-Lock + bekannte Artists rausfiltern (wir wollen NEUES)
-            filtered = []
-            for t in tracks:
-                if len(filtered) >= 20:
-                    break
-                artist_name = t["artists"][0]["name"].lower()
-                # Nur Artists die NICHT in den Top-50 sind
-                if artist_name not in self._profile_artists or \
-                   self._profile_artists[artist_name]["rank"] > 50:
-                    artist_id = t["artists"][0]["id"]
-                    if self._is_genre_allowed(artist_id):
-                        filtered.append(t)
-
-            if filtered:
-                uris = [t["uri"] for t in filtered]
-                logger.info(f"[SPOTIFY] {len(uris)} neue Tracks entdeckt")
-                self.shuffle(True)
-                return self.play(uri=uris)
-
-            logger.warning("[SPOTIFY] Keine neuen Empfehlungen nach Genre-Filter")
+        if not self._track_index:
             return False
 
-        except Exception as e:
-            logger.error(f"[SPOTIFY] New Music fehlgeschlagen: {e}")
+        # Top-30 Artists nach Gesamtplays, aber deren SELTENSTE Tracks
+        artist_plays = []
+        for artist_key, tracks in self._track_index.items():
+            total = sum(t["plays"] for t in tracks)
+            artist_plays.append((artist_key, total, tracks))
+
+        artist_plays.sort(key=lambda x: x[1], reverse=True)
+
+        uris = []
+        for _, _, tracks in artist_plays[:50]:
+            # Tracks mit 1-5 Plays (selten gehoert, aber vorhanden)
+            rare = [t for t in tracks if 1 <= t["plays"] <= 5]
+            if rare:
+                random.shuffle(rare)
+                uris.extend(t["uri"] for t in rare[:3])
+
+        if not uris:
+            logger.warning("[SPOTIFY] Keine seltenen Tracks im Index")
             return False
+
+        random.shuffle(uris)
+        uris = uris[:20]
+        logger.info(f"[SPOTIFY] {len(uris)} selten gehoerte Tracks entdeckt")
+        return self.play(uri=uris)
+
+    def play_from_year(self, year: int) -> bool:
+        """Kann ohne Jahr-Info im Index nicht filtern — spielt stattdessen Top Tracks."""
+        logger.info(f"[SPOTIFY] Jahr-Filter nicht verfuegbar im Index, spiele Top Tracks")
+        return self.play_top_tracks()
 
     # =========================================================================
     # AUTO-DJ: Automatischer Zone-Wechsel
@@ -896,22 +877,32 @@ class SpotifyController:
         """Auto-DJ Hauptschleife — laeuft als Daemon-Thread.
 
         Liest Core State alle 5 Sekunden. Bei Zone-Wechsel -> neue Musik.
+        Prueft spotifyd alle 60 Sekunden.
         """
         logger.info("[AUTO-DJ] Loop gestartet")
+        health_counter = 0
 
         while self._auto_dj_active:
             try:
+                # spotifyd Health Check alle 12 Zyklen (~60 Sekunden)
+                health_counter += 1
+                if health_counter >= 12:
+                    health_counter = 0
+                    self._ensure_spotifyd()
+
                 # Core Integrator Zone lesen
                 zone = self._get_current_zone()
                 if zone and zone != self._auto_dj_zone:
                     old_zone = self._auto_dj_zone
                     self._auto_dj_zone = zone
                     if old_zone is not None:
-                        # Zone hat gewechselt -> Musik wechseln
                         logger.info(f"[AUTO-DJ] Zone-Wechsel: {old_zone} -> {zone}")
-                        self.play_by_mood(zone)
+                        if not self.play_by_mood(zone):
+                            # Retry nach Device-Recovery
+                            self._device_id = None
+                            self._refresh_device()
+                            self.play_by_mood(zone)
                     else:
-                        # Erster Start -> aktuelle Zone spielen
                         logger.info(f"[AUTO-DJ] Initiale Zone: {zone}")
                         self.play_by_mood(zone)
             except Exception as e:
@@ -940,8 +931,6 @@ class SpotifyController:
 
     def is_available(self) -> bool:
         """Pruefe ob Spotify verfuegbar ist (Credentials + Device)."""
-        if self._auth_failed:
-            return False
         if not self._ensure_auth():
             return False
         return self._device_id is not None
@@ -951,20 +940,29 @@ class SpotifyController:
         if not self._ensure_auth():
             return []
         try:
-            return self._sp.devices().get("devices", [])
+            return self._api_call(self._sp.devices).get("devices", [])
         except Exception:
             return []
 
     def get_status(self) -> Dict[str, Any]:
-        """Gesamtstatus fuer Panel/IPC.
-
-        Wird in _write_status_json eingebaut und vom Panel gelesen.
-        """
+        """Gesamtstatus fuer Panel/IPC."""
         track = self.get_current_track() if self._initialized else None
+
+        # spotifyd Status pruefen
+        spotifyd_ok = False
+        try:
+            result = subprocess.run(
+                ["systemctl", "is-active", "spotifyd"],
+                capture_output=True, text=True, timeout=3,
+            )
+            spotifyd_ok = result.stdout.strip() == "active"
+        except Exception:
+            pass
+
         return {
             "initialized": self._initialized,
             "auth_ok": self._sp is not None,
-            "auth_failed": self._auth_failed,
+            "spotifyd_ok": spotifyd_ok,
             "device_id": self._device_id[:8] + "..." if self._device_id else None,
             "auto_dj": self._auto_dj_active,
             "auto_dj_zone": self._auto_dj_zone,
