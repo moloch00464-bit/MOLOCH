@@ -490,6 +490,9 @@ class InferenceEngine:
                             # LED Indikator: Markus erkannt?
                             if name.lower() == "markus":
                                 _markus_recognized = True
+                                # Owner-Override loeschen: Vision hat Markus bestaetigt
+                                if self._core_integrator and self._core_integrator.is_owner_confirmed():
+                                    self._core_integrator.clear_owner_override()
 
                             # Face Attributes (NPU, ~2926 FPS — Gender/Age/Emotion)
                             emotion = self._cached_emotion.get(name)

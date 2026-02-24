@@ -122,6 +122,10 @@ class CoreIntegrator:
         self._berserker_active = False
         self._berserker_until = 0.0
 
+        # === Owner Override (Chat/Voice Identifikation) ===
+        self._owner_confirmed = False
+        self._owner_confirmed_until = 0.0  # monotonic timestamp
+
         # === Physiologisches Feedback ===
         self._cpu_temp_raw = 0.0        # Celsius
         self._cpu_temp_normalized = 0.0  # 0.0-1.0
@@ -179,6 +183,46 @@ class CoreIntegrator:
         with self._lock:
             self._impulse_flag = True
             _logger.info("[CORE] Impulse-Flag gesetzt")
+
+    # === Owner Override (Chat/Voice -> Core State) ===
+
+    OWNER_OVERRIDE_DURATION = 600.0  # 10 Minuten
+    OWNER_OVERRIDE_TENSION_DROP = 0.3
+    OWNER_OVERRIDE_DOMINANCE_BOOST = 0.3
+
+    def owner_override(self):
+        """Owner hat sich per Chat/Voice identifiziert.
+
+        Effekt: Tension sofort -0.3, Dominance Richtung Guardian +0.3.
+        Gilt fuer 10 Minuten oder bis naechste positive Face-ID (clear_owner_override).
+        """
+        with self._lock:
+            if self._owner_confirmed:
+                _logger.info("[CORE] Owner-Override bereits aktiv, erneuert")
+            self._owner_confirmed = True
+            self._owner_confirmed_until = time.monotonic() + self.OWNER_OVERRIDE_DURATION
+            # Sofortiger Effekt auf State
+            self._tension = _clamp(self._tension - self.OWNER_OVERRIDE_TENSION_DROP)
+            self._dominance = _clamp(
+                self._dominance + self.OWNER_OVERRIDE_DOMINANCE_BOOST, -1.0, 1.0
+            )
+            _logger.info(
+                f"[CORE] Owner-Override AKTIV: T={self._tension:.3f} "
+                f"D={self._dominance:+.3f} (gilt {self.OWNER_OVERRIDE_DURATION:.0f}s)"
+            )
+
+    def clear_owner_override(self):
+        """Override loeschen (z.B. nach positiver Face-ID durch Vision)."""
+        with self._lock:
+            if self._owner_confirmed:
+                self._owner_confirmed = False
+                self._owner_confirmed_until = 0.0
+                _logger.info("[CORE] Owner-Override geloescht (Face-ID bestaetigt)")
+
+    def is_owner_confirmed(self) -> bool:
+        """Ist Owner-Override gerade aktiv?"""
+        with self._lock:
+            return self._owner_confirmed
 
     def set_npu_load(self, load: float):
         """NPU-Auslastung setzen (0.0-1.0). Aus Model Health Monitoring."""
@@ -445,6 +489,18 @@ class CoreIntegrator:
                 _logger.warning("[CORE] === BERSERKER AKTIVIERT === T=%.3f", self._tension)
 
             # =============================================================
+            # 4b. Owner-Override Timer pruefen
+            # =============================================================
+            if self._owner_confirmed:
+                if now > self._owner_confirmed_until:
+                    self._owner_confirmed = False
+                    self._owner_confirmed_until = 0.0
+                    _logger.info("[CORE] Owner-Override abgelaufen (Timer)")
+                else:
+                    # Waehrend Override: leichter Guardian-Drift (wie Markus erkannt)
+                    self._dominance = _clamp(self._dominance + 0.005, -1.0, 1.0)
+
+            # =============================================================
             # 5. Zone mit Hysterese bestimmen
             # =============================================================
             if self._berserker_active:
@@ -649,6 +705,7 @@ class CoreIntegrator:
                 "cpu_temp_norm": round(self._cpu_temp_normalized, 3),
                 "npu_load": round(self._npu_load, 3),
                 "berserker_active": self._berserker_active,
+                "owner_confirmed": self._owner_confirmed,
                 "effects": {k: round(v, 3) for k, v in self._effects.items()},
                 "tick": self._tick_count,
             }

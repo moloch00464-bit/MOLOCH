@@ -390,6 +390,9 @@ class VoicePipeline:
         except Exception as e:
             logger.error(f"[VOICE] Memory save_message(user) fehlgeschlagen: {e}")
 
+        # Owner-Override: Keywords pruefen (Voice -> Core State Rueckkopplung)
+        self._check_owner_override(text)
+
         # 1.5 Direkte Spotify-Commands (OHNE Claude API — instant)
         spotify_response = self._handle_direct_spotify_command(text)
         if spotify_response:
@@ -726,6 +729,39 @@ class VoicePipeline:
         return clean_text
 
     # =========================================================================
+    # Owner-Override Keyword Detection
+    # =========================================================================
+
+    # Keywords die Owner-Identifikation triggern (lowercase)
+    _OWNER_KEYWORDS = [
+        "ich bin's", "ich bins", "ich bin es",
+        "ich bin markus", "das bin ich",
+        "erkennst mich nicht", "erkennst du mich nicht",
+        "ich bin da", "ich bin hier",
+        "ich bin zuhause", "ich bin zu hause",
+    ]
+
+    def _check_owner_override(self, text: str) -> bool:
+        """Prueft ob der Text eine Owner-Identifikation enthaelt.
+
+        Bei Match: CoreIntegrator.owner_override() aufrufen.
+        Returns: True wenn Owner erkannt.
+        """
+        lower = text.lower().strip()
+        for keyword in self._OWNER_KEYWORDS:
+            if keyword in lower:
+                logger.info(f"[VOICE] Owner-Override erkannt: '{keyword}' in '{text[:60]}'")
+                try:
+                    from core.core_integrator import get_core_integrator
+                    ci = get_core_integrator()
+                    ci.owner_override()
+                    return True
+                except Exception as e:
+                    logger.error(f"[VOICE] Owner-Override fehlgeschlagen: {e}")
+                    return False
+        return False
+
+    # =========================================================================
     # Chat Message (Text statt PTT)
     # =========================================================================
 
@@ -760,6 +796,9 @@ class VoicePipeline:
             get_memory().save_message("user", text, source="text")
         except Exception as e:
             logger.error(f"[VOICE] Memory save_message(user/text) fehlgeschlagen: {e}")
+
+        # Owner-Override: Keywords pruefen (Chat -> Core State Rueckkopplung)
+        self._check_owner_override(text)
 
         # Direkte Spotify-Commands (OHNE Claude API — instant)
         spotify_response = self._handle_direct_spotify_command(text)
