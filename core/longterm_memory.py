@@ -104,6 +104,8 @@ class MolochMemory:
         # Facts: SSD2 als Basis, PersistentMemory-Fakten dazu mergen
         self._facts = _safe_read_json(FACTS_PATH, {})
         self._merge_persistent_knowledge()
+        # Recovery: SSD2 Facts zurueck in PersistentMemory schieben wenn diese leer ist
+        self._recover_persistent_memory()
 
         # Core State laden (v2: tension + dominance)
         self._core_state = _safe_read_json(CORE_STATE_PATH, {
@@ -185,6 +187,41 @@ class MolochMemory:
         if merged > 0:
             _safe_write_json(FACTS_PATH, self._facts)
             logger.info(f"[MEMORY] {merged} Fakten aus PersistentMemory gemergt (total: {len(self._facts)})")
+
+    def _recover_persistent_memory(self):
+        """Recovery: Wenn PersistentMemory (SSD1) weniger Facts hat als SSD2, fehlende zurueckschieben.
+
+        Passiert wenn user_knowledge.json bei Crash korrupt wurde.
+        SSD2 facts.json (atomar geschrieben) ist dann das Backup.
+        """
+        pm_knowledge = _safe_read_json(PERSISTENT_KNOWLEDGE_PATH, {})
+        if not self._facts:
+            return
+
+        recovered = 0
+        pm_updated = dict(pm_knowledge) if pm_knowledge else {}
+        for key, fact_data in self._facts.items():
+            if key not in pm_updated:
+                val = fact_data.get("value", fact_data) if isinstance(fact_data, dict) else fact_data
+                pm_updated[key] = val
+                recovered += 1
+
+        if recovered > 0:
+            # Atomar auf SSD1 zurueckschreiben
+            tmp_path = PERSISTENT_KNOWLEDGE_PATH + ".tmp"
+            try:
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    json.dump(pm_updated, f, indent=2, ensure_ascii=False)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp_path, PERSISTENT_KNOWLEDGE_PATH)
+                logger.info(f"[MEMORY] RECOVERY: {recovered} Facts von SSD2 nach PersistentMemory zurueckgeschrieben")
+            except Exception as e:
+                logger.error(f"[MEMORY] Recovery fehlgeschlagen: {e}")
+                try:
+                    os.unlink(tmp_path)
+                except FileNotFoundError:
+                    pass
 
     def _get_persistent_memory(self):
         """Lazy-Load PersistentMemory Singleton (vermeidet zirkulaere Imports)."""
@@ -462,11 +499,33 @@ Regeln:
         REMEMBER-Tags aus Claude-Antwort extrahieren und in BEIDE Systeme speichern.
         Gibt den bereinigten Text zurueck (ohne Tags).
         """
+        import re
         pm = self._get_persistent_memory()
         if pm:
+            # Vor dem Parsen: Tags direkt extrahieren fuer SSD2-Sync
+            pattern = r'\[REMEMBER:\s*(.+?)\s*=\s*(.+?)\s*\]'
+            tags = re.findall(pattern, text)
+
             # PersistentMemory parst die Tags und speichert in user_knowledge.json
             cleaned = pm.extract_memories(text)
-            # Neu gelernte Fakten auch auf SSD2 sichern
+
+            # DIREKT in SSD2 Facts speichern (nicht nur ueber Disk-Merge)
+            # Belt + Suspenders: Selbst wenn user_knowledge.json write fehlschlaegt,
+            # sind die Facts auf SSD2 sicher
+            if tags:
+                with self._facts_lock:
+                    for key, value in tags:
+                        key = key.strip()
+                        value = value.strip()
+                        self._facts[key] = {
+                            "value": value,
+                            "source": "persistent_memory",
+                            "date": datetime.now().strftime("%Y-%m-%d"),
+                        }
+                    _safe_write_json(FACTS_PATH, self._facts)
+                    logger.info(f"[MEMORY] {len(tags)} Facts direkt auf SSD2 gesichert")
+
+            # Zusaetzlich: Disk-Merge fuer andere Quellen
             self._merge_persistent_knowledge()
             return cleaned
         return text

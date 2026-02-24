@@ -370,8 +370,9 @@ class DailyLearner:
         angle = self._estimate_angle(head_pose)
 
         # Nur speichern bei echtem Match (kein unknown_maybe, Unbekannt, Keine DB)
+        # Threshold 0.55 statt 0.5 — weniger Falsch-Positive
         _SKIP_NAMES = {"unknown_maybe", "Unbekannt", "Keine DB"}
-        if name in _SKIP_NAMES or confidence <= 0.5:
+        if name in _SKIP_NAMES or confidence <= 0.55:
             return False
 
         save_it = False

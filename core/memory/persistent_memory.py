@@ -77,23 +77,39 @@ class PersistentMemory:
                 self.conversation_log = []
 
     def _save_knowledge(self):
-        """Speichere Wissen auf Disk."""
+        """Speichere Wissen auf Disk (atomar: tmp + fsync + rename)."""
+        tmp_path = KNOWLEDGE_FILE + ".tmp"
         try:
-            with open(KNOWLEDGE_FILE, "w", encoding="utf-8") as f:
+            with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(self.knowledge, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, KNOWLEDGE_FILE)
         except Exception as e:
             logger.error(f"[MEMORY] Knowledge save error: {e}")
+            try:
+                os.unlink(tmp_path)
+            except FileNotFoundError:
+                pass
 
     def _save_conversation(self):
-        """Speichere Konversationslog auf Disk."""
+        """Speichere Konversationslog auf Disk (atomar: tmp + fsync + rename)."""
+        tmp_path = CONVERSATION_FILE + ".tmp"
         try:
             # Nur letzte N Turns behalten
             if len(self.conversation_log) > MAX_CONVERSATION_TURNS:
                 self.conversation_log = self.conversation_log[-MAX_CONVERSATION_TURNS:]
-            with open(CONVERSATION_FILE, "w", encoding="utf-8") as f:
+            with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(self.conversation_log, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, CONVERSATION_FILE)
         except Exception as e:
             logger.error(f"[MEMORY] Conversation save error: {e}")
+            try:
+                os.unlink(tmp_path)
+            except FileNotFoundError:
+                pass
 
     # === WRITE ===
 

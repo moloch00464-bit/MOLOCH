@@ -520,8 +520,10 @@ class InferenceEngine:
                                                        head_pose=_head_pose if '_head_pose' in dir() else None,
                                                        detected_objects=_detected_objects if '_detected_objects' in dir() else [])
 
-                            # DailyLearner: Snapshot bei erkanntem Gesicht
-                            if self._daily_learner and self._daily_learner.enabled and name != "Keine DB":
+                            # DailyLearner: Snapshot NUR bei echtem Gesicht (hoher SCRFD Score)
+                            # score >= 0.65 filtert Falsch-Positive (Moebel, Kissen etc.)
+                            if (self._daily_learner and self._daily_learner.enabled
+                                    and name != "Keine DB" and float(score) >= 0.65):
                                 try:
                                     _hp = None
                                     if '_head_pose' in dir() and _head_pose is not None:
