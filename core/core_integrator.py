@@ -224,6 +224,23 @@ class CoreIntegrator:
         with self._lock:
             return self._owner_confirmed
 
+    # === Calm Down (Beruhigung per Sprache/Text) ===
+
+    CALM_DOWN_TENSION_DROP = 0.3
+
+    def calm_down(self):
+        """Beruhigung per Sprache/Text — Tension sofort senken.
+
+        Effekt: Tension -0.3. Kein Dominance-Shift.
+        """
+        with self._lock:
+            old_t = self._tension
+            self._tension = _clamp(self._tension - self.CALM_DOWN_TENSION_DROP)
+            _logger.info(
+                f"[CORE] Calm-Down: T={old_t:.3f} -> {self._tension:.3f} "
+                f"(delta={self._tension - old_t:+.3f})"
+            )
+
     def set_npu_load(self, load: float):
         """NPU-Auslastung setzen (0.0-1.0). Aus Model Health Monitoring."""
         with self._lock:

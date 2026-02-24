@@ -1103,6 +1103,22 @@ class MolochConsole:
         threading.Thread(target=_execute, daemon=True).start()
         return clean_text
 
+    def _handle_keyword(self, text: str) -> Optional[str]:
+        """Text gegen lokale Keywords pruefen (VOR Claude API).
+
+        Returns:
+            Antwort-String wenn lokal behandelt, None wenn weiter an API.
+        """
+        try:
+            from core.keyword_handler import get_keyword_handler
+            response = get_keyword_handler().execute(text)
+            if response:
+                logger.info(f"[CONSOLE] Keyword-Match: '{text[:60]}' -> '{response}'")
+            return response
+        except Exception as e:
+            logger.error(f"[CONSOLE] Keyword-Handler Fehler: {e}")
+            return None
+
     def _handle_direct_spotify_command(self, text: str) -> Optional[str]:
         """Direkte Spotify-Commands ohne Claude API (Keyword-basiert)."""
         import re
@@ -1189,6 +1205,21 @@ class MolochConsole:
     def _chat_with_claude(self, user_input: str) -> None:
         """Send message to Claude and display response."""
         self._print_line("")
+
+        # Lokale Keyword-Erkennung (KEIN API Call noetig)
+        keyword_response = self._handle_keyword(user_input)
+        if keyword_response:
+            logger.info(f"[CONSOLE] Keyword-Match: {keyword_response}")
+            self._print_line(f"M.O.L.O.C.H.: {keyword_response}")
+            self._print_line("")
+            try:
+                get_memory().save_message("user", user_input, source="console")
+                get_memory().save_message("moloch", keyword_response, source="console")
+            except Exception:
+                pass
+            if self.tts.enabled:
+                self.tts.speak(keyword_response, blocking=True)
+            return
 
         # Direkte Spotify-Commands (OHNE Claude API)
         spotify_response = self._handle_direct_spotify_command(user_input)

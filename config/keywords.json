@@ -1,0 +1,93 @@
+{
+    "_comment": "M.O.L.O.C.H. Lokale Keyword-Erkennung — VOR Claude API",
+    "_matching": "substring, case-insensitive. Reihenfolge: erste Kategorie die matcht gewinnt. OFF vor ON listen!",
+
+    "categories": [
+        {
+            "id": "owner_confirm",
+            "description": "Owner bestaetigt sich per Sprache/Text",
+            "action": "owner_confirm",
+            "response": "Alles klar, Markus.",
+            "keywords": [
+                "das bin ich",
+                "ich bin's",
+                "ich bins",
+                "ich bin markus",
+                "ich bin es",
+                "kein fremder",
+                "erkennst mich nicht",
+                "erkennst du mich nicht",
+                "ich bin da",
+                "ich bin hier",
+                "ich bin zuhause",
+                "ich bin zu hause"
+            ]
+        },
+        {
+            "id": "calm_down",
+            "description": "Beruhigung — Tension sofort senken",
+            "action": "calm_down",
+            "response": "Okay, ich fahr runter.",
+            "keywords": [
+                "beruhig dich",
+                "beruhige dich",
+                "entspann dich",
+                "ganz ruhig",
+                "alles gut",
+                "schon gut",
+                "reg dich ab",
+                "chill mal",
+                "komm runter",
+                "komm mal runter",
+                "ruhig blut"
+            ]
+        },
+        {
+            "id": "light_off",
+            "description": "Flutlicht / Weisse LED ausschalten",
+            "action": "light_off",
+            "response": "Licht aus.",
+            "keywords": [
+                "licht aus",
+                "flutlicht aus",
+                "mach licht aus",
+                "licht ausschalten"
+            ]
+        },
+        {
+            "id": "light_on",
+            "description": "Flutlicht / Weisse LED einschalten",
+            "action": "light_on",
+            "response": "Licht an.",
+            "keywords": [
+                "licht an",
+                "flutlicht an",
+                "mach licht an",
+                "licht einschalten"
+            ]
+        },
+        {
+            "id": "alarm_off",
+            "description": "Alarm ausschalten",
+            "action": "alarm_off",
+            "response": "Alarm aus.",
+            "keywords": [
+                "alarm aus",
+                "alarm ausschalten",
+                "alarm deaktivieren",
+                "alarm stopp"
+            ]
+        },
+        {
+            "id": "alarm_on",
+            "description": "Alarm einschalten",
+            "action": "alarm_on",
+            "response": "Alarm aktiv.",
+            "keywords": [
+                "alarm an",
+                "alarm einschalten",
+                "alarm aktivieren"
+            ]
+        }
+    ]
+}
