@@ -734,11 +734,26 @@ class AutonomousTracker:
             self.current_target_bbox = bbox
             self.current_target_confidence = selected_pose.get("face_confidence", 0) if selected_type == TargetType.FACE else selected_pose.get("confidence", 0)
 
+            # Ring-Buffer Smoothing (gleiche Logik wie update_detection Stage 4)
+            buf_size = self.config.center_ring_buffer_size
+            self._center_ring.append((track_x, track_y))
+            if len(self._center_ring) > buf_size:
+                self._center_ring = self._center_ring[-buf_size:]
+
+            if len(self._center_ring) > 1:
+                weights = list(range(1, len(self._center_ring) + 1))
+                w_sum = sum(weights)
+                smooth_tx = sum(w * c[0] for w, c in zip(weights, self._center_ring)) / w_sum
+                smooth_ty = sum(w * c[1] for w, c in zip(weights, self._center_ring)) / w_sum
+            else:
+                smooth_tx = track_x
+                smooth_ty = track_y
+
             self.latest_detection = DetectionData(
                 detected=True,
                 bbox=bbox,
-                center_x=track_x,
-                center_y=track_y,
+                center_x=smooth_tx,
+                center_y=smooth_ty,
                 confidence=self.current_target_confidence,
                 target_id=self.current_target_id,
                 timestamp=time.time(),
@@ -756,6 +771,38 @@ class AutonomousTracker:
                 logger.info(f"[ADAPTIVE] {selected_type.value.upper()} at ({track_x:.2f},{track_y:.2f}) "
                            f"conf={self.current_target_confidence:.2f} "
                            f"faces={len(face_candidates)} bodies={len(body_candidates)}")
+
+    # =========================================================================
+    # Camera Position Reading (ONVIF)
+    # =========================================================================
+
+    def _read_camera_position(self):
+        """Liest echte Kameraposition via ONVIF GET.
+
+        Wird alle 2 Cycles (~400ms) aufgerufen. Ohne echte Position
+        wuerde der Anti-Overshoot-Check nie feuern und Befehle stapeln sich.
+        """
+        if not self.camera or not self.camera.is_connected:
+            return
+        try:
+            pos = self.camera.get_position()
+            old_pan = self.last_known_pan
+            old_tilt = self.last_known_tilt
+            self.last_known_pan = pos.pan
+            self.last_known_tilt = pos.tilt
+            self.last_position_time = time.time()
+            self.stats["position_reads"] += 1
+
+            # Debug: Position-Drift erkennen
+            drift = abs(old_pan - pos.pan) + abs(old_tilt - pos.tilt)
+            if drift > 2.0 and self.stats["position_reads"] % 5 == 0:
+                ptz_debug.info(
+                    f"POS_READ pan={pos.pan:+.1f} tilt={pos.tilt:+.1f} "
+                    f"(drift={drift:.1f} von cached ({old_pan:+.1f},{old_tilt:+.1f}))"
+                )
+        except Exception as e:
+            if self.stats["cycles"] % 50 == 0:
+                logger.warning(f"[TRACKER] Position read failed: {e}")
 
     # =========================================================================
     # Core Integrator Adaption
@@ -846,6 +893,10 @@ class AutonomousTracker:
 
     def _process_tracking_cycle(self):
         """Process one tracking cycle."""
+        # Echte Kameraposition alle 2 Cycles (~400ms) via ONVIF lesen
+        if self.stats["cycles"] % 2 == 0:
+            self._read_camera_position()
+
         with self._lock:
             detection = self.latest_detection
 
@@ -1100,10 +1151,24 @@ class AutonomousTracker:
             pan_delta = max(-self.config.max_step_pan, min(self.config.max_step_pan, pan_delta))
             tilt_delta = max(-self.config.max_step_tilt, min(self.config.max_step_tilt, tilt_delta))
 
-        # Calculate target position + Clamping auf Hardware-Limits
-        # (verhindert Position-Drift wenn Kamera intern clampt)
-        target_pan = max(self.config.pan_limit_min, min(self.config.pan_limit_max, self.last_known_pan + pan_delta))
-        target_tilt = max(self.config.tilt_limit_min, min(self.config.tilt_limit_max, self.last_known_tilt + tilt_delta))
+        # Calculate target position + Soft-Limit Clamping
+        # 10 Grad INNERHALB der Hardware-Limits stoppen (nie auf Anschlag fahren)
+        LIMIT_BUFFER = 10.0
+        soft_pan_min = self.config.pan_limit_min + LIMIT_BUFFER
+        soft_pan_max = self.config.pan_limit_max - LIMIT_BUFFER
+        soft_tilt_min = self.config.tilt_limit_min + LIMIT_BUFFER
+        soft_tilt_max = self.config.tilt_limit_max - LIMIT_BUFFER
+        target_pan = max(soft_pan_min, min(soft_pan_max, self.last_known_pan + pan_delta))
+        target_tilt = max(soft_tilt_min, min(soft_tilt_max, self.last_known_tilt + tilt_delta))
+
+        # Wenn schon am Soft-Limit und Move wuerde weiter in Richtung Limit gehen -> abbrechen
+        if (self.last_known_pan <= soft_pan_min and pan_delta < 0) or \
+           (self.last_known_pan >= soft_pan_max and pan_delta > 0):
+            ptz_debug.warning(
+                f"LIMIT_BLOCK pan={self.last_known_pan:+.1f} delta={pan_delta:+.1f} "
+                f"soft_range=[{soft_pan_min:+.1f},{soft_pan_max:+.1f}]"
+            )
+            return False
 
         # PTZ Debug: Vollstaendige Berechnung loggen
         face_side = "LINKS" if error_x_norm < 0 else "RECHTS"
@@ -1128,9 +1193,9 @@ class AutonomousTracker:
             self.last_move_time = time.time()
             self._target_pan = target_pan
             self._target_tilt = target_tilt
-            # Cache sofort auf Zielposition setzen (kein ONVIF noetig)
-            self.last_known_pan = target_pan
-            self.last_known_tilt = target_tilt
+            # KEIN sofortiges Position-Caching! Kamera ist noch unterwegs.
+            # last_known_pan/tilt wird NUR durch _read_camera_position() aktualisiert.
+            # Anti-Overshoot-Wait (Z.998) blockiert neue Befehle bis Kamera ankommt.
 
             total_moves = self.stats["tracking_moves"] + self.stats["search_moves"]
             if total_moves % 15 == 0:
