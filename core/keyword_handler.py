@@ -117,7 +117,7 @@ class KeywordHandler:
     # =========================================================================
 
     def _action_owner_confirm(self, response: str) -> str:
-        """Owner bestaetigt sich — CoreIntegrator updaten."""
+        """Owner bestaetigt sich — CoreIntegrator + ArbitrationEngine updaten."""
         try:
             from core.core_integrator import get_core_integrator
             ci = get_core_integrator()
@@ -125,10 +125,19 @@ class KeywordHandler:
             logger.info("[KEYWORD] Owner-Override ausgefuehrt")
         except Exception as e:
             logger.error(f"[KEYWORD] Owner-Override fehlgeschlagen: {e}")
+        # ArbitrationEngine: User Override + Identity Confirmed
+        try:
+            from core.arbitration import get_arbitration
+            arbi = get_arbitration()
+            arbi.user_override("guardian")
+            arbi.identity_confirmed()
+            logger.info("[KEYWORD] ArbitrationEngine: user_override + identity_confirmed")
+        except Exception as e:
+            logger.error(f"[KEYWORD] ArbitrationEngine fehlgeschlagen: {e}")
         return response
 
     def _action_calm_down(self, response: str) -> str:
-        """Beruhigung — Tension senken."""
+        """Beruhigung — Tension senken + ArbitrationEngine Guardian Override."""
         try:
             from core.core_integrator import get_core_integrator
             ci = get_core_integrator()
@@ -136,6 +145,13 @@ class KeywordHandler:
             logger.info("[KEYWORD] Calm-Down ausgefuehrt")
         except Exception as e:
             logger.error(f"[KEYWORD] Calm-Down fehlgeschlagen: {e}")
+        # ArbitrationEngine: Guardian Override 20s + 5s Fade
+        try:
+            from core.arbitration import get_arbitration
+            get_arbitration().user_override("guardian")
+            logger.info("[KEYWORD] ArbitrationEngine: user_override(guardian)")
+        except Exception as e:
+            logger.error(f"[KEYWORD] ArbitrationEngine fehlgeschlagen: {e}")
         return response
 
     def _action_light(self, on: bool, response: str) -> str:

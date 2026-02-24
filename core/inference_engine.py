@@ -493,6 +493,12 @@ class InferenceEngine:
                                 # Owner-Override loeschen: Vision hat Markus bestaetigt
                                 if self._core_integrator and self._core_integrator.is_owner_confirmed():
                                     self._core_integrator.clear_owner_override()
+                                # ArbitrationEngine: Identity Confirmed (Shadow gecappt)
+                                try:
+                                    from core.arbitration import get_arbitration
+                                    get_arbitration().identity_confirmed()
+                                except Exception:
+                                    pass
 
                             # Face Attributes (NPU, ~2926 FPS — Gender/Age/Emotion)
                             emotion = self._cached_emotion.get(name)

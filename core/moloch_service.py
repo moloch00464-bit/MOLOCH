@@ -480,7 +480,13 @@ class MolochService:
             if self._perception:
                 status["perception"] = self._perception.get_state()
             if self._core_integrator:
-                status["core"] = self._core_integrator.get_status_dict()
+                raw_core = self._core_integrator.get_status_dict()
+                # ArbitrationEngine: Override-Logik anwenden
+                try:
+                    from core.arbitration import get_arbitration
+                    status["core"] = get_arbitration().apply(raw_core)
+                except Exception:
+                    status["core"] = raw_core
             # Spotify Status (lazy — nur wenn bereits initialisiert)
             try:
                 from core.spotify_controller import get_spotify

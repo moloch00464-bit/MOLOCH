@@ -458,20 +458,23 @@ class PersonalityEngine:
     # ---- Core Integrator Anbindung ----
 
     def update_from_integrator(self):
-        """Personality-Zone vom CoreIntegrator v2 lesen und Modus automatisch anpassen.
+        """Personality-Zone von ArbitrationEngine lesen und Modus automatisch anpassen.
 
-        v2: Zone basiert auf dominance (-1=Shadow, +1=Guardian) mit Hysterese (0.15).
-        Berserker nur bei tension > 0.95 UND externem Impulse.
+        ArbitrationEngine sitzt ueber CoreIntegrator und wendet User-Overrides an.
+        Fallback: CoreIntegrator direkt wenn ArbitrationEngine nicht verfuegbar.
         """
         if not self.auto_mode:
             return  # Manueller Override aktiv -> kein Auto-Switch
 
         try:
-            from core.core_integrator import get_core_integrator
-            ci = get_core_integrator()
-            zone = ci.get_personality_zone()
+            from core.arbitration import get_arbitration
+            zone = get_arbitration().get_zone()
         except Exception:
-            return
+            try:
+                from core.core_integrator import get_core_integrator
+                zone = get_core_integrator().get_personality_zone()
+            except Exception:
+                return
 
         # Zone -> PersonalityMode Mapping
         zone_map = {

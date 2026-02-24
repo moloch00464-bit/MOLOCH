@@ -143,17 +143,22 @@ class LEDController:
         self._markus_off_streak = 0
 
         # Berserker-Zone: LED blinken statt Standlicht
+        # ArbitrationEngine hat Vorrang, Fallback auf CoreIntegrator
         if self._core_integrator:
             try:
-                zone = self._core_integrator.get_personality_zone()
-                if zone == "berserker":
-                    now = time.time()
-                    if now - self._last_api_call >= self._API_MIN_INTERVAL:
-                        self._last_api_call = now
-                        self.blink(count=3, interval=0.15)
-                    return
+                from core.arbitration import get_arbitration
+                zone = get_arbitration().get_zone()
             except Exception:
-                pass
+                try:
+                    zone = self._core_integrator.get_personality_zone()
+                except Exception:
+                    zone = "guardian"
+            if zone == "berserker":
+                now = time.time()
+                if now - self._last_api_call >= self._API_MIN_INTERVAL:
+                    self._last_api_call = now
+                    self.blink(count=3, interval=0.15)
+                return
 
         if not self._markus_on:
             now = time.time()
