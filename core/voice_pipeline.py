@@ -422,6 +422,8 @@ class VoicePipeline:
         response = self._chat(text)
 
         if not response:
+            # Fehlermeldung im Chat damit User weiss was los ist
+            self._emit_message("System", "API nicht erreichbar — versuch's nochmal.")
             self._whisper_status = "Idle"
             return
 
@@ -515,6 +517,7 @@ class VoicePipeline:
                 max_tokens=512,
                 system=system,
                 messages=msgs,
+                timeout=30.0,  # 30s Timeout — kein ewiges Haengen bei API-Problemen
             )
             text = response.content[0].text
 
@@ -543,6 +546,17 @@ class VoicePipeline:
     # =========================================================================
     # Direkte Spotify Voice Commands (OHNE Claude API)
     # =========================================================================
+
+    def _get_current_zone_for_spotify(self) -> str:
+        """Aktuelle Personality-Zone fuer Spotify Mood holen. Fallback: 'shadow'."""
+        try:
+            from core.core_integrator import get_core_integrator
+            zone = get_core_integrator().get_personality_zone()
+            if zone:
+                return zone
+        except Exception:
+            pass
+        return "shadow"
 
     def _handle_direct_spotify_command(self, text: str) -> Optional[str]:
         """
@@ -638,6 +652,26 @@ class VoicePipeline:
                 return f"{track['artist']} — {track['track']} ({status})"
             return "Gerade laeuft nichts."
 
+        # --- Generische Musik-Befehle (OHNE spezifischen Artist) ---
+        # "spiel musik", "spiel mal musik", "spiel was", "mach musik an", etc.
+        _GENERIC_MUSIC_PHRASES = (
+            "musik", "mal musik", "mal was", "was", "etwas", "irgendwas",
+            "mal etwas", "mal irgendwas", "mir was", "mir musik", "mir mal was",
+            "mir mal musik", "doch was", "doch musik", "mal was gutes",
+        )
+        if lower in ("spiel musik", "spiele musik", "musik abspielen",
+                      "spiel mal musik", "spiel mal was", "spiel was",
+                      "mach musik an", "mache musik an", "musik spielen",
+                      "spiel etwas", "spiel irgendwas", "leg musik auf",
+                      "leg was auf", "leg mal was auf", "leg mal musik auf"):
+            zone = self._get_current_zone_for_spotify()
+            if sp.play_by_mood(zone):
+                return f"Musik laeuft — {zone.capitalize()} Mood."
+            # Fallback: irgendwas spielen
+            if sp.play():
+                return "Musik laeuft."
+            return "Spotify reagiert nicht — spotifyd laeuft?"
+
         # --- "SPIEL ..." Commands (mit Argument) ---
 
         # Pattern: "spiel(e) [etwas]" / "mach [artist] an" / "musik von [artist]"
@@ -657,6 +691,22 @@ class VoicePipeline:
             query = spiel_match.group(1).strip()
             if not query:
                 return None
+
+            # Fuellwoerter entfernen: "mal", "mir", "doch", "bitte", "mal eben"
+            query = re.sub(
+                r'\b(?:mal|mir|doch|bitte|eben|mal eben|noch)\b', '', query
+            ).strip()
+            # Doppelte Leerzeichen bereinigen
+            query = re.sub(r'\s+', ' ', query).strip()
+
+            # Wenn nach Fuellwort-Strip nur generische Begriffe uebrig sind
+            if not query or query in _GENERIC_MUSIC_PHRASES:
+                zone = self._get_current_zone_for_spotify()
+                if sp.play_by_mood(zone):
+                    return f"Musik laeuft — {zone.capitalize()} Mood."
+                if sp.play():
+                    return "Musik laeuft."
+                return "Spotify reagiert nicht."
 
             logger.info(f"[SPOTIFY-DIRECT] Suche: '{query}'")
 
@@ -827,6 +877,8 @@ class VoicePipeline:
 
         response = self._chat(text)
         if not response:
+            # Fehlermeldung im Chat damit User weiss was los ist
+            self._emit_message("System", "API nicht erreichbar — versuch's nochmal.")
             self._whisper_status = "Idle"
             return
 

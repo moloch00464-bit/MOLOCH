@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "total_decisions": 448800,
+  "total_decisions": 448900,
   "weights": {
-    "scrfd": -0.05,
+    "scrfd": -0.1,
     "arcface": -0.1,
-    "yolov8m": 0.0,
+    "yolov8m": -0.05,
     "pose": -0.1,
-    "hand_landmark": 0.05
+    "hand_landmark": 0.0
   },
   "base_scores": {
     "scrfd": 0.6,
@@ -15,9 +15,9 @@
     "hand_landmark": 0.2
   },
   "effective_scores": {
-    "scrfd": 0.55,
+    "scrfd": 0.5,
     "arcface": 0.4,
-    "yolov8m": 0.4,
-    "hand_landmark": 0.25
+    "yolov8m": 0.35,
+    "hand_landmark": 0.2
   }
 }
