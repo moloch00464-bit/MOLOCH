@@ -235,6 +235,10 @@ class VoicePipeline:
         self._msg_counter = 0
         self._msg_lock = threading.Lock()
 
+        # API-Thread Schutz: Verhindert Queue von API-Calls wenn API down
+        self._api_in_flight = False
+        self._api_lock = threading.Lock()
+
         # Spontane Kommentare State
         self._spontaneous_cooldown = 600  # 10 Minuten
         self._last_spontaneous = 0.0
@@ -417,31 +421,14 @@ class VoicePipeline:
             self._whisper_status = "Idle"
             return
 
-        # 2. Claude API
-        self._whisper_status = "Denke..."
-        response = self._chat(text)
-
-        if not response:
-            # Fehlermeldung im Chat damit User weiss was los ist
-            self._emit_message("System", "API nicht erreichbar — versuch's nochmal.")
-            self._whisper_status = "Idle"
-            return
-
-        logger.info(f"[VOICE] Antwort: {response[:100]}...")
-        self._emit_message("MOLOCH", response)
-
-        # Langzeitgedaechtnis: Moloch-Antwort SOFORT speichern
-        try:
-            get_memory().save_message("moloch", response, source="voice")
-        except Exception as e:
-            logger.error(f"[VOICE] Memory save_message(moloch) fehlgeschlagen: {e}")
-
-        # 3. TTS
-        if self._voice_enabled:
-            self._whisper_status = "Spreche..."
-            self._speak(response)
-
-        self._whisper_status = "Idle"
+        # STUFE 3: Claude API in SEPARATEM Thread (blockiert NICHT Stufe 1+2)
+        self._whisper_status = "Idle"  # Stufe 1+2 fertig, Pipeline frei
+        api_thread = threading.Thread(
+            target=self._api_and_respond,
+            args=(text, "voice"),
+            daemon=True,
+        )
+        api_thread.start()
 
     # =========================================================================
     # Whisper STT
@@ -889,27 +876,14 @@ class VoicePipeline:
             self._whisper_status = "Idle"
             return
 
-        response = self._chat(text)
-        if not response:
-            # Fehlermeldung im Chat damit User weiss was los ist
-            self._emit_message("System", "API nicht erreichbar — versuch's nochmal.")
-            self._whisper_status = "Idle"
-            return
-
-        logger.info(f"[VOICE] Antwort: {response[:100]}...")
-        self._emit_message("MOLOCH", response)
-
-        # Langzeitgedaechtnis: Moloch-Antwort SOFORT speichern
-        try:
-            get_memory().save_message("moloch", response, source="text")
-        except Exception as e:
-            logger.error(f"[VOICE] Memory save_message(moloch/text) fehlgeschlagen: {e}")
-
-        if self._voice_enabled:
-            self._whisper_status = "Spreche..."
-            self._speak(response)
-
-        self._whisper_status = "Idle"
+        # STUFE 3: Claude API in SEPARATEM Thread (blockiert NICHT Stufe 1+2)
+        self._whisper_status = "Idle"  # Stufe 1+2 fertig, Pipeline frei
+        api_thread = threading.Thread(
+            target=self._api_and_respond,
+            args=(text, "text"),
+            daemon=True,
+        )
+        api_thread.start()
 
     # =========================================================================
     # Piper TTS
