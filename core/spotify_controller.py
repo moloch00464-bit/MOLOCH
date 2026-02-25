@@ -878,9 +878,19 @@ class SpotifyController:
 
         Liest Core State alle 5 Sekunden. Bei Zone-Wechsel -> neue Musik.
         Prueft spotifyd alle 60 Sekunden.
+
+        Stabilisierungs-Regeln:
+          - Cooldown: Min 60s zwischen Track-Wechseln (kein Rapid-Fire)
+          - Debounce: Zone muss 2 Checks stabil sein bevor Wechsel
+          - Max 3 consecutive Fehler, dann Auto-DJ pausieren bis Zone-Wechsel
         """
         logger.info("[AUTO-DJ] Loop gestartet")
         health_counter = 0
+        last_play_time = 0.0       # Monotonic: Wann zuletzt Tracks gestartet
+        pending_zone = None        # Zone die noch bestaetigt werden muss (Debounce)
+        consecutive_failures = 0   # Zaehler fuer Spotify-Fehler am Stueck
+        _COOLDOWN_SECS = 60.0     # Min Sekunden zwischen Zone-Wechseln
+        _MAX_FAILURES = 3          # Danach aufhoeren bis naechster Zone-Wechsel
 
         while self._auto_dj_active:
             try:
@@ -892,21 +902,57 @@ class SpotifyController:
 
                 # Core Integrator Zone lesen
                 zone = self._get_current_zone()
-                if zone and zone != self._auto_dj_zone:
-                    old_zone = self._auto_dj_zone
-                    self._auto_dj_zone = zone
-                    if old_zone is not None:
-                        logger.info(f"[AUTO-DJ] Zone-Wechsel: {old_zone} -> {zone}")
-                        if not self.play_by_mood(zone):
-                            # Retry nach Device-Recovery
-                            self._device_id = None
-                            self._refresh_device()
-                            self.play_by_mood(zone)
-                    else:
-                        logger.info(f"[AUTO-DJ] Initiale Zone: {zone}")
-                        self.play_by_mood(zone)
+                if not zone:
+                    pending_zone = None
+                    continue
+
+                # Zone gleich wie aktuell? Nichts tun
+                if zone == self._auto_dj_zone:
+                    pending_zone = None
+                    continue
+
+                # Debounce: Zone muss 2 Checks hintereinander stabil sein
+                if zone != pending_zone:
+                    pending_zone = zone
+                    logger.debug(f"[AUTO-DJ] Zone-Kandidat: {zone} (warte auf Bestaetigung)")
+                    continue
+                # Zone ist stabil (2. Check) — jetzt Wechsel pruefen
+
+                # Cooldown: Nicht zu oft wechseln
+                now = time.monotonic()
+                if now - last_play_time < _COOLDOWN_SECS:
+                    remaining = int(_COOLDOWN_SECS - (now - last_play_time))
+                    logger.debug(f"[AUTO-DJ] Cooldown: noch {remaining}s bis naechster Wechsel")
+                    continue
+
+                # Zu viele Fehler? Warten bis Zone sich aendert
+                if consecutive_failures >= _MAX_FAILURES:
+                    logger.debug(f"[AUTO-DJ] {consecutive_failures} Fehler — warte auf neuen Zone-Wechsel")
+                    continue
+
+                old_zone = self._auto_dj_zone
+                self._auto_dj_zone = zone
+                pending_zone = None
+
+                if old_zone is not None:
+                    logger.info(f"[AUTO-DJ] Zone-Wechsel: {old_zone} -> {zone}")
+                else:
+                    logger.info(f"[AUTO-DJ] Initiale Zone: {zone}")
+
+                # Einen Play-Versuch, kein sofortiger Retry
+                if self.play_by_mood(zone):
+                    last_play_time = time.monotonic()
+                    consecutive_failures = 0
+                    logger.info(f"[AUTO-DJ] Musik laeuft fuer Zone '{zone}'")
+                else:
+                    consecutive_failures += 1
+                    logger.warning(f"[AUTO-DJ] Play fehlgeschlagen ({consecutive_failures}/{_MAX_FAILURES})")
+                    if consecutive_failures >= _MAX_FAILURES:
+                        logger.warning("[AUTO-DJ] Zu viele Fehler — Spotify down? Pausiere Auto-DJ Wechsel.")
+
             except Exception as e:
                 logger.error(f"[AUTO-DJ] Fehler: {e}")
+                consecutive_failures += 1
 
             # 5 Sekunden warten (in 0.5s Schritten fuer schnelles Shutdown)
             for _ in range(10):

@@ -467,7 +467,11 @@ class VoicePipeline:
     # =========================================================================
 
     def _chat(self, user_text: str) -> Optional[str]:
-        """Text an Claude API senden und Antwort holen."""
+        """Text an Claude API senden und Antwort holen.
+
+        SDK retried 529 intern 3x. Wir machen EINEN zusaetzlichen Versuch
+        nach 5s Pause wenn die SDK aufgibt (Overloaded).
+        """
         if not self._claude_available or not self._claude_client:
             logger.warning("[VOICE] Claude API nicht verfuegbar")
             return None
@@ -482,66 +486,76 @@ class VoicePipeline:
                 self._conversation = self._conversation[-10:]
             msgs = list(self._conversation)  # Kopie fuer API-Call
 
+        # System-Prompt einmalig aufbauen (gilt fuer alle Versuche)
+        system = _sanitize_text(self._system_prompt)
         try:
-            # System-Prompt mit Memory-Kontext und Personality-Zone anreichern
-            system = _sanitize_text(self._system_prompt)
-            try:
-                memory_ctx = get_memory().get_memory_context()
-                if memory_ctx:
-                    system = system + "\n\n--- LANGZEITGEDAECHTNIS ---\n" + _sanitize_text(memory_ctx)
-            except Exception as e:
-                logger.error(f"[VOICE] Memory-Kontext laden fehlgeschlagen: {e}")
-
-            # Wahrnehmungs-Kontext (was sehen die NPU-Modelle gerade?)
-            perception_ctx = _perception_to_text()
-            if perception_ctx:
-                system = system + "\n\n--- AKTUELLE WAHRNEHMUNG ---\n" + _sanitize_text(perception_ctx)
-
-            # Personality Zone vom CoreIntegrator
-            try:
-                from core.personality.personality_engine import get_personality_engine
-                pe = get_personality_engine()
-                pe.update_from_integrator()  # Zone aktualisieren
-                zone_addon = pe.get_zone_system_prompt_addon()
-                if zone_addon:
-                    system = system + _sanitize_text(zone_addon)
-                # Stimme an aktuelle Zone anpassen
-                vc = pe.voice_config
-                self._current_voice = vc.voice_id
-                self._length_scale = vc.speed
-            except Exception as e:
-                logger.debug(f"[VOICE] Personality-Zone nicht verfuegbar: {e}")
-
-            response = self._claude_client.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=512,
-                system=system,
-                messages=msgs,
-                timeout=30.0,  # 30s Timeout — kein ewiges Haengen bei API-Problemen
-            )
-            text = response.content[0].text
-
-            # REMEMBER-Tags extrahieren und lernen (persistiert in beide Systeme)
-            try:
-                text = get_memory().extract_and_learn(text)
-            except Exception as e:
-                logger.error(f"[VOICE] extract_and_learn fehlgeschlagen: {e}")
-
-            # SPOTIFY-Tags extrahieren und ausfuehren
-            try:
-                text = self._extract_spotify_commands(text)
-            except Exception as e:
-                logger.error(f"[VOICE] Spotify-Commands fehlgeschlagen: {e}")
-
-            with self._lock:
-                self._conversation.append({"role": "assistant", "content": text})
-            return text
+            memory_ctx = get_memory().get_memory_context()
+            if memory_ctx:
+                system = system + "\n\n--- LANGZEITGEDAECHTNIS ---\n" + _sanitize_text(memory_ctx)
         except Exception as e:
-            logger.error(f"[VOICE] Claude API Fehler: {e}")
-            with self._lock:
-                if self._conversation and self._conversation[-1].get("role") == "user":
-                    self._conversation.pop()
-            return None
+            logger.error(f"[VOICE] Memory-Kontext laden fehlgeschlagen: {e}")
+
+        perception_ctx = _perception_to_text()
+        if perception_ctx:
+            system = system + "\n\n--- AKTUELLE WAHRNEHMUNG ---\n" + _sanitize_text(perception_ctx)
+
+        try:
+            from core.personality.personality_engine import get_personality_engine
+            pe = get_personality_engine()
+            pe.update_from_integrator()
+            zone_addon = pe.get_zone_system_prompt_addon()
+            if zone_addon:
+                system = system + _sanitize_text(zone_addon)
+            vc = pe.voice_config
+            self._current_voice = vc.voice_id
+            self._length_scale = vc.speed
+        except Exception as e:
+            logger.debug(f"[VOICE] Personality-Zone nicht verfuegbar: {e}")
+
+        # API Call mit einem Retry bei Overloaded (529)
+        last_err = None
+        for attempt in range(2):  # Max 2 Versuche auf unserer Ebene
+            try:
+                response = self._claude_client.messages.create(
+                    model="claude-sonnet-4-20250514",
+                    max_tokens=512,
+                    system=system,
+                    messages=msgs,
+                    timeout=30.0,
+                )
+                text = response.content[0].text
+
+                try:
+                    text = get_memory().extract_and_learn(text)
+                except Exception as e:
+                    logger.error(f"[VOICE] extract_and_learn fehlgeschlagen: {e}")
+
+                try:
+                    text = self._extract_spotify_commands(text)
+                except Exception as e:
+                    logger.error(f"[VOICE] Spotify-Commands fehlgeschlagen: {e}")
+
+                with self._lock:
+                    self._conversation.append({"role": "assistant", "content": text})
+                return text
+
+            except Exception as e:
+                last_err = e
+                err_str = str(e).lower()
+                # Nur bei Overloaded (529) retrien, sonst sofort aufgeben
+                if attempt == 0 and ("529" in err_str or "overloaded" in err_str):
+                    logger.warning(f"[VOICE] API ueberlastet, warte 5s und versuche nochmal...")
+                    self._whisper_status = "API ueberlastet..."
+                    time.sleep(5)
+                    continue
+                break
+
+        # Alle Versuche fehlgeschlagen
+        logger.error(f"[VOICE] Claude API Fehler: {last_err}")
+        with self._lock:
+            if self._conversation and self._conversation[-1].get("role") == "user":
+                self._conversation.pop()
+        return None
 
     # =========================================================================
     # Direkte Spotify Voice Commands (OHNE Claude API)
