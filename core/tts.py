@@ -149,9 +149,10 @@ class TTSEngine:
         return result.stdout
 
     def _play_raw(self, raw_audio: bytes, sample_rate: int):
-        """Play raw PCM directly via aplay (no temp file, no mpv startup)."""
+        """Play raw PCM direkt via pw-cat (PipeWire, kein ALSA-Konflikt)."""
         subprocess.run(
-            ["aplay", "-r", str(sample_rate), "-f", "S16_LE", "-c", "1", "-q"],
+            ["pw-cat", "-p", "--raw", "--rate", str(sample_rate),
+             "--channels", "1", "--format", "s16", "-"],
             input=raw_audio, check=True)
 
     def set_speed(self, speed: float):
@@ -228,20 +229,20 @@ class TTSEngine:
                     self._play_audio(raw_audio, voice_model.config)
                 return bool(raw_audio)
 
-            # Direct pipe streaming: piper | aplay
-            # Piper outputs raw PCM incrementally, aplay plays as data arrives
+            # Direct pipe streaming: piper | pw-cat (PipeWire, raw PCM)
+            # Piper outputs raw PCM incrementally, pw-cat spielt via PipeWire
             piper_cmd = [
                 str(self.piper_bin),
                 "--model", str(voice_model.path),
                 "--length-scale", str(LENGTH_SCALE),
                 "--output-raw"
             ]
-            aplay_cmd = [
-                "aplay", "-r", str(sample_rate),
-                "-f", "S16_LE", "-c", "1", "-q"
+            pw_cmd = [
+                "pw-cat", "-p", "--raw", "--rate", str(sample_rate),
+                "--channels", "1", "--format", "s16", "-"
             ]
 
-            logger.info("[TTS] Pipe streaming: piper | aplay")
+            logger.info("[TTS] Pipe streaming: piper | pw-cat")
 
             piper_proc = subprocess.Popen(
                 piper_cmd,
@@ -249,21 +250,21 @@ class TTSEngine:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL
             )
-            aplay_proc = subprocess.Popen(
-                aplay_cmd,
+            pw_proc = subprocess.Popen(
+                pw_cmd,
                 stdin=piper_proc.stdout,
                 stderr=subprocess.DEVNULL
             )
 
-            # Close piper stdout in parent so aplay gets EOF when piper finishes
+            # Close piper stdout in parent so pw-play gets EOF wenn piper fertig
             piper_proc.stdout.close()
 
-            # Send text to piper stdin
+            # Text an piper stdin senden
             piper_proc.stdin.write(text.encode('utf-8'))
             piper_proc.stdin.close()
 
-            # Wait for playback to complete
-            aplay_proc.wait()
+            # Warten bis Playback fertig
+            pw_proc.wait()
             piper_proc.wait()
 
             logger.info("[TTS] Pipe streaming done")
@@ -331,9 +332,10 @@ class TTSEngine:
 
         except subprocess.CalledProcessError as e:
             logger.error(f"Audio playback failed: {e}")
-            # Fallback to simple aplay if mpv/sox fails
+            # Fallback zu pw-cat wenn mpv/sox fehlschlaegt
             try:
-                cmd = ["aplay", "-r", str(sample_rate), "-f", "S16_LE", "-c", "1", "-q"]
+                cmd = ["pw-cat", "-p", "--raw", "--rate", str(sample_rate),
+                       "--channels", "1", "--format", "s16", "-"]
                 subprocess.run(cmd, input=raw_audio, check=True)
             except Exception:
                 raise

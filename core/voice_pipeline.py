@@ -7,7 +7,7 @@ PTT Recording -> Whisper STT -> Claude API -> Piper TTS -> HDMI Output
 
 Audio Devices:
   Input:  ReSpeaker Lite (card 2, device 0) — plughw:2,0
-  Output: HDMI (card 0, device 0) — plughw:0,0
+  Output: HDMI via PipeWire (pw-play)
 
 Eigenstaendiges Modul, wird vom MolochService instanziiert.
 Kommuniziert NICHT direkt mit GUI.
@@ -30,7 +30,7 @@ logger = logging.getLogger("VoicePipeline")
 
 # Audio Device Konfiguration
 MIC_DEVICE = "plughw:2,0"      # ReSpeaker Lite
-SPEAKER_DEVICE = "plughw:0,0"  # HDMI-0
+SPEAKER_DEVICE = "plughw:1,0"  # HDMI-1 (Fallback, primaer pw-play)
 
 # Pfade
 MODELS_DIR = Path.home() / "moloch" / "models" / "voices"
@@ -853,7 +853,7 @@ class VoicePipeline:
         """Text mit Piper TTS sprechen und ueber HDMI ausgeben.
 
         Buffer-before-Play: Komplett generieren, dann in einem Stueck abspielen.
-        Kein Stottern zwischen Saetzen, ein einziger aplay-Aufruf.
+        Kein Stottern zwischen Saetzen, ein einziger pw-play-Aufruf via PipeWire.
         """
         if not self._piper_available:
             logger.warning("[VOICE] Piper nicht verfuegbar")
@@ -875,9 +875,9 @@ class VoicePipeline:
             except Exception:
                 pass
 
-        aplay_cmd = [
-            "aplay", "-D", SPEAKER_DEVICE,
-            "-r", sample_rate, "-f", "S16_LE", "-c", "1", "-q",
+        pw_cmd = [
+            "pw-cat", "-p", "--raw", "--rate", sample_rate,
+            "--channels", "1", "--format", "s16", "-",
         ]
 
         # Text in Saetze aufteilen
@@ -908,7 +908,7 @@ class VoicePipeline:
                         f"{len(sentences)} Saetze, {len(full_audio)//1024}KB "
                         f"in {gen_time:.1f}s — starte Playback")
 
-            subprocess.run(aplay_cmd, input=full_audio, timeout=120)
+            subprocess.run(pw_cmd, input=full_audio, timeout=120)
 
             dt = time.time() - t0
             logger.info(f"[VOICE] Gesprochen: {len(text)} Zeichen ({dt:.1f}s total)")
