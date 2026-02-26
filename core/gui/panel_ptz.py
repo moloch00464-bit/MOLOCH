@@ -23,6 +23,7 @@ from core.gui.panel_styles import (
     FONT_BUTTON, FONT_LABEL, FONT_SMALL,
     STATUS_UPDATE_MS,
     ACCENT_CYAN,
+    STATUS_GREEN, STATUS_YELLOW, STATUS_RED,
 )
 
 
@@ -50,8 +51,12 @@ class PtzModule:
         self._daily_learner = False
         self._active_position = None
 
+        # Restless-Score Cache
+        self._restless_score = 0.0
+
         # GUI aufbauen
         self._build_dpad()
+        self._build_restless_indicator()
         self._build_quick_positions()
         self._build_toggles()
 
@@ -119,6 +124,63 @@ class PtzModule:
     def _ptz_move(self, direction):
         """PTZ-Bewegung senden."""
         self._service._write_command("ptz_move", {"direction": direction})
+
+    # =========================================================================
+    # Restless-Indikator
+    # =========================================================================
+
+    def _build_restless_indicator(self):
+        """Kleiner Indikator: Kamera-Bewegungsintensitaet.
+
+        Ruhig (gruen) | Moderat (gelb) | Hektisch (rot)
+        """
+        row = tk.Frame(self._parent, bg=BG_FRAME)
+        row.pack(fill=tk.X, padx=5, pady=(0, 2))
+
+        tk.Label(
+            row, text="PTZ:", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
+        ).pack(side=tk.LEFT, padx=(5, 2))
+
+        self._lbl_restless = tk.Label(
+            row, text="Ruhig", bg=BG_FRAME, fg=STATUS_GREEN, font=FONT_SMALL,
+        )
+        self._lbl_restless.pack(side=tk.LEFT, padx=2)
+
+        self._lbl_tracker_state = tk.Label(
+            row, text="", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
+        )
+        self._lbl_tracker_state.pack(side=tk.RIGHT, padx=5)
+
+    def _update_restless_indicator(self, status):
+        """Restless-Indikator aus Status-Dict aktualisieren."""
+        ptz = status.get("ptz", {})
+        score = ptz.get("ptz_restless_score", 0.0)
+        stage = ptz.get("ptz_stage", "idle")
+        tracker_state = ptz.get("tracker_state", "idle")
+
+        # Farbe nach Score
+        if score < 0.2:
+            text = "Ruhig"
+            color = STATUS_GREEN
+        elif score < 0.6:
+            text = f"Aktiv ({score:.1f})"
+            color = STATUS_YELLOW
+        else:
+            text = f"Hektisch ({score:.1f})"
+            color = STATUS_RED
+
+        if hasattr(self, '_lbl_restless'):
+            self._lbl_restless.config(text=text, fg=color)
+
+        # Tracker-State rechts anzeigen
+        state_map = {
+            "idle": "", "tracking": "Trackt", "searching": "Sucht...",
+            "locked": "Locked", "frozen": "Frozen", "coast": "Coast",
+            "dwell": "Dwell",
+        }
+        state_text = state_map.get(tracker_state, tracker_state)
+        if hasattr(self, '_lbl_tracker_state'):
+            self._lbl_tracker_state.config(text=state_text)
 
     # =========================================================================
     # Quick Positions
@@ -246,6 +308,9 @@ class PtzModule:
                     text="Lernt..." if dl else "Bereit",
                     fg=BTN_ON_GREEN if dl else FG_DIM,
                 )
+
+            # Restless-Indikator aktualisieren
+            self._update_restless_indicator(status)
 
         # Widgets sofort neu zeichnen
         self._parent.update_idletasks()

@@ -83,7 +83,7 @@ class TrackingConfig:
     frozen_threshold_pixels: int = 5
 
     # === Dwell Timer ===
-    dwell_time_sec: float = 0.5  # schneller starten (war 1.5)
+    dwell_time_sec: float = 0.0  # SOFORT tracken, kein Warten (war 0.5)
 
     # === AbsoluteMove Tracking Parameters ===
     # Kamera Motor-Speed: ~30 deg/s (Kalibrierung: 342deg in ~12s)
@@ -106,8 +106,8 @@ class TrackingConfig:
     tilt_limit_max: float = 78.8
 
     # Search mode parameters
-    search_speed: float = 0.3
-    search_direction_interval: float = 4.0
+    search_speed: float = 0.15          # Langsam schwenken, nicht hektisch (war 0.3)
+    search_direction_interval: float = 6.0  # 6s pro Position, mehr Zeit zum Scannen (war 4.0)
     search_reset_to_center: bool = False
     search_patrol_positions: list = field(default_factory=lambda: [
         (0.0, 0.0),        # Home (Markus' Sitzplatz)
@@ -117,9 +117,15 @@ class TrackingConfig:
         (60.0, 0.0),       # Leicht rechts
         (120.0, 0.0),      # Weiter rechts
     ])
-    search_home_timeout: float = 120.0  # 120s ohne Fund -> Home (war 30s)
+    search_home_timeout: float = 120.0  # 120s ohne Fund -> Home
 
-    target_lost_timeout: float = 10.0  # 10s coasting bevor Search (war 5s)
+    # Verlust-Logik (3-Phasen):
+    #   Phase 1: 0-5s nach Verlust -> STEHEN BLEIBEN (halt_wait_timeout)
+    #   Phase 2: 5-30s -> langsam Home fahren
+    #   Phase 3: >30s -> Idle-Suche (langsames Patrol)
+    halt_wait_timeout: float = 5.0     # 5s an letzter Position warten
+    home_return_timeout: float = 30.0  # Nach 30s ohne Detection -> Home + Suche starten
+    target_lost_timeout: float = 5.0   # Ab 5s -> Home (war 10s, jetzt = halt_wait)
     frame_width: int = 640
     frame_height: int = 640
 
@@ -146,9 +152,9 @@ class TrackingConfig:
     prefer_current_target: bool = True
 
     # === SMOOTHING: Face/Person Wechsel-Daempfung ===
-    source_hysteresis_frames: int = 3   # Neuer Source-Typ muss 3 Frames stabil sein
-    center_ring_buffer_size: int = 10   # Mittelwert ueber letzte 10 Frame-Zentren (war 5)
-    min_frames_before_move: int = 3     # Mindestens 3 Frames im Buffer bevor Kamera bewegt
+    source_hysteresis_frames: int = 1   # Body->Face sofort, kein Warten (war 3)
+    center_ring_buffer_size: int = 5    # Kleinerer Buffer fuer schnellere Reaktion (war 10)
+    min_frames_before_move: int = 1     # SOFORT bewegen nach erstem Frame (war 3)
 
     # === DEAD ZONE + COAST MODE (Tracker-Beruhigung) ===
     dead_zone_pct: float = 0.15        # 15% - mittlere 30% des Bildes = RUHIG (war 3%)
@@ -228,6 +234,7 @@ class AutonomousTracker:
         self.last_direction_switch = 0.0
         self.search_patrol_index = 0
         self.search_move_time = 0.0
+        self._returning_home = False  # Phase-2 Flag: langsam Home fahren
 
         # === Real Camera Position (replaces virtual position) ===
         self.last_known_pan = 0.0
@@ -893,7 +900,16 @@ class AutonomousTracker:
                 time.sleep(sleep_time)
 
     def _process_tracking_cycle(self):
-        """Process one tracking cycle."""
+        """Process one tracking cycle.
+
+        3-Phasen Verlust-Logik:
+          Phase 0: Detection aktiv     -> SOFORT tracken (Person/Gesicht)
+          Phase 1: 0-5s ohne Detection -> STEHEN BLEIBEN an letzter Position
+          Phase 2: 5-30s              -> langsam Home fahren, dort warten
+          Phase 3: >30s               -> Idle-Suche (langsames Patrol)
+
+        ABSOLUTE REGEL: Wenn Person im Bild -> NIEMALS Search starten.
+        """
         # Echte Kameraposition alle 2 Cycles (~400ms) via ONVIF lesen
         if self.stats["cycles"] % 2 == 0:
             self._read_camera_position()
@@ -912,25 +928,63 @@ class AutonomousTracker:
                        f"state={self.state.value} "
                        f"pos=({self.last_known_pan:+.1f},{self.last_known_tilt:+.1f})deg")
 
+        # === PHASE 0: Detection aktiv -> SOFORT tracken ===
         if detection.detected and time_since_detection < 0.5:
+            # Search/Patrol SOFORT abbrechen wenn Person im Bild
+            if self.state == TrackerState.SEARCHING:
+                logger.info("[CYCLE] Person erkannt waehrend Search -> SOFORT tracken!")
+                if self.camera:
+                    self.camera.stop()
             self._do_tracking(detection)
-        else:
-            if time_since_detection > self.config.target_lost_timeout:
-                if debug_log:
-                    logger.info(f"[CYCLE] No detection for {time_since_detection:.1f}s -> SEARCH")
-                self._do_search()
-            else:
-                if debug_log:
-                    logger.info(f"[CYCLE] Brief loss ({time_since_detection:.2f}s) -> COAST")
-                self._do_coast()
+            return
+
+        # === Kein Target: 3-Phasen Verlust-Logik ===
+
+        # Phase 1: 0-5s -> STEHEN BLEIBEN (halt_wait_timeout)
+        if time_since_detection <= self.config.halt_wait_timeout:
+            if self.state == TrackerState.SEARCHING:
+                # Laufende Search stoppen — Person war gerade noch da
+                if self.camera:
+                    self.camera.stop()
+                self._set_state(TrackerState.COAST)
+            if debug_log:
+                logger.info(f"[CYCLE] Phase 1: HALT ({time_since_detection:.1f}s < {self.config.halt_wait_timeout}s)")
+            self._do_coast()
+            return
+
+        # Phase 2: 5-30s -> langsam Home fahren
+        if time_since_detection <= self.config.home_return_timeout:
+            if self.state != TrackerState.SEARCHING:
+                # Einmalig Home anfahren
+                if not getattr(self, '_returning_home', False):
+                    self._returning_home = True
+                    logger.info(f"[CYCLE] Phase 2: Home fahren ({time_since_detection:.1f}s)")
+                    if self.camera and self.camera.is_connected:
+                        self.camera.move_absolute(0.0, 0.0, speed=0.15)
+            if debug_log:
+                logger.info(f"[CYCLE] Phase 2: Warte auf Home ({time_since_detection:.1f}s)")
+            return
+
+        # Phase 3: >30s -> Idle-Suche (langsames Patrol)
+        self._returning_home = False
+        if debug_log:
+            logger.info(f"[CYCLE] Phase 3: SEARCH ({time_since_detection:.1f}s)")
+        self._do_search()
 
     # =========================================================================
     # Tracking (AbsoluteMove-based)
     # =========================================================================
 
     def _do_tracking(self, detection: DetectionData):
-        """Execute tracking with dwell timer, proportional position control, and LOCK/FROZEN states."""
+        """Execute tracking: SOFORT auf Person locken, proportional + PD-Regler.
+
+        ABSOLUTE REGEL: Person im Bild -> Kamera folgt. Sofort. Kein Dwell.
+        YOLO Person -> Kamera folgt. SCRFD Gesicht -> praeziser zentrieren.
+        """
         now = time.time()
+
+        # Home-Return Flag zuruecksetzen — Person gefunden
+        self._returning_home = False
 
         # EMA Glaettung: smooth detection center (kein Ruckeln/Springen)
         alpha = self.config.smooth_alpha
@@ -968,34 +1022,10 @@ class AutonomousTracker:
             logger.info(f"[TRACK] error=({error_x:+.0f},{error_y:+.0f})px mag={error_magnitude:.0f}px "
                        f"state={self.state.value} pos=({self.last_known_pan:+.1f},{self.last_known_tilt:+.1f})deg")
 
-        # === DWELL STATE: Wait before starting movement ===
-        if not self.dwell_target_acquired:
+        # SOFORT in TRACKING State — kein Dwell, kein Warten
+        if self.state != TrackerState.TRACKING and self.state != TrackerState.FROZEN and self.state != TrackerState.COAST:
+            self._set_state(TrackerState.TRACKING)
             self.dwell_target_acquired = True
-            self.dwell_start_time = now
-            # FOLLOW_FACE Prioritaet: Nach SEARCH sofort tracken, kein Dwell
-            if self._prev_state == TrackerState.SEARCHING:
-                logger.info("[DWELL] Uebersprungen - Ziel nach SEARCH gefunden, sofort Follow")
-                self._set_state(TrackerState.TRACKING)
-            else:
-                self._set_state(TrackerState.DWELL)
-                logger.info(f"[DWELL] Target acquired - waiting {self.config.dwell_time_sec}s before tracking")
-                return
-
-        if self.state == TrackerState.DWELL:
-            dwell_elapsed = now - self.dwell_start_time
-            if dwell_elapsed < self.config.dwell_time_sec:
-                if debug_log:
-                    logger.info(f"[DWELL] Waiting... {dwell_elapsed:.1f}s / {self.config.dwell_time_sec}s")
-                return
-            else:
-                logger.info("[DWELL] Complete - starting tracking")
-                self._set_state(TrackerState.TRACKING)
-
-        # === Minimum Frames: Erst bewegen wenn genug Daten im Ring-Buffer ===
-        if len(self._center_ring) < self.config.min_frames_before_move:
-            if debug_log:
-                logger.info(f"[TRACK] Warte auf Frames: {len(self._center_ring)}/{self.config.min_frames_before_move}")
-            return
 
         # === Error-Magnitude als Prozent vom Bild (fuer Dead Zone / Coast) ===
         error_magnitude_pct = math.sqrt(error_x_norm**2 + error_y_norm**2)
@@ -1215,11 +1245,13 @@ class AutonomousTracker:
     # =========================================================================
 
     def _do_search(self):
-        """Execute search mode - patrol sweep using AbsoluteMove positions.
+        """Idle-Suche: Langsames Patrol nach >30s ohne Detection.
 
-        Search Pattern: Home -> Links -> Rechts -> Home -> Hoch -> Runter -> Home
-        Nach 60s ohne Fund: Zurueck zu Home, Presence sinkt.
-        CoreIntegrator wird ueber Such-Status informiert.
+        ABSOLUTE REGEL: Wenn waehrend Search eine Detection reinkommt,
+        wird Search in _process_tracking_cycle() SOFORT abgebrochen.
+        Hier nur die Patrol-Logik fuer Phase 3.
+
+        Search Speed ist LANGSAM (0.15), Positionswechsel alle 6s.
         """
         # Smoothing + Coast-Timer + PD-State zuruecksetzen wenn Ziel verloren
         self._smooth_x = None
@@ -1228,11 +1260,13 @@ class AutonomousTracker:
         self._prev_error_x = 0.0
         self._prev_error_y = 0.0
         self._prev_error_time = 0.0
+
+        # Sofort-Check: Person sichtbar laut Perception -> KEIN Search
         if PERCEPTION_AVAILABLE:
             try:
                 if is_user_visible():
                     if self.state == TrackerState.SEARCHING:
-                        logger.info("[SEARCH] Aborted: user_visible=True in perception")
+                        logger.info("[SEARCH] Abbruch: user_visible=True in perception")
                     self._do_coast()
                     return
             except Exception:
@@ -1247,8 +1281,7 @@ class AutonomousTracker:
             self.search_move_time = now
             self._search_start_time = now
 
-            # Erste Position ansteuern
-            logger.info(f"[SEARCH] Patrol gestartet ab ({self.last_known_pan:+.1f},{self.last_known_tilt:+.1f})")
+            logger.info(f"[SEARCH] Idle-Patrol gestartet (langsam, speed={self.config.search_speed})")
 
             # Reset dwell state for next target acquisition
             self.dwell_target_acquired = False
@@ -1266,13 +1299,13 @@ class AutonomousTracker:
         search_duration = now - getattr(self, '_search_start_time', now)
         patrol_positions = self.config.search_patrol_positions
 
-        # Nach 30s ohne Fund: Zurueck zu Home und aufhoeren
+        # Nach search_home_timeout (120s) ohne Fund: Zurueck zu Home, stoppen
         if search_duration > self.config.search_home_timeout:
             if self.search_patrol_index != 0 or self.search_move_time == 0:
-                logger.info(f"[SEARCH] {self.config.search_home_timeout:.0f}s ohne Fund -> Home-Position")
+                logger.info(f"[SEARCH] {self.config.search_home_timeout:.0f}s ohne Fund -> Home + Idle")
                 self._send_search_move(0.0, 0.0)
                 self.search_patrol_index = 0
-                # CoreIntegrator: Presence sinkt stark
+                # CoreIntegrator: Presence auf 0
                 if self._core_integrator:
                     try:
                         self._core_integrator.update_input("tracker", "time_since_interaction", 1.0)
@@ -1281,23 +1314,22 @@ class AutonomousTracker:
                         pass
             return
 
-        # Patrol-Position wechseln alle 4 Sekunden
+        # Patrol-Position wechseln alle search_direction_interval Sekunden
         time_at_position = now - self.search_move_time
         if time_at_position >= self.config.search_direction_interval:
-            # Naechste Patrol-Position
             self.search_patrol_index = (self.search_patrol_index + 1) % len(patrol_positions)
             target_pan, target_tilt = patrol_positions[self.search_patrol_index]
 
             logger.info(f"[SEARCH] Patrol [{self.search_patrol_index}/{len(patrol_positions)}] "
                        f"-> ({target_pan:+.1f},{target_tilt:+.1f}) "
-                       f"(Search seit {search_duration:.0f}s)")
+                       f"(seit {search_duration:.0f}s, speed={self.config.search_speed})")
 
             self._send_search_move(target_pan, target_tilt)
 
             # CoreIntegrator: Presence sinkt langsam beim Suchen
             if self._core_integrator:
                 try:
-                    decay = min(1.0, search_duration / 60.0)  # 0->1 ueber 60s
+                    decay = min(1.0, search_duration / 60.0)
                     self._core_integrator.update_input("tracker", "time_since_interaction", decay)
                 except Exception:
                     pass

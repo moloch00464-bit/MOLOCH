@@ -658,6 +658,28 @@ class CameraManager:
                     pan, tilt = pos.pan, pos.tilt
                     ptz_text = f"Pan: {pan:.1f}  Tilt: {tilt:.1f}"
 
+                    # PTZ-Tracker: Position aufzeichnen (fuer restless_score)
+                    try:
+                        from core.ptz_tracker import get_ptz_tracker
+                        ptz_tracker = get_ptz_tracker()
+                        ptz_tracker.record_position(pan, tilt)
+                        # Tracker-Stage aktualisieren
+                        if self._autonomous_mode and self._tracker:
+                            from core.mpo.autonomous_tracker import TrackerState
+                            ts = self._tracker.state
+                            if ts in (TrackerState.LOCKED, TrackerState.FROZEN, TrackerState.COAST):
+                                ptz_tracker.set_stage("locked")
+                            elif ts == TrackerState.SEARCHING:
+                                ptz_tracker.set_stage("searching")
+                            elif ts == TrackerState.TRACKING:
+                                ptz_tracker.set_stage("tracking")
+                            else:
+                                ptz_tracker.set_stage("idle")
+                        elif not self._autonomous_mode:
+                            ptz_tracker.set_stage("idle")
+                    except Exception:
+                        pass
+
                     if (self._guardian_mode and self._smart_tracking_on
                             and not self._moloch_has_control
                             and not self._transitioning
