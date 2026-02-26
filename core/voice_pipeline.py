@@ -456,8 +456,8 @@ class VoicePipeline:
     def _chat(self, user_text: str) -> Optional[str]:
         """Text an Claude API senden und Antwort holen.
 
-        SDK retried 529 intern 3x. Wir machen EINEN zusaetzlichen Versuch
-        nach 5s Pause wenn die SDK aufgibt (Overloaded).
+        SDK retried 529 intern 2x. Wir machen KEINEN Extra-Retry mehr.
+        Laeuft in separatem Thread (_api_and_respond), blockiert nicht die Pipeline.
         """
         if not self._claude_available or not self._claude_client:
             logger.warning("[VOICE] Claude API nicht verfuegbar")
@@ -499,50 +499,38 @@ class VoicePipeline:
         except Exception as e:
             logger.debug(f"[VOICE] Personality-Zone nicht verfuegbar: {e}")
 
-        # API Call mit einem Retry bei Overloaded (529)
-        last_err = None
-        for attempt in range(2):  # Max 2 Versuche auf unserer Ebene
+        # API Call — SDK retried 529 intern 2x, wir machen KEINEN Extra-Retry
+        # Timeout 15s statt 30s: Fail fast, nicht ewig blockieren
+        try:
+            response = self._claude_client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=512,
+                system=system,
+                messages=msgs,
+                timeout=15.0,
+            )
+            text = response.content[0].text
+
             try:
-                response = self._claude_client.messages.create(
-                    model="claude-sonnet-4-20250514",
-                    max_tokens=512,
-                    system=system,
-                    messages=msgs,
-                    timeout=30.0,
-                )
-                text = response.content[0].text
-
-                try:
-                    text = get_memory().extract_and_learn(text)
-                except Exception as e:
-                    logger.error(f"[VOICE] extract_and_learn fehlgeschlagen: {e}")
-
-                try:
-                    text = self._extract_spotify_commands(text)
-                except Exception as e:
-                    logger.error(f"[VOICE] Spotify-Commands fehlgeschlagen: {e}")
-
-                with self._lock:
-                    self._conversation.append({"role": "assistant", "content": text})
-                return text
-
+                text = get_memory().extract_and_learn(text)
             except Exception as e:
-                last_err = e
-                err_str = str(e).lower()
-                # Nur bei Overloaded (529) retrien, sonst sofort aufgeben
-                if attempt == 0 and ("529" in err_str or "overloaded" in err_str):
-                    logger.warning(f"[VOICE] API ueberlastet, warte 5s und versuche nochmal...")
-                    self._whisper_status = "API ueberlastet..."
-                    time.sleep(5)
-                    continue
-                break
+                logger.error(f"[VOICE] extract_and_learn fehlgeschlagen: {e}")
 
-        # Alle Versuche fehlgeschlagen
-        logger.error(f"[VOICE] Claude API Fehler: {last_err}")
-        with self._lock:
-            if self._conversation and self._conversation[-1].get("role") == "user":
-                self._conversation.pop()
-        return None
+            try:
+                text = self._extract_spotify_commands(text)
+            except Exception as e:
+                logger.error(f"[VOICE] Spotify-Commands fehlgeschlagen: {e}")
+
+            with self._lock:
+                self._conversation.append({"role": "assistant", "content": text})
+            return text
+
+        except Exception as e:
+            logger.error(f"[VOICE] Claude API Fehler: {e}")
+            with self._lock:
+                if self._conversation and self._conversation[-1].get("role") == "user":
+                    self._conversation.pop()
+            return None
 
     # =========================================================================
     # Direkte Spotify Voice Commands (OHNE Claude API)
@@ -884,6 +872,55 @@ class VoicePipeline:
             daemon=True,
         )
         api_thread.start()
+
+    # =========================================================================
+    # STUFE 3: API Thread (laeuft unabhaengig von Whisper/Keywords)
+    # =========================================================================
+
+    def _api_and_respond(self, text: str, source: str = "voice"):
+        """Claude API in separatem Thread — blockiert NICHT die Voice Pipeline.
+
+        Args:
+            text: Transkribierter/eingegebener Text
+            source: "voice" oder "text" (fuer Memory-Tracking)
+        """
+        # Schutz: Wenn bereits ein API-Call laeuft, nicht stapeln
+        with self._api_lock:
+            if self._api_in_flight:
+                logger.warning("[VOICE] API-Call laeuft bereits, ueberspringe")
+                self._emit_message("System",
+                    "Vorherige Anfrage laeuft noch...")
+                return
+            self._api_in_flight = True
+
+        try:
+            self._whisper_status = "Denke..."
+            response = self._chat(text)
+
+            if not response:
+                self._emit_message("System",
+                    "API gerade nicht erreichbar. Lokale Befehle funktionieren.")
+                self._whisper_status = "Idle"
+                return
+
+            logger.info(f"[VOICE] Antwort: {response[:100]}...")
+            self._emit_message("MOLOCH", response)
+
+            # Langzeitgedaechtnis
+            try:
+                get_memory().save_message("moloch", response, source=source)
+            except Exception as e:
+                logger.error(f"[VOICE] Memory save_message(moloch/{source}) fehlgeschlagen: {e}")
+
+            # TTS
+            if self._voice_enabled:
+                self._whisper_status = "Spreche..."
+                self._speak(response)
+
+            self._whisper_status = "Idle"
+        finally:
+            with self._api_lock:
+                self._api_in_flight = False
 
     # =========================================================================
     # Piper TTS
