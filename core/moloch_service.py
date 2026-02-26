@@ -546,6 +546,17 @@ class MolochService:
                 "tracking_speed": round(getattr(self, '_ptz_tracking_speed', 0.7), 2),
                 "search_speed": round(getattr(self, '_ptz_search_speed', 0.15), 2),
             }
+            # Aktuelle Kamera-Position (Pan/Tilt in Grad)
+            try:
+                from core.hardware.camera import get_camera_controller
+                cam_ctrl = get_camera_controller()
+                if cam_ctrl and hasattr(cam_ctrl, 'current_position'):
+                    pos = cam_ctrl.current_position
+                    if pos:
+                        ptz_status["current_pan"] = round(pos.pan, 1)
+                        ptz_status["current_tilt"] = round(pos.tilt, 1)
+            except Exception:
+                pass
             # Tracker-State (fuer Panel-Anzeige)
             tracker = self._cam._tracker
             if tracker:

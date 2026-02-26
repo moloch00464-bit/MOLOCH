@@ -54,6 +54,9 @@ class PtzModule:
         # Restless-Score Cache
         self._restless_score = 0.0
 
+        # Manuelle Bewegungszaehler
+        self._move_count = 0
+
         # GUI aufbauen
         self._build_dpad()
         self._build_restless_indicator()
@@ -121,9 +124,24 @@ class PtzModule:
             command=lambda: self._ptz_move("down"),
         ).grid(row=2, column=1, padx=2, pady=2)
 
+        # Zeile 3: Pan/Tilt Anzeige
+        self._lbl_pan_tilt = tk.Label(
+            grid, text="Pan: ---  Tilt: ---",
+            bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
+        )
+        self._lbl_pan_tilt.grid(row=3, column=0, columnspan=3, pady=(2, 0))
+
+        # Zeile 4: Moves-Zaehler
+        self._lbl_moves = tk.Label(
+            grid, text="Moves: 0",
+            bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
+        )
+        self._lbl_moves.grid(row=4, column=0, columnspan=3, pady=(0, 5))
+
     def _ptz_move(self, direction):
         """PTZ-Bewegung senden."""
         self._service._write_command("ptz_move", {"direction": direction})
+        self._move_count += 1
 
     # =========================================================================
     # Restless-Indikator
@@ -308,6 +326,25 @@ class PtzModule:
                     text="Lernt..." if dl else "Bereit",
                     fg=BTN_ON_GREEN if dl else FG_DIM,
                 )
+
+            # Pan/Tilt Anzeige aktualisieren
+            ptz = status.get("ptz", {})
+            cur_pan = ptz.get("current_pan")
+            cur_tilt = ptz.get("current_tilt")
+            if cur_pan is not None and cur_tilt is not None:
+                self._lbl_pan_tilt.config(
+                    text=f"Pan: {cur_pan:.1f}\u00b0  Tilt: {cur_tilt:.1f}\u00b0",
+                    fg=FG_LABEL,
+                )
+            else:
+                self._lbl_pan_tilt.config(text="Pan: ---  Tilt: ---", fg=FG_DIM)
+
+            # Moves-Zaehler (manuell + tracking + search)
+            trk = ptz.get("tracking_moves", 0)
+            srch = ptz.get("search_moves", 0)
+            self._lbl_moves.config(
+                text=f"Moves: {self._move_count}  Trk: {trk}  Srch: {srch}",
+            )
 
             # Restless-Indikator aktualisieren
             self._update_restless_indicator(status)
