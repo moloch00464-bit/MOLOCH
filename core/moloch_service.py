@@ -269,13 +269,18 @@ class MolochService:
         except Exception as e:
             logger.error(f"[INIT] Whisper NPU init fehlgeschlagen: {e}")
 
-        # 1c. Alle Modelle sofort auf NPU konfigurieren (always_on: 320MB von 8GB)
-        if self._orchestrator.orchestration_mode == "always_on":
-            for name in list(self._orchestrator._models.keys()):
+        # 1c. NPU Idle-Modus: NUR yolov8m beim Start konfigurieren
+        # Weitere Modelle werden von PerceptionEngine stufenweise dazugeschaltet:
+        #   IDLE (nur yolov8m) → PERSON (+scrfd) → FACE (+arcface)
+        idle_models = ["yolov8m"]
+        if self._perception:
+            idle_models = self._perception.get_stage_models()  # Stage "idle" → ["yolov8m"]
+        for name in idle_models:
+            if name in self._orchestrator._models:
                 self._orchestrator.configure(name)
-            self._orchestrator.sync_flags()
-            self._inference.sync_flags_from_npu()
-            logger.info(f"[INIT] Always-On: {len(self._orchestrator.active_models)} Modelle konfiguriert: {self._orchestrator.active_models}")
+        self._orchestrator.sync_flags()
+        self._inference.sync_flags_from_npu()
+        logger.info(f"[INIT] Boot → Idle-Modus — nur Person-Waechter aktiv: {self._orchestrator.active_models}")
 
         # 2. Face DB (via InferenceEngine)
         self._inference.reload_face_db()
@@ -904,9 +909,14 @@ class MolochService:
         except Exception as e:
             logger.warning(f"[SETTINGS] Learner-Fehler: {e}")
 
-        # Orchestration Mode (always_on = alle Modelle immer aktiv, Default)
+        # Orchestration Mode — NPU Idle-Modus ersetzt always_on
+        # PerceptionEngine steuert jetzt die Modelle stufenweise (idle/person/face)
         try:
-            om = data.get("orchestration_mode", "always_on")
+            om = data.get("orchestration_mode", "adaptive")
+            # "always_on" wird nicht mehr unterstuetzt — Idle-Modus ist aktiv
+            if om == "always_on":
+                om = "adaptive"
+                logger.info("[SETTINGS] orchestration_mode: always_on → adaptive (NPU Idle-Modus)")
             if self._orchestrator:
                 self._orchestrator.orchestration_mode = om
                 logger.info(f"[SETTINGS] Orchestration Mode: {om}")

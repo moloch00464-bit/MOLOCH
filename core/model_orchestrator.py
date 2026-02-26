@@ -100,9 +100,8 @@ class ModelOrchestrator:
         self._attention_level_lock = threading.Lock()
         self._target_frame_delay = 0.033  # 30 FPS Default
 
-        # Orchestration Mode: "always_on" = alle Modelle immer aktiv (Default)
-        #                     "adaptive" = dynamische Level-basierte Aktivierung
-        self._orchestration_mode = "always_on"
+        # Orchestration Mode: "adaptive" = NPU Idle-Modus (PerceptionEngine steuert)
+        self._orchestration_mode = "adaptive"
 
         # NPU Watchdog: Anti-Oszillation
         self._swap_log = []
@@ -512,20 +511,25 @@ class ModelOrchestrator:
     # =================================================================
 
     def compute_attention_level(self) -> str:
-        """Attention-Level aus CoreIntegrator ableiten.
+        """Attention-Level aus PerceptionEngine NPU-Stage ableiten.
 
-        Bei orchestration_mode='always_on': Immer 'high' (alle Modelle, 30 FPS).
-        Bei orchestration_mode='adaptive': Dynamisch basierend auf CoreIntegrator.
+        NPU Idle-Modus: Stage wird von PerceptionEngine gesteuert.
+        idle → nur yolov8m, person → +scrfd, face → scrfd+arcface.
         """
-        # Always-On: Alle Modelle immer aktiv, kein Stromsparen bei 8GB NPU-RAM
-        if self._orchestration_mode == "always_on":
-            if self._daily_learner and self._daily_learner.enabled:
-                return "teach"
-            return "high"
-
-        # Adaptive Modus (Legacy, fuer spaeter)
         if self._daily_learner and self._daily_learner.enabled:
             return "teach"
+
+        # NPU-Stage aus PerceptionEngine als Attention-Level
+        if self._perception and hasattr(self._perception, 'npu_stage'):
+            stage = self._perception.npu_stage
+            if stage == "idle":
+                return "idle"
+            elif stage == "person":
+                return "normal"
+            elif stage == "face":
+                return "high"
+
+        # Fallback auf CoreIntegrator
         if not self._core_integrator:
             return "normal"
         attention = self._core_integrator.get_attention()
@@ -556,28 +560,35 @@ class ModelOrchestrator:
     def apply_attention_level(self, new_level: str):
         """Modelle aktivieren/deaktivieren basierend auf Attention-Level.
 
-        Bei always_on: Stellt sicher dass ALLE Modelle konfiguriert sind (30 FPS).
-        Bei adaptive: Dynamisches Switching wie bisher.
+        NPU Idle-Modus: PerceptionEngine steuert Stufen (idle/person/face).
+        Orchestrator folgt den Slots der Perception Engine — NICHT mehr always_on.
         """
-        if self._orchestration_mode == "always_on":
-            # Always-On: Alle geladenen Modelle muessen konfiguriert sein
-            all_models = set(self._models.keys())
+        # PerceptionEngine steuert: Welche Modelle sollen aktiv sein?
+        if self._perception and hasattr(self._perception, 'slots') and self._perception.slots:
+            wanted = set(self._perception.slots)
             have = set(self._active_ctx.keys())
-            missing = all_models - have
-            if missing:
-                logger.info(f"[ORCHESTRATION] Always-On: Konfiguriere fehlende Modelle: {missing}")
-                for m in missing:
-                    if m not in self._active_ctx:
+            to_add = wanted - have
+            to_remove = have - wanted
+
+            if to_add or to_remove:
+                stage = self._perception.npu_stage if hasattr(self._perception, 'npu_stage') else "?"
+                logger.info(f"[ORCHESTRATION] Stage={stage}: add={to_add or 'none'} remove={to_remove or 'none'}")
+                for m in to_remove:
+                    self.unconfigure(m)
+                    if self._model_health:
+                        self._model_health.set_paused(m, True)
+                for m in to_add:
+                    if m in self._models and m not in self._active_ctx:
                         self.configure(m)
                         if self._model_health:
                             self._model_health.set_paused(m, False)
                 self.sync_flags()
-            # FPS immer auf 30
-            self._target_frame_delay = 0.033
+
             with self._attention_level_lock:
                 if self._attention_level != new_level:
                     self._attention_level = new_level
-                    self._notify("attention_level", {"level": new_level, "fps_target": 30})
+                    fps = round(1.0 / self._target_frame_delay) if self._target_frame_delay > 0 else 30
+                    self._notify("attention_level", {"level": new_level, "fps_target": fps})
             return
 
         # Adaptive Modus (Legacy)
