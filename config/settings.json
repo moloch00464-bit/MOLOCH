@@ -65,7 +65,7 @@
     "move_cooldown_ms": 400.0,
     "center_ring_buffer_size": 10.0,
     "pan_limit_min": -115.0,
-    "pan_limit_max": 127.0,
+    "pan_limit_max": 111.0,
     "tilt_limit_min": -71.0,
     "tilt_limit_max": 78.8,
     "search_speed": 0.3,

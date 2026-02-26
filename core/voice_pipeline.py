@@ -226,7 +226,7 @@ class VoicePipeline:
         self._system_prompt = _build_system_prompt()
 
         # TTS
-        self._current_voice = "de_DE-thorsten-high"
+        self._current_voice = "de_DE-thorsten-low"  # 16kHz nativ (passt zu ReSpeaker)
         self._length_scale = 1.1  # Leicht langsamer fuer Verstaendlichkeit
         self._piper_available = PIPER_PATH.exists()
 

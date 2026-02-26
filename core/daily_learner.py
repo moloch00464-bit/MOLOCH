@@ -369,10 +369,17 @@ class DailyLearner:
         distance = self._estimate_distance(bbox_height, frame_height)
         angle = self._estimate_angle(head_pose)
 
-        # Nur speichern bei echtem Match (kein unknown_maybe, Unbekannt, Keine DB)
-        # Threshold 0.55 statt 0.5 — weniger Falsch-Positive
+        # Teach-Modus: Markus ist alleine — JEDE Erkennung = Markus
+        # Unbekannt/unknown_maybe/Keine DB werden zu "markus" umbenannt
         _SKIP_NAMES = {"unknown_maybe", "Unbekannt", "Keine DB"}
-        if name in _SKIP_NAMES or confidence <= 0.55:
+        if name in _SKIP_NAMES:
+            # Teach aktiv: Jede Erkennung ist Markus (er ist alleine)
+            logger.info(f"[DailyLearner] '{name}' -> 'markus' (Teach-Modus, alleine)")
+            name = "markus"
+            confidence = max(confidence, 0.60)  # Mindest-Confidence fuer Teach
+
+        # Confidence-Filter: Nur sehr schlechte Erkennungen ablehnen
+        if confidence <= 0.30:
             return False
 
         save_it = False
@@ -381,7 +388,7 @@ class DailyLearner:
         if self._is_new_condition(angle, light, distance):
             save_it = True
             reason = f"neue Bedingung fuer {name}"
-        elif confidence >= 0.65:
+        elif confidence >= 0.50:
             # Auch bei bekannter Bedingung: periodisch Snapshots fuer Vielfalt
             # (Rate Limit oben greift trotzdem - max 1 pro snapshot_interval)
             save_it = True
