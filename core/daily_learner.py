@@ -43,13 +43,13 @@ class DailyLearner:
     def __init__(self):
         self.enabled = False
         self.last_snapshot_time = 0
-        self.snapshot_interval = 60  # Sekunden
+        self.snapshot_interval = 15  # Sekunden (war 60 - zu langsam fuer Teach)
 
         # Tracking: Welche Bedingungen wurden schon gesehen
         # Key: (angle_bucket, light_bucket, distance_bucket)
         # Value: timestamp wann zuletzt gesehen
         self.seen_conditions: Dict[Tuple[int, int, int], float] = {}
-        self.condition_cooldown = 3600  # 1h bevor gleiche Bedingung wieder interessant
+        self.condition_cooldown = 300  # 5min bevor gleiche Bedingung wieder (war 3600/1h)
 
         # Face-DB Referenz (wird vom Service injiziert)
         self._face_db: Optional[Dict[str, np.ndarray]] = None
@@ -381,6 +381,11 @@ class DailyLearner:
         if self._is_new_condition(angle, light, distance):
             save_it = True
             reason = f"neue Bedingung fuer {name}"
+        elif confidence >= 0.65:
+            # Auch bei bekannter Bedingung: periodisch Snapshots fuer Vielfalt
+            # (Rate Limit oben greift trotzdem - max 1 pro snapshot_interval)
+            save_it = True
+            reason = f"periodischer Teach-Snapshot fuer {name}"
 
         if save_it:
             self._save_snapshot(face_crop, name, confidence, angle, light, distance, head_pose,
