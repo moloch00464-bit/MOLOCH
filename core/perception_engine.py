@@ -2,13 +2,18 @@
 """
 M.O.L.O.C.H. Perception Engine
 ================================
-All-Slot NPU Management. Alle 4 Modelle permanent geladen.
+NPU Idle-Modus: Dreistufige Modell-Steuerung fuer Energieeffizienz.
 
-Hardware: Hailo-10H NPU (8GB RAM, 40 TOPS), alle Modelle gleichzeitig (~43MB).
-Kein Swapping noetig — SCRFD + ArcFace + YOLOv8m + Hand Landmark permanent aktiv.
-Scoring laeuft weiter fuer Lernfaehigkeit/Logging, treibt aber keine Swaps mehr.
+Hardware: Hailo-10H NPU (8GB RAM, 40 TOPS).
 
-tick(context) -> Optional[List[str]]: Alle Modelle beim ersten Tick, danach None.
+Stufe 1 — IDLE: Nur yolov8m (Person suchen). NPU-Last minimal.
+Stufe 2 — PERSON: yolov8m + SCRFD (Gesicht suchen in Person).
+Stufe 3 — FACE: SCRFD + ArcFace (Identifizierung). yolov8m kann weg.
+
+Zurueck zu IDLE: 30s ohne Person-Detection.
+CPU-Modelle (Emotion, Age, Head Pose) laufen unabhaengig wenn Face-Crop da.
+
+tick(context) -> Optional[List[str]]: Modell-Liste bei Stufenwechsel, sonst None.
 """
 import time
 import json
@@ -24,9 +29,16 @@ _MAX_ADJUST = 0.10  # Max 10% Aenderung pro Lernzyklus
 
 
 class PerceptionEngine:
-    """All-Slot NPU Management — alle 4 Modelle permanent auf Hailo-10H (8GB)."""
+    """NPU Idle-Modus — dreistufige Modell-Steuerung auf Hailo-10H."""
 
     ALL_MODELS = ["scrfd", "arcface", "yolov8m", "hand_landmark"]
+
+    # NPU Stufen: welche Modelle pro Stufe aktiv
+    STAGE_MODELS = {
+        "idle":   ["yolov8m"],
+        "person": ["yolov8m", "scrfd"],
+        "face":   ["scrfd", "arcface"],
+    }
 
     BASE_SCORES = {
         "scrfd": 0.6,
@@ -38,15 +50,23 @@ class PerceptionEngine:
     # ArcFace ohne SCRFD ist nutzlos (braucht Face-Crops)
     DEPENDENCIES = {"arcface": "scrfd"}
 
+    # Idle-Timeout: Sekunden ohne Detection bis IDLE
+    IDLE_TIMEOUT = 30.0
+
     def __init__(self, personality_engine=None):
         self._personality = personality_engine
-        self.slots: List[str] = []  # Aktuelle 2 Modelle (leer = noch nicht gesetzt)
+        self.slots: List[str] = []  # Aktuelle Modelle (leer = noch nicht gesetzt)
         self._scores: Dict[str, float] = {}
         self._last_rotation = 0.0
         self._last_active: Dict[str, float] = {}
         self._min_interval = 10.0
         self._hysteresis = 0.15
         self._forced: Optional[List[str]] = None
+
+        # === NPU Idle-Modus (3 Stufen) ===
+        self._npu_stage = "idle"           # idle / person / face
+        self._last_person_time = 0.0       # Letzte Person-Detection
+        self._last_face_detect_time = 0.0  # Letzte Face-Detection (fuer Stage)
 
         # Face State Tracking (Hand-Occlusion)
         self._last_face_bbox: Optional[Tuple[float, float, float, float]] = None
@@ -72,14 +92,25 @@ class PerceptionEngine:
         self._load_weights()
 
     # =========================================================================
+    # NPU Stage Property
+    # =========================================================================
+
+    @property
+    def npu_stage(self) -> str:
+        """Aktuelle NPU-Stufe: idle / person / face."""
+        return self._npu_stage
+
+    # =========================================================================
     # Public API
     # =========================================================================
 
     def tick(self, context: Dict) -> Optional[List[str]]:
         """Pro Inference-Zyklus aufrufen.
 
-        Hailo-10H mit 8GB RAM: Alle 4 Modelle permanent geladen, kein Swapping.
-        Scoring laeuft weiter fuer Lernfaehigkeit, treibt aber keine Swaps.
+        NPU Idle-Modus: Dreistufige Modell-Steuerung.
+        - IDLE: Nur yolov8m (Person suchen)
+        - PERSON: yolov8m + SCRFD (Gesicht suchen)
+        - FACE: SCRFD + ArcFace (Identifizierung)
 
         Args:
             context: {
@@ -92,7 +123,7 @@ class PerceptionEngine:
             }
 
         Returns:
-            ALL_MODELS beim ersten Tick, danach None (kein Swap noetig).
+            Modell-Liste bei Stufenwechsel, None wenn kein Wechsel.
         """
         self._update_face_tracking(context)
         if self._hand_occlusion_enabled:
@@ -103,22 +134,31 @@ class PerceptionEngine:
             utility = self._check_utility(self._last_chosen, context)
             self._log_decision(self._last_chosen, context, utility)
 
-        # Scores berechnen (fuer Logging/Lernen, nicht fuer Swaps)
+        # Scores berechnen (fuer Logging/Lernen)
         scores = self._compute_scores(context)
         self._scores = scores
         self._last_scores = scores
         self._last_context = dict(context)
 
-        # Alle 4 Modelle permanent aktiv — kein Swapping
-        all_models = list(self.ALL_MODELS)
+        now = time.time()
+        face_detected = context.get("face_detected", False)
+        person_detected = context.get("person_detected", False)
 
-        # Erster tick: alle Modelle setzen
+        # Timestamps aktualisieren
+        if person_detected:
+            self._last_person_time = now
+        if face_detected:
+            self._last_face_detect_time = now
+
+        # Erster tick: starte im IDLE Modus
         if not self.slots:
-            self.slots = all_models
-            self._last_chosen = all_models
-            self._last_rotation = time.time()
-            _logger.info(f"[PERCEPTION] Alle 4 Modelle permanent aktiv: {all_models}")
-            return list(all_models)
+            self._npu_stage = "idle"
+            target = list(self.STAGE_MODELS["idle"])
+            self.slots = target
+            self._last_chosen = target
+            self._last_rotation = now
+            _logger.info(f"[NPU] Start im Idle-Modus — nur Person-Waechter aktiv: {target}")
+            return list(target)
 
         # Manueller Override (force_models) beachten
         if self._forced:
@@ -127,15 +167,71 @@ class PerceptionEngine:
                 return list(self.slots)
             return None
 
-        # Alle Modelle bereits geladen — kein Swap noetig
-        if set(self.slots) != set(all_models):
-            # Recovery: falls Modelle fehlen, alle wieder laden
-            self.slots = all_models
-            self._last_chosen = all_models
-            _logger.info(f"[PERCEPTION] Recovery: Modelle auf {all_models} gesetzt")
-            return list(all_models)
+        # === NPU Stage Machine ===
+        old_stage = self._npu_stage
+        new_stage = self._compute_npu_stage(context, now)
+
+        if new_stage != old_stage:
+            self._npu_stage = new_stage
+            target = list(self.STAGE_MODELS[new_stage])
+            self.slots = target
+            self._last_chosen = target
+            self._last_rotation = now
+            _logger.info(f"[NPU] {old_stage.upper()} → {new_stage.upper()} — Modelle: {target}")
+            return list(target)
+
+        # Kein Wechsel — pruefe ob aktuelle Slots korrekt
+        expected = set(self.STAGE_MODELS[self._npu_stage])
+        if set(self.slots) != expected:
+            self.slots = list(expected)
+            self._last_chosen = list(expected)
+            _logger.info(f"[NPU] Recovery: Modelle auf {self.slots} gesetzt (Stage: {self._npu_stage})")
+            return list(self.slots)
 
         return None
+
+    def _compute_npu_stage(self, context: Dict, now: float) -> str:
+        """Berechne naechste NPU-Stufe basierend auf Detektionen.
+
+        IDLE → PERSON: Person erkannt
+        PERSON → FACE: Gesicht erkannt
+        FACE → PERSON: Kein Gesicht mehr, aber Person da
+        * → IDLE: 30s keine Person
+        """
+        face_detected = context.get("face_detected", False)
+        person_detected = context.get("person_detected", False)
+        time_since_person = now - self._last_person_time if self._last_person_time > 0 else 999
+
+        # Zurueck zu IDLE: 30s ohne Person
+        if time_since_person >= self.IDLE_TIMEOUT:
+            if self._npu_stage != "idle":
+                _logger.info(f"[NPU] Idle-Modus — {time_since_person:.0f}s ohne Person")
+            return "idle"
+
+        # Stage-Uebergaenge
+        if self._npu_stage == "idle":
+            if person_detected:
+                return "person"
+            return "idle"
+
+        elif self._npu_stage == "person":
+            if face_detected:
+                return "face"
+            if not person_detected and time_since_person >= self.IDLE_TIMEOUT:
+                return "idle"
+            return "person"
+
+        elif self._npu_stage == "face":
+            if not face_detected and person_detected:
+                # Gesicht verloren, Person noch da → zurueck zu PERSON
+                time_since_face = now - self._last_face_detect_time
+                if time_since_face > 5.0:
+                    return "person"
+            if not person_detected and time_since_person >= self.IDLE_TIMEOUT:
+                return "idle"
+            return "face"
+
+        return self._npu_stage
 
     def force_models(self, models: Optional[List[str]]):
         """Manueller Override. None = zurueck zu Scoring."""
@@ -152,6 +248,7 @@ class PerceptionEngine:
         return {
             "slots": list(self.slots),
             "forced": self._forced,
+            "npu_stage": self._npu_stage,
             "scores": {k: round(v, 3) for k, v in self._scores.items()},
             "tension": round(tension, 3),
             "personality_mode": mode,
@@ -166,12 +263,12 @@ class PerceptionEngine:
         }
 
     # =========================================================================
-    # Model Selection (Legacy — alle 4 permanent aktiv auf 8GB Hailo-10H)
+    # Model Selection (Stufen-basiert)
     # =========================================================================
 
-    def _select_all(self) -> List[str]:
-        """Alle Modelle zurueckgeben — kein Swapping auf 8GB NPU."""
-        return list(self.ALL_MODELS)
+    def get_stage_models(self) -> List[str]:
+        """Modelle fuer aktuelle NPU-Stufe zurueckgeben."""
+        return list(self.STAGE_MODELS.get(self._npu_stage, ["yolov8m"]))
 
     # =========================================================================
     # Face Tracking

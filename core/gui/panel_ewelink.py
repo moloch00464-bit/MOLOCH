@@ -9,7 +9,7 @@ Bekommt parent_frame (LabelFrame) und ServiceProxy von panel_main.
 - FLUTLICHT: Toggle weisse LEDs (Panel: 0=aus/IR, 2=an/Farb-Nacht)
 - ERKANNT: Status-Indikator blaue LED (sledOnline, vom Service gesteuert)
 - ALARM (rot toggle), SNAP (cyan einmal)
-- SYNC Button: Holt Cloud-Status, aktualisiert Button-Farben
+- EINPRÄGEN Button: Batch-Analyse aller Snapshots (Face + Pose Enrollment)
 
 Alle Commands via ServiceProxy._write_command().
 Importiert NUR panel_styles und tkinter.
@@ -52,11 +52,11 @@ class EwelinkModule:
         self._build_action_buttons()
 
     # =========================================================================
-    # Buttons: ALARM, SNAP, FLUTLICHT, ERKANNT, SYNC
+    # Buttons: ALARM, SNAP, FLUTLICHT, ERKANNT, EINPRÄGEN
     # =========================================================================
 
     def _build_action_buttons(self):
-        """ALARM, SNAP, FLUTLICHT, ERKANNT, SYNC, GALERIE Buttons."""
+        """ALARM, SNAP, FLUTLICHT, ERKANNT, EINPRÄGEN, GALERIE Buttons."""
         section = tk.LabelFrame(
             self._parent,
             text="Aktionen",
@@ -105,13 +105,14 @@ class EwelinkModule:
         )
         self._btn_erkannt.grid(row=0, column=3, padx=3, pady=2)
 
-        # SYNC Button
-        tk.Button(
-            row, text="SYNC", width=8,
+        # EINPRÄGEN Button
+        self._btn_einpraegen = tk.Button(
+            row, text="EINPRÄGEN", width=10,
             bg=BG_BUTTON, fg=FG_LABEL, font=FONT_BUTTON,
             activebackground=BG_FRAME,
-            command=self._sync_cloud_status,
-        ).grid(row=0, column=4, padx=3, pady=2)
+            command=self._start_einpraegen,
+        )
+        self._btn_einpraegen.grid(row=0, column=4, padx=3, pady=2)
 
         # GALERIE Button
         tk.Button(
@@ -142,10 +143,13 @@ class EwelinkModule:
         )
         self._lbl_erkannt.grid(row=1, column=3, pady=(0, 5))
 
-        self._lbl_sync = tk.Label(
+        self._lbl_einpraegen = tk.Label(
             row, text="", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
         )
-        self._lbl_sync.grid(row=1, column=4, pady=(0, 5))
+        self._lbl_einpraegen.grid(row=1, column=4, pady=(0, 5))
+
+        # Einpraegen Poll-State
+        self._einpraegen_polling = False
 
     def _toggle_alarm(self):
         """Alarm an/aus."""
@@ -196,44 +200,45 @@ class EwelinkModule:
             self._btn_erkannt.config(bg=BTN_OFF_DARK, disabledforeground=FG_WHITE)
             self._lbl_erkannt.config(text="---", fg=FG_DIM)
 
-    def _sync_cloud_status(self):
-        """Cloud-Status holen und alle Buttons aktualisieren."""
-        self._lbl_sync.config(text="sync...", fg=ACCENT_CYAN)
-        self._service._write_command("cloud_sync")
+    def _start_einpraegen(self):
+        """EINPRÄGEN starten: Batch-Analyse aller Snapshots via Service."""
+        self._btn_einpraegen.config(state="disabled")
+        self._lbl_einpraegen.config(text="starte...", fg=ACCENT_CYAN)
+        self._service._write_command("einpraegen")
+        # Fortschritt pollen
+        if not self._einpraegen_polling:
+            self._einpraegen_polling = True
+            self._poll_einpraegen()
 
-        # Status lesen und GUI aktualisieren
+    def _poll_einpraegen(self):
+        """Fortschritt des Einpraegen-Prozesses pollen."""
         status = self._service.read_status()
         if status:
-            cloud = status.get("cloud", {})
-            if cloud:
-                # FLUTLICHT (nightVision: 0=aus, 2=an)
-                led = cloud.get("led_level")
-                if led is not None:
-                    self._flutlicht_on = (led >= 2)
-                    self._update_flutlicht_button()
+            running = status.get("einpraegen_running", False)
+            progress = status.get("einpraegen_progress", "")
 
-                # Alarm
-                alarm = cloud.get("alarm_active")
-                if alarm is not None:
-                    self._alarm_active = alarm
-                    self._update_alarm_button()
-
-                # ERKANNT (blaue Status-LED)
-                wled = cloud.get("status_led")
-                if wled is not None:
-                    self._erkannt_led_on = wled
-                    self._update_erkannt_button()
-
-                self._lbl_sync.config(text="OK", fg=ACCENT_CYAN)
+            if running and progress:
+                self._btn_einpraegen.config(text=f"EINPRÄGEN ({progress})")
+                self._lbl_einpraegen.config(text="laeuft...", fg=ACCENT_CYAN)
+                self._parent.after(500, self._poll_einpraegen)
+            elif not running and status.get("einpraegen_done", False):
+                # Fertig
+                self._btn_einpraegen.config(text="EINPRÄGEN \u2713", state="normal")
+                self._lbl_einpraegen.config(text="fertig", fg=ACCENT_CYAN)
+                self._einpraegen_polling = False
+                # Nach 5 Sekunden Button-Text zuruecksetzen
+                self._parent.after(5000, self._reset_einpraegen_button)
             else:
-                self._lbl_sync.config(text="leer", fg=FG_DIM)
+                # Noch kein Status — weiter pollen
+                self._parent.after(500, self._poll_einpraegen)
         else:
-            self._lbl_sync.config(text="fehler", fg=BTN_ALARM_RED)
+            # Kein Status — weiter pollen (Service evtl. noch nicht bereit)
+            self._parent.after(1000, self._poll_einpraegen)
 
-        # Label nach 3 Sekunden zuruecksetzen
-        self._parent.after(3000, lambda: self._lbl_sync.config(
-            text="", fg=FG_DIM
-        ))
+    def _reset_einpraegen_button(self):
+        """Button-Text zurueck auf Standard."""
+        self._btn_einpraegen.config(text="EINPRÄGEN", state="normal")
+        self._lbl_einpraegen.config(text="", fg=FG_DIM)
 
     def update_from_status(self, status):
         """Vom panel_main Poll aufgerufen: ERKANNT-Indikator aktualisieren."""

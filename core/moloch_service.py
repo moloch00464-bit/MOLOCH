@@ -103,6 +103,15 @@ class MolochService:
         except Exception as e:
             logger.warning(f"[INIT] DailyLearner nicht verfuegbar: {e}")
 
+        # Einpraegen (Batch Face+Pose Enrollment)
+        self._einpraegen = None
+        try:
+            from core.einpraegen import get_einpraegen
+            self._einpraegen = get_einpraegen()
+            logger.info("[INIT] Einpraegen bereit")
+        except Exception as e:
+            logger.warning(f"[INIT] Einpraegen nicht verfuegbar: {e}")
+
         # Voice Pipeline (PTT -> Whisper -> Claude -> TTS)
         self._voice_pipeline = None
         try:
@@ -477,8 +486,14 @@ class MolochService:
                 },
                 "voice": self._voice_pipeline.get_state() if self._voice_pipeline else {},
             }
+            # Einpraegen Status
+            if self._einpraegen:
+                status["einpraegen_running"] = self._einpraegen.is_running
+                status["einpraegen_progress"] = self._einpraegen.progress
+                status["einpraegen_done"] = self._einpraegen.is_done
             if self._perception:
                 status["perception"] = self._perception.get_state()
+                status["npu_stage"] = self._perception.npu_stage
             if self._core_integrator:
                 raw_core = self._core_integrator.get_status_dict()
                 # ArbitrationEngine: Override-Logik anwenden
@@ -711,6 +726,17 @@ class MolochService:
             if self._voice_pipeline:
                 self._voice_pipeline.reset_conversation()
                 logger.info("[IPC] Voice: Konversation zurueckgesetzt")
+
+        # ---- Einpraegen (Batch Face+Pose) ----
+        elif action == 'einpraegen':
+            if self._einpraegen:
+                if not self._einpraegen.is_running:
+                    self._einpraegen.start()
+                    logger.info("[IPC] Einpraegen gestartet")
+                else:
+                    logger.warning("[IPC] Einpraegen laeuft bereits")
+            else:
+                logger.warning("[IPC] Einpraegen nicht verfuegbar")
 
         # ---- Spotify Commands ----
         elif action == 'spotify_play':
