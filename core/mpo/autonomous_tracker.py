@@ -117,9 +117,9 @@ class TrackingConfig:
         (60.0, 0.0),       # Leicht rechts
         (120.0, 0.0),      # Weiter rechts
     ])
-    search_home_timeout: float = 30.0   # 30s ohne Fund -> Home (war 60s)
+    search_home_timeout: float = 120.0  # 120s ohne Fund -> Home (war 30s)
 
-    target_lost_timeout: float = 5.0  # 5s coasting bevor Search
+    target_lost_timeout: float = 10.0  # 10s coasting bevor Search (war 5s)
     frame_width: int = 640
     frame_height: int = 640
 
@@ -193,6 +193,7 @@ class AutonomousTracker:
 
         # State
         self.state = TrackerState.IDLE
+        self._prev_state = TrackerState.IDLE
         self.tracking_active = False
         self._running = False
         self._thread: Optional[threading.Thread] = None
@@ -971,9 +972,14 @@ class AutonomousTracker:
         if not self.dwell_target_acquired:
             self.dwell_target_acquired = True
             self.dwell_start_time = now
-            self._set_state(TrackerState.DWELL)
-            logger.info(f"[DWELL] Target acquired - waiting {self.config.dwell_time_sec}s before tracking")
-            return
+            # FOLLOW_FACE Prioritaet: Nach SEARCH sofort tracken, kein Dwell
+            if self._prev_state == TrackerState.SEARCHING:
+                logger.info("[DWELL] Uebersprungen - Ziel nach SEARCH gefunden, sofort Follow")
+                self._set_state(TrackerState.TRACKING)
+            else:
+                self._set_state(TrackerState.DWELL)
+                logger.info(f"[DWELL] Target acquired - waiting {self.config.dwell_time_sec}s before tracking")
+                return
 
         if self.state == TrackerState.DWELL:
             dwell_elapsed = now - self.dwell_start_time
@@ -1329,6 +1335,7 @@ class AutonomousTracker:
         """Update state with logging."""
         if new_state != self.state:
             old_state = self.state
+            self._prev_state = old_state
             self.state = new_state
             self.stats["state_changes"] += 1
 

@@ -105,7 +105,7 @@ class CameraManager:
         self._last_interesting_time = 0
         self._search_start_time = 0
         self.TAKEOVER_TIMEOUT = 30
-        self.SEARCH_TIMEOUT = 20
+        self.SEARCH_TIMEOUT = 120
         self._guardian_last_pan = None
         self._guardian_last_tilt = None
         self._guardian_move_thresh = 5.0
@@ -581,20 +581,27 @@ class CameraManager:
         if not self._moloch_has_control:
             return
         now = time.time()
-        if now - self._last_interesting_time > self.TAKEOVER_TIMEOUT:
-            logger.info(f"[TENTAKEL] Takeover timeout ({self.TAKEOVER_TIMEOUT}s) - zurueckgeben")
-            threading.Thread(target=self.moloch_release, daemon=True).start()
-            return
-        if self._tracker and self._autonomous_mode:
-            if self._tracker.state == TrackerState.SEARCHING:
-                if self._search_start_time == 0:
-                    self._search_start_time = now
-                elif now - self._search_start_time > self.SEARCH_TIMEOUT:
-                    logger.info(f"[TENTAKEL] Search timeout ({self.SEARCH_TIMEOUT}s) - zurueckgeben")
-                    threading.Thread(target=self.moloch_release, daemon=True).start()
-                    return
-            else:
-                self._search_start_time = 0
+
+        # Waehrend aktiver Suche: NUR SEARCH_TIMEOUT entscheidet
+        # TAKEOVER_TIMEOUT darf aktive Suche nicht abbrechen
+        is_searching = (self._tracker and self._autonomous_mode
+                        and self._tracker.state == TrackerState.SEARCHING)
+
+        if is_searching:
+            # SEARCH_TIMEOUT: Suche laeuft zu lange -> zurueckgeben
+            if self._search_start_time == 0:
+                self._search_start_time = now
+            elif now - self._search_start_time > self.SEARCH_TIMEOUT:
+                logger.info(f"[TENTAKEL] Search timeout ({self.SEARCH_TIMEOUT}s) - zurueckgeben")
+                threading.Thread(target=self.moloch_release, daemon=True).start()
+                return
+        else:
+            self._search_start_time = 0
+            # TAKEOVER_TIMEOUT: Nichts Interessantes mehr -> zurueckgeben
+            if now - self._last_interesting_time > self.TAKEOVER_TIMEOUT:
+                logger.info(f"[TENTAKEL] Takeover timeout ({self.TAKEOVER_TIMEOUT}s) - zurueckgeben")
+                threading.Thread(target=self.moloch_release, daemon=True).start()
+                return
 
     def signal_detection(self):
         """Vom Inference Loop aufgerufen wenn Detection erkannt (fuer fliessenden Takeover)."""
