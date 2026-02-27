@@ -739,6 +739,33 @@ class MolochService:
                 self._saved_gestures[param] = float(value)
                 logger.info(f"[IPC] Gesture: {param} = {value}")
 
+        elif action == 'set_tracker_param':
+            # Tracker-Parameter live auf AutonomousTracker anwenden (Popup-Slider)
+            param = cmd.get('param')
+            value = cmd.get('value')
+            if param is not None and value is not None:
+                value = float(value)
+                tracker = self._cam._tracker
+                if tracker and hasattr(tracker, 'config'):
+                    cfg = tracker.config
+                    if hasattr(cfg, param):
+                        setattr(cfg, param, value)
+                        # Basis-Werte aktualisieren (fuer dynamische Anpassung)
+                        if param == 'pan_gain':
+                            tracker._base_pan_gain = value
+                        elif param == 'tilt_gain':
+                            tracker._base_tilt_gain = value
+                        elif param == 'max_step_pan':
+                            tracker._base_max_step_pan = value
+                        elif param == 'tracking_speed':
+                            tracker._base_tracking_speed = value
+                            self._ptz_tracking_speed = value
+                        elif param == 'search_speed':
+                            self._ptz_search_speed = value
+                        logger.info(f"[TRACKER] {param} = {value}")
+                    else:
+                        logger.warning(f"[TRACKER] Unbekannter Param: {param}")
+
         elif action == 'set_ptz_settings':
             # PTZ-Settings vom Panel: Home, Speed, Limits
             self._ptz_home_pan = float(cmd.get('home_pan', getattr(self, '_ptz_home_pan', 0.0)))

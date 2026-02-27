@@ -342,8 +342,8 @@ class TrackerPopup:
         val = float(value)
         self._labels[key].config(text=self._format_value(val, unit, step))
 
-        self.service._write_command("action", {
-            "action": "set_tracker_param",
+        # set_tracker_param: Live an Service senden
+        self.service._write_command("set_tracker_param", {
             "param": key,
             "value": val,
         })
@@ -351,29 +351,23 @@ class TrackerPopup:
 
     def _set_home_position(self):
         """Aktuelle Kamera-Position als Home speichern."""
-        # Position aus Service-Status lesen
+        # Position aus Service-Status lesen (ptz.current_pan/tilt)
         status = self.service.read_status()
         home_pan = 0.0
         home_tilt = 0.0
 
         if status and isinstance(status, dict):
-            tracker = status.get("tracker", {})
-            if isinstance(tracker, dict):
-                cam_pos = tracker.get("camera_position", {})
-                if isinstance(cam_pos, dict):
-                    home_pan = cam_pos.get("pan_deg", 0.0)
-                    home_tilt = cam_pos.get("tilt_deg", 0.0)
+            ptz = status.get("ptz", {})
+            if isinstance(ptz, dict):
+                home_pan = ptz.get("current_pan", 0.0)
+                home_tilt = ptz.get("current_tilt", 0.0)
 
         self._lbl_home.config(
             text=f"Home: Pan {home_pan:.1f} / Tilt {home_tilt:.1f}",
             fg=STATUS_GREEN)
 
-        # Service-Command
-        self.service._write_command("action", {
-            "action": "set_tracker_home",
-            "pan": home_pan,
-            "tilt": home_tilt,
-        })
+        # Service-Command: set_ptz_home speichert aktuelle Position
+        self.service._write_command("set_ptz_home")
 
         # In settings.json speichern
         try:

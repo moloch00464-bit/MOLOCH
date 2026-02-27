@@ -7,6 +7,7 @@ PTZ Steuerung und Hauptbuttons.
 Bekommt parent_frame (LabelFrame) und ServiceProxy von panel_main.
 
 - D-Pad: 5 Buttons in Kreuzform (Hoch/Runter/Links/Rechts/Home)
+- Pan/Tilt Live-Anzeige + Moves-Zaehler
 - Quick Positions: Werkstatt, Wohnzimmer
 - Toggle-Buttons: AUTONOM, TEACHEN
 - Status-Labels mit 500ms Update via ServiceProxy
@@ -67,11 +68,11 @@ class PtzModule:
         self._poll_status()
 
     # =========================================================================
-    # D-Pad
+    # D-Pad + Pan/Tilt Anzeige
     # =========================================================================
 
     def _build_dpad(self):
-        """D-Pad in Kreuzform: Hoch/Runter/Links/Rechts/Home."""
+        """D-Pad in Kreuzform + Pan/Tilt Live-Anzeige + Moves."""
         section = tk.LabelFrame(
             self._parent,
             text="PTZ",
@@ -124,16 +125,16 @@ class PtzModule:
             command=lambda: self._ptz_move("down"),
         ).grid(row=2, column=1, padx=2, pady=2)
 
-        # Zeile 3: Pan/Tilt Anzeige
+        # Zeile 3: Pan/Tilt Live-Anzeige
         self._lbl_pan_tilt = tk.Label(
             grid, text="Pan: ---  Tilt: ---",
             bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
         )
-        self._lbl_pan_tilt.grid(row=3, column=0, columnspan=3, pady=(2, 0))
+        self._lbl_pan_tilt.grid(row=3, column=0, columnspan=3, pady=(4, 0))
 
         # Zeile 4: Moves-Zaehler
         self._lbl_moves = tk.Label(
-            grid, text="Moves: 0",
+            grid, text="Moves: 0  Trk: 0  Srch: 0",
             bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
         )
         self._lbl_moves.grid(row=4, column=0, columnspan=3, pady=(0, 5))
