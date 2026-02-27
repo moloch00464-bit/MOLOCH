@@ -78,6 +78,15 @@ class MolochService:
         except Exception as e:
             logger.warning(f"[INIT] CoreIntegrator nicht verfuegbar: {e}")
 
+        # MolochSprache (Semantisches Protokoll)
+        self._sprache = None
+        try:
+            from core.moloch_sprache import get_sprache
+            self._sprache = get_sprache()
+            logger.info("[INIT] MolochSprache bereit")
+        except Exception as e:
+            logger.warning(f"[INIT] MolochSprache nicht verfuegbar: {e}")
+
         # Perception Engine (NPU Slot-Rotation mit Personality)
         self._perception = None
         try:
@@ -281,6 +290,12 @@ class MolochService:
             self._memory = None
             logger.error(f"[INIT] Memory fehlgeschlagen: {e}")
 
+        # 0b. MolochSprache Writer-Thread starten
+        if self._sprache:
+            self._sprache.start()
+            self._sprache.log(self._sprache.build("STARTE", "Service",
+                                                   version="4.0"))
+
         # 1. Hailo VDevice + Models (via ModelOrchestrator)
         self._hailo_manager = get_hailo_manager()
         self._orchestrator._hailo_manager = self._hailo_manager
@@ -459,6 +474,15 @@ class MolochService:
             except Exception as e:
                 logger.error(f"[STOP] Core State Speichern fehlgeschlagen: {e}")
 
+        # MolochSprache: Letzter Satz + Queue leeren
+        if self._sprache:
+            try:
+                self._sprache.log(self._sprache.build("STOPPE", "Service"))
+                self._sprache.stop()
+                logger.info("[STOP] MolochSprache gestoppt")
+            except Exception:
+                pass
+
         # Core Integrator stoppen
         if self._core_integrator:
             try:
@@ -599,6 +623,10 @@ class MolochService:
                 except Exception:
                     pass
             self._ipc.write_status(status)
+
+            # MolochSprache Retention-Tick (1x/Stunde Cleanup)
+            if self._sprache:
+                self._sprache.tick_retention()
         except Exception:
             pass
 
