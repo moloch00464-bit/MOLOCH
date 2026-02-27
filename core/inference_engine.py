@@ -752,6 +752,11 @@ class InferenceEngine:
                                     torso_kpts = [5, 6, 11, 12]
                                     has_torso = sum(1 for k in torso_kpts if kpts[k, 2] > 0.3) >= 3
                                     face_conf = float(np.mean(face_vis)) if has_face else 0.0
+                                    # Nose-Keypoint separat (Tracking-Prioritaet 1)
+                                    nose_center = None
+                                    if kpts[0, 2] > 0.3:
+                                        nose_center = (float(kpts[0, 0] / 640.0),
+                                                       float(kpts[0, 1] / 640.0))
                                     pose_dets.append({
                                         "bbox": p["bbox"],
                                         "confidence": p["score"],
@@ -759,6 +764,7 @@ class InferenceEngine:
                                         "face_center": face_center,
                                         "face_confidence": face_conf,
                                         "has_torso": has_torso,
+                                        "nose_center": nose_center,
                                     })
                                 self._cam._tracker.update_pose_detection(
                                     poses=pose_dets,

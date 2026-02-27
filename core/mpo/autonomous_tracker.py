@@ -157,10 +157,10 @@ class TrackingConfig:
     min_frames_before_move: int = 1     # SOFORT bewegen nach erstem Frame (war 3)
 
     # === DEAD ZONE + COAST MODE (Tracker-Beruhigung) ===
-    dead_zone_pct: float = 0.15        # 15% - mittlere 30% des Bildes = RUHIG (war 3%)
-    track_start_pct: float = 0.18      # 18% - erst ab hier Tracking starten (war 5%)
+    dead_zone_pct: float = 0.10        # ±10% Deadzone (war 15%, Aufgabe sagt ±10%)
+    track_start_pct: float = 0.13      # 13% - Hysterese-Obergrenze (war 18%)
     coast_stable_time: float = 1.5     # 1.5s stabil im Dead Zone -> Coast (war 2.0)
-    coast_resume_pct: float = 0.12     # 12% Abweichung zum Aufwachen aus Coast (war 5%)
+    coast_resume_pct: float = 0.10     # 10% Abweichung zum Aufwachen aus Coast (war 12%)
     min_move_speed: float = 0.15       # Minimale ONVIF-Speed bei kleinen Korrekturen
 
 
@@ -244,7 +244,7 @@ class AutonomousTracker:
         # Anti-Overshoot: letztes Ziel tracken
         self._target_pan = None
         self._target_tilt = None
-        self._target_arrival_thresh = 3.0  # Grad - Kamera muss so nah am Ziel sein
+        self._target_arrival_thresh = 5.0  # Grad - etwas toleranter (war 3.0, blockierte zu oft)
         # EMA Glaettung fuer smooth tracking
         self._smooth_x = None
         self._smooth_y = None
@@ -722,18 +722,27 @@ class AutonomousTracker:
 
             bbox = selected_pose.get("bbox", [0, 0, 0, 0])
             if selected_type == TargetType.FACE:
-                face_center = selected_pose.get("face_center", (0.5, 0.5))
-                track_x, track_y = face_center
+                # Prioritaet 1: Nose-Keypoint, Prioritaet 2: Face-Center
+                nose = selected_pose.get("nose_center")
+                if nose and nose[1] > 0:
+                    track_x, track_y = nose
+                else:
+                    face_center = selected_pose.get("face_center", (0.5, 0.5))
+                    track_x, track_y = face_center
             else:
-                # Body-Tracking: Oberes Drittel der Person-Box anpeilen (Kopfhoehe)
-                # statt Mitte der Box (war center_y * 0.85 = kaum Korrektur)
-                bbox_center_x = (bbox[0] + bbox[2]) / 2 / frame_width
-                bbox_top_y = bbox[1] / frame_height
-                bbox_bottom_y = bbox[3] / frame_height
-                bbox_height = bbox_bottom_y - bbox_top_y
-                # Ziel: 30% von oben in der Person-Box (= Kopf/Schulterbereich)
-                track_x = bbox_center_x
-                track_y = bbox_top_y + bbox_height * 0.30
+                # Body-Tracking: Kopf zentrieren
+                # Prioritaet 1: Nose-Keypoint (wenn sichtbar)
+                nose = selected_pose.get("nose_center")
+                if nose and nose[1] > 0:
+                    track_x, track_y = nose
+                else:
+                    # Prioritaet 3: Oberstes Fuenftel der Person-Box (Kopfhoehe)
+                    bbox_center_x = (bbox[0] + bbox[2]) / 2 / frame_width
+                    bbox_top_y = bbox[1] / frame_height
+                    bbox_bottom_y = bbox[3] / frame_height
+                    bbox_height = bbox_bottom_y - bbox_top_y
+                    track_x = bbox_center_x
+                    track_y = bbox_top_y + bbox_height * 0.15
 
             if self.current_target_id == 0:
                 self.current_target_id = self._next_target_id
@@ -801,9 +810,18 @@ class AutonomousTracker:
             self.last_position_time = time.time()
             self.stats["position_reads"] += 1
 
-            # Debug: Position-Drift erkennen
+            # Drift erkennen und Target-Cache invalidieren wenn zu gross
             drift = abs(old_pan - pos.pan) + abs(old_tilt - pos.tilt)
-            if drift > 2.0 and self.stats["position_reads"] % 5 == 0:
+            if drift > 5.0:
+                # Grosser Drift: Target-Cache invalidieren, neue Befehle erlauben
+                self._target_pan = None
+                self._target_tilt = None
+                self._target_wait_start = None
+                ptz_debug.warning(
+                    f"POS_DRIFT pan={pos.pan:+.1f} tilt={pos.tilt:+.1f} "
+                    f"drift={drift:.1f} > 5.0 — cache invalidiert"
+                )
+            elif drift > 2.0 and self.stats["position_reads"] % 5 == 0:
                 ptz_debug.info(
                     f"POS_READ pan={pos.pan:+.1f} tilt={pos.tilt:+.1f} "
                     f"(drift={drift:.1f} von cached ({old_pan:+.1f},{old_tilt:+.1f}))"
@@ -999,7 +1017,8 @@ class AutonomousTracker:
         center_x_px = self._smooth_x * self.config.frame_width
         center_y_px = self._smooth_y * self.config.frame_height
         frame_center_x = self.config.frame_width / 2
-        frame_center_y = self.config.frame_height / 2
+        # Kopf soll im oberen Drittel des Bildes erscheinen (33% statt 50%)
+        frame_center_y = self.config.frame_height * 0.33
 
         error_x = center_x_px - frame_center_x  # Positive = target RIGHT of center
         error_y = center_y_px - frame_center_y  # Positive = target BELOW center
@@ -1188,8 +1207,8 @@ class AutonomousTracker:
             tilt_delta = max(-self.config.max_step_tilt, min(self.config.max_step_tilt, tilt_delta))
 
         # Calculate target position + Soft-Limit Clamping
-        # 10 Grad INNERHALB der Hardware-Limits stoppen (nie auf Anschlag fahren)
-        LIMIT_BUFFER = 10.0
+        # 2 Grad INNERHALB der Hardware-Limits (war 10 = zu viel Range-Verlust)
+        LIMIT_BUFFER = 2.0
         soft_pan_min = self.config.pan_limit_min + LIMIT_BUFFER
         soft_pan_max = self.config.pan_limit_max - LIMIT_BUFFER
         soft_tilt_min = self.config.tilt_limit_min + LIMIT_BUFFER
