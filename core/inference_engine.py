@@ -337,7 +337,7 @@ class InferenceEngine:
                     }
                     _new_slots = self._perception.tick(_idle_ctx)
                     if _new_slots:
-                        _want = set(_new_slots) | {"face_attr"}
+                        _want = set(_new_slots)
                         _have = set(self._orchestrator._active_ctx.keys())
                         _to_remove = _have - _want
                         _to_add = _want - _have
@@ -443,10 +443,8 @@ class InferenceEngine:
                     self._model_health.record_error("scrfd")
 
 
-            # Lazy-configure face_attr (einmalig ~400ms, danach 0ms)
-            if not self.face_attr_active and "face_attr" in self._orchestrator._models and face_boxes:
-                self._orchestrator.configure("face_attr")
-                self.face_attr_active = "face_attr" in self._orchestrator._active_ctx
+            # face_attr wird jetzt von PerceptionEngine STAGE_MODELS gesteuert
+            # (Kein lazy-configure mehr — war Ursache des Load/Unload-Loop!)
 
             # 2. ArcFace (nur wenn SCRFD aktiv + Faces gefunden)
             if (self.arcface_active and self.scrfd_active
@@ -811,7 +809,7 @@ class InferenceEngine:
                 _new_slots = self._perception.tick(_perc_ctx)
                 # Always-On: KEINE Modell-Rotation, alle 6 bleiben permanent aktiv
                 if _new_slots and self._orchestrator.orchestration_mode != "always_on":
-                    _want = set(_new_slots) | {"face_attr"}
+                    _want = set(_new_slots)
                     _have = set(self._orchestrator._active_ctx.keys())
                     _to_remove = _have - _want
                     _to_add = _want - _have

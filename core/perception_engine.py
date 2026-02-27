@@ -34,10 +34,11 @@ class PerceptionEngine:
     ALL_MODELS = ["scrfd", "arcface", "yolov8m", "hand_landmark"]
 
     # NPU Stufen: welche Modelle pro Stufe aktiv
+    # face_attr in person/face Stufen — sonst Loop mit apply_attention_level!
     STAGE_MODELS = {
         "idle":   ["yolov8m"],
-        "person": ["yolov8m", "scrfd"],
-        "face":   ["scrfd", "arcface"],
+        "person": ["yolov8m", "scrfd", "face_attr"],
+        "face":   ["scrfd", "arcface", "face_attr"],
     }
 
     BASE_SCORES = {
