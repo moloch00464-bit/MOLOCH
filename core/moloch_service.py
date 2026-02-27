@@ -592,6 +592,14 @@ class MolochService:
                 ptz_state = self._ptz_tracker.get_state()
                 ptz_status.update(ptz_state)
             status["ptz"] = ptz_status
+            # PTZ Arbiter Status
+            try:
+                from core.ptz_arbiter import get_ptz_arbiter
+                arbiter = get_ptz_arbiter()
+                arbiter.check_timeout()
+                status.update(arbiter.get_status())
+            except Exception:
+                pass
             if self._core_integrator:
                 raw_core = self._core_integrator.get_status_dict()
                 # ArbitrationEngine: Override-Logik anwenden

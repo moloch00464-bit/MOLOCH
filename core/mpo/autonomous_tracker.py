@@ -1196,6 +1196,16 @@ class AutonomousTracker:
         if hasattr(self.camera, '_exclusive_owner') and self.camera._exclusive_owner is not None:
             return False
 
+        # PTZ Arbiter: Darf MOLOCH jetzt einen Befehl senden?
+        try:
+            from core.ptz_arbiter import get_ptz_arbiter
+            arbiter = get_ptz_arbiter()
+            if not arbiter.may_send_ptz():
+                return False
+            arbiter.record_takeover_reason()
+        except Exception:
+            pass
+
         # PD-Delta nutzen wenn vorhanden, sonst reiner P-Term als Fallback
         if pd_pan_delta is not None and pd_tilt_delta is not None:
             pan_delta = pd_pan_delta
@@ -1360,6 +1370,14 @@ class AutonomousTracker:
 
         if hasattr(self.camera, '_exclusive_owner') and self.camera._exclusive_owner is not None:
             return False
+
+        # PTZ Arbiter: Darf MOLOCH jetzt einen Befehl senden?
+        try:
+            from core.ptz_arbiter import get_ptz_arbiter
+            if not get_ptz_arbiter().may_send_ptz():
+                return False
+        except Exception:
+            pass
 
         result = self.camera.move_absolute(pan_deg, tilt_deg, speed=self.config.search_speed)
 

@@ -367,6 +367,12 @@ class CameraManager:
         with self._st_lock:
             self._smart_tracking_on = value
         self._notify("smart_tracking", {"on": value})
+        # PTZ Arbiter synchronisieren
+        try:
+            from core.ptz_arbiter import get_ptz_arbiter
+            get_ptz_arbiter().sync_smart_tracking(value)
+        except Exception:
+            pass
 
     def toggle_smart_tracking(self):
         """Smart Tracking toggle via persistent cloud connection."""
@@ -478,6 +484,12 @@ class CameraManager:
                 self.enable_autonomous()
                 if self._led:
                     self._led.on()
+                # PTZ Arbiter: MOLOCH uebernimmt
+                try:
+                    from core.ptz_arbiter import get_ptz_arbiter
+                    get_ptz_arbiter().set_moloch_uebernimmt(reason)
+                except Exception:
+                    pass
                 self._update_status(f"MOLOCH: {reason}")
                 logger.info(f"[TENTAKEL] Takeover komplett (fliessend): {reason}")
             except Exception as e:
@@ -528,6 +540,13 @@ class CameraManager:
                 if self._cloud.set_smart_tracking(True):
                     self._set_smart_tracking_state(True)
                     logger.info("[TENTAKEL] Smart Tracking wiederhergestellt")
+
+            # PTZ Arbiter: Kamera fuehrt wieder
+            try:
+                from core.ptz_arbiter import get_ptz_arbiter
+                get_ptz_arbiter().set_kamera_fuehrt("release")
+            except Exception:
+                pass
 
             if self._perception and self._perception._forced:
                 self._sync_flags()

@@ -149,12 +149,13 @@ class PtzModule:
     # =========================================================================
 
     def _build_restless_indicator(self):
-        """Kleiner Indikator: Kamera-Bewegungsintensitaet.
+        """Kleiner Indikator: Kamera-Bewegungsintensitaet + NPU Stage.
 
         Ruhig (gruen) | Moderat (gelb) | Hektisch (rot)
+        NPU: IDLE (grau) | PERSON (gelb) | FACE (gruen)
         """
         row = tk.Frame(self._parent, bg=BG_FRAME)
-        row.pack(fill=tk.X, padx=5, pady=(0, 2))
+        row.pack(fill=tk.X, padx=5, pady=(0, 1))
 
         tk.Label(
             row, text="PTZ:", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
@@ -169,6 +170,24 @@ class PtzModule:
             row, text="", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
         )
         self._lbl_tracker_state.pack(side=tk.RIGHT, padx=5)
+
+        # NPU Stage Zeile
+        npu_row = tk.Frame(self._parent, bg=BG_FRAME)
+        npu_row.pack(fill=tk.X, padx=5, pady=(0, 2))
+
+        tk.Label(
+            npu_row, text="NPU:", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
+        ).pack(side=tk.LEFT, padx=(5, 2))
+
+        self._lbl_npu_stage = tk.Label(
+            npu_row, text="---", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
+        )
+        self._lbl_npu_stage.pack(side=tk.LEFT, padx=2)
+
+        self._lbl_npu_models = tk.Label(
+            npu_row, text="", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
+        )
+        self._lbl_npu_models.pack(side=tk.RIGHT, padx=5)
 
     def _update_restless_indicator(self, status):
         """Restless-Indikator aus Status-Dict aktualisieren."""
@@ -245,7 +264,7 @@ class PtzModule:
     # =========================================================================
 
     def _build_toggles(self):
-        """Toggle-Buttons: AUTONOM und TEACHEN mit Status-Labels."""
+        """Toggle-Buttons: AUTONOM, ST Toggle, TEACHEN mit Status-Labels."""
         section = tk.LabelFrame(
             self._parent,
             text="Modi",
@@ -255,8 +274,26 @@ class PtzModule:
         )
         section.pack(fill=tk.X, padx=5, pady=(2, 5))
 
+        # Zeile 1: Smart Tracking Status + Toggle
+        st_row = tk.Frame(section, bg=BG_FRAME)
+        st_row.pack(fill=tk.X, padx=5, pady=(5, 2))
+
+        self._btn_st = tk.Button(
+            st_row, text="ST: ---", width=10,
+            bg=BTN_OFF_DARK, fg=FG_WHITE, font=FONT_BUTTON,
+            activebackground=BG_FRAME,
+            command=self._toggle_smart_tracking,
+        )
+        self._btn_st.pack(side=tk.LEFT, padx=3)
+
+        self._lbl_arbiter = tk.Label(
+            st_row, text="", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
+        )
+        self._lbl_arbiter.pack(side=tk.LEFT, padx=5)
+
+        # Zeile 2: AUTONOM + TEACHEN
         grid = tk.Frame(section, bg=BG_FRAME)
-        grid.pack(pady=5, padx=5)
+        grid.pack(pady=(2, 5), padx=5)
 
         # AUTONOM
         self._btn_autonom = tk.Button(
@@ -286,6 +323,10 @@ class PtzModule:
             grid, text="Bereit", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
         )
         self._lbl_alltag.grid(row=1, column=1, pady=(0, 5))
+
+    def _toggle_smart_tracking(self):
+        """Smart Tracking an/aus."""
+        self._service.toggle_smart_tracking()
 
     def _toggle_autonomous(self):
         """Autonomen Modus umschalten."""
@@ -347,11 +388,50 @@ class PtzModule:
                 text=f"Moves: {self._move_count}  Trk: {trk}  Srch: {srch}",
             )
 
+            # Smart Tracking Status + Arbiter
+            st_on = status.get("cam_smart_tracking", False)
+            arbiter_mode = status.get("ptz_arbiter_mode", "")
+            self._btn_st.config(
+                text=f"ST: {'AN' if st_on else 'AUS'}",
+                bg=BTN_ON_GREEN if st_on else BTN_OFF_DARK,
+            )
+            # Arbiter-Modus als Kurztext
+            arbiter_map = {
+                "kamera_fuehrt": "Kamera fuehrt",
+                "moloch_korrigiert": "MOLOCH korrigiert",
+                "moloch_uebernimmt": "MOLOCH steuert",
+            }
+            arbiter_text = arbiter_map.get(arbiter_mode, arbiter_mode)
+            arbiter_color = STATUS_GREEN if arbiter_mode == "kamera_fuehrt" else (
+                STATUS_YELLOW if arbiter_mode == "moloch_korrigiert" else STATUS_RED
+            )
+            self._lbl_arbiter.config(text=arbiter_text, fg=arbiter_color)
+
+            # NPU-Stage Anzeige
+            npu_stage = status.get("npu_stage", "")
+            active_models = status.get("active_models", [])
+            npu_paused = status.get("npu_paused", False)
+            if npu_paused:
+                npu_text = "Voice"
+                npu_color = STATUS_YELLOW
+            elif npu_stage == "face":
+                npu_text = "FACE"
+                npu_color = STATUS_GREEN
+            elif npu_stage == "person":
+                npu_text = "PERSON"
+                npu_color = STATUS_YELLOW
+            elif npu_stage == "idle":
+                npu_text = "IDLE"
+                npu_color = FG_DIM
+            else:
+                npu_text = npu_stage.upper() if npu_stage else "---"
+                npu_color = FG_DIM
+            self._lbl_npu_stage.config(text=npu_text, fg=npu_color)
+            models_text = ", ".join(active_models) if active_models else "---"
+            self._lbl_npu_models.config(text=models_text)
+
             # Restless-Indikator aktualisieren
             self._update_restless_indicator(status)
-
-        # Widgets sofort neu zeichnen
-        self._parent.update_idletasks()
 
         # Naechster Poll
         self._after_id = self._parent.after(STATUS_UPDATE_MS, self._poll_status)
