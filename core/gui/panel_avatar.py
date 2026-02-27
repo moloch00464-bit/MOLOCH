@@ -660,134 +660,144 @@ class AvatarModule:
     # =========================================================================
 
     def _update_animation(self):
-        """Ein Animation-Frame: Update State -> Render -> Display."""
+        """Ein Animation-Frame: Update State -> Render -> Display.
+
+        KRITISCH: try/except um den GESAMTEN Body. Wenn hier eine Exception
+        durchrutscht, stirbt der after()-Chain und das Avatar-Auge friert ein.
+        """
         if not self._running:
             return
 
-        now = time.monotonic()
-        dt = min(now - self._last_time, 0.1)
-        self._last_time = now
-        self._tick += 1
+        try:
+            now = time.monotonic()
+            dt = min(now - self._last_time, 0.1)
+            self._last_time = now
+            self._tick += 1
 
-        # Core State lesen (alle 15 Ticks ~ 500ms bei 30 FPS)
-        if self._tick % 15 == 0:
-            self._read_core_state()
-        else:
-            # Music Data JEDEN anderen Frame lesen (~33ms) fuer Sync
-            # Binary IPC ist <0.1ms, kein Performance-Problem
-            self._read_music_fast()
-
-        # Smooth Interpolation (rate=dt*6 ~ 300ms Settling)
-        rate = min(1.0, dt * 6.0)
-        self._s_tension += (self._tension - self._s_tension) * rate
-        self._s_dominance += (self._dominance - self._s_dominance) * rate
-        self._s_cpu += (self._cpu_temp - self._s_cpu) * rate
-
-        # Music Data: DIREKT uebernehmen, KEINE zweite Interpolation!
-        # Visualizer liefert bereits EMA-geglattete Werte via Binary IPC.
-        # Doppeltes Smoothing war die Ursache fuer Sync-Probleme.
-        if self._music_active:
-            self._s_music_bass = self._t_music_bass
-            self._s_music_mid = self._t_music_mid
-            self._s_music_high = self._t_music_high
-            self._s_music_rms = self._t_music_rms
-        else:
-            # Smooth Decay wenn keine Musik (nur hier, nicht bei aktiver Musik)
-            self._s_music_bass *= 0.92
-            self._s_music_mid *= 0.92
-            self._s_music_high *= 0.92
-            self._s_music_rms *= 0.92
-
-        # Dual-Modus Crossfade: 0→1 bei Musik, 1→0 bei Stille (~1s)
-        blend_target = 1.0 if self._music_active else 0.0
-        blend_rate = min(1.0, dt * 2.0)  # ~500ms Uebergang
-        self._music_blend += (blend_target - self._music_blend) * blend_rate
-
-        # Voice State Interpolation (smooth fuer weiche Uebergaenge)
-        speak_target = 1.0 if self._tts_active else 0.0
-        listen_target = 1.0 if (self._ptt_active and not self._tts_active) else 0.0
-        self._s_voice_speak += (speak_target - self._s_voice_speak) * rate
-        self._s_voice_listen += (listen_target - self._s_voice_listen) * rate
-
-        # Visuelle Dominance mit Hysterese
-        if abs(self._dominance - self._dom_at_last_change) > DOM_HYSTERESIS:
-            self._dom_at_last_change = self._dominance
-        self._visual_dom += (self._dom_at_last_change - self._visual_dom) * rate
-
-        # Puls-Phase: Geschwindigkeit von Tension + Voice, gedaempft bei CPU-Hitze
-        speed = 1.0 + self._s_tension * 3.0
-        speed *= 1.0 + self._s_voice_speak * 2.5   # Schneller beim Sprechen
-        if self._s_voice_listen > 0.3:
-            speed *= 0.6                            # Ruhiger beim Zuhoeren
-        if self._s_cpu > 0.7:
-            speed *= 0.85
-        if self._s_cpu > 0.9:
-            speed *= 0.6
-        self._pulse_phase += speed * dt * math.tau / 3.0
-
-        # Speech-Phase (eigene Frequenz fuer Sprech-Pulsation, ~3.5 Hz)
-        self._speech_phase += self._s_voice_speak * dt * math.tau * 3.5
-
-        # Blinzel-Logik (pausiert beim Sprechen — Auge "spricht dich an")
-        blink_speed = 4.0 * dt
-        speaking = self._s_voice_speak > 0.5
-
-        if speaking and self._blinking:
-            # Beim Sprechen: Auge schnell oeffnen
-            self._blink_progress -= blink_speed * 3
-            if self._blink_progress <= 0.0:
-                self._blink_progress = 0.0
-                self._blinking = False
-                self._blink_opening = False
-        elif self._blinking:
-            if not self._blink_opening:
-                self._blink_progress += blink_speed
-                if self._blink_progress >= 1.0:
-                    self._blink_progress = 1.0
-                    self._blink_opening = True
+            # Core State lesen (alle 15 Ticks ~ 500ms bei 30 FPS)
+            if self._tick % 15 == 0:
+                self._read_core_state()
             else:
-                self._blink_progress -= blink_speed
+                # Music Data JEDEN anderen Frame lesen (~33ms) fuer Sync
+                # Binary IPC ist <0.1ms, kein Performance-Problem
+                self._read_music_fast()
+
+            # Smooth Interpolation (rate=dt*6 ~ 300ms Settling)
+            rate = min(1.0, dt * 6.0)
+            self._s_tension += (self._tension - self._s_tension) * rate
+            self._s_dominance += (self._dominance - self._s_dominance) * rate
+            self._s_cpu += (self._cpu_temp - self._s_cpu) * rate
+
+            # Music Data: DIREKT uebernehmen, KEINE zweite Interpolation!
+            # Visualizer liefert bereits EMA-geglattete Werte via Binary IPC.
+            # Doppeltes Smoothing war die Ursache fuer Sync-Probleme.
+            if self._music_active:
+                self._s_music_bass = self._t_music_bass
+                self._s_music_mid = self._t_music_mid
+                self._s_music_high = self._t_music_high
+                self._s_music_rms = self._t_music_rms
+            else:
+                # Smooth Decay wenn keine Musik (nur hier, nicht bei aktiver Musik)
+                self._s_music_bass *= 0.92
+                self._s_music_mid *= 0.92
+                self._s_music_high *= 0.92
+                self._s_music_rms *= 0.92
+
+            # Dual-Modus Crossfade: 0→1 bei Musik, 1→0 bei Stille (~1s)
+            blend_target = 1.0 if self._music_active else 0.0
+            blend_rate = min(1.0, dt * 2.0)  # ~500ms Uebergang
+            self._music_blend += (blend_target - self._music_blend) * blend_rate
+
+            # Voice State Interpolation (smooth fuer weiche Uebergaenge)
+            speak_target = 1.0 if self._tts_active else 0.0
+            listen_target = 1.0 if (self._ptt_active and not self._tts_active) else 0.0
+            self._s_voice_speak += (speak_target - self._s_voice_speak) * rate
+            self._s_voice_listen += (listen_target - self._s_voice_listen) * rate
+
+            # Visuelle Dominance mit Hysterese
+            if abs(self._dominance - self._dom_at_last_change) > DOM_HYSTERESIS:
+                self._dom_at_last_change = self._dominance
+            self._visual_dom += (self._dom_at_last_change - self._visual_dom) * rate
+
+            # Puls-Phase: Geschwindigkeit von Tension + Voice, gedaempft bei CPU-Hitze
+            speed = 1.0 + self._s_tension * 3.0
+            speed *= 1.0 + self._s_voice_speak * 2.5   # Schneller beim Sprechen
+            if self._s_voice_listen > 0.3:
+                speed *= 0.6                            # Ruhiger beim Zuhoeren
+            if self._s_cpu > 0.7:
+                speed *= 0.85
+            if self._s_cpu > 0.9:
+                speed *= 0.6
+            self._pulse_phase += speed * dt * math.tau / 3.0
+
+            # Speech-Phase (eigene Frequenz fuer Sprech-Pulsation, ~3.5 Hz)
+            self._speech_phase += self._s_voice_speak * dt * math.tau * 3.5
+
+            # Blinzel-Logik (pausiert beim Sprechen — Auge "spricht dich an")
+            blink_speed = 4.0 * dt
+            speaking = self._s_voice_speak > 0.5
+
+            if speaking and self._blinking:
+                # Beim Sprechen: Auge schnell oeffnen
+                self._blink_progress -= blink_speed * 3
                 if self._blink_progress <= 0.0:
                     self._blink_progress = 0.0
                     self._blinking = False
                     self._blink_opening = False
-                    self._next_blink_tick = self._tick + random.randint(100, 250)
-        elif not speaking and self._tick >= self._next_blink_tick:
-            if self._s_tension > 0.7 and random.random() < 0.5:
-                self._next_blink_tick = self._tick + random.randint(100, 250)
-            else:
-                self._blinking = True
-                self._blink_opening = False
-
-        # Mikro-Bewegung Pupille
-        if self._tick % 60 == 0:
-            self._target_dx = random.uniform(-4, 4)
-            self._target_dy = random.uniform(-4, 4)
-        self._pupil_dx += (self._target_dx - self._pupil_dx) * 0.03
-        self._pupil_dy += (self._target_dy - self._pupil_dy) * 0.03
-
-        # Track-Text Scrolling (alle 2 Ticks bei 30 FPS)
-        if self._track_visible and self._track_text and self._tick % 2 == 0:
-            max_vis = 35
-            if len(self._track_text) > max_vis:
-                if self._track_scroll_pause > 0:
-                    self._track_scroll_pause -= 1
-                    self._track_label.config(text=self._track_text[:max_vis])
+            elif self._blinking:
+                if not self._blink_opening:
+                    self._blink_progress += blink_speed
+                    if self._blink_progress >= 1.0:
+                        self._blink_progress = 1.0
+                        self._blink_opening = True
                 else:
-                    self._track_scroll_offset += 1
-                    if self._track_scroll_offset > len(self._track_text) - max_vis + 10:
-                        self._track_scroll_offset = 0
-                        self._track_scroll_pause = 45  # ~3s bei halber Rate
-                    start = max(0, min(self._track_scroll_offset,
-                                       len(self._track_text) - max_vis))
-                    self._track_label.config(
-                        text=self._track_text[start:start + max_vis])
-            else:
-                self._track_label.config(text=self._track_text)
+                    self._blink_progress -= blink_speed
+                    if self._blink_progress <= 0.0:
+                        self._blink_progress = 0.0
+                        self._blinking = False
+                        self._blink_opening = False
+                        self._next_blink_tick = self._tick + random.randint(100, 250)
+            elif not speaking and self._tick >= self._next_blink_tick:
+                if self._s_tension > 0.7 and random.random() < 0.5:
+                    self._next_blink_tick = self._tick + random.randint(100, 250)
+                else:
+                    self._blinking = True
+                    self._blink_opening = False
 
-        # Rendern + Display
-        self._render()
-        self._blit_to_tkinter()
+            # Mikro-Bewegung Pupille
+            if self._tick % 60 == 0:
+                self._target_dx = random.uniform(-4, 4)
+                self._target_dy = random.uniform(-4, 4)
+            self._pupil_dx += (self._target_dx - self._pupil_dx) * 0.03
+            self._pupil_dy += (self._target_dy - self._pupil_dy) * 0.03
+
+            # Track-Text Scrolling (alle 2 Ticks bei 30 FPS)
+            if self._track_visible and self._track_text and self._tick % 2 == 0:
+                max_vis = 35
+                if len(self._track_text) > max_vis:
+                    if self._track_scroll_pause > 0:
+                        self._track_scroll_pause -= 1
+                        self._track_label.config(text=self._track_text[:max_vis])
+                    else:
+                        self._track_scroll_offset += 1
+                        if self._track_scroll_offset > len(self._track_text) - max_vis + 10:
+                            self._track_scroll_offset = 0
+                            self._track_scroll_pause = 45  # ~3s bei halber Rate
+                        start = max(0, min(self._track_scroll_offset,
+                                           len(self._track_text) - max_vis))
+                        self._track_label.config(
+                            text=self._track_text[start:start + max_vis])
+                else:
+                    self._track_label.config(text=self._track_text)
+
+            # Rendern + Display
+            self._render()
+            self._blit_to_tkinter()
+
+        except Exception as e:
+            # KRITISCH: after-Chain MUSS weiterlaufen, sonst Avatar-Freeze!
+            if self._tick % 300 == 0:
+                self._logger.warning(f"[WARNUNG] Avatar render_error err={e}")
 
         self._after_id = self._parent.after(ANIM_INTERVAL_MS, self._update_animation)
 

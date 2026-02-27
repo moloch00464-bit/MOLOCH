@@ -891,7 +891,7 @@ class MolochService:
         elif action == 'einpraegen':
             if self._einpraegen:
                 if not self._einpraegen.is_running:
-                    self._einpraegen.start()
+                    self._einpraegen.start(orchestrator=self._orchestrator)
                     logger.info("[IPC] Einpraegen gestartet")
                 else:
                     logger.warning("[IPC] Einpraegen laeuft bereits")

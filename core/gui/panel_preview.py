@@ -19,6 +19,7 @@ import tkinter as tk
 import struct
 import time
 import os
+import logging
 
 from PIL import Image, ImageTk
 
@@ -68,6 +69,13 @@ class PreviewModule:
         # FPS-Zaehler
         self._frame_times = []
         self._fps = 0.0
+
+        # SHM Sequenznummer — gleicher Frame = kein Neuzeichnen
+        self._last_seq = -1
+
+        # Fehler-Zaehler fuer Diagnostik
+        self._error_count = 0
+        self._logger = logging.getLogger("Preview")
 
         # Zeitstempel fuer Frame-Skip Logik
         self._last_update_start = 0.0
@@ -149,14 +157,14 @@ class PreviewModule:
                 header = f.read(16)
                 if len(header) < 16:
                     return None
-                h, w, c, _seq = struct.unpack("<IIII", header)
+                h, w, c, seq = struct.unpack("<IIII", header)
                 expected = w * h * c
                 if expected == 0 or expected > 10_000_000:
                     return None
                 raw = f.read(expected)
                 if len(raw) < expected:
                     return None
-            return (w, h, raw)
+            return (w, h, seq, raw)
         except OSError:
             return None
 
@@ -186,66 +194,85 @@ class PreviewModule:
         )
 
     def _update(self):
-        """Einen Frame lesen, konvertieren und anzeigen."""
+        """Einen Frame lesen, konvertieren und anzeigen.
+
+        KRITISCH: try/except um den GESAMTEN Body. Wenn hier eine Exception
+        durchrutscht, stirbt der after()-Chain und das Bild friert ein.
+        """
         if not self._running:
             return
 
-        now_start = time.monotonic()
+        try:
+            now_start = time.monotonic()
 
-        # Frame-Skip: wenn letzter Update laenger als 28ms gedauert hat,
-        # diesen Frame ueberspringen und direkt naechsten planen
-        elapsed_since_last = (now_start - self._last_update_start) * 1000
-        if self._last_update_start > 0 and elapsed_since_last < UPDATE_INTERVAL_MS * 0.5:
-            # Zu frueh — ueberspringen
+            # Frame-Skip: zu frueh seit letztem Update
+            elapsed_since_last = (now_start - self._last_update_start) * 1000
+            if self._last_update_start > 0 and elapsed_since_last < UPDATE_INTERVAL_MS * 0.5:
+                self._after_id = self._parent.after(UPDATE_INTERVAL_MS, self._update)
+                return
+
+            self._last_update_start = now_start
+
+            result = self._read_shm_frame()
+
+            if result is not None:
+                shm_w, shm_h, seq, raw = result
+
+                # Gleicher Frame wie letztes Mal — kein Neuzeichnen noetig
+                if seq == self._last_seq:
+                    self._after_id = self._parent.after(UPDATE_INTERVAL_MS, self._update)
+                    return
+                self._last_seq = seq
+
+                # Bild mit Originalgroesse aus SHM rekonstruieren (BGR raw)
+                img = Image.frombytes('RGB', (shm_w, shm_h), raw)
+                # B und R tauschen (BGR -> RGB)
+                b, g, r = img.split()
+                img = Image.merge('RGB', (r, g, b))
+
+                # Auf Canvas-Groesse resizen (gekappt auf MAX_CANVAS)
+                if img.size != (self._canvas_w, self._canvas_h):
+                    img = img.resize((self._canvas_w, self._canvas_h), Image.BILINEAR)
+
+                # Anzeigen
+                self._photo = ImageTk.PhotoImage(img)
+                self._canvas.itemconfig(self._image_id, image=self._photo)
+                self._canvas.itemconfig(self._nosignal_id, state='hidden')
+
+                # FPS berechnen (Frames der letzten Sekunde zaehlen)
+                now = time.monotonic()
+                self._frame_times.append(now)
+                cutoff = now - 1.0
+                self._frame_times = [t for t in self._frame_times if t > cutoff]
+                self._fps = len(self._frame_times)
+
+                # Fehler-Zaehler zuruecksetzen nach erfolgreichem Frame
+                self._error_count = 0
+            else:
+                # Kein Frame — "Kein Signal" anzeigen
+                self._canvas.itemconfig(self._nosignal_id, state='normal')
+                self._fps = 0.0
+
+            # FPS-Overlay aktualisieren und nach vorne
+            self._canvas.itemconfig(self._fps_id, text=f"{self._fps:.1f} FPS")
+            self._canvas.tag_raise(self._fps_id)
+
+            # Naechsten Frame planen
+            processing_time = (time.monotonic() - now_start) * 1000
+            if processing_time > UPDATE_INTERVAL_MS:
+                self._after_id = self._parent.after(UPDATE_INTERVAL_MS, self._update)
+            else:
+                wait = max(1, UPDATE_INTERVAL_MS - int(processing_time))
+                self._after_id = self._parent.after(wait, self._update)
+
+        except Exception as e:
+            # KRITISCH: after-Chain MUSS weiterlaufen, sonst Bild-Freeze!
+            self._error_count += 1
+            if self._error_count <= 3 or self._error_count % 100 == 0:
+                self._logger.warning(
+                    f"[WARNUNG] Preview frame_error count={self._error_count} err={e}"
+                )
             self._after_id = self._parent.after(UPDATE_INTERVAL_MS, self._update)
-            return
-
-        self._last_update_start = now_start
-
-        result = self._read_shm_frame()
-
-        if result is not None:
-            shm_w, shm_h, raw = result
-
-            # Bild mit Originalgroesse aus SHM rekonstruieren (BGR raw)
-            img = Image.frombytes('RGB', (shm_w, shm_h), raw)
-            # B und R tauschen (BGR -> RGB)
-            b, g, r = img.split()
-            img = Image.merge('RGB', (r, g, b))
-
-            # Auf Canvas-Groesse resizen (gekappt auf MAX_CANVAS)
-            if img.size != (self._canvas_w, self._canvas_h):
-                img = img.resize((self._canvas_w, self._canvas_h), Image.BILINEAR)
-
-            # Anzeigen
-            self._photo = ImageTk.PhotoImage(img)
-            self._canvas.itemconfig(self._image_id, image=self._photo)
-            self._canvas.itemconfig(self._nosignal_id, state='hidden')
-
-            # FPS berechnen (Frames der letzten Sekunde zaehlen)
-            now = time.monotonic()
-            self._frame_times.append(now)
-            cutoff = now - 1.0
-            self._frame_times = [t for t in self._frame_times if t > cutoff]
-            self._fps = len(self._frame_times)
-        else:
-            # Kein Frame — "Kein Signal" anzeigen
-            self._canvas.itemconfig(self._nosignal_id, state='normal')
-            self._fps = 0.0
-
-        # FPS-Overlay aktualisieren und nach vorne
-        self._canvas.itemconfig(self._fps_id, text=f"{self._fps:.1f} FPS")
-        self._canvas.tag_raise(self._fps_id)
-
-        # Frame-Skip Logik: wenn Verarbeitung > 28ms, naechsten Frame ueberspringen
-        processing_time = (time.monotonic() - now_start) * 1000
-        if processing_time > UPDATE_INTERVAL_MS:
-            # Verarbeitung war zu lang — uebernaechstes Intervall planen
-            self._after_id = self._parent.after(UPDATE_INTERVAL_MS, self._update)
-        else:
-            # Normal: restliche Zeit bis zum naechsten Intervall warten
-            wait = max(1, UPDATE_INTERVAL_MS - int(processing_time))
-            self._after_id = self._parent.after(wait, self._update)
 
     def start(self):
         """Preview-Loop starten."""

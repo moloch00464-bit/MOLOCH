@@ -5,11 +5,12 @@ M.O.L.O.C.H. Einpraegen — Batch-Analyse fuer Face + Pose Enrollment.
 Laeuft als Background-Thread (GUI darf NICHT einfrieren).
 Sammelt JPGs aus snapshots/ und daily/, jagt sie durch SCRFD+ArcFace und Pose.
 
+WICHTIG: Nutzt den ModelOrchestrator des Service — kein eigenes VDevice!
+Hailo-10H erlaubt nur EIN VDevice gleichzeitig.
+
 Ergebnisse:
   - Face Embeddings → ~/moloch/data/face_embeddings.json (erweitern)
   - Pose-Profile   → ~/moloch/data/pose_profiles.json (neu/erweitern)
-
-NPU Max-2 Regel: Erst SCRFD+ArcFace fuer alle Bilder, DANN SCRFD+Pose fuer alle.
 """
 
 import os
@@ -21,7 +22,10 @@ import logging
 
 import cv2
 import numpy as np
-from hailo_platform import HEF, VDevice, FormatType
+
+from core.perception.hailo_postprocess import (
+    decode_scrfd, decode_yolov8_pose,
+)
 
 logger = logging.getLogger("Einpraegen")
 
@@ -30,12 +34,6 @@ SNAPSHOTS_DIR = os.path.expanduser("~/moloch/snapshots")
 DAILY_DIR = "/mnt/moloch-data/daily"
 FACE_DB_PATH = os.path.expanduser("~/moloch/data/face_embeddings.json")
 POSE_DB_PATH = os.path.expanduser("~/moloch/data/pose_profiles.json")
-MODEL_DIR = "/mnt/moloch-data/hailo/models"
-
-# Modell-Pfade
-SCRFD_HEF = f"{MODEL_DIR}/scrfd_10g.hef"
-ARCFACE_HEF = f"{MODEL_DIR}/arcface_mobilefacenet.hef"
-POSE_HEF = f"{MODEL_DIR}/yolov8s_pose_h10.hef"
 
 # Thresholds
 MIN_FACE_SIZE = 20       # Pixel, kleiner wird uebersprungen
@@ -101,14 +99,15 @@ def _collect_images() -> list:
 
 
 class Einpraegen:
-    """Batch-Analyse: Bilder durch NPU jagen, Embeddings + Pose speichern."""
+    """Batch-Analyse: Bilder durch NPU jagen via ModelOrchestrator."""
 
     def __init__(self):
         self._running = False
         self._thread = None
-        self._progress = ""       # z.B. "14/87"
+        self._progress = ""       # z.B. "Face 14/87"
         self._done = False
         self._lock = threading.Lock()
+        self._orchestrator = None
         # Statistik
         self._stats = {
             "total": 0,
@@ -132,40 +131,77 @@ class Einpraegen:
     def is_done(self) -> bool:
         return self._done
 
-    def start(self):
-        """Einpraegen starten (Background-Thread)."""
+    def start(self, orchestrator=None):
+        """Einpraegen starten (Background-Thread).
+
+        Args:
+            orchestrator: ModelOrchestrator vom Service (shared VDevice).
+        """
         if self._running:
-            logger.warning("[EINPRAEGEN] Laeuft bereits!")
+            logger.warning("[LERNE] Laeuft bereits!")
             return
+        if orchestrator is None:
+            logger.error("[LERNE] Kein Orchestrator — Einpraegen nicht moeglich!")
+            return
+        self._orchestrator = orchestrator
         self._done = False
         self._running = True
+        # Statistik zuruecksetzen
+        for k in self._stats:
+            self._stats[k] = 0
         self._thread = threading.Thread(target=self._run, daemon=True, name="Einpraegen")
         self._thread.start()
 
-    def _update_progress(self, current: int, total: int):
+    def _update_progress(self, phase: str, current: int, total: int):
         """Fortschritt aktualisieren (thread-safe)."""
         with self._lock:
-            self._progress = f"{current}/{total}"
+            self._progress = f"{phase} {current}/{total}"
 
     def _run(self):
-        """Haupt-Batch-Schleife. Laeuft im Background-Thread."""
+        """Haupt-Batch-Schleife. Laeuft im Background-Thread.
+
+        Nutzt ModelOrchestrator.configure()/run() statt eigenes VDevice.
+        """
+        t_start = time.monotonic()
+        models_we_configured = []
+        already_active = set()
+
         try:
-            logger.info("[EINPRAEGEN] Starte Batch-Analyse...")
             images = _collect_images()
             total = len(images)
             if total == 0:
-                logger.info("[EINPRAEGEN] Keine Bilder gefunden.")
-                self._update_progress(0, 0)
+                logger.info("[LERNE] Gesichter quelle=batch bilder_total=0")
+                self._update_progress("", 0, 0)
                 return
             self._stats["total"] = total
-            logger.info(f"[EINPRAEGEN] {total} Bilder gesammelt")
+            logger.info(f"[LERNE] Gesichter quelle=batch bilder_total={total}")
 
-            # NPU-Kontext aufbauen (eigenes VDevice fuer Batch)
-            # PHASE 1: SCRFD + ArcFace
-            logger.info("[EINPRAEGEN] Phase 1: SCRFD + ArcFace (Gesichter)")
+            # Merken welche Modelle schon aktiv waren
+            already_active = set(self._orchestrator.active_models)
+
+            # ================================================================
+            # PHASE 1: SCRFD + ArcFace (Gesichtserkennung)
+            # ================================================================
+            logger.info("[LERNE] Phase 1: SCRFD + ArcFace")
+
+            # Modelle konfigurieren falls noetig
+            for model_name in ("scrfd", "arcface"):
+                if model_name not in already_active:
+                    logger.info(f"[LERNE] Konfiguriere {model_name} temporaer")
+                    self._orchestrator.configure(model_name)
+                    models_we_configured.append(model_name)
+
+            # Pruefen ob Modelle tatsaechlich verfuegbar
+            if "scrfd" not in self._orchestrator.active_models:
+                logger.error("[LERNE] SCRFD konnte nicht konfiguriert werden!")
+                return
+            if "arcface" not in self._orchestrator.active_models:
+                logger.error("[LERNE] ArcFace konnte nicht konfiguriert werden!")
+                return
+
             face_db = _load_existing_face_db()
 
-            # Referenz-Embedding fuer Markus laden (fuer Qualitaetscheck)
+            # Referenz-Embedding fuer Markus (Qualitaetscheck)
             markus_ref = None
             if "Markus" in face_db:
                 markus_ref = np.array(face_db["Markus"], dtype=np.float32)
@@ -173,179 +209,128 @@ class Einpraegen:
                 if norm > 0:
                     markus_ref = markus_ref / norm
 
-            # Gesammelte Embeddings + Metadata pro Bild
-            image_faces = {}  # {bild_pfad: [(face_bbox, embedding, name, sim)]}
+            # Gesammelte Face-Info pro Bild (fuer Phase 2)
+            image_faces = {}
 
-            params = VDevice.create_params()
-            vdevice = VDevice(params)
-            try:
-                # SCRFD laden
-                scrfd_model = vdevice.create_infer_model(SCRFD_HEF)
-                scrfd_model.input().set_format_type(FormatType.UINT8)
-                scrfd_hef = HEF(SCRFD_HEF)
-                scrfd_out_names = [o.name for o in scrfd_hef.get_output_vstream_infos()]
-                for oname in scrfd_out_names:
-                    scrfd_model.output(oname).set_format_type(FormatType.FLOAT32)
+            for idx, img_path in enumerate(images):
+                if not self._running:
+                    break
+                self._update_progress("Face", idx + 1, total)
 
-                # ArcFace laden
-                arcface_model = vdevice.create_infer_model(ARCFACE_HEF)
-                arcface_model.input().set_format_type(FormatType.UINT8)
-                arcface_hef = HEF(ARCFACE_HEF)
-                arcface_out_names = [o.name for o in arcface_hef.get_output_vstream_infos()]
-                for oname in arcface_out_names:
-                    arcface_model.output(oname).set_format_type(FormatType.FLOAT32)
+                try:
+                    frame = cv2.imread(img_path)
+                    if frame is None:
+                        continue
+                    fh, fw = frame.shape[:2]
 
-                # Konfigurieren
-                scrfd_ctx = scrfd_model.configure().__enter__()
-                scrfd_bufs = {n: np.empty(scrfd_model.output(n).shape, dtype=np.float32) for n in scrfd_out_names}
-                scrfd_bindings = scrfd_ctx.create_bindings(output_buffers=scrfd_bufs)
-
-                arcface_ctx = arcface_model.configure().__enter__()
-                arcface_bufs = {n: np.empty(arcface_model.output(n).shape, dtype=np.float32) for n in arcface_out_names}
-                arcface_bindings = arcface_ctx.create_bindings(output_buffers=arcface_bufs)
-
-                # Alle Bilder durchgehen
-                from core.perception.hailo_postprocess import decode_scrfd, normalize_arcface, match_face
-
-                for idx, img_path in enumerate(images):
-                    if not self._running:
-                        break
-                    self._update_progress(idx + 1, total)
-
-                    try:
-                        frame = cv2.imread(img_path)
-                        if frame is None:
-                            continue
-                        fh, fw = frame.shape[:2]
-
-                        # SCRFD: 640x640 resize
-                        input_640 = cv2.resize(frame, (640, 640))
-                        input_rgb = cv2.cvtColor(input_640, cv2.COLOR_BGR2RGB)
-                        scrfd_bindings.input().set_buffer(np.ascontiguousarray(input_rgb))
-                        scrfd_ctx.run([scrfd_bindings], timeout=10000)
-                        scrfd_outputs = {n: scrfd_bufs[n].copy() for n in scrfd_out_names}
-
-                        faces = decode_scrfd(scrfd_outputs, 640, SCRFD_CONF, SCRFD_NMS)
-                        if not faces:
-                            continue
-
-                        image_faces[img_path] = []
-
-                        for (x1n, y1n, x2n, y2n, conf) in faces:
-                            # Pixel-Koordinaten im Original
-                            x1 = max(0, int(x1n * fw))
-                            y1 = max(0, int(y1n * fh))
-                            x2 = min(fw, int(x2n * fw))
-                            y2 = min(fh, int(y2n * fh))
-                            bw, bh = x2 - x1, y2 - y1
-
-                            # Mindestgroesse
-                            if bw < MIN_FACE_SIZE or bh < MIN_FACE_SIZE:
-                                self._stats["faces_skipped_small"] += 1
-                                continue
-
-                            self._stats["faces_found"] += 1
-
-                            # 20% Margin
-                            mx, my = int(bw * 0.2), int(bh * 0.2)
-                            cx1 = max(0, x1 - mx)
-                            cy1 = max(0, y1 - my)
-                            cx2 = min(fw, x2 + mx)
-                            cy2 = min(fh, y2 + my)
-
-                            crop = frame[cy1:cy2, cx1:cx2]
-                            crop_112 = cv2.resize(crop, (112, 112))
-                            crop_rgb = cv2.cvtColor(crop_112, cv2.COLOR_BGR2RGB)
-
-                            # ArcFace Inference
-                            arcface_bindings.input().set_buffer(np.ascontiguousarray(crop_rgb))
-                            arcface_ctx.run([arcface_bindings], timeout=10000)
-                            emb_key = arcface_out_names[0]
-                            embedding = arcface_bufs[emb_key].copy().flatten()
-                            norm = np.linalg.norm(embedding)
-                            if norm > 0:
-                                embedding = embedding / norm
-
-                            # Qualitaetscheck gegen bestehende Markus-Referenz
-                            name = "unknown"
-                            sim = 0.0
-                            if markus_ref is not None:
-                                sim = float(np.dot(embedding, markus_ref))
-                                if sim >= ARCFACE_MIN_SIM:
-                                    name = "Markus"
-                                else:
-                                    self._stats["faces_skipped_unsicher"] += 1
-                                    logger.debug(f"[EINPRAEGEN] {os.path.basename(img_path)}: "
-                                                 f"Sim={sim:.3f} < {ARCFACE_MIN_SIM} → uebersprungen")
-                                    continue
-                            else:
-                                # Keine Referenz → alles als Markus speichern (Ersteinrichtung)
-                                name = "Markus"
-
-                            # In DB speichern
-                            ts = int(time.time())
-                            key = f"{name}#einpraegen_{ts}_{idx}"
-                            face_db[key] = embedding.tolist()
-                            self._stats["faces_saved"] += 1
-
-                            image_faces[img_path].append({
-                                "bbox": [x1, y1, x2, y2],
-                                "name": name,
-                                "sim": round(sim, 3),
-                            })
-
-                    except Exception as e:
-                        logger.warning(f"[EINPRAEGEN] Fehler bei {img_path}: {e}")
+                    # SCRFD: 640x640 resize
+                    input_640 = cv2.resize(frame, (640, 640))
+                    input_rgb = cv2.cvtColor(input_640, cv2.COLOR_BGR2RGB)
+                    scrfd_outputs = self._orchestrator.run("scrfd", input_rgb)
+                    if not scrfd_outputs:
                         continue
 
-                # Face-DB speichern
-                _save_face_db(face_db)
-                logger.info(f"[EINPRAEGEN] Phase 1 fertig: {self._stats['faces_saved']} Faces gespeichert, "
-                            f"{self._stats['faces_skipped_small']} zu klein, "
-                            f"{self._stats['faces_skipped_unsicher']} unsicher")
+                    faces = decode_scrfd(scrfd_outputs, 640, SCRFD_CONF, SCRFD_NMS)
+                    if not faces:
+                        continue
 
-            finally:
-                # NPU freigeben (Phase 1)
-                try:
-                    scrfd_ctx.__exit__(None, None, None)
-                except Exception:
-                    pass
-                try:
-                    arcface_ctx.__exit__(None, None, None)
-                except Exception:
-                    pass
-                del vdevice
+                    image_faces[img_path] = []
 
-            # PHASE 2: SCRFD + Pose (Skelett/Koerperhaltung)
-            logger.info("[EINPRAEGEN] Phase 2: SCRFD + Pose (Koerperhaltung)")
-            pose_db = _load_existing_pose_db()
+                    for (x1n, y1n, x2n, y2n, conf) in faces:
+                        # Pixel-Koordinaten im Original
+                        x1 = max(0, int(x1n * fw))
+                        y1 = max(0, int(y1n * fh))
+                        x2 = min(fw, int(x2n * fw))
+                        y2 = min(fh, int(y2n * fh))
+                        bw, bh = x2 - x1, y2 - y1
 
-            # Nur Bilder mit erkannten Gesichtern analysieren
+                        # Mindestgroesse
+                        if bw < MIN_FACE_SIZE or bh < MIN_FACE_SIZE:
+                            self._stats["faces_skipped_small"] += 1
+                            continue
+
+                        self._stats["faces_found"] += 1
+
+                        # 20% Margin
+                        mx, my = int(bw * 0.2), int(bh * 0.2)
+                        cx1 = max(0, x1 - mx)
+                        cy1 = max(0, y1 - my)
+                        cx2 = min(fw, x2 + mx)
+                        cy2 = min(fh, y2 + my)
+
+                        crop = frame[cy1:cy2, cx1:cx2]
+                        crop_112 = cv2.resize(crop, (112, 112))
+                        crop_rgb = cv2.cvtColor(crop_112, cv2.COLOR_BGR2RGB)
+
+                        # ArcFace Inference via Orchestrator
+                        arcface_outputs = self._orchestrator.run("arcface", crop_rgb)
+                        if not arcface_outputs:
+                            continue
+                        emb_key = list(arcface_outputs.keys())[0]
+                        embedding = arcface_outputs[emb_key].flatten()
+                        norm = np.linalg.norm(embedding)
+                        if norm > 0:
+                            embedding = embedding / norm
+
+                        # Qualitaetscheck gegen Markus-Referenz
+                        name = "unknown"
+                        sim = 0.0
+                        if markus_ref is not None:
+                            sim = float(np.dot(embedding, markus_ref))
+                            if sim >= ARCFACE_MIN_SIM:
+                                name = "Markus"
+                            else:
+                                self._stats["faces_skipped_unsicher"] += 1
+                                continue
+                        else:
+                            # Keine Referenz → als Markus speichern (Ersteinrichtung)
+                            name = "Markus"
+
+                        # In DB speichern
+                        ts = int(time.time())
+                        key = f"{name}#einpraegen_{ts}_{idx}"
+                        face_db[key] = embedding.tolist()
+                        self._stats["faces_saved"] += 1
+
+                        image_faces[img_path].append({
+                            "bbox": [x1, y1, x2, y2],
+                            "name": name,
+                            "sim": round(sim, 3),
+                        })
+
+                except Exception as e:
+                    logger.warning(f"[LERNE] Fehler bei {os.path.basename(img_path)}: {e}")
+                    continue
+
+            # Face-DB speichern
+            _save_face_db(face_db)
+            logger.info(f"[LERNE] Phase 1 fertig: gespeichert={self._stats['faces_saved']} "
+                        f"zu_klein={self._stats['faces_skipped_small']} "
+                        f"unsicher={self._stats['faces_skipped_unsicher']}")
+
+            # ================================================================
+            # PHASE 2: Pose (nur Bilder mit erkannten Gesichtern)
+            # ================================================================
             face_images = [p for p in images if p in image_faces and image_faces[p]]
             if not face_images:
-                logger.info("[EINPRAEGEN] Keine Bilder mit Gesichtern fuer Pose-Analyse")
+                logger.info("[LERNE] Keine Bilder mit Gesichtern fuer Pose-Analyse")
             else:
-                params2 = VDevice.create_params()
-                vdevice2 = VDevice(params2)
-                try:
-                    # Pose-Modell laden
-                    pose_model = vdevice2.create_infer_model(POSE_HEF)
-                    pose_model.input().set_format_type(FormatType.UINT8)
-                    pose_hef = HEF(POSE_HEF)
-                    pose_out_names = [o.name for o in pose_hef.get_output_vstream_infos()]
-                    for oname in pose_out_names:
-                        pose_model.output(oname).set_format_type(FormatType.FLOAT32)
+                logger.info(f"[LERNE] Phase 2: Pose fuer {len(face_images)} Bilder")
 
-                    pose_ctx = pose_model.configure().__enter__()
-                    pose_bufs = {n: np.empty(pose_model.output(n).shape, dtype=np.float32) for n in pose_out_names}
-                    pose_bindings = pose_ctx.create_bindings(output_buffers=pose_bufs)
+                if "pose" not in already_active:
+                    logger.info("[LERNE] Konfiguriere pose temporaer")
+                    self._orchestrator.configure("pose")
+                    models_we_configured.append("pose")
 
-                    from core.perception.hailo_postprocess import decode_yolov8_pose
+                if "pose" not in self._orchestrator.active_models:
+                    logger.warning("[LERNE] Pose konnte nicht konfiguriert werden, ueberspringe Phase 2")
+                else:
+                    pose_db = _load_existing_pose_db()
 
                     for idx, img_path in enumerate(face_images):
                         if not self._running:
                             break
-                        self._update_progress(idx + 1, len(face_images))
+                        self._update_progress("Pose", idx + 1, len(face_images))
 
                         try:
                             frame = cv2.imread(img_path)
@@ -356,15 +341,14 @@ class Einpraegen:
                             # Pose: 640x640 resize
                             input_640 = cv2.resize(frame, (640, 640))
                             input_rgb = cv2.cvtColor(input_640, cv2.COLOR_BGR2RGB)
-                            pose_bindings.input().set_buffer(np.ascontiguousarray(input_rgb))
-                            pose_ctx.run([pose_bindings], timeout=10000)
-                            pose_outputs = {n: pose_bufs[n].copy() for n in pose_out_names}
+                            pose_outputs = self._orchestrator.run("pose", input_rgb)
+                            if not pose_outputs:
+                                continue
 
                             persons = decode_yolov8_pose(pose_outputs, 640, 640, conf_thresh=0.3)
                             if not persons:
                                 continue
 
-                            # Faces aus Phase 1
                             face_info = image_faces.get(img_path, [])
 
                             for person in persons:
@@ -373,7 +357,7 @@ class Einpraegen:
                                 if not keypoints:
                                     continue
 
-                                # Face mit Person verknuepfen (naechstes Face-Center zu Person-BBox)
+                                # Face mit Person verknuepfen
                                 matched_name = "unknown"
                                 matched_sim = 0.0
                                 px_center = (bbox[0] + bbox[2]) / 2 * fw
@@ -383,7 +367,8 @@ class Einpraegen:
                                     fb = fi["bbox"]
                                     fx_center = (fb[0] + fb[2]) / 2
                                     fy_center = (fb[1] + fb[3]) / 2
-                                    if abs(fx_center - px_center) < fw * 0.3 and abs(fy_center - py_top) < fh * 0.3:
+                                    if (abs(fx_center - px_center) < fw * 0.3
+                                            and abs(fy_center - py_top) < fh * 0.3):
                                         matched_name = fi["name"]
                                         matched_sim = fi["sim"]
                                         break
@@ -398,7 +383,8 @@ class Einpraegen:
                                     "source": os.path.basename(img_path),
                                     "timestamp": ts,
                                     "bbox": [round(b, 4) for b in bbox],
-                                    "keypoints": [[round(k, 4) for k in kp] for kp in keypoints],
+                                    "keypoints": [[round(k, 4) for k in kp]
+                                                   for kp in keypoints],
                                     "face_sim": matched_sim,
                                 }
                                 key = f"{matched_name}#pose_{ts}_{idx}"
@@ -406,28 +392,32 @@ class Einpraegen:
                                 self._stats["poses_saved"] += 1
 
                         except Exception as e:
-                            logger.warning(f"[EINPRAEGEN] Pose-Fehler bei {img_path}: {e}")
+                            logger.warning(f"[LERNE] Pose-Fehler bei {os.path.basename(img_path)}: {e}")
                             continue
 
-                    # Pose-DB speichern
                     _save_pose_db(pose_db)
-                    logger.info(f"[EINPRAEGEN] Phase 2 fertig: {self._stats['poses_saved']} Pose-Profile gespeichert")
-
-                finally:
-                    try:
-                        pose_ctx.__exit__(None, None, None)
-                    except Exception:
-                        pass
-                    del vdevice2
+                    logger.info(f"[LERNE] Phase 2 fertig: poses={self._stats['poses_saved']}")
 
             # Fertig
-            logger.info(f"[EINPRAEGEN] Komplett: {self._stats}")
+            dauer = time.monotonic() - t_start
+            logger.info(f"[LERNE] Gesichter quelle=batch bilder_total={total} "
+                        f"verarbeitet={self._stats['faces_found']} "
+                        f"gespeichert={self._stats['faces_saved']} "
+                        f"poses={self._stats['poses_saved']} "
+                        f"dauer={dauer:.1f}s")
 
         except Exception as e:
-            logger.error(f"[EINPRAEGEN] Batch-Analyse fehlgeschlagen: {e}")
+            logger.error(f"[LERNE] Batch-Analyse fehlgeschlagen: {e}")
             import traceback
             traceback.print_exc()
         finally:
+            # Temporaer konfigurierte Modelle wieder freigeben
+            for name in models_we_configured:
+                try:
+                    self._orchestrator.unconfigure(name)
+                    logger.info(f"[LERNE] {name} wieder freigegeben")
+                except Exception:
+                    pass
             self._running = False
             self._done = True
 

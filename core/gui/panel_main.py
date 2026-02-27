@@ -592,9 +592,6 @@ class MolochPanel:
                 fg=FG_DIM,
             )
 
-        # Widgets sofort neu zeichnen
-        self.root.update_idletasks()
-
         # Naechster Poll
         self.root.after(STATUS_UPDATE_MS, self._poll_status)
 
