@@ -554,35 +554,20 @@ class ModelOrchestrator:
 
     def get_target_fps_delay(self, level: str) -> float:
         """Target-Delay zwischen Frames fuer Adaptive FPS."""
-        delays = {"idle": 0.2, "normal": 0.067, "high": 0.033, "teach": 0.067}
+        delays = {"idle": 0.1, "normal": 0.067, "high": 0.033, "teach": 0.067}
         return delays.get(level, 0.067)
 
     def apply_attention_level(self, new_level: str):
-        """Modelle aktivieren/deaktivieren basierend auf Attention-Level.
+        """FPS-Throttle setzen basierend auf Attention-Level.
 
         NPU Idle-Modus: PerceptionEngine steuert Stufen (idle/person/face).
-        Orchestrator folgt den Slots der Perception Engine — NICHT mehr always_on.
+        Modell-Swaps passieren NUR im InferenceEngine via perception.tick().
+        Orchestrator setzt hier NUR den FPS-Throttle — KEINE Modell-Aenderungen!
         """
-        # PerceptionEngine steuert: Welche Modelle sollen aktiv sein?
+        # PerceptionEngine aktiv: NUR FPS-Throttle setzen, Modelle NICHT anfassen
         if self._perception and hasattr(self._perception, 'slots') and self._perception.slots:
-            wanted = set(self._perception.slots)
-            have = set(self._active_ctx.keys())
-            to_add = wanted - have
-            to_remove = have - wanted
-
-            if to_add or to_remove:
-                stage = self._perception.npu_stage if hasattr(self._perception, 'npu_stage') else "?"
-                logger.info(f"[ORCHESTRATION] Stage={stage}: add={to_add or 'none'} remove={to_remove or 'none'}")
-                for m in to_remove:
-                    self.unconfigure(m)
-                    if self._model_health:
-                        self._model_health.set_paused(m, True)
-                for m in to_add:
-                    if m in self._models and m not in self._active_ctx:
-                        self.configure(m)
-                        if self._model_health:
-                            self._model_health.set_paused(m, False)
-                self.sync_flags()
+            # FPS-Throttle anpassen (idle=10fps, person=15fps, face=30fps)
+            self._target_frame_delay = self.get_target_fps_delay(new_level)
 
             with self._attention_level_lock:
                 if self._attention_level != new_level:

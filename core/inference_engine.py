@@ -367,6 +367,13 @@ class InferenceEngine:
                 continue
 
             t_total = time.perf_counter()
+            # Tatsaechliche Loop-FPS (inkl. Throttle-Sleep)
+            if hasattr(self, '_t_prev_loop'):
+                _dt_loop = t_total - self._t_prev_loop
+                if _dt_loop > 0:
+                    with self._fps_lock:
+                        self._fps["total"] = 1.0 / _dt_loop
+            self._t_prev_loop = t_total
             annotated = frame.copy()
             fh, fw = frame.shape[:2]
             self._frame_counter += 1
@@ -899,10 +906,8 @@ class InferenceEngine:
                             self._perception.force_models(None)
                         self._hand_no_detect = 0
 
-            # Total FPS
+            # dt_total fuer Throttle (Verarbeitungszeit OHNE Sleep)
             dt_total = time.perf_counter() - t_total
-            with self._fps_lock:
-                self._fps["total"] = 1.0 / dt_total if dt_total > 0 else 0
 
             # Hand-Occlusion Overlay auf Video (nur wenn enabled in settings.json)
             if self._hand_occlusion_enabled and self._perception and self._perception._hand_occlusion:
@@ -920,7 +925,9 @@ class InferenceEngine:
             self._write_status_cb()
 
             # === Phase 3: Adaptive FPS — Throttle bei niedrigem Attention-Level ===
-            if dt_total < self._target_frame_delay:
+            # FPS-Boost: Kein Throttle wenn manuelles PTZ aktiv (letzten 3s)
+            _ptz_boost = (time.time() - self._cam._last_manual_ptz) < 3.0
+            if not _ptz_boost and dt_total < self._target_frame_delay:
                 _sleep = self._target_frame_delay - dt_total
                 time.sleep(_sleep)
 

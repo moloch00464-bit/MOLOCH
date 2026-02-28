@@ -123,6 +123,9 @@ class CameraManager:
         self._waiting_for_first_detection = False
         self._first_detection_event = threading.Event()
 
+        # Letzter manueller PTZ-Befehl (fuer FPS-Boost in Inference)
+        self._last_manual_ptz = 0
+
         # Home Position (fuer Release -> Home -> ST)
         self._home_position = {"pan": 0.0, "tilt": -15.0}
         try:
@@ -209,7 +212,7 @@ class CameraManager:
 
         def _rtsp_connect():
             os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
-                "rtsp_transport;udp|fflags;nobuffer|flags;low_delay"
+                "rtsp_transport;tcp|fflags;nobuffer|flags;low_delay"
             )
             cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -893,6 +896,7 @@ class CameraManager:
 
     def ptz_move(self, direction, speed=0.3):
         """PTZ Bewegung in eine Richtung oder Home."""
+        self._last_manual_ptz = time.time()
         from core.hardware.camera import get_camera_controller
         cam = get_camera_controller()
         if not cam.is_connected:
