@@ -330,7 +330,8 @@ def test_ptz_arbiter():
     mode = data.get("ptz_arbiter_mode", None)
     if mode is None:
         return False, "Kein Arbiter-Modus (nicht integriert?)"
-    valid = ["kamera_fuehrt", "moloch_korrigiert", "moloch_uebernimmt"]
+    valid = ["kamera_fuehrt", "moloch_korrigiert", "moloch_uebernimmt",
+             "moloch_autonom", "moloch_manuell"]
     if mode in valid:
         return True, f"Modus: {mode}"
     return False, f"Ungültig: {mode}"

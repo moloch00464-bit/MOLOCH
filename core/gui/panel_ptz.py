@@ -278,11 +278,12 @@ class PtzModule:
         st_row = tk.Frame(section, bg=BG_FRAME)
         st_row.pack(fill=tk.X, padx=5, pady=(5, 2))
 
+        # Gate 0: ST permanent AUS, Button deaktiviert
         self._btn_st = tk.Button(
-            st_row, text="ST: ---", width=10,
-            bg=BTN_OFF_DARK, fg=FG_WHITE, font=FONT_BUTTON,
+            st_row, text="ST: AUS", width=10,
+            bg=BTN_OFF_DARK, fg=FG_DIM, font=FONT_BUTTON,
             activebackground=BG_FRAME,
-            command=self._toggle_smart_tracking,
+            state=tk.DISABLED,
         )
         self._btn_st.pack(side=tk.LEFT, padx=3)
 
@@ -388,23 +389,18 @@ class PtzModule:
                 text=f"Moves: {self._move_count}  Trk: {trk}  Srch: {srch}",
             )
 
-            # Smart Tracking Status + Arbiter
-            st_on = status.get("cam_smart_tracking", False)
+            # Gate 0: Arbiter nur AUTONOM/MANUELL, kein ST
             arbiter_mode = status.get("ptz_arbiter_mode", "")
-            self._btn_st.config(
-                text=f"ST: {'AN' if st_on else 'AUS'}",
-                bg=BTN_ON_GREEN if st_on else BTN_OFF_DARK,
-            )
-            # Arbiter-Modus als Kurztext
             arbiter_map = {
-                "kamera_fuehrt": "Kamera fuehrt",
-                "moloch_korrigiert": "MOLOCH korrigiert",
-                "moloch_uebernimmt": "MOLOCH steuert",
+                "moloch_autonom": "MOLOCH AUTONOM",
+                "moloch_manuell": "MANUELL",
+                # Legacy-Werte → AUTONOM
+                "kamera_fuehrt": "MOLOCH AUTONOM",
+                "moloch_korrigiert": "MOLOCH AUTONOM",
+                "moloch_uebernimmt": "MOLOCH AUTONOM",
             }
-            arbiter_text = arbiter_map.get(arbiter_mode, arbiter_mode)
-            arbiter_color = STATUS_GREEN if arbiter_mode == "kamera_fuehrt" else (
-                STATUS_YELLOW if arbiter_mode == "moloch_korrigiert" else STATUS_RED
-            )
+            arbiter_text = arbiter_map.get(arbiter_mode, "MOLOCH AUTONOM")
+            arbiter_color = STATUS_GREEN if "autonom" in arbiter_mode.lower() or "uebernimmt" in arbiter_mode.lower() else STATUS_YELLOW
             self._lbl_arbiter.config(text=arbiter_text, fg=arbiter_color)
 
             # NPU-Stage Anzeige

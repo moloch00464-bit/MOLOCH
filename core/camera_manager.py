@@ -350,9 +350,10 @@ class CameraManager:
                 self._led.set_cloud(self._cloud)
             if self._cloud.connected:
                 logger.info("eWeLink Cloud verbunden")
-                if self._cloud.set_smart_tracking(True):
-                    self._set_smart_tracking_state(True)
-                    logger.info("Smart Tracking aktiviert - Kamera scannt autonom")
+                # Gate 0: Smart Tracking PERMANENT AUS — Moloch steuert ALLES
+                if self._cloud.set_smart_tracking(False):
+                    self._set_smart_tracking_state(False)
+                    logger.info("[STARTE] ptz_modus=moloch_allein smart_tracking=deaktiviert")
                 try:
                     self._cloud.run(self._cloud.bridge.set_status_led(False))
                 except Exception:
@@ -378,18 +379,9 @@ class CameraManager:
             pass
 
     def toggle_smart_tracking(self):
-        """Smart Tracking toggle via persistent cloud connection."""
-        new_state = not self._smart_tracking_on
-        if not self._cloud or not self._cloud.connected:
-            self._update_status("Cloud nicht verbunden")
-            return
-        def do_toggle():
-            if self._cloud.set_smart_tracking(new_state):
-                self._set_smart_tracking_state(new_state)
-                self._update_status(f"Smart Tracking {'AN' if new_state else 'AUS'}")
-            else:
-                self._update_status("Smart Tracking Fehler")
-        threading.Thread(target=do_toggle, daemon=True).start()
+        """Gate 0: Smart Tracking bleibt PERMANENT AUS. Toggle deaktiviert."""
+        logger.info("[GATE0] Smart Tracking Toggle ignoriert — permanent AUS")
+        self._update_status("ST permanent AUS (Gate 0)")
 
     # =================================================================
     # Tentakel-Logik (Smart Tracking <-> MOLOCH Takeover)
@@ -539,15 +531,11 @@ class CameraManager:
             logger.info("[TENTAKEL] Tracker gestoppt")
             self._notify("auto_mode", {"state": "disabled"})
 
-            if self._cloud and self._cloud.connected:
-                if self._cloud.set_smart_tracking(True):
-                    self._set_smart_tracking_state(True)
-                    logger.info("[TENTAKEL] Smart Tracking wiederhergestellt")
-
-            # PTZ Arbiter: Kamera fuehrt wieder
+            # Gate 0: Smart Tracking bleibt AUS — Moloch steuert ALLES
+            # PTZ Arbiter: zurueck zu AUTONOM
             try:
                 from core.ptz_arbiter import get_ptz_arbiter
-                get_ptz_arbiter().set_kamera_fuehrt("release")
+                get_ptz_arbiter().set_moloch_autonom("release")
             except Exception:
                 pass
 
@@ -871,12 +859,12 @@ class CameraManager:
                 self._perception.force_models(None)
                 logger.info("[MODUS] AUTONOM -> force_models(None) - Perception Auto-Modus")
 
-            def start_cam_control():
-                if self._cloud and self._cloud.connected:
-                    if self._cloud.set_smart_tracking(True):
-                        self._set_smart_tracking_state(True)
-                        logger.info("[TENTAKEL] Smart Tracking aktiviert")
-            threading.Thread(target=start_cam_control, daemon=True).start()
+            # Gate 0: Smart Tracking bleibt AUS, Arbiter auf AUTONOM
+            try:
+                from core.ptz_arbiter import get_ptz_arbiter
+                get_ptz_arbiter().set_moloch_autonom("autonom_toggle")
+            except Exception:
+                pass
 
             self._guardian_last_pan = None
             self._guardian_last_tilt = None
@@ -884,7 +872,7 @@ class CameraManager:
             self._takeover_cooldown_until = time.time() + 10
 
             self._notify("auto_mode", {"state": "autonomous"})
-            self._update_status("AUTONOM - Tentakel scannt")
+            self._update_status("AUTONOM - Moloch steuert")
 
     # =================================================================
     # Tracker Stop

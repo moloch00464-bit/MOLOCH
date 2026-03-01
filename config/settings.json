@@ -70,7 +70,7 @@
     "search_speed": 0.3,
     "search_home_timeout": 30.0,
     "target_lost_timeout": 7.5,
-    "home_pan": 12.8,
+    "home_pan": 0.0,
     "home_tilt": 0.0
   }
 }

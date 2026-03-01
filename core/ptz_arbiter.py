@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 """
-M.O.L.O.C.H. PTZ Arbiter — Drei-Modus Kamerasteuerung.
+M.O.L.O.C.H. PTZ Arbiter — Zwei-Modus Kamerasteuerung.
 
-Verhindert Konflikte zwischen Sonoff Smart Tracking und MOLOCH PTZ.
+Gate 0 Phase 2: Smart Tracking KOMPLETT AUS. Moloch steuert ALLES.
 
 Modi:
-  1. KAMERA_FUEHRT   — Smart Tracking AN, MOLOCH beobachtet nur (Default)
-  2. MOLOCH_KORRIGIERT — ST bleibt AN, MOLOCH sendet max 1 Korrektur / 5s
-  3. MOLOCH_UEBERNIMMT — ST AUS, MOLOCH steuert via ONVIF
+  1. MOLOCH_AUTONOM  — Moloch steuert Kamera (Default)
+  2. MOLOCH_MANUELL  — User steuert per GUI, 30s Timeout → zurueck zu AUTONOM
 
-Uebergangslogik:
-  - 200ms Pause zwischen Modus-Wechseln
-  - Modus 3 > 10s ohne Grund -> auto zurueck zu Modus 1
+Alte Modi entfernt:
+  - KAMERA_FUEHRT (Smart Tracking) — existiert nicht mehr
+  - MOLOCH_KORRIGIERT — nicht mehr noetig ohne ST
 
 Status wird in /dev/shm/moloch_status.json exportiert.
 """
@@ -25,39 +24,36 @@ logger = logging.getLogger("PTZArbiter")
 
 
 class ArbiterMode(Enum):
+    MOLOCH_AUTONOM = "moloch_autonom"
+    MOLOCH_MANUELL = "moloch_manuell"
+    # Legacy-Kompatibilitaet (fuer alte Status-Reads)
     KAMERA_FUEHRT = "kamera_fuehrt"
     MOLOCH_KORRIGIERT = "moloch_korrigiert"
     MOLOCH_UEBERNIMMT = "moloch_uebernimmt"
 
 
 class PTZArbiter:
-    """Drei-Modus PTZ Arbiter. Thread-safe."""
+    """Zwei-Modus PTZ Arbiter. Thread-safe. Gate 0."""
 
     # Mindestzeit zwischen Modus-Wechseln
     SWITCH_COOLDOWN_SEC = 0.2
 
-    # Max 1 Korrektur pro Intervall in Modus 2
-    CORRECTION_INTERVAL_SEC = 5.0
-
-    # Modus 3 Timeout: zurueck zu Modus 1 wenn kein Grund mehr besteht
-    TAKEOVER_TIMEOUT_SEC = 10.0
+    # Manuell-Timeout: nach 30s zurueck zu AUTONOM
+    MANUAL_TIMEOUT_SEC = 30.0
 
     def __init__(self):
         self._lock = threading.Lock()
-        self._mode = ArbiterMode.KAMERA_FUEHRT
+        self._mode = ArbiterMode.MOLOCH_AUTONOM
         self._mode_since = time.time()
         self._last_switch_time = 0.0
         self._switch_reason = "init"
 
-        # Modus 2: letzte Korrektur-Zeit
-        self._last_correction_time = 0.0
+        # Manuell: wann zuletzt manuell gesteuert
+        self._last_manual_time = 0.0
 
-        # Modus 3: Grund-Tracking (wann zuletzt ein Grund vorlag)
-        self._last_takeover_reason_time = 0.0
-
-        # Externe Flags (von camera_manager gesetzt)
-        self._smart_tracking_on = True
-        self._moloch_tracking_on = False
+        # Smart Tracking ist PERMANENT AUS (Gate 0)
+        self._smart_tracking_on = False
+        self._moloch_tracking_on = True
 
     # =========================================================================
     # Properties (Thread-safe)
@@ -75,8 +71,8 @@ class PTZArbiter:
 
     @property
     def smart_tracking_on(self) -> bool:
-        with self._lock:
-            return self._smart_tracking_on
+        # Gate 0: IMMER False
+        return False
 
     @property
     def moloch_tracking_on(self) -> bool:
@@ -102,27 +98,33 @@ class PTZArbiter:
         logger.info(f"[ARBITER] {old.value} -> {new_mode.value} grund={reason}")
         return True
 
-    def set_kamera_fuehrt(self, reason: str = "default"):
-        """Modus 1: Kamera fuehrt, MOLOCH beobachtet."""
-        with self._lock:
-            self._smart_tracking_on = True
-            self._moloch_tracking_on = False
-            return self._switch_mode(ArbiterMode.KAMERA_FUEHRT, reason)
-
-    def set_moloch_korrigiert(self, reason: str = "head_off_center"):
-        """Modus 2: ST bleibt an, MOLOCH darf 1x korrigieren."""
-        with self._lock:
-            self._smart_tracking_on = True
-            self._moloch_tracking_on = True
-            return self._switch_mode(ArbiterMode.MOLOCH_KORRIGIERT, reason)
-
-    def set_moloch_uebernimmt(self, reason: str = "person_detected"):
-        """Modus 3: ST aus, MOLOCH steuert."""
+    def set_moloch_autonom(self, reason: str = "default"):
+        """Moloch steuert Kamera autonom."""
         with self._lock:
             self._smart_tracking_on = False
             self._moloch_tracking_on = True
-            self._last_takeover_reason_time = time.time()
-            return self._switch_mode(ArbiterMode.MOLOCH_UEBERNIMMT, reason)
+            return self._switch_mode(ArbiterMode.MOLOCH_AUTONOM, reason)
+
+    def set_moloch_manuell(self, reason: str = "gui_steuerung"):
+        """User steuert manuell. 30s Timeout → zurueck zu AUTONOM."""
+        with self._lock:
+            self._smart_tracking_on = False
+            self._moloch_tracking_on = False
+            self._last_manual_time = time.time()
+            return self._switch_mode(ArbiterMode.MOLOCH_MANUELL, reason)
+
+    # Legacy-Kompatibilitaet (andere Module rufen diese noch auf)
+    def set_kamera_fuehrt(self, reason: str = "default"):
+        """Legacy → wird zu MOLOCH_AUTONOM."""
+        return self.set_moloch_autonom(f"legacy_kamera_fuehrt_{reason}")
+
+    def set_moloch_korrigiert(self, reason: str = "head_off_center"):
+        """Legacy → wird zu MOLOCH_AUTONOM."""
+        return self.set_moloch_autonom(f"legacy_korrigiert_{reason}")
+
+    def set_moloch_uebernimmt(self, reason: str = "person_detected"):
+        """Legacy → wird zu MOLOCH_AUTONOM."""
+        return self.set_moloch_autonom(f"legacy_uebernimmt_{reason}")
 
     # =========================================================================
     # PTZ-Befehl erlaubt?
@@ -131,57 +133,47 @@ class PTZArbiter:
     def may_send_ptz(self) -> bool:
         """Darf MOLOCH jetzt einen PTZ-Befehl senden?
 
-        Returns True wenn:
-          - Modus 3 (UEBERNIMMT): immer
-          - Modus 2 (KORRIGIERT): nur wenn letzte Korrektur > 5s her
-          - Modus 1 (KAMERA_FUEHRT): nie
+        Gate 0: JA wenn AUTONOM, NEIN wenn MANUELL.
         """
         with self._lock:
-            if self._mode == ArbiterMode.MOLOCH_UEBERNIMMT:
-                return True
-            if self._mode == ArbiterMode.MOLOCH_KORRIGIERT:
-                now = time.time()
-                if now - self._last_correction_time >= self.CORRECTION_INTERVAL_SEC:
-                    return True
-                return False
-            return False
+            return self._mode == ArbiterMode.MOLOCH_AUTONOM
 
     def record_correction(self):
-        """Modus 2: Korrektur wurde gesendet — Zeitstempel aktualisieren."""
-        with self._lock:
-            self._last_correction_time = time.time()
-            # Nach Korrektur zurueck zu Modus 1
-            self._switch_mode(ArbiterMode.KAMERA_FUEHRT, "korrektur_gesendet")
+        """Legacy-Kompatibilitaet. Noop in Gate 0."""
+        pass
 
     def record_takeover_reason(self):
-        """Modus 3: Es gibt noch einen Grund fuer Takeover (z.B. Person sichtbar)."""
+        """Legacy-Kompatibilitaet. Noop in Gate 0."""
+        pass
+
+    def record_manual_activity(self):
+        """User hat manuell gesteuert — Timeout reset."""
         with self._lock:
-            self._last_takeover_reason_time = time.time()
+            self._last_manual_time = time.time()
 
     # =========================================================================
     # Timeout-Check (sollte periodisch aufgerufen werden)
     # =========================================================================
 
     def check_timeout(self):
-        """Modus 3 Timeout: zurueck zu Modus 1 wenn kein Grund seit 10s."""
+        """Manuell-Timeout: zurueck zu AUTONOM nach 30s."""
         with self._lock:
-            if self._mode != ArbiterMode.MOLOCH_UEBERNIMMT:
+            if self._mode != ArbiterMode.MOLOCH_MANUELL:
                 return
             now = time.time()
-            elapsed = now - self._last_takeover_reason_time
-            if elapsed > self.TAKEOVER_TIMEOUT_SEC:
-                self._smart_tracking_on = True
-                self._moloch_tracking_on = False
-                self._switch_mode(ArbiterMode.KAMERA_FUEHRT, f"timeout_{elapsed:.0f}s")
+            elapsed = now - self._last_manual_time
+            if elapsed > self.MANUAL_TIMEOUT_SEC:
+                self._moloch_tracking_on = True
+                self._switch_mode(ArbiterMode.MOLOCH_AUTONOM,
+                                  f"manual_timeout_{elapsed:.0f}s")
 
     # =========================================================================
-    # Sync mit externem State
+    # Sync (Legacy-Kompatibilitaet)
     # =========================================================================
 
     def sync_smart_tracking(self, on: bool):
-        """Von camera_manager aufgerufen wenn ST-State sich aendert."""
-        with self._lock:
-            self._smart_tracking_on = on
+        """Legacy. Smart Tracking bleibt AUS in Gate 0."""
+        pass
 
     # =========================================================================
     # Status-Export (fuer /dev/shm/moloch_status.json)
@@ -192,7 +184,7 @@ class PTZArbiter:
         with self._lock:
             return {
                 "ptz_arbiter_mode": self._mode.value,
-                "cam_smart_tracking": self._smart_tracking_on,
+                "cam_smart_tracking": False,
                 "moloch_tracking": self._moloch_tracking_on,
                 "ptz_last_switch": time.strftime(
                     "%Y-%m-%dT%H:%M:%S",
