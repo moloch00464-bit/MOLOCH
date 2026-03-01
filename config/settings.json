@@ -33,12 +33,11 @@
     "arcface",
     "yolov8m",
     "hand_landmark",
-    "pose",
-    "face_attr"
+    "pose"
   ],
   "mpo": {
-    "tension_tau": 340.0,
-    "dominance_drift": 0.025,
+    "tension_tau": 300.0,
+    "dominance_drift": 0.021,
     "zone_hysteresis": 0.15,
     "berserker_threshold": 0.92,
     "thermal_damping_start": 70.0

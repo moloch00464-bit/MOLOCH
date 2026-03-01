@@ -194,8 +194,12 @@ class ModelOrchestrator:
     # Model Configure/Unconfigure/Run (Hot Path)
     # =================================================================
 
-    def configure(self, name):
-        """Konfiguriere Modell persistent (einmalig ~400ms, danach 0ms)."""
+    def configure(self, name, _retry=0):
+        """Konfiguriere Modell persistent (einmalig ~400ms, danach 0ms).
+
+        Gate 0: Retry mit Backoff bei DRIVER_OPERATION_FAILED (max 3 Versuche).
+        """
+        MAX_RETRIES = 3
         with self._ctx_lock:
             already_active = name in self._active_ctx
         if already_active:
@@ -235,6 +239,19 @@ class ModelOrchestrator:
             active_after = list(self._active_ctx.keys())
             logger.info(f"[CONFIGURE] {name}: OK. Aktive Modelle NACHHER: {active_after}")
         except Exception as e:
+            err_str = str(e)
+            # Hailo DRIVER_OPERATION_FAILED(36) oder CONNECTION_REFUSED(89): Retry mit Backoff
+            if _retry < MAX_RETRIES and ("36" in err_str or "89" in err_str
+                                          or "DRIVER_OPERATION" in err_str
+                                          or "CONNECTION_REFUSED" in err_str):
+                backoff = 1.0 * (2 ** _retry)
+                logger.warning(f"[CONFIGURE] {name}: Hailo-Error, retry {_retry+1}/{MAX_RETRIES} "
+                               f"in {backoff:.0f}s — {type(e).__name__}: {e}")
+                self._configuring.set()
+                time.sleep(backoff)
+                self.configure(name, _retry=_retry + 1)
+                return
+
             crash_log = os.path.expanduser("~/moloch/logs/panel_crash.log")
             crash_info = (
                 f"\n{'='*60}\n"
@@ -273,17 +290,23 @@ class ModelOrchestrator:
     def run(self, name, input_data):
         """Fuehre Modell aus mit persistenter Konfiguration (~21ms).
 
+        Gate 0: Bei Hailo-Error leeres Dict statt Crash (Inference Loop laeuft weiter).
+
         Returns: Dict mit Output-Name -> numpy array
         """
         with self._ctx_lock:
             ctx = self._active_ctx.get(name)
             if not ctx:
                 return {}
-            bindings = ctx["bindings"]
-            bindings.input().set_buffer(np.ascontiguousarray(input_data))
-            ctx["configured"].run([bindings], timeout=10000)
-            return {oname: ctx["output_buffers"][oname].copy()
-                    for oname in ctx["out_names"]}
+            try:
+                bindings = ctx["bindings"]
+                bindings.input().set_buffer(np.ascontiguousarray(input_data))
+                ctx["configured"].run([bindings], timeout=10000)
+                return {oname: ctx["output_buffers"][oname].copy()
+                        for oname in ctx["out_names"]}
+            except Exception as e:
+                logger.warning(f"[NPU] run({name}) fehlgeschlagen: {type(e).__name__}: {e}")
+                return {}
 
     # =================================================================
     # Flags + Sync
@@ -515,9 +538,20 @@ class ModelOrchestrator:
 
         NPU Idle-Modus: Stage wird von PerceptionEngine gesteuert.
         idle → nur yolov8m, person → +scrfd, face → scrfd+arcface.
+
+        Gate 0 Fix: always_on Modus = IMMER "high" (30 FPS).
+        Vorher: npu_stage blieb auf "idle" bei forced models → 10 FPS Throttle!
         """
+        # always_on: Kein Throttle, immer 30 FPS
+        if self._orchestration_mode == "always_on":
+            return "high"
+
         if self._daily_learner and self._daily_learner.enabled:
             return "teach"
+
+        # Forced models: Stage-Machine laeuft nicht → immer "high"
+        if self._perception and self._perception._forced:
+            return "high"
 
         # NPU-Stage aus PerceptionEngine als Attention-Level
         if self._perception and hasattr(self._perception, 'npu_stage'):
@@ -541,21 +575,28 @@ class ModelOrchestrator:
             return "high"
 
     def get_target_models(self, level: str) -> set:
-        """Welche Modelle sollen bei diesem Attention-Level aktiv sein?"""
+        """Welche Modelle sollen bei diesem Attention-Level aktiv sein?
+
+        face_attr ENTFERNT — verursachte Load/Unload Loop (Gate 0 Phase 1).
+        face_attr laeuft nur wenn manuell konfiguriert.
+        """
         if level == "idle":
             return {"yolov8m"}
         elif level == "normal":
-            return {"yolov8m", "scrfd", "arcface", "face_attr"}
+            return {"yolov8m", "scrfd", "arcface"}
         elif level == "high":
-            return {"yolov8m", "scrfd", "arcface", "face_attr", "pose", "hand_landmark"}
+            return {"yolov8m", "scrfd", "arcface", "pose", "hand_landmark"}
         elif level == "teach":
-            return {"scrfd", "arcface", "face_attr"}
-        return {"yolov8m", "scrfd", "arcface", "face_attr"}
+            return {"scrfd", "arcface"}
+        return {"yolov8m", "scrfd", "arcface"}
 
     def get_target_fps_delay(self, level: str) -> float:
-        """Target-Delay zwischen Frames fuer Adaptive FPS."""
-        delays = {"idle": 0.1, "normal": 0.067, "high": 0.033, "teach": 0.067}
-        return delays.get(level, 0.067)
+        """Target-Delay zwischen Frames fuer Adaptive FPS.
+
+        Gate 0: idle von 10 auf 20 FPS erhoeht (Akzeptanz: FPS > 15).
+        """
+        delays = {"idle": 0.05, "normal": 0.04, "high": 0.033, "teach": 0.05}
+        return delays.get(level, 0.04)
 
     def apply_attention_level(self, new_level: str):
         """FPS-Throttle setzen basierend auf Attention-Level.

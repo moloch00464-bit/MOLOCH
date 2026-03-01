@@ -296,11 +296,15 @@ class InferenceEngine:
             if self._orchestrator.auto_recover_models():
                 continue
 
-            # Frame holen
+            # Frame holen + Timestamp-Check (Gate 0: Frame > 200ms = veraltet)
             with self._cam._frame_lock:
                 frame = self._cam._latest_frame
             if frame is None:
                 time.sleep(0.02)
+                continue
+            frame_age = time.time() - self._cam._last_frame_write
+            if frame_age > 0.2:
+                time.sleep(0.01)
                 continue
 
             # Pause waehrend Modell-Konfiguration (NPU blockiert)

@@ -97,10 +97,7 @@ class MolochService:
             logger.info(f"[INIT] Perception Engine bereit (Personality: {_pe.mode.value})")
             # Hand-Occlusion Params werden spaeter in _load_settings() angewendet
             # (nach InferenceEngine-Erstellung)
-            # Gespeicherte aktive Modelle als force_models setzen
-            if hasattr(self, '_saved_active_models') and self._saved_active_models:
-                self._perception.force_models(self._saved_active_models)
-                logger.info(f"[SETTINGS] force_models({self._saved_active_models}) aus settings.json")
+            # Gate 0: force_models erfolgt in _apply_settings() NACH init
         except Exception as e:
             logger.warning(f"[INIT] Perception Engine nicht verfuegbar: {e}")
 
@@ -1108,12 +1105,14 @@ class MolochService:
         except Exception as e:
             logger.warning(f"[SETTINGS] Orchestration-Mode-Fehler: {e}")
 
-        # Aktive Modelle (fuer force_models nach Perception-Init)
+        # Aktive Modelle — Gate 0: KEINE force_models mehr!
+        # Perception Engine steuert Modelle automatisch (idle/person/face Stufen).
+        # Alle Modelle gleichzeitig = NPU saturiert = 6 FPS statt 25+.
         try:
             am = data.get("active_models")
             if am and isinstance(am, list):
                 self._saved_active_models = list(am)
-                logger.info(f"[SETTINGS] Active Models: {self._saved_active_models}")
+                logger.info(f"[SETTINGS] Active Models (gespeichert, nicht erzwungen): {am}")
         except Exception as e:
             logger.warning(f"[SETTINGS] Active-Models-Fehler: {e}")
 
