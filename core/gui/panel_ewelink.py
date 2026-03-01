@@ -42,6 +42,7 @@ class EwelinkModule:
         self._flutlicht_on = False  # nightVision: 0=aus, 2=an
         self._alarm_active = False
         self._erkannt_led_on = False  # blaue Status-LED (sledOnline)
+        self._erkannt_mode = "guardian"  # Gate0 Phase 6: personality_mode
 
         # Button-Referenzen
         self._btn_alarm = None
@@ -192,11 +193,25 @@ class EwelinkModule:
             self._lbl_flutlicht.config(text="AUS", fg=FG_DIM)
 
     def _update_erkannt_button(self):
-        """Status-Indikator: zeigt LED-State und wer erkannt wurde."""
-        if self._erkannt_led_on:
+        """Status-Indikator: zeigt LED-State UND personality_mode.
+
+        Gate0 Phase 6: LED zeigt Wahrheit — stimmt mit Iris ueberein.
+        Guardian + Markus = BLAU/CYAN
+        Shadow = ROT
+        Berserker = DUNKELROT
+        """
+        if self._erkannt_mode in ("shadow", "berserker"):
+            # Shadow/Berserker: ROT — unabhaengig von Erkennung
+            clr = BTN_ALARM_RED if self._erkannt_mode == "shadow" else "#880000"
+            lbl = "SHADOW" if self._erkannt_mode == "shadow" else "BERSERKER"
+            self._btn_erkannt.config(bg=clr, disabledforeground="#000000")
+            self._lbl_erkannt.config(text=lbl, fg=clr)
+        elif self._erkannt_led_on:
+            # Guardian + Markus erkannt = BLAU
             self._btn_erkannt.config(bg=ACCENT_CYAN, disabledforeground="#000000")
             self._lbl_erkannt.config(text="MARKUS", fg=ACCENT_CYAN)
         else:
+            # Guardian + niemand erkannt = dunkel
             self._btn_erkannt.config(bg=BTN_OFF_DARK, disabledforeground=FG_WHITE)
             self._lbl_erkannt.config(text="---", fg=FG_DIM)
 
@@ -241,10 +256,15 @@ class EwelinkModule:
         self._lbl_einpraegen.config(text="", fg=FG_DIM)
 
     def update_from_status(self, status):
-        """Vom panel_main Poll aufgerufen: ERKANNT-Indikator aktualisieren."""
+        """Vom panel_main Poll aufgerufen: ERKANNT-Indikator aktualisieren.
+
+        Gate0 Phase 6: LED zeigt Wahrheit — Farbe folgt personality_mode.
+        """
         led_on = status.get("led_markus_on", False)
-        if led_on != self._erkannt_led_on:
+        led_mode = status.get("led_personality_mode", "guardian")
+        if led_on != self._erkannt_led_on or led_mode != self._erkannt_mode:
             self._erkannt_led_on = led_on
+            self._erkannt_mode = led_mode
             self._update_erkannt_button()
 
     def _open_gallery(self):

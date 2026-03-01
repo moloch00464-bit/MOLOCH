@@ -846,12 +846,19 @@ class InferenceEngine:
                             "yolov8m": self.yolo_active,
                             "hand_landmark": self.hand_active})
 
-            # === LED Erkennungs-Indikator (Hysterese im LEDController) ===
+            # === LED Erkennungs-Indikator (Gate0 Phase 6: EINE Wahrheit mit Iris) ===
+            _led_mode = "guardian"
+            if self._core_integrator:
+                try:
+                    _led_mode = self._core_integrator.get_personality_zone()
+                except Exception:
+                    pass
             self._led.update_hysteresis(
                 markus_recognized=_markus_recognized,
                 face_detected=face_detected,
                 persons_detected=_persons_detected,
                 moloch_has_control=self._cam._moloch_has_control,
+                personality_mode=_led_mode,
             )
 
             # === Phase 3: Perception Frame aggregieren ===

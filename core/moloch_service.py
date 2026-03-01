@@ -543,6 +543,7 @@ class MolochService:
                     "yolo_conf": _inf.yolo_conf_val,
                 },
                 "led_markus_on": self._led.markus_on,
+                "led_personality_mode": self._led.personality_mode,
                 "cloud": self._cloud_state,
                 "audio": {
                     "mic_gain": self._saved_mic_gain,

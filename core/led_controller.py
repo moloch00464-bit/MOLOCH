@@ -52,6 +52,9 @@ class LEDController:
         self._last_api_call = 0
         self._API_MIN_INTERVAL = 2.0
 
+        # Gate0 Phase 6: Personality-Modus (EINE Wahrheit mit Iris)
+        self._personality_mode = "guardian"
+
     def set_cloud(self, cloud):
         """Cloud-Referenz setzen (fuer spaete Initialisierung)."""
         self._cloud = cloud
@@ -64,6 +67,11 @@ class LEDController:
     def markus_on(self) -> bool:
         """Ob Markus-Standlicht gerade aktiv ist."""
         return self._markus_on
+
+    @property
+    def personality_mode(self) -> str:
+        """Aktueller Personality-Modus (fuer Panel-Indikator)."""
+        return self._personality_mode
 
     # =================================================================
     # Basis-LED-Operationen
@@ -179,16 +187,34 @@ class LEDController:
 
     def update_hysteresis(self, markus_recognized: bool,
                           face_detected: bool, persons_detected: bool,
-                          moloch_has_control: bool):
+                          moloch_has_control: bool,
+                          personality_mode: str = "guardian"):
         """LED-Hysterese aktualisieren. Wird pro Inference-Frame aufgerufen.
+
+        Gate0 Phase 6: LED zeigt Wahrheit.
+        LED blau NUR wenn Guardian + Markus erkannt.
+        Shadow/Berserker = LED AUS (physisch blau nicht moeglich -> aus).
 
         Args:
             markus_recognized: Markus in diesem Frame erkannt
             face_detected: Irgendein Gesicht erkannt
             persons_detected: Person (YOLO) erkannt
             moloch_has_control: MOLOCH hat Kamera-Kontrolle
+            personality_mode: Aktueller Modus (guardian/shadow/berserker)
         """
-        # Markus-Erkennung mit Hysterese
+        self._personality_mode = personality_mode
+
+        # Shadow/Berserker: LED IMMER aus — keine blaue LED bei Bedrohung
+        if personality_mode in ("shadow", "berserker"):
+            if self._markus_on or self._indicator_state:
+                self._markus_on = False
+                self._markus_on_streak = 0
+                self._markus_off_streak = 0
+                self.indicator_set(False)
+                logger.info(f"[LED] Modus {personality_mode} -> LED AUS (Wahrheit)")
+            return
+
+        # Guardian: LED blau NUR wenn Markus erkannt (Hysterese)
         if markus_recognized:
             self._markus_on_streak += 1
             self._markus_off_streak = 0
@@ -203,19 +229,6 @@ class LEDController:
                     self._markus_on = False
                     self.indicator_set(False)
                     logger.info("[LED] Markus Hysterese: Off-Streak erreicht -> LED AUS")
-
-        # Generelle Detection (nicht-Markus)
-        if not self._markus_on:
-            if face_detected or persons_detected:
-                self._detect_on_streak += 1
-                self._detect_off_streak = 0
-                if self._detect_on_streak >= self._DETECT_ON_THRESH:
-                    self.indicator_set(True)
-            elif not moloch_has_control:
-                self._detect_off_streak += 1
-                self._detect_on_streak = 0
-                if self._detect_off_streak >= self._DETECT_OFF_THRESH:
-                    self.indicator_set(False)
 
     # =================================================================
     # Weisse LED (Flutlicht/Flash)
