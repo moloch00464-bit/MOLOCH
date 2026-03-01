@@ -6,7 +6,7 @@ M.O.L.O.C.H. Voice Pipeline
 PTT Recording -> Whisper STT -> Claude API -> Piper TTS -> HDMI Output
 
 Audio Devices:
-  Input:  ReSpeaker Lite (card 2, device 0) — plughw:2,0
+  Input:  ReSpeaker Lite — plughw:CARD=Lite,DEV=0 (stabil ueber Reboots)
   Output: HDMI via PipeWire (pw-play)
 
 Eigenstaendiges Modul, wird vom MolochService instanziiert.
@@ -29,7 +29,7 @@ from core.longterm_memory import get_memory
 logger = logging.getLogger("VoicePipeline")
 
 # Audio Device Konfiguration
-MIC_DEVICE = "plughw:2,0"      # ReSpeaker Lite
+MIC_DEVICE = "plughw:CARD=Lite,DEV=0"  # ReSpeaker Lite (Name statt Nummer = stabil)
 SPEAKER_DEVICE = "plughw:1,0"  # HDMI-1 (Fallback, primaer pw-play)
 
 # Pfade
