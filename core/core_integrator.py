@@ -91,10 +91,12 @@ class CoreIntegrator:
         "respect_score": -0.3,          # Hoher Respekt senkt Tension
         "disrespect_spike": 0.8,        # Respektlosigkeit -> Spike
         "conflict_input": 0.5,          # Unbekannte Person, Alarm etc.
-        "unknown_person": 0.4,          # Unbekannter erkannt
+        "unknown_person": 0.4,          # Unbekannter erkannt -> Tension steigt
+        "person_detected": 0.1,         # Jemand sichtbar -> leichte Wachsamkeit
+        "markus_recognized": -0.4,      # Markus erkannt -> Tension faellt aktiv
         "alarm_active": 0.9,            # Alarm -> maximale Tension
         "environmental_stress": 0.2,    # Laerm, Temperatur etc.
-        "system_load": 0.15,            # CPU/RAM Auslastung
+        # system_load ENTFERNT: CPU-Last ist keine Bedrohung, hat Tension bei 1.0 fixiert
     }
 
     # === Dominance-Inputs (positiv=Guardian, negativ=Shadow) ===
