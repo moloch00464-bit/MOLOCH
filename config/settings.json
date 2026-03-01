@@ -2,8 +2,8 @@
   "version": 1,
   "thresholds": {
     "scrfd_conf": 0.4,
-    "scrfd_nms": 0.5,
-    "arcface_thresh": 0.45,
+    "scrfd_nms": 0.55,
+    "arcface_thresh": 0.55,
     "yolo_conf": 0.5,
     "pose_conf": 0.5,
     "hand_conf": 0.3
