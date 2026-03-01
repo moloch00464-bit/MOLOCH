@@ -503,9 +503,14 @@ class InferenceEngine:
                                 if self._core_integrator and self._core_integrator.is_owner_confirmed():
                                     self._core_integrator.clear_owner_override()
                                 # ArbitrationEngine: Identity Confirmed (Shadow gecappt)
+                                # NUR wenn CoreIntegrator NICHT im Shadow-Modus ist
+                                # (hohe Tension = Bedrohungslage, einzelner Markus-Frame
+                                #  soll Override nicht staendig neu setzen)
                                 try:
                                     from core.arbitration import get_arbitration
-                                    get_arbitration().identity_confirmed()
+                                    ci_zone = self._core_integrator.get_personality_zone() if self._core_integrator else "guardian"
+                                    if ci_zone != "shadow":
+                                        get_arbitration().identity_confirmed()
                                 except Exception:
                                     pass
 
