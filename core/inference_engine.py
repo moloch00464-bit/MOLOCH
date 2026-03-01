@@ -169,6 +169,13 @@ class InferenceEngine:
         # Learner Flash
         self._learner_flash = False
 
+        # Gate0 Phase 8: Name-Hysterese (OSD stimmt mit Panel ueberein)
+        self._sticky_name = "Unbekannt"
+        self._sticky_sim = 0.0
+        self._sticky_frames = 0
+        self._STICKY_HOLD_FRAMES = 15  # Name bleibt 15 Frames nach letzter Erkennung
+        self._last_logged_name = None  # Nur bei Namenswechsel loggen
+
         logger.info("[INIT] InferenceEngine bereit")
 
     # =====================================================================
@@ -495,6 +502,29 @@ class InferenceEngine:
                                 )
                             else:
                                 name, sim = "Keine DB", 0.0
+
+                            # Gate0 Phase 8: Name-Hysterese (EINE Wahrheit fuer OSD + Panel)
+                            # Wenn match_face "Markus" liefert: sticky setzen
+                            # Wenn "Unbekannt" aber sticky noch aktiv: Name beibehalten
+                            if name != "Unbekannt":
+                                self._sticky_name = name
+                                self._sticky_sim = sim
+                                self._sticky_frames = self._STICKY_HOLD_FRAMES
+                            elif self._sticky_frames > 0:
+                                # Name halten solange Hysterese laeuft
+                                name = self._sticky_name
+                                self._sticky_frames -= 1
+                            else:
+                                self._sticky_name = "Unbekannt"
+                                self._sticky_sim = 0.0
+
+                            # Gate0 Phase 8: Face-Log nur bei Namenswechsel
+                            if name != self._last_logged_name:
+                                self._last_logged_name = name
+                                if name != "Unbekannt":
+                                    logger.info(f"[SEHE] Gesicht name={name} confidence={sim:.2f} threshold={self.arcface_thresh_val:.2f}")
+                                else:
+                                    logger.info(f"[SEHE] Gesicht name=unbekannt best_match={sim:.2f} threshold={self.arcface_thresh_val:.2f}")
 
                             # LED Indikator: Markus erkannt?
                             if name.lower() == "markus":
