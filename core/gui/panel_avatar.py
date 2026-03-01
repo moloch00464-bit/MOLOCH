@@ -53,7 +53,7 @@ MAX_VISUAL_AMP = 0.15
 AVATAR_SIZE = 300
 CX = AVATAR_SIZE // 2
 CY = AVATAR_SIZE // 2
-ANIM_INTERVAL_MS = 33   # ~30 FPS
+ANIM_INTERVAL_MS = 110  # ~9 FPS, versetzt zu Preview-100ms (Gate0 Phase 9: CPU < 15%)
 
 # Hintergrund
 BG_AVATAR = "#0A0A14"
@@ -248,6 +248,9 @@ class AvatarModule:
         # --- Glow Cache ---
         self._glow_surface = None
         self._glow_key = None
+
+        # Watchdog: Letzter erfolgreicher Render (Gate0 Phase 9)
+        self.last_render_time = 0.0
 
         # --- Tkinter: Label fuer Bild-Anzeige ---
         self._photo = None
@@ -820,6 +823,7 @@ class AvatarModule:
             # Rendern + Display
             self._render()
             self._blit_to_tkinter()
+            self.last_render_time = time.monotonic()
 
         except Exception as e:
             # KRITISCH: after-Chain MUSS weiterlaufen, sonst Avatar-Freeze!

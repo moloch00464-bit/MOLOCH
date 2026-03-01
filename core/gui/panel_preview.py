@@ -21,6 +21,7 @@ import time
 import os
 import logging
 
+import numpy as np
 from PIL import Image, ImageTk
 
 from core.gui.panel_styles import (
@@ -40,8 +41,8 @@ RESOLUTIONS = [
 MAX_CANVAS_W = 960
 MAX_CANVAS_H = 540
 
-# Festes Update-Intervall: 28ms = ~35 FPS Ziel
-UPDATE_INTERVAL_MS = 28
+# Festes Update-Intervall: 100ms = 10 FPS Ziel (Gate0 Phase 9: CPU unter 15%)
+UPDATE_INTERVAL_MS = 100
 
 
 class PreviewModule:
@@ -79,6 +80,9 @@ class PreviewModule:
 
         # Zeitstempel fuer Frame-Skip Logik
         self._last_update_start = 0.0
+
+        # Watchdog: Letzter erfolgreicher Render (Gate0 Phase 9)
+        self.last_render_time = 0.0
 
         # --- Aufloesung-Selector oberhalb des Canvas ---
         self._res_frame = tk.Frame(parent_frame, bg=BG_DARK)
@@ -224,11 +228,9 @@ class PreviewModule:
                     return
                 self._last_seq = seq
 
-                # Bild mit Originalgroesse aus SHM rekonstruieren (BGR raw)
-                img = Image.frombytes('RGB', (shm_w, shm_h), raw)
-                # B und R tauschen (BGR -> RGB)
-                b, g, r = img.split()
-                img = Image.merge('RGB', (r, g, b))
+                # BGR -> RGB via numpy (schneller als PIL split/merge)
+                arr = np.frombuffer(raw, dtype=np.uint8).reshape((shm_h, shm_w, 3))
+                img = Image.fromarray(arr[:, :, ::-1])
 
                 # Auf Canvas-Groesse resizen (gekappt auf MAX_CANVAS)
                 if img.size != (self._canvas_w, self._canvas_h):
@@ -248,6 +250,7 @@ class PreviewModule:
 
                 # Fehler-Zaehler zuruecksetzen nach erfolgreichem Frame
                 self._error_count = 0
+                self.last_render_time = time.monotonic()
             else:
                 # Kein Frame — "Kein Signal" anzeigen
                 self._canvas.itemconfig(self._nosignal_id, state='normal')

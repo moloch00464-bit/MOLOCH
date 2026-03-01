@@ -17,6 +17,7 @@ from tkinter import ttk
 import json
 import struct
 import os
+import time
 import logging
 import glob as glob_mod
 from typing import Optional, Dict, Any
@@ -348,6 +349,10 @@ class MolochPanel:
         # Status-Polling starten
         self._poll_status()
 
+        # Watchdog starten (Gate0 Phase 9) — erster Check nach 10s (Startup-Grace)
+        self._watchdog_last_poll = time.monotonic()
+        self.root.after(10000, self._watchdog)
+
     def _build_layout(self):
         """3-Spalten-Layout mit Status-Bar aufbauen."""
 
@@ -594,6 +599,66 @@ class MolochPanel:
 
         # Naechster Poll
         self.root.after(STATUS_UPDATE_MS, self._poll_status)
+
+    def _watchdog(self):
+        """Panel-Watchdog: Prueft ob Module noch rendern (Gate0 Phase 9).
+
+        Laeuft alle 5 Sekunden. Warnt wenn Preview oder Avatar > 2s nicht
+        gerendert hat. Versucht after-Chain neu zu starten wenn moeglich.
+        """
+        try:
+            now = time.monotonic()
+
+            # Preview pruefen
+            if self._preview is not None and hasattr(self._preview, 'last_render_time'):
+                last = self._preview.last_render_time
+                if last > 0 and (now - last) > 2.0:
+                    self.logger.warning(
+                        f"[WARNUNG] Panel render_timeout modul=preview "
+                        f"stale_sec={now - last:.1f}"
+                    )
+                    # after-Chain neu starten
+                    if self._preview._running:
+                        try:
+                            self._preview._after_id = self._preview._parent.after(
+                                100, self._preview._update
+                            )
+                            self.logger.info("[WATCHDOG] Preview after-Chain neugestartet")
+                        except Exception:
+                            pass
+
+            # Avatar pruefen
+            if self._avatar is not None and hasattr(self._avatar, 'last_render_time'):
+                last = self._avatar.last_render_time
+                if last > 0 and (now - last) > 2.0:
+                    self.logger.warning(
+                        f"[WARNUNG] Panel render_timeout modul=avatar "
+                        f"stale_sec={now - last:.1f}"
+                    )
+                    # after-Chain neu starten
+                    if self._avatar._running:
+                        try:
+                            self._avatar._after_id = self._avatar._parent.after(
+                                100, self._avatar._update_animation
+                            )
+                            self.logger.info("[WATCHDOG] Avatar after-Chain neugestartet")
+                        except Exception:
+                            pass
+
+            # Status-Poll selbst pruefen (wenn _poll_status haengt)
+            poll_gap = now - self._watchdog_last_poll
+            if poll_gap > 3.0:
+                self.logger.warning(
+                    f"[WARNUNG] Panel poll_timeout stale_sec={poll_gap:.1f}"
+                )
+
+            self._watchdog_last_poll = now
+
+        except Exception as e:
+            self.logger.error(f"[WATCHDOG] Fehler: {e}")
+
+        # Naechster Check in 5 Sekunden
+        self.root.after(5000, self._watchdog)
 
     def register_module(self, name: str, frame: tk.Frame):
         """
