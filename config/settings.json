@@ -1,9 +1,9 @@
 {
   "version": 1,
   "thresholds": {
-    "scrfd_conf": 0.55,
+    "scrfd_conf": 0.4,
     "scrfd_nms": 0.35,
-    "arcface_thresh": 0.55,
+    "arcface_thresh": 0.5,
     "yolo_conf": 0.6,
     "pose_conf": 0.65,
     "hand_conf": 0.7
@@ -37,10 +37,10 @@
     "face_attr"
   ],
   "mpo": {
-    "tension_tau": 300.0,
-    "dominance_drift": 0.014,
+    "tension_tau": 340.0,
+    "dominance_drift": 0.025,
     "zone_hysteresis": 0.15,
-    "berserker_threshold": 0.95,
+    "berserker_threshold": 0.92,
     "thermal_damping_start": 70.0
   },
   "gestures": {
@@ -48,30 +48,30 @@
     "thumbs_up_enabled": true,
     "stop_enabled": true,
     "point_enabled": true,
-    "sensitivity": 0.7
+    "sensitivity": 0.55
   },
   "tracker": {
     "dead_zone_pct": 0.25,
-    "track_start_pct": 0.18,
-    "coast_stable_time": 3.5,
+    "track_start_pct": 0.26,
+    "coast_stable_time": 5.5,
     "coast_resume_pct": 0.12,
     "tracking_speed": 0.7,
     "min_move_speed": 0.1,
     "smooth_alpha": 0.3,
-    "pan_gain": 0.25,
-    "tilt_gain": 0.2,
-    "max_step_pan": 5.0,
-    "max_step_tilt": 3.0,
-    "move_cooldown_ms": 400.0,
-    "center_ring_buffer_size": 10.0,
+    "pan_gain": 0.5,
+    "tilt_gain": 0.6,
+    "max_step_pan": 7.5,
+    "max_step_tilt": 4.5,
+    "move_cooldown_ms": 600.0,
+    "center_ring_buffer_size": 12.0,
     "pan_limit_min": -115.0,
     "pan_limit_max": 111.0,
     "tilt_limit_min": -71.0,
-    "tilt_limit_max": 78.8,
+    "tilt_limit_max": 79.0,
     "search_speed": 0.3,
     "search_home_timeout": 30.0,
     "target_lost_timeout": 7.5,
-    "home_pan": 33.8,
-    "home_tilt": -9.9
+    "home_pan": 12.8,
+    "home_tilt": 0.0
   }
 }

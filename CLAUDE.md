@@ -324,6 +324,20 @@ h) Quick-Verify Einzeiler nach jedem Deploy:
    `sudo systemctl restart moloch && sleep 10 && systemctl is-active moloch && journalctl -u moloch --since "15 sec ago" --no-pager | grep -i "error\|exception\|traceback" | head -5 || echo "=== SERVICE FAILED ==="`
 ```
 
+## REGEL 12 — REGRESSIONSTEST NACH JEDEM FIX
+
+> Kein Fix ohne Audit. Kein Weitermachen bei FAIL.
+
+```
+a) Nach JEDER Aenderung: python3 ~/moloch/moloch_audit.py --auto
+b) Wenn ein Test FAIL → STOPP. Zuerst die Regression fixen.
+c) Erst wenn ALLE Tests PASS → naechster Task.
+d) KEIN WEITERMACHEN BEI FAIL.
+e) --full Modus nach Sprint-Abschluss / Gate-Check (User muss vor Kamera stehen).
+f) Report liegt in ~/moloch/logs/audit_last.json
+g) History in ~/moloch/logs/audit_history.jsonl
+```
+
 ## KONTEXT-DATEIEN — WO DU ZUERST LIEST
 
 > Bevor du loslegst: Verschaff dir Ueberblick.
