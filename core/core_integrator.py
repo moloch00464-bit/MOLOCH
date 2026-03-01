@@ -67,7 +67,12 @@ class CoreIntegrator:
     DOMINANCE_DRIFT_RATE = 0.01 / 60.0  # 0.01 pro Minute, aufgeloest in 1-Hz-Ticks
 
     # === Hysterese ===
-    ZONE_HYSTERESIS = 0.15  # Mindest-Delta fuer Zone-Wechsel
+    ZONE_HYSTERESIS = 0.15  # Mindest-Delta fuer Zone-Wechsel (Dominance-basiert)
+
+    # === Tension-basierte Zone-Hysterese (Gate0 Phase 5) ===
+    TENSION_HIGH_THRESHOLD = 0.6   # Ueber diesem Wert -> Shadow
+    TENSION_LOW_THRESHOLD = 0.3    # Unter diesem Wert -> Guardian
+    TENSION_HYSTERESIS_TIME = 10.0 # Sekunden stabil bevor Zone-Wechsel
 
     # === Berserker ===
     BERSERKER_TENSION_THRESHOLD = 0.95
@@ -125,6 +130,10 @@ class CoreIntegrator:
         # === Owner Override (Chat/Voice Identifikation) ===
         self._owner_confirmed = False
         self._owner_confirmed_until = 0.0  # monotonic timestamp
+
+        # === Tension-basierte Zone-Hysterese (Gate0 Phase 5) ===
+        self._tension_high_since: Optional[float] = None  # monotonic, wann tension > 0.6
+        self._tension_low_since: Optional[float] = None   # monotonic, wann tension < 0.3
 
         # === Physiologisches Feedback ===
         self._cpu_temp_raw = 0.0        # Celsius
@@ -518,20 +527,70 @@ class CoreIntegrator:
                     self._dominance = _clamp(self._dominance + 0.005, -1.0, 1.0)
 
             # =============================================================
-            # 5. Zone mit Hysterese bestimmen
+            # 5. Zone mit Hysterese bestimmen (Gate0 Phase 5)
+            #    Tension-basiert mit 10s Stabilitaetsfenster.
+            #    Tension > 0.6 stabil 10s -> Shadow
+            #    Tension < 0.3 stabil 10s -> Guardian
+            #    Dazwischen: Zone bleibt (kein Flackern).
             # =============================================================
+
+            # Tension-Schwellen-Timer aktualisieren
+            if self._tension > self.TENSION_HIGH_THRESHOLD:
+                if self._tension_high_since is None:
+                    self._tension_high_since = now
+                self._tension_low_since = None
+            elif self._tension < self.TENSION_LOW_THRESHOLD:
+                if self._tension_low_since is None:
+                    self._tension_low_since = now
+                self._tension_high_since = None
+            else:
+                # Zwischen den Schwellen: beide Timer resetten
+                self._tension_high_since = None
+                self._tension_low_since = None
+
             if self._berserker_active:
                 self._current_zone = "berserker"
-            elif self._current_zone == "guardian" and self._dominance < -self.ZONE_HYSTERESIS:
-                self._current_zone = "shadow"
-                _logger.info(f"[CORE] Zone: GUARDIAN -> SHADOW (D={self._dominance:+.3f})")
-            elif self._current_zone == "shadow" and self._dominance > self.ZONE_HYSTERESIS:
-                self._current_zone = "guardian"
-                _logger.info(f"[CORE] Zone: SHADOW -> GUARDIAN (D={self._dominance:+.3f})")
             elif self._current_zone == "berserker" and not self._berserker_active:
-                # Berserker endet -> Zone basierend auf dominance
-                self._current_zone = "guardian" if self._dominance > 0 else "shadow"
+                # Berserker endet -> Zone basierend auf tension
+                self._current_zone = "guardian" if self._tension < 0.5 else "shadow"
                 _logger.info(f"[CORE] Zone: BERSERKER -> {self._current_zone.upper()}")
+            elif (self._tension_high_since is not None
+                  and (now - self._tension_high_since) >= self.TENSION_HYSTERESIS_TIME
+                  and self._current_zone != "shadow"):
+                # Tension stabil ueber 0.6 seit 10s -> Shadow
+                old_zone = self._current_zone
+                self._current_zone = "shadow"
+                _logger.info(
+                    f"[WECHSLE] {old_zone}→shadow "
+                    f"weil=tension_stabil_ueber_0.6_seit_10s "
+                    f"T={self._tension:.3f}"
+                )
+                # ArbitrationEngine Identity-Override aufheben
+                # (hohe Tension bedeutet Szene hat sich geaendert)
+                try:
+                    from core.arbitration import get_arbitration
+                    arbi = get_arbitration()
+                    if arbi.is_override_active():
+                        info = arbi.get_override_info()
+                        if info.get("source") == "identity":
+                            arbi.clear_identity()
+                            _logger.info(
+                                "[CORE] Identity-Override aufgehoben "
+                                "(Tension-Hysterese erzwingt Shadow)"
+                            )
+                except Exception:
+                    pass
+            elif (self._tension_low_since is not None
+                  and (now - self._tension_low_since) >= self.TENSION_HYSTERESIS_TIME
+                  and self._current_zone != "guardian"):
+                # Tension stabil unter 0.3 seit 10s -> Guardian
+                old_zone = self._current_zone
+                self._current_zone = "guardian"
+                _logger.info(
+                    f"[WECHSLE] {old_zone}→guardian "
+                    f"weil=tension_stabil_unter_0.3_seit_10s "
+                    f"T={self._tension:.3f}"
+                )
 
             # =============================================================
             # 6. Effekte ableiten

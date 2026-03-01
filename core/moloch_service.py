@@ -606,6 +606,10 @@ class MolochService:
                     status["core"] = get_arbitration().apply(raw_core)
                 except Exception:
                     status["core"] = raw_core
+                # EINE Wahrheit: Top-Level personality_mode + tension (Gate0 Phase 5)
+                core_data = status.get("core", {})
+                status["personality_mode"] = core_data.get("zone", "guardian")
+                status["tension"] = core_data.get("tension", 0.0)
             # Spotify Status (lazy — nur wenn bereits initialisiert)
             try:
                 from core.spotify_controller import get_spotify

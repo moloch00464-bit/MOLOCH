@@ -60,14 +60,17 @@ BG_AVATAR = "#0A0A14"
 BG_RGB = (10, 10, 20)
 GRID_RGB = (17, 17, 32)
 
-# Zone-Farben (RGB)
-COL_GUARDIAN = (0, 170, 255)
-COL_NEUTRAL = (255, 255, 255)
-COL_SHADOW = (255, 34, 0)
-COL_BERSERKER = (255, 34, 0)
+# Zone-Farben (RGB) — Gate0 Phase 5: Harte Farben pro Zone
+COL_GUARDIAN = (0, 102, 255)      # #0066ff — klares Blau
+COL_GUARDIAN_IRIS = (68, 170, 255) # Helleres Blau fuer Iris
+COL_SHADOW = (204, 0, 0)          # #cc0000 — klares Rot
+COL_SHADOW_IRIS = (255, 68, 51)   # Helleres Rot fuer Iris
+COL_BERSERKER = (136, 0, 0)       # #880000 — Dunkelrot
+COL_BERSERKER_IRIS = (255, 34, 17) # Helles Rot fuer Iris (pulsierend)
+COL_NEUTRAL = (255, 255, 255)     # Fallback
 
-# Hysterese
-DOM_HYSTERESIS = 0.15
+# Max Uebergangszeit fuer Zone-Farbwechsel (Sekunden)
+ZONE_TRANSITION_TIME = 2.0
 
 
 # =============================================================================
@@ -85,18 +88,33 @@ def _scale(color, factor):
     return tuple(min(255, max(0, int(c * factor))) for c in color)
 
 
+def _zone_color(zone):
+    """Zone -> Hauptfarbe (Gate0 Phase 5: harte Farben, kein Fade)."""
+    if zone == "shadow":
+        return COL_SHADOW
+    elif zone == "berserker":
+        return COL_BERSERKER
+    return COL_GUARDIAN
+
+
+def _zone_iris(zone):
+    """Zone -> Iris-Farbe (Gate0 Phase 5: harte Farben)."""
+    if zone == "shadow":
+        return COL_SHADOW_IRIS
+    elif zone == "berserker":
+        return COL_BERSERKER_IRIS
+    return COL_GUARDIAN_IRIS
+
+
+# Legacy-Compat (falls extern referenziert)
 def _dom_color(d):
-    """Dominance -> Hauptfarbe."""
-    if d >= 0:
-        return _lerp(COL_NEUTRAL, COL_GUARDIAN, d)
-    return _lerp(COL_NEUTRAL, COL_SHADOW, -d)
+    """DEPRECATED — nutze _zone_color()."""
+    return _zone_color("guardian" if d >= 0 else "shadow")
 
 
 def _dom_iris(d):
-    """Dominance -> Iris-Farbe (heller)."""
-    if d >= 0:
-        return _lerp((220, 220, 220), (68, 204, 255), d)
-    return _lerp((220, 220, 220), (255, 68, 51), -d)
+    """DEPRECATED — nutze _zone_iris()."""
+    return _zone_iris("guardian" if d >= 0 else "shadow")
 
 
 def _rgb_to_hex(rgb):
@@ -181,9 +199,12 @@ class AvatarModule:
         self._s_dominance = 0.5
         self._s_cpu = 0.0
 
-        # --- Visuelle Dominance mit Hysterese ---
-        self._visual_dom = 0.5
-        self._dom_at_last_change = 0.5
+        # --- Zone-basierte Farben (Gate0 Phase 5) ---
+        # Aktuelle und Ziel-Farben fuer smooth transition (max 2s)
+        self._target_main_color = COL_GUARDIAN
+        self._target_iris_color = COL_GUARDIAN_IRIS
+        self._current_main_color = list(COL_GUARDIAN)  # Mutable fuer Interpolation
+        self._current_iris_color = list(COL_GUARDIAN_IRIS)
 
         # --- Animation State ---
         self._tick = 0
@@ -306,12 +327,13 @@ class AvatarModule:
             iris_c = (255, 170, 170)
             bri = 1.0
         elif self._zone == "berserker":
-            main_c = (255, 20, 0)
-            iris_c = (255, 68, 51)
+            main_c = COL_BERSERKER
+            iris_c = COL_BERSERKER_IRIS
             bri = 0.7 + self._s_tension * 0.3
         else:
-            main_c = _dom_color(self._visual_dom)
-            iris_c = _dom_iris(self._visual_dom)
+            # Zone-basierte Farben (Gate0 Phase 5: harte Farben)
+            main_c = tuple(int(c) for c in self._current_main_color)
+            iris_c = tuple(int(c) for c in self._current_iris_color)
             bri = 0.55 + self._s_tension * 0.45
 
         # MUSIC: Helligkeit pulsiert mit RMS (nur bei Music-Blend)
@@ -688,6 +710,16 @@ class AvatarModule:
             self._s_dominance += (self._dominance - self._s_dominance) * rate
             self._s_cpu += (self._cpu_temp - self._s_cpu) * rate
 
+            # Zone-basierte Farbinterpolation (max 2s Uebergang, Gate0 Phase 5)
+            # Zielfarben aus Zone berechnen
+            self._target_main_color = _zone_color(self._zone)
+            self._target_iris_color = _zone_iris(self._zone)
+            # Interpolationsrate: dt/2.0 = 2s Uebergang
+            color_rate = min(1.0, dt / ZONE_TRANSITION_TIME * 3.0)
+            for i in range(3):
+                self._current_main_color[i] += (self._target_main_color[i] - self._current_main_color[i]) * color_rate
+                self._current_iris_color[i] += (self._target_iris_color[i] - self._current_iris_color[i]) * color_rate
+
             # Music Data: DIREKT uebernehmen, KEINE zweite Interpolation!
             # Visualizer liefert bereits EMA-geglattete Werte via Binary IPC.
             # Doppeltes Smoothing war die Ursache fuer Sync-Probleme.
@@ -713,11 +745,6 @@ class AvatarModule:
             listen_target = 1.0 if (self._ptt_active and not self._tts_active) else 0.0
             self._s_voice_speak += (speak_target - self._s_voice_speak) * rate
             self._s_voice_listen += (listen_target - self._s_voice_listen) * rate
-
-            # Visuelle Dominance mit Hysterese
-            if abs(self._dominance - self._dom_at_last_change) > DOM_HYSTERESIS:
-                self._dom_at_last_change = self._dominance
-            self._visual_dom += (self._dom_at_last_change - self._visual_dom) * rate
 
             # Puls-Phase: Geschwindigkeit von Tension + Voice, gedaempft bei CPU-Hitze
             speed = 1.0 + self._s_tension * 3.0
@@ -847,8 +874,8 @@ class AvatarModule:
             else:
                 self._status_text = "Idle"
 
-        # Info-Labels aktualisieren
-        main_hex = _rgb_to_hex(_dom_color(self._visual_dom))
+        # Info-Labels aktualisieren (Zone-basiert, Gate0 Phase 5)
+        main_hex = _rgb_to_hex(_zone_color(self._zone))
         bright = max(0.5, 0.5 + self._s_tension * 0.5)
 
         zone_name = {"guardian": "GUARDIAN", "shadow": "SHADOW",
