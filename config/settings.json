@@ -27,7 +27,7 @@
   "learner": {
     "flash_enabled": true
   },
-  "orchestration_mode": "always_on",
+  "orchestration_mode": "adaptive",
   "active_models": [
     "scrfd",
     "arcface",

@@ -560,6 +560,7 @@ class MolochService:
             if self._perception:
                 status["perception"] = self._perception.get_state()
                 status["npu_stage"] = self._perception.npu_stage
+                status["npu_stage_since"] = self._perception.npu_stage_since
             # PTZ-Settings + Tracker-State + restless_score fuer Panel
             ptz_status = {
                 "home_pan": round(getattr(self, '_ptz_home_pan', 0.0), 1),

@@ -283,27 +283,32 @@ def test_npu_no_error_loop():
 
 @auto_test("NPU State gültig", "npu")
 def test_npu_state():
-    """Gemini: NPU nur in definierten Zuständen 0/1/2."""
+    """Gemini: NPU nur in definierten Zuständen (Gate 0 Phase 4: idle/person/face)."""
     data = read_status()
     if not data:
         return False, "Kein Status"
-    # Prüfe ob NPU in einem sinnvollen Zustand ist
+    # Gate 0 Phase 4: npu_stage aus PerceptionEngine ist die Wahrheit
+    npu_stage = data.get("npu_stage", "")
+    if npu_stage in ("idle", "person", "face"):
+        stage_models = {
+            "idle": "yolov8m",
+            "person": "yolov8m+scrfd",
+            "face": "yolov8m+scrfd+arcface",
+        }
+        return True, f"{npu_stage.upper()} ({stage_models[npu_stage]})"
+    # Fallback: Flag-basierte Erkennung (Legacy)
     yolo = data.get("yolo_active", False)
     scrfd = data.get("scrfd_active", False)
     arcface = data.get("arcface_active", False)
-
     if not yolo and not scrfd and not arcface:
-        state = "SUSPENDED"
+        return True, "SUSPENDED"
     elif yolo and not scrfd:
-        state = "IDLE (nur YOLO)"
+        return True, "IDLE (nur YOLO)"
     elif yolo and scrfd:
-        state = "ACTIVE"
+        return True, "ACTIVE"
     elif not yolo and scrfd and arcface:
-        state = "FACE_DIRECT (SCRFD+ArcFace ohne YOLO)"
-    else:
-        state = "UNBEKANNT"
-        return False, f"Ungültiger NPU-State: yolo={yolo} scrfd={scrfd} arcface={arcface}"
-    return True, state
+        return True, "FACE_DIRECT (SCRFD+ArcFace ohne YOLO)"
+    return False, f"Ungültiger NPU-State: yolo={yolo} scrfd={scrfd} arcface={arcface}"
 
 # ============================================================
 # AUTO-TESTS: PTZ KAMERA (Claude + Gemini)

@@ -19,6 +19,7 @@ import time
 import json
 import os
 import logging
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
 _logger = logging.getLogger("PerceptionEngine")
@@ -34,11 +35,13 @@ class PerceptionEngine:
     ALL_MODELS = ["scrfd", "arcface", "yolov8m", "hand_landmark"]
 
     # NPU Stufen: welche Modelle pro Stufe aktiv
+    # Gate 0 Phase 4: Dreistufig — FACE behaelt yolov8m (Tracking braucht Person-BBox)
+    # Pose NICHT in FACE: 4 Modelle = 9 FPS (unter min_fps 10). Gemessen, nicht geraten.
     # face_attr ENTFERNT — verursachte Load/Unload Loop bei Stufenwechsel (Gate 0 Phase 1)
     STAGE_MODELS = {
         "idle":   ["yolov8m"],
         "person": ["yolov8m", "scrfd"],
-        "face":   ["scrfd", "arcface"],
+        "face":   ["yolov8m", "scrfd", "arcface"],
     }
 
     BASE_SCORES = {
@@ -51,8 +54,10 @@ class PerceptionEngine:
     # ArcFace ohne SCRFD ist nutzlos (braucht Face-Crops)
     DEPENDENCIES = {"arcface": "scrfd"}
 
-    # Idle-Timeout: Sekunden ohne Detection bis IDLE
-    IDLE_TIMEOUT = 30.0
+    # Idle-Timeout: Sekunden ohne Detection bis IDLE (Gate 0 Phase 4 Spec: 60s)
+    IDLE_TIMEOUT = 60.0
+    # Face-verloren Timeout: Sekunden bis FACE → PERSON (Gate 0 Phase 4 Spec: 10s)
+    FACE_LOST_TIMEOUT = 10.0
 
     def __init__(self, personality_engine=None):
         self._personality = personality_engine
@@ -66,6 +71,7 @@ class PerceptionEngine:
 
         # === NPU Idle-Modus (3 Stufen) ===
         self._npu_stage = "idle"           # idle / person / face
+        self._npu_stage_since = datetime.now(timezone.utc).isoformat()  # Gate 0 Phase 4
         self._last_person_time = 0.0       # Letzte Person-Detection
         self._last_face_detect_time = 0.0  # Letzte Face-Detection (fuer Stage)
 
@@ -100,6 +106,11 @@ class PerceptionEngine:
     def npu_stage(self) -> str:
         """Aktuelle NPU-Stufe: idle / person / face."""
         return self._npu_stage
+
+    @property
+    def npu_stage_since(self) -> str:
+        """ISO Timestamp seit wann aktuelle Stufe aktiv."""
+        return self._npu_stage_since
 
     # =========================================================================
     # Public API
@@ -174,11 +185,15 @@ class PerceptionEngine:
 
         if new_stage != old_stage:
             self._npu_stage = new_stage
+            self._npu_stage_since = datetime.now(timezone.utc).isoformat()
             target = list(self.STAGE_MODELS[new_stage])
             self.slots = target
             self._last_chosen = target
             self._last_rotation = now
-            _logger.info(f"[NPU] {old_stage.upper()} → {new_stage.upper()} — Modelle: {target}")
+            # Moloch-Sprache: Stufenwechsel loggen (Gate 0 Phase 4)
+            _grund = self._stage_change_reason(old_stage, new_stage, context, now)
+            _logger.info(f"[WECHSLE] npu_stage={old_stage}→{new_stage} weil={_grund}")
+            _logger.info(f"[NPU] Modelle: {target}")
             return list(target)
 
         # Kein Wechsel — pruefe ob aktuelle Slots korrekt
@@ -226,13 +241,27 @@ class PerceptionEngine:
             if not face_detected and person_detected:
                 # Gesicht verloren, Person noch da → zurueck zu PERSON
                 time_since_face = now - self._last_face_detect_time
-                if time_since_face > 5.0:
+                if time_since_face > self.FACE_LOST_TIMEOUT:
                     return "person"
             if not person_detected and time_since_person >= self.IDLE_TIMEOUT:
                 return "idle"
             return "face"
 
         return self._npu_stage
+
+    def _stage_change_reason(self, old: str, new: str, ctx: Dict, now: float) -> str:
+        """Grund fuer Stufenwechsel als Moloch-Sprache String."""
+        if new == "idle":
+            t = now - self._last_person_time if self._last_person_time > 0 else 999
+            return f"keine_person_seit_{t:.0f}s"
+        elif old == "idle" and new == "person":
+            return "person_erkannt"
+        elif old == "person" and new == "face":
+            return "gesicht_erkannt"
+        elif old == "face" and new == "person":
+            t = now - self._last_face_detect_time if self._last_face_detect_time > 0 else 999
+            return f"gesicht_verloren_seit_{t:.0f}s"
+        return "unbekannt"
 
     def force_models(self, models: Optional[List[str]]):
         """Manueller Override. None = zurueck zu Scoring."""
@@ -250,6 +279,7 @@ class PerceptionEngine:
             "slots": list(self.slots),
             "forced": self._forced,
             "npu_stage": self._npu_stage,
+            "npu_stage_since": self._npu_stage_since,
             "scores": {k: round(v, 3) for k, v in self._scores.items()},
             "tension": round(tension, 3),
             "personality_mode": mode,
