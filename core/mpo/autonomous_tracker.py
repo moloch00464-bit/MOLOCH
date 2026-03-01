@@ -131,7 +131,7 @@ class TrackingConfig:
 
     # === Detection filtering ===
     min_bbox_height_ratio: float = 0.40
-    max_bbox_center_y_ratio: float = 0.75
+    max_bbox_center_y_ratio: float = 0.92   # Gate 0 Phase 3: war 0.75, filterte ALLE Gesichter raus
     min_bbox_area_ratio: float = 0.08
     min_confidence: float = 0.50
     min_aspect_ratio: float = 0.35
@@ -441,9 +441,9 @@ class AutonomousTracker:
                     self.stats["detections_filtered"] += 1
                     continue
 
-                # Face-BBoxen sind viel kleiner als Person-BBoxen -> relaxed thresholds
-                min_height = 0.08 if is_face else self.config.min_bbox_height_ratio
-                min_area = 0.01 if is_face else self.config.min_bbox_area_ratio
+                # Gate 0 Phase 3: Face-Filter stark relaxt - SCRFD Confidence reicht
+                min_height = 0.03 if is_face else self.config.min_bbox_height_ratio
+                min_area = 0.002 if is_face else self.config.min_bbox_area_ratio
 
                 height_ratio = height / frame_height
                 if height_ratio < min_height:
@@ -460,10 +460,13 @@ class AutonomousTracker:
                     self.stats["detections_filtered"] += 1
                     continue
 
-                center_y_ratio = ((y1 + y2) / 2) / frame_height
-                if center_y_ratio > self.config.max_bbox_center_y_ratio:
-                    self.stats["detections_filtered"] += 1
-                    continue
+                # center_y Filter NUR fuer Person-BBoxen
+                # Face am Bildrand = Kamera muss sich bewegen (Gate 0 Phase 3)
+                if not is_face:
+                    center_y_ratio = ((y1 + y2) / 2) / frame_height
+                    if center_y_ratio > self.config.max_bbox_center_y_ratio:
+                        self.stats["detections_filtered"] += 1
+                        continue
 
                 valid_dets.append(d)
 

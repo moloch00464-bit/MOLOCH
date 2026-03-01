@@ -663,6 +663,17 @@ class CameraManager:
                 cam.connect()
             if cam.is_connected:
                 onvif_ok = True
+
+                # Phase 3 Fix: Retry autonomous wenn Kamera beim Boot zu spaet kam
+                # enable_autonomous() wird beim Boot aufgerufen, schlaegt aber fehl
+                # wenn die Kamera noch nicht erreichbar ist (Race Condition).
+                if not self._autonomous_mode and not self._manual_mode:
+                    _last_retry = getattr(self, '_auto_retry_time', 0)
+                    if time.time() - _last_retry > 10.0:
+                        self._auto_retry_time = time.time()
+                        logger.info("[AUTONOM] Kamera online aber autonomous_mode=False - retry")
+                        self.enable_autonomous()
+
                 pos = cam.get_position()
                 if pos:
                     pan, tilt = pos.pan, pos.tilt
