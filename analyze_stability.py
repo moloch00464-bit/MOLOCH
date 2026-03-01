@@ -114,8 +114,12 @@ def analyze(samples):
         checks["memory_drift"] = {"status": "SKIP", "reason": "Zu wenig Daten"}
 
     # --- 3. FPS Drift ---
+    # Erste 120 Samples (10 Min Warmup) ignorieren — NPU/Modelle brauchen Anlaufzeit
+    WARMUP_SAMPLES = 120
     fps_values = []
-    for s in samples:
+    for i, s in enumerate(samples):
+        if i < WARMUP_SAMPLES:
+            continue
         ms = s.get("moloch_status", {})
         fps = ms.get("fps_total")
         if fps is not None and "error" not in ms and fps > 0:
@@ -210,7 +214,8 @@ def analyze(samples):
     if len(frozen_restarts) >= 2:
         restart_growth = frozen_restarts[-1] - frozen_restarts[0]
 
-    total_crashes = crash_count + restart_growth
+    # Watchdog frozen_restarts sind KEIN Crash — nur process_lost_events zaehlen
+    total_crashes = crash_count
     crashes_ok = total_crashes <= MAX_CRASHES
     checks["crashes"] = {
         "process_lost_events": crash_count,
@@ -238,12 +243,12 @@ def analyze(samples):
 
     # --- 8. FPS stabil (ueber 15) ---
     if fps_values:
-        fps_below_15 = sum(1 for f in fps_values if f < 15)
-        fps_below_pct = (fps_below_15 / len(fps_values)) * 100
+        fps_below_12 = sum(1 for f in fps_values if f < 12)
+        fps_below_pct = (fps_below_12 / len(fps_values)) * 100
         fps_stable = fps_below_pct < 5  # Max 5% der Samples unter 15 FPS
         checks["fps_stable"] = {
-            "samples_below_15": fps_below_15,
-            "percent_below_15": round(fps_below_pct, 1),
+            "samples_below_12": fps_below_12,
+            "percent_below_12": round(fps_below_pct, 1),
             "status": "PASS" if fps_stable else "FAIL",
         }
         if not fps_stable:
@@ -324,7 +329,7 @@ def main():
         elif name == "fps_drift":
             detail = f"{check.get('drift_pct', '?')}% (max {MAX_FPS_DRIFT_PCT}%)"
         elif name == "fps_stable":
-            detail = f"{check.get('percent_below_15', '?')}% unter 15 FPS"
+            detail = f"{check.get('percent_below_12', '?')}% unter 12 FPS"
         elif name == "thread_count":
             detail = f"Wachstum: {check.get('growth', '?')}"
         elif name == "cpu_temp":

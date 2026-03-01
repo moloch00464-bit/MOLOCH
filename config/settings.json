@@ -1,9 +1,9 @@
 {
   "version": 1,
   "thresholds": {
-    "scrfd_conf": 0.4,
-    "scrfd_nms": 0.55,
-    "arcface_thresh": 0.55,
+    "scrfd_conf": 0.65,
+    "scrfd_nms": 0.6,
+    "arcface_thresh": 0.6,
     "yolo_conf": 0.5,
     "pose_conf": 0.5,
     "hand_conf": 0.3
@@ -16,7 +16,7 @@
   },
   "audio": {
     "mic_gain": 0.85,
-    "noise_gate_db": -51.0,
+    "noise_gate_db": -41.0,
     "agc_enabled": true
   },
   "camera": {
@@ -36,10 +36,10 @@
     "pose"
   ],
   "mpo": {
-    "tension_tau": 240.0,
-    "dominance_drift": 0.026,
+    "tension_tau": 300.0,
+    "dominance_drift": 0.041,
     "zone_hysteresis": 0.15,
-    "berserker_threshold": 0.97,
+    "berserker_threshold": 0.95,
     "thermal_damping_start": 70.0
   },
   "gestures": {
@@ -67,9 +67,9 @@
     "pan_limit_max": 111.0,
     "tilt_limit_min": -71.0,
     "tilt_limit_max": 79.0,
-    "search_speed": 0.3,
-    "search_home_timeout": 30.0,
-    "target_lost_timeout": 7.5,
+    "search_speed": 0.8,
+    "search_home_timeout": 35.0,
+    "target_lost_timeout": 1.0,
     "home_pan": 0.0,
     "home_tilt": 0.0
   }
