@@ -65,6 +65,7 @@ class TrackerState(Enum):
     DWELL = "dwell"         # Target acquired, waiting before movement
     FROZEN = "frozen"       # Target perfectly centered, no movement needed
     COAST = "coast"         # Ziel stabil seit 2s, Kamera komplett eingefroren
+    PARKED = "parked"       # Search-Timeout: Kamera geparkt auf Home, NPU IDLE
 
 
 class TargetType(Enum):
@@ -118,6 +119,7 @@ class TrackingConfig:
         (120.0, 0.0),      # Weiter rechts
     ])
     search_home_timeout: float = 120.0  # 120s ohne Fund -> Home
+    search_park_timeout: float = 180.0  # 3 Min ohne Detection -> Park-Modus (keine Bewegung, NPU IDLE)
 
     # Verlust-Logik (3-Phasen):
     #   Phase 1: 0-5s nach Verlust -> STEHEN BLEIBEN (halt_wait_timeout)
@@ -273,6 +275,10 @@ class AutonomousTracker:
 
         # Callbacks
         self.on_state_change: Optional[Callable[[TrackerState], None]] = None
+        # Park-Modus Callback: wird mit True (parken) / False (aufwachen) aufgerufen
+        # Extern setzen fuer NPU-IDLE Steuerung (nur YOLO im Park-Modus)
+        self.on_park_change: Optional[Callable[[bool], None]] = None
+        self._park_time: float = 0.0  # Zeitpunkt des Park-Eintritts
 
         # Core Integrator Referenz (fuer adaptive Tracking-Parameter)
         self._core_integrator = None
@@ -949,6 +955,22 @@ class AutonomousTracker:
                        f"state={self.state.value} "
                        f"pos=({self.last_known_pan:+.1f},{self.last_known_tilt:+.1f})deg")
 
+        # === PARKED: Keine Bewegung, nur auf Detection warten ===
+        if self.state == TrackerState.PARKED:
+            if detection.detected and time_since_detection < 0.5:
+                # YOLO hat Person gemeldet -> Aufwachen!
+                park_duration = now - self._park_time if self._park_time > 0 else 0
+                logger.info(f"[PARK] AUFGEWACHT! Person erkannt nach {park_duration:.0f}s Park-Modus")
+                self._set_state(TrackerState.TRACKING)
+                # NPU zurueck auf Vollbetrieb
+                if self.on_park_change:
+                    try:
+                        self.on_park_change(False)
+                    except Exception as e:
+                        logger.error(f"[PARK] on_park_change(False) Fehler: {e}")
+                self._do_tracking(detection)
+            return
+
         # === PHASE 0: Detection aktiv -> SOFORT tracken ===
         if detection.detected and time_since_detection < 0.5:
             # Search/Patrol SOFORT abbrechen wenn Person im Bild
@@ -1331,6 +1353,31 @@ class AutonomousTracker:
         search_duration = now - getattr(self, '_search_start_time', now)
         patrol_positions = self.config.search_patrol_positions
 
+        # === PARK-MODUS: Nach search_park_timeout (180s) -> Home, NPU IDLE ===
+        if search_duration > self.config.search_park_timeout:
+            if self.state != TrackerState.PARKED:
+                logger.info(f"[PARK] {self.config.search_park_timeout:.0f}s ohne Detection "
+                           f"-> Home + Park-Modus (NPU IDLE)")
+                # Kamera auf Home-Position fahren
+                if self.camera and self.camera.is_connected:
+                    self.camera.move_absolute(0.0, 0.0, speed=0.15)
+                self._park_time = now
+                self._set_state(TrackerState.PARKED)
+                # NPU auf IDLE-Stufe (nur YOLO)
+                if self.on_park_change:
+                    try:
+                        self.on_park_change(True)
+                    except Exception as e:
+                        logger.error(f"[PARK] on_park_change(True) Fehler: {e}")
+                # CoreIntegrator: Presence komplett auf 0
+                if self._core_integrator:
+                    try:
+                        self._core_integrator.update_input("tracker", "user_proximity", 0.0)
+                        self._core_integrator.update_input("tracker", "time_since_interaction", 1.0)
+                    except Exception:
+                        pass
+            return
+
         # Nach search_home_timeout (120s) ohne Fund: Zurueck zu Home, stoppen
         if search_duration > self.config.search_home_timeout:
             if self.search_patrol_index != 0 or self.search_move_time == 0:
@@ -1469,6 +1516,11 @@ class AutonomousTracker:
             "dwell": {
                 "target_acquired": self.dwell_target_acquired,
                 "elapsed_sec": time.time() - self.dwell_start_time if self.dwell_target_acquired else 0
+            },
+            "park": {
+                "parked": self.state == TrackerState.PARKED,
+                "parked_since_sec": int(time.time() - self._park_time) if self.state == TrackerState.PARKED and self._park_time > 0 else 0,
+                "park_timeout_sec": self.config.search_park_timeout
             },
             "stats": self.stats.copy(),
             "config": {
