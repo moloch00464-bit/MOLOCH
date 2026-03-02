@@ -189,6 +189,11 @@ class SpotifyController:
         # spotifyd Health Check
         self._last_spotifyd_check = 0.0
 
+        # Cached Status — wird vom Status-Thread aktualisiert, nicht von der Pipeline
+        self._cached_status: Dict[str, Any] = {}
+        self._status_thread: Optional[threading.Thread] = None
+        self._status_thread_started = False
+
     def _ensure_auth(self) -> bool:
         """Lazy Authentication mit Retry-Cooldown (kein permanentes Aufgeben)."""
         if self._sp is not None:
@@ -991,7 +996,51 @@ class SpotifyController:
             return []
 
     def get_status(self) -> Dict[str, Any]:
-        """Gesamtstatus fuer Panel/IPC."""
+        """Cached Status — blockiert NICHT die Inference-Pipeline.
+
+        Der eigentliche API-Fetch laeuft in einem separaten Daemon-Thread
+        (alle 3 Sekunden). Diese Methode gibt nur den Cache zurueck (~0ms).
+        """
+        # Status-Thread lazy starten wenn Spotify initialisiert ist
+        if self._initialized and not self._status_thread_started:
+            self._start_status_thread()
+
+        if self._cached_status:
+            return self._cached_status
+
+        # Fallback solange der Cache noch leer ist (erster Aufruf)
+        return {
+            "initialized": self._initialized,
+            "auth_ok": self._sp is not None,
+            "spotifyd_ok": False,
+            "device_id": self._device_id[:8] + "..." if self._device_id else None,
+            "auto_dj": self._auto_dj_active,
+            "auto_dj_zone": self._auto_dj_zone,
+            "current_track": None,
+            "current_track_str": "nicht initialisiert" if not self._initialized else "Status wird geladen...",
+        }
+
+    def _start_status_thread(self):
+        """Startet den Hintergrund-Thread fuer Spotify-Status-Updates."""
+        if self._status_thread_started:
+            return
+        self._status_thread_started = True
+        t = threading.Thread(target=self._status_update_loop, daemon=True, name="SpotifyStatus")
+        t.start()
+        self._status_thread = t
+        logger.info("[SPOTIFY] Status-Thread gestartet (3s Intervall)")
+
+    def _status_update_loop(self):
+        """Aktualisiert den Spotify-Cache alle 3 Sekunden. Laeuft als Daemon-Thread."""
+        while True:
+            try:
+                self._cached_status = self._fetch_status_sync()
+            except Exception as e:
+                logger.debug(f"[SPOTIFY] Status-Update Fehler: {e}")
+            time.sleep(3)
+
+    def _fetch_status_sync(self) -> Dict[str, Any]:
+        """Synchroner Status-Fetch — NUR vom Status-Thread aufgerufen."""
         track = self.get_current_track() if self._initialized else None
 
         # spotifyd Status pruefen
@@ -1005,6 +1054,19 @@ class SpotifyController:
         except Exception:
             pass
 
+        # Track-String aus bereits geholtem Track (kein zweiter API-Call)
+        if self._initialized and track:
+            status_text = "spielt" if track["is_playing"] else "pausiert"
+            progress = track["progress_ms"] // 1000
+            duration = track["duration_ms"] // 1000
+            track_str = (f"{track['artist']} - {track['track']} "
+                         f"[{progress // 60}:{progress % 60:02d}/"
+                         f"{duration // 60}:{duration % 60:02d}] ({status_text})")
+        elif self._initialized:
+            track_str = "Nichts laeuft gerade"
+        else:
+            track_str = "nicht initialisiert"
+
         return {
             "initialized": self._initialized,
             "auth_ok": self._sp is not None,
@@ -1013,7 +1075,7 @@ class SpotifyController:
             "auto_dj": self._auto_dj_active,
             "auto_dj_zone": self._auto_dj_zone,
             "current_track": track,
-            "current_track_str": self.get_current_track_str() if self._initialized else "nicht initialisiert",
+            "current_track_str": track_str,
         }
 
 
