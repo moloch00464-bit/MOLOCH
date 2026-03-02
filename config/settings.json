@@ -72,5 +72,9 @@
     "target_lost_timeout": 1.0,
     "home_pan": 0.0,
     "home_tilt": 0.0
+  },
+  "profiler": {
+    "enabled": true,
+    "log_interval_sec": 30
   }
 }

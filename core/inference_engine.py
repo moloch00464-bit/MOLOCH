@@ -176,6 +176,18 @@ class InferenceEngine:
         self._STICKY_HOLD_FRAMES = 15  # Name bleibt 15 Frames nach letzter Erkennung
         self._last_logged_name = None  # Nur bei Namenswechsel loggen
 
+        # FPS Profiler (ein/ausschaltbar via settings.json -> profiler.enabled)
+        self._profiler_enabled = False
+        self._profiler_interval = 30
+        self._profiler_accum = {
+            "rtsp": 0.0, "preprocess": 0.0, "npu": 0.0, "parse": 0.0,
+            "arcface": 0.0, "compare": 0.0, "status": 0.0, "total": 0.0,
+        }
+        self._profiler_count = 0
+        self._profiler_last_log = 0.0
+        self._profiler_log_path = "/mnt/moloch-data/logs/fps_profiler.log"
+        self._load_profiler_config()
+
         logger.info("[INIT] InferenceEngine bereit")
 
     # =====================================================================
@@ -304,6 +316,9 @@ class InferenceEngine:
                 continue
 
             # Frame holen + Timestamp-Check (Gate 0: Frame > 200ms = veraltet)
+            _prof = self._profiler_enabled
+            if _prof:
+                _t_rtsp = time.perf_counter()
             with self._cam._frame_lock:
                 frame = self._cam._latest_frame
             if frame is None:
@@ -313,6 +328,8 @@ class InferenceEngine:
             if frame_age > 0.2:
                 time.sleep(0.01)
                 continue
+            if _prof:
+                _prof_rtsp = time.perf_counter() - _t_rtsp
 
             # Pause waehrend Modell-Konfiguration (NPU blockiert)
             if not self._orchestrator._configuring.wait(timeout=0.1):
@@ -390,11 +407,19 @@ class InferenceEngine:
             self._frame_counter += 1
 
             # Preprocessing: Resize auf 640x640 fuer Modelle
+            if _prof:
+                _t_pre = time.perf_counter()
             input_640 = cv2.resize(frame, (640, 640))
             input_rgb = cv2.cvtColor(input_640, cv2.COLOR_BGR2RGB)
 
             scale_x = fw / 640.0
             scale_y = fh / 640.0
+            if _prof:
+                _prof_pre = time.perf_counter() - _t_pre
+                _prof_npu = 0.0
+                _prof_parse = 0.0
+                _prof_arcface = 0.0
+                _prof_compare = 0.0
 
             # Max-2 Draw-Priority: face > hand
             _draw_candidates = []
@@ -415,11 +440,16 @@ class InferenceEngine:
                 try:
                     t0 = time.perf_counter()
                     outputs = self._orchestrator.run("scrfd", input_rgb)
+                    if _prof:
+                        _t_npu_end = time.perf_counter()
+                        _prof_npu += _t_npu_end - t0
                     boxes, scores, landmarks = decode_scrfd(
                         outputs, img_size=640,
                         conf_thresh=self.scrfd_conf_val,
                         iou_thresh=self.scrfd_nms_val
                     )
+                    if _prof:
+                        _prof_parse += time.perf_counter() - _t_npu_end
                     dt = time.perf_counter() - t0
                     with self._fps_lock:
                         self._fps["scrfd"] = 1.0 / dt if dt > 0 else 0
@@ -489,12 +519,18 @@ class InferenceEngine:
                         crop_112 = cv2.resize(crop, (112, 112))
                         crop_rgb = cv2.cvtColor(crop_112, cv2.COLOR_BGR2RGB)
 
+                        if _prof:
+                            _t_af = time.perf_counter()
                         outputs = self._orchestrator.run("arcface", crop_rgb)
                         if outputs:
                             emb_key = self._orchestrator._output_names["arcface"][0]
                             embedding = outputs[emb_key].flatten()
                             embedding = normalize_arcface(embedding)
+                            if _prof:
+                                _prof_arcface += time.perf_counter() - _t_af
 
+                            if _prof:
+                                _t_cmp = time.perf_counter()
                             if self._face_db:
                                 name, sim = match_face(
                                     embedding, self._face_db,
@@ -502,6 +538,8 @@ class InferenceEngine:
                                 )
                             else:
                                 name, sim = "Keine DB", 0.0
+                            if _prof:
+                                _prof_compare += time.perf_counter() - _t_cmp
 
                             # Gate0 Phase 8: Name-Hysterese (EINE Wahrheit fuer OSD + Panel)
                             # Wenn match_face "Markus" liefert: sticky setzen
@@ -633,12 +671,17 @@ class InferenceEngine:
                 try:
                     t0 = time.perf_counter()
                     outputs = self._orchestrator.run("yolov8m", input_rgb)
+                    if _prof:
+                        _t_yolo_npu = time.perf_counter()
+                        _prof_npu += _t_yolo_npu - t0
                     out_key = self._orchestrator._output_names["yolov8m"][0]
                     all_dets = decode_yolov8_nms(
                         outputs[out_key],
                         class_id=-1,
                         conf_thresh=self.yolo_conf_val
                     )
+                    if _prof:
+                        _prof_parse += time.perf_counter() - _t_yolo_npu
                     dt = time.perf_counter() - t0
                     with self._fps_lock:
                         self._fps["yolov8m"] = 1.0 / dt if dt > 0 else 0
@@ -727,7 +770,12 @@ class InferenceEngine:
                     hand_224 = cv2.resize(hand_crop, (224, 224))
 
                     outputs = self._orchestrator.run("hand_landmark", hand_224)
+                    if _prof:
+                        _t_hand_npu = time.perf_counter()
+                        _prof_npu += _t_hand_npu - t0
                     hand_result = decode_hand_landmark(outputs, presence_thresh=self.hand_conf_val)
+                    if _prof:
+                        _prof_parse += time.perf_counter() - _t_hand_npu
 
                     dt = time.perf_counter() - t0
                     with self._fps_lock:
@@ -765,11 +813,16 @@ class InferenceEngine:
                 try:
                     t0 = time.perf_counter()
                     outputs = self._orchestrator.run("pose", input_rgb)
+                    if _prof:
+                        _t_pose_npu = time.perf_counter()
+                        _prof_npu += _t_pose_npu - t0
                     _pose_data = decode_yolov8_pose(
                         outputs,
                         conf_thresh=self.pose_conf_val,
                         img_h=640, img_w=640,
                     )
+                    if _prof:
+                        _prof_parse += time.perf_counter() - _t_pose_npu
                     dt = time.perf_counter() - t0
                     with self._fps_lock:
                         self._fps["pose"] = 1.0 / dt if dt > 0 else 0
@@ -822,6 +875,8 @@ class InferenceEngine:
                     self._model_health.record_error("pose")
 
             # ===== Perception Engine: All-Slot (alle 4 permanent, nur beim Start) =====
+            if _prof:
+                _t_status = time.perf_counter()
             if self._perception:
                 _perc_face_bbox = None
                 if face_boxes:
@@ -970,6 +1025,17 @@ class InferenceEngine:
             self._ipc.write_frame(cv2.resize(annotated, (IPCRouter.PREVIEW_W, IPCRouter.PREVIEW_H)))
             self._write_status_cb()
 
+            # FPS Profiler: Zeiten akkumulieren und alle N Sekunden loggen
+            if _prof:
+                _prof_status = time.perf_counter() - _t_status
+                _prof_total = time.perf_counter() - t_total
+                self._profiler_tick({
+                    "rtsp": _prof_rtsp, "preprocess": _prof_pre,
+                    "npu": _prof_npu, "parse": _prof_parse,
+                    "arcface": _prof_arcface, "compare": _prof_compare,
+                    "status": _prof_status, "total": _prof_total,
+                })
+
             # === Phase 3: Adaptive FPS — Throttle bei niedrigem Attention-Level ===
             # FPS-Boost: Kein Throttle wenn manuelles PTZ aktiv (letzten 3s)
             _ptz_boost = (time.time() - self._cam._last_manual_ptz) < 3.0
@@ -1112,3 +1178,65 @@ class InferenceEngine:
     def _announce_person(self, name):
         """Person erkannt - Log (LED wird vom Indikator gesteuert)."""
         logger.info(f"[FACE] Person erkannt: {name}")
+
+    # =====================================================================
+    # FPS Profiler
+    # =====================================================================
+
+    def _load_profiler_config(self):
+        """Profiler-Config aus settings.json laden."""
+        try:
+            settings_path = os.path.expanduser("~/moloch/config/settings.json")
+            with open(settings_path, "r", encoding="utf-8") as f:
+                settings = json.load(f)
+            prof = settings.get("profiler", {})
+            self._profiler_enabled = prof.get("enabled", False)
+            self._profiler_interval = prof.get("log_interval_sec", 30)
+            if self._profiler_enabled:
+                logger.info(f"[PROFILER] Aktiv, Intervall {self._profiler_interval}s, Log: {self._profiler_log_path}")
+        except Exception as e:
+            logger.debug(f"[PROFILER] Config laden: {e}")
+
+    def _profiler_tick(self, timings: dict):
+        """Einzelne Frame-Zeiten akkumulieren und alle N Sekunden loggen."""
+        for key in self._profiler_accum:
+            self._profiler_accum[key] += timings.get(key, 0.0)
+        self._profiler_count += 1
+
+        now = time.time()
+        if self._profiler_last_log == 0.0:
+            self._profiler_last_log = now
+            return
+        elapsed = now - self._profiler_last_log
+        if elapsed < self._profiler_interval:
+            return
+
+        # Durchschnitt berechnen und loggen
+        n = max(self._profiler_count, 1)
+        avg = {k: (v / n) * 1000 for k, v in self._profiler_accum.items()}
+        fps = 1000.0 / avg["total"] if avg["total"] > 0 else 0.0
+
+        line = (
+            f"[PROFILER] RTSP: {avg['rtsp']:.0f}ms | "
+            f"Preprocess: {avg['preprocess']:.0f}ms | "
+            f"NPU: {avg['npu']:.0f}ms | "
+            f"Parse: {avg['parse']:.0f}ms | "
+            f"ArcFace: {avg['arcface']:.0f}ms | "
+            f"Compare: {avg['compare']:.0f}ms | "
+            f"Status: {avg['status']:.0f}ms | "
+            f"TOTAL: {avg['total']:.0f}ms ({fps:.1f} FPS) [{n} frames/{elapsed:.0f}s]"
+        )
+        logger.info(line)
+
+        # In Profiler-Logfile schreiben
+        try:
+            ts = time.strftime("%Y-%m-%d %H:%M:%S")
+            with open(self._profiler_log_path, "a", encoding="utf-8") as f:
+                f.write(f"{ts} {line}\n")
+        except Exception:
+            pass
+
+        # Reset
+        self._profiler_accum = {k: 0.0 for k in self._profiler_accum}
+        self._profiler_count = 0
+        self._profiler_last_log = now
