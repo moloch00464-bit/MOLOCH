@@ -5,19 +5,28 @@ M.O.L.O.C.H. Whisper Speech-to-Text
 ===================================
 
 NPU-accelerated Whisper auf Hailo-10H (8GB RAM).
-Shared VDevice mit Vision-Pipeline — alle Modelle permanent geladen.
+On-Demand: Wird NUR bei Push-to-Talk geladen und danach entladen.
+Vision-Pipeline behaelt volle NPU-Bandbreite wenn Whisper nicht aktiv.
 
-Hailo-10H 8GB: SCRFD(6MB) + ArcFace(3MB) + YOLOv8m(21MB) + Pose(14MB) + Whisper(137MB) = ~180MB
-Das passt locker. Kein Pausieren, kein VDevice-Wechsel, kein Laden/Entladen.
+Ablauf:
+  1. System startet → Whisper NICHT geladen → Vision hat volle NPU
+  2. User drueckt Push-to-Talk → Whisper wird auf NPU geladen (1-2s)
+  3. Spracherkennung laeuft
+  4. Ergebnis da → Whisper wird von NPU entladen
+  5. Vision hat wieder volle NPU
 
 Usage:
     whisper = get_whisper()
-    whisper.set_vdevice(service_vdevice)  # Shared VDevice vom Service
+    whisper.set_vdevice(service_vdevice)  # VDevice speichern (kein Laden!)
     text = whisper.transcribe("/path/to/audio.wav", language="de")
+    # Whisper wird automatisch entladen nach Transkription
 """
 
+import gc
 import logging
 import re
+import time
+import threading
 import wave
 from pathlib import Path
 from typing import Optional
@@ -32,43 +41,39 @@ _whisper_instance = None
 
 class MolochWhisper:
     """
-    Hailo NPU Whisper — permanent geladen auf shared VDevice.
+    Hailo NPU Whisper — On-Demand Laden/Entladen.
 
-    Nutzt das GLEICHE VDevice wie die Vision-Pipeline.
-    Kein eigenes VDevice, kein Pausieren, kein HailoManager-Acquire.
-    8GB NPU-RAM reichen fuer alle Modelle gleichzeitig.
+    Wird NUR bei Push-to-Talk auf die NPU geladen und danach entladen.
+    Nutzt shared VDevice vom Service. Vision hat volle NPU wenn Whisper nicht aktiv.
     """
 
     def __init__(self):
-        self.backend = "none"
+        self.backend = "on-demand"
         self._npu_processor = None
-        self._vdevice = None        # Shared VDevice vom Service
+        self._vdevice = None        # Aktives VDevice (nur waehrend Transkription)
         self._shared_vdevice = None  # Referenz auf Service-VDevice (nicht freigeben!)
         self._npu_initialized = False
+        self._load_lock = threading.Lock()  # Schutz gegen parallele Load/Unload
 
-        logger.info("Whisper: Wartet auf shared VDevice vom Service")
-        self.backend = "waiting-for-vdevice"
+        logger.info("Whisper: On-Demand Modus (wird bei PTT geladen)")
 
     def set_vdevice(self, vdevice):
-        """Shared VDevice vom Service uebernehmen und Whisper sofort laden.
+        """Shared VDevice vom Service speichern. Whisper wird NICHT geladen.
 
-        Hailo-10H hat 8GB — alle Modelle (Vision + Whisper) passen gleichzeitig.
-        Kein Pausieren noetig, kein VDevice-Wechsel.
+        Das VDevice wird nur gespeichert und bei Bedarf (Push-to-Talk)
+        fuer das Laden von Whisper verwendet.
         """
         self._shared_vdevice = vdevice
-        logger.info("[Whisper] Shared VDevice vom Service uebernommen")
+        logger.info("[Whisper] VDevice gespeichert — On-Demand (kein permanentes Laden)")
 
-        if self._init_npu():
-            logger.info("[Whisper] Permanent auf NPU geladen (shared VDevice)")
-        else:
-            logger.error("[Whisper] NPU init mit shared VDevice fehlgeschlagen!")
+    def _load_npu(self) -> bool:
+        """Whisper Speech2Text auf NPU laden (On-Demand).
 
-    def _init_npu(self) -> bool:
-        """Whisper Speech2Text auf NPU laden.
-
-        Nutzt shared VDevice vom Service — kein eigenes VDevice erstellen!
-        Bleibt permanent geladen.
+        Nutzt shared VDevice vom Service. Wird nach Transkription entladen.
         """
+        if self._npu_initialized and self._npu_processor:
+            return True
+
         try:
             from hailo_platform.genai import Speech2Text
 
@@ -77,12 +82,9 @@ class MolochWhisper:
             from hailo_apps.python.core.common.core import resolve_hef_path
             from hailo_apps.python.core.common.defines import HAILO10H_ARCH, WHISPER_CHAT_APP
 
-            logger.info("Initializing Hailo NPU Whisper...")
-
             # Shared VDevice vom Service nutzen
             if self._shared_vdevice:
                 self._vdevice = self._shared_vdevice
-                logger.info("[Whisper] Nutze shared VDevice vom Service")
             else:
                 # Standalone-Fallback: eigenes VDevice (nur fuer Tests)
                 from hailo_platform import VDevice
@@ -103,22 +105,37 @@ class MolochWhisper:
                 logger.error("Whisper HEF not found. Run: hailo-download-resources --group whisper_chat")
                 return False
 
-            logger.info(f"Loading Whisper model: {hef_path}")
+            logger.info(f"[Whisper] On-Demand: Lade {hef_path}...")
 
             # Speech2Text auf shared VDevice laden
             self._npu_processor = Speech2Text(self._vdevice, str(hef_path))
 
             self.backend = "npu-whisper-base"
             self._npu_initialized = True
-            logger.info("Hailo NPU Whisper permanent geladen")
             return True
 
         except ImportError as e:
             logger.warning(f"Hailo imports not available: {e}")
             return False
         except Exception as e:
-            logger.error(f"Failed to initialize NPU Whisper: {e}")
+            logger.error(f"Failed to load NPU Whisper: {e}")
             return False
+
+    def _unload_npu(self):
+        """Whisper von NPU entladen — gibt Ressourcen fuer Vision frei."""
+        try:
+            if self._npu_processor:
+                self._npu_processor = None
+            # VDevice-Referenz freigeben (shared VDevice bleibt beim Service)
+            self._vdevice = None
+            gc.collect()
+            self._npu_initialized = False
+            self.backend = "on-demand"
+            logger.info("[Whisper] NPU entladen — Vision hat volle Bandbreite")
+        except Exception as e:
+            logger.error(f"[Whisper] Entladen fehlgeschlagen: {e}")
+            self._npu_initialized = False
+            self.backend = "on-demand"
 
     def _load_wav_as_numpy(self, audio_path: str) -> Optional[np.ndarray]:
         """Load WAV file and convert to float32 numpy array."""
@@ -161,10 +178,10 @@ class MolochWhisper:
     def transcribe(self, audio_path: str, language: str = "de",
                    timeout_ms: int = 0, **kwargs) -> str:
         """
-        Audio transkribieren. NPU ist permanent geladen — kein Pause/Resume.
+        On-Demand Transkription: Whisper laden -> transkribieren -> entladen.
 
-        Shared VDevice: Vision + Whisper laufen parallel auf der gleichen NPU.
-        Kein HailoManager-Acquire noetig.
+        Vision-Pipeline hat volle NPU-Bandbreite ausser waehrend Transkription.
+        Ladezeit ~1-2s ist akzeptabel fuer PTT-Workflow.
 
         Args:
             audio_path: Pfad zur WAV-Datei
@@ -174,18 +191,22 @@ class MolochWhisper:
         Returns:
             Transkribierter Text
         """
-        # Lazy-init falls set_vdevice noch nicht aufgerufen wurde
-        if not self._npu_initialized:
-            logger.info("Whisper: Lazy-loading NPU fuer erste Transkription...")
-            if not self._init_npu():
+        with self._load_lock:
+            # On-Demand: Whisper auf NPU laden
+            t_load = time.perf_counter()
+            if not self._load_npu():
                 logger.error("NPU init fehlgeschlagen — kein Whisper verfuegbar")
                 return ""
+            dt_load = (time.perf_counter() - t_load) * 1000
+            logger.info(f"[Whisper] NPU geladen in {dt_load:.0f}ms")
 
-        if self._npu_processor:
-            return self._transcribe_npu(audio_path, language, timeout_ms)
-
-        logger.error("Kein Whisper-Backend verfuegbar (NPU nicht initialisiert)")
-        return ""
+            try:
+                if self._npu_processor:
+                    return self._transcribe_npu(audio_path, language, timeout_ms)
+                return ""
+            finally:
+                # IMMER entladen — auch bei Exception
+                self._unload_npu()
 
     def _transcribe_npu(self, audio_path: str, language: str, timeout_ms: int) -> str:
         """Transcribe using Hailo NPU."""
@@ -227,31 +248,18 @@ class MolochWhisper:
     def release(self):
         """NPU Whisper-Ressourcen freigeben.
         ACHTUNG: Shared VDevice wird NICHT freigegeben (gehoert dem Service)."""
-        try:
-            if self._npu_processor:
-                self._npu_processor = None
-            # Shared VDevice NICHT freigeben!
-            if self._vdevice and self._vdevice is not self._shared_vdevice:
-                self._vdevice = None
-            self._vdevice = None
-
-            import gc
-            gc.collect()
-
-            self.backend = "released"
-            self._npu_initialized = False
-
-            logger.info("[Whisper] NPU-Ressourcen freigegeben (VDevice bleibt beim Service)")
-        except Exception as e:
-            logger.error(f"[Whisper] Error during release: {e}")
+        with self._load_lock:
+            self._unload_npu()
+            logger.info("[Whisper] Release abgeschlossen")
 
     @property
     def is_available(self) -> bool:
-        """Check if NPU backend is available."""
-        return self._npu_initialized and self._npu_processor is not None
+        """Check ob Whisper grundsaetzlich verfuegbar ist (VDevice vorhanden)."""
+        return self._shared_vdevice is not None
 
     def __str__(self) -> str:
-        return f"MolochWhisper(backend={self.backend}, available={self.is_available})"
+        loaded = "geladen" if self._npu_initialized else "on-demand"
+        return f"MolochWhisper(backend={self.backend}, {loaded})"
 
 
 # Kompatibilitaet

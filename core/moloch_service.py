@@ -301,13 +301,13 @@ class MolochService:
         for name in self._orchestrator._models:
             logger.info(f"Modell geladen: {name} ({len(self._orchestrator._output_names[name])} outputs)")
 
-        # 1b. Whisper permanent auf NPU laden (shared VDevice, 8GB reichen)
+        # 1b. Whisper VDevice uebergeben (On-Demand: wird erst bei PTT geladen)
         try:
             from core.speech.hailo_whisper import get_whisper
             whisper = get_whisper()
             whisper.set_vdevice(self._orchestrator.vdevice)
         except Exception as e:
-            logger.error(f"[INIT] Whisper NPU init fehlgeschlagen: {e}")
+            logger.error(f"[INIT] Whisper VDevice-Uebergabe fehlgeschlagen: {e}")
 
         # 1c. NPU Idle-Modus: NUR yolov8m beim Start konfigurieren
         # Weitere Modelle werden von PerceptionEngine stufenweise dazugeschaltet:
