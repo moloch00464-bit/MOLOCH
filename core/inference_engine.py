@@ -482,9 +482,13 @@ class InferenceEngine:
                     with self._fps_lock:
                         self._fps["total"] = 1.0 / _dt_loop
             self._t_prev_loop = t_total
-            annotated = frame.copy()
             fh, fw = frame.shape[:2]
             self._frame_counter += 1
+
+            # Preview-Frame: Explizit auf 640x360 skalieren, dann darauf zeichnen
+            # So werden BBox-Koordinaten direkt im Preview-Space berechnet
+            annotated = cv2.resize(frame, (IPCRouter.PREVIEW_W, IPCRouter.PREVIEW_H))
+            ah, aw = annotated.shape[:2]  # 360, 640
 
             # Preprocessing: Letterbox auf 640x640 (Aspektverhaeltnis beibehalten)
             if _prof:
@@ -492,17 +496,12 @@ class InferenceEngine:
             input_640, _lb_scale, _lb_px, _lb_py, _lb_rw, _lb_rh = letterbox_resize(frame, 640)
             input_rgb = cv2.cvtColor(input_640, cv2.COLOR_BGR2RGB)
 
-            # === EINMALIGES DEBUG-LOGGING: Letterbox-Parameter ===
-            if not self._letterbox_debug_done:
-                logger.warning(
-                    "[LETTERBOX-DEBUG] frame=%dx%d (hw=%dx%d), "
-                    "scale=%.4f, pad_x=%d, pad_y=%d, content_w=%d, content_h=%d, "
-                    "input_640.shape=%s",
-                    fw, fh, fh, fw, _lb_scale, _lb_px, _lb_py, _lb_rw, _lb_rh,
-                    input_640.shape)
-
+            # Scale-Faktoren: Modell-Space (640x640) -> Frame-Space (1920x1080)
             scale_x = fw / 640.0
             scale_y = fh / 640.0
+            # Draw-Scale: Modell-Space (640x640) -> Preview-Space (640x360)
+            draw_sx = aw / 640.0   # 640/640 = 1.0
+            draw_sy = ah / 640.0   # 360/640 = 0.5625
             if _prof:
                 _prof_pre = time.perf_counter() - _t_pre
                 _prof_npu = 0.0
@@ -546,95 +545,22 @@ class InferenceEngine:
                     self._model_health.record_inference("scrfd", dt * 1000)
 
                     if len(boxes) > 0:
-                        # === EINMALIGES DEBUG-LOGGING: Rohe SCRFD-Werte ===
-                        if not self._letterbox_debug_done:
-                            b0 = boxes[0]
-                            lm0 = landmarks[0]
-                            logger.warning(
-                                "[LETTERBOX-DEBUG] RAW SCRFD box[0]: "
-                                "[%.4f, %.4f, %.4f, %.4f] "
-                                "(px: [%.1f, %.1f, %.1f, %.1f])",
-                                b0[0], b0[1], b0[2], b0[3],
-                                b0[0]*640, b0[1]*640, b0[2]*640, b0[3]*640)
-                            logger.warning(
-                                "[LETTERBOX-DEBUG] RAW SCRFD lm[0]: "
-                                "[%.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f]",
-                                *lm0[:10])
-
                         # Letterbox-Korrektur: Model-Space -> Frame-Space
+                        #
+                        # Das Kamerabild kommt in 1920x1080 rein. SCRFD braucht
+                        # 640x640, also wird das Bild runterskaliert und dabei
+                        # gepaddet (Letterboxing, weil 16:9 -> 1:1). Die NPU gibt
+                        # Landmark-Koordinaten zurueck die auf 640x640 passen.
+                        # Diese Koordinaten muessen korrekt auf 1920x1080
+                        # zurueckgerechnet werden — inklusive Padding-Offset
+                        # abziehen und Skalierungsfaktor anwenden. Wenn das fehlt
+                        # oder falsch ist, landen BBox und Landmarks verschoben
+                        # auf Brust/Hand statt im Gesicht.
                         boxes_c, lm_c = _unletterbox_scrfd(
                             boxes, landmarks, _lb_px, _lb_py, _lb_rw, _lb_rh)
 
-                        # === EINMALIGES DEBUG-LOGGING: Korrigierte Werte + Snapshot ===
-                        if not self._letterbox_debug_done:
-                            bc0 = boxes_c[0]
-                            lc0 = lm_c[0]
-                            logger.warning(
-                                "[LETTERBOX-DEBUG] CORRECTED box[0]: "
-                                "[%.4f, %.4f, %.4f, %.4f] "
-                                "(draw_px: [%.1f, %.1f, %.1f, %.1f])",
-                                bc0[0], bc0[1], bc0[2], bc0[3],
-                                bc0[0]*fw, bc0[1]*fh, bc0[2]*fw, bc0[3]*fh)
-                            logger.warning(
-                                "[LETTERBOX-DEBUG] CORRECTED lm[0]: "
-                                "[%.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f] "
-                                "(draw_px: le=[%.1f,%.1f] re=[%.1f,%.1f] nose=[%.1f,%.1f])",
-                                *lc0[:10],
-                                lc0[0]*fw, lc0[1]*fh,
-                                lc0[2]*fw, lc0[3]*fh,
-                                lc0[4]*fw, lc0[5]*fh)
-                            # Visueller Debug: RAW Boxen auf padded 640x640 Bild
-                            try:
-                                _dbg_padded = input_640.copy()
-                                # Content-Area Grenzen (gruen gestrichelt)
-                                cv2.line(_dbg_padded, (0, _lb_py), (640, _lb_py), (0, 255, 0), 1)
-                                cv2.line(_dbg_padded, (0, _lb_py + _lb_rh), (640, _lb_py + _lb_rh), (0, 255, 0), 1)
-                                cv2.putText(_dbg_padded, f"content: y={_lb_py}..{_lb_py+_lb_rh}", (5, _lb_py - 5),
-                                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
-                                # RAW SCRFD Boxen (rot) + Landmarks (gelb)
-                                for bi in range(len(boxes)):
-                                    bx = boxes[bi]
-                                    rx1 = int(bx[0] * 640)
-                                    ry1 = int(bx[1] * 640)
-                                    rx2 = int(bx[2] * 640)
-                                    ry2 = int(bx[3] * 640)
-                                    cv2.rectangle(_dbg_padded, (rx1, ry1), (rx2, ry2), (0, 0, 255), 2)
-                                    cv2.putText(_dbg_padded, f"RAW {scores[bi]:.2f}", (rx1, ry1 - 3),
-                                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
-                                    lm = landmarks[bi]
-                                    for p in range(5):
-                                        lx = int(lm[p*2] * 640)
-                                        ly = int(lm[p*2+1] * 640)
-                                        cv2.circle(_dbg_padded, (lx, ly), 3, (0, 255, 255), -1)
-                                _snap_path = os.path.expanduser("~/moloch/snapshots/letterbox_debug_padded.jpg")
-                                cv2.imwrite(_snap_path, _dbg_padded)
-                                # Auch annotated Frame speichern (mit korrigierten Boxen)
-                                _dbg_ann = annotated.copy()
-                                for bi in range(len(boxes_c)):
-                                    bx = boxes_c[bi]
-                                    ax1 = int(bx[0] * fw)
-                                    ay1 = int(bx[1] * fh)
-                                    ax2 = int(bx[2] * fw)
-                                    ay2 = int(bx[3] * fh)
-                                    cv2.rectangle(_dbg_ann, (ax1, ay1), (ax2, ay2), (255, 0, 0), 3)
-                                    cv2.putText(_dbg_ann, "CORRECTED", (ax1, ay1 - 5),
-                                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
-                                    lm = lm_c[bi]
-                                    for p in range(5):
-                                        lx = int(lm[p*2] * fw)
-                                        ly = int(lm[p*2+1] * fh)
-                                        cv2.circle(_dbg_ann, (lx, ly), 5, (0, 255, 255), -1)
-                                _snap_ann = os.path.expanduser("~/moloch/snapshots/letterbox_debug_annotated.jpg")
-                                cv2.imwrite(_snap_ann, _dbg_ann)
-                                logger.warning(
-                                    "[LETTERBOX-DEBUG] Snapshots gespeichert: %s + %s",
-                                    _snap_path, _snap_ann)
-                            except Exception as _dbg_err:
-                                logger.warning("[LETTERBOX-DEBUG] Snapshot-Fehler: %s", _dbg_err)
-                            self._letterbox_debug_done = True
-
                         if "face" in _allowed_draws:
-                            draw_faces(annotated, boxes_c, scores, lm_c, scale_x, scale_y)
+                            draw_faces(annotated, boxes_c, scores, lm_c, draw_sx, draw_sy)
                         face_boxes = list(zip(boxes_c, scores, lm_c))
                         _face_raw_640 = boxes  # Original fuer Tracker + Hand-Crop
                         face_detected = True
@@ -779,7 +705,7 @@ class InferenceEngine:
                                 except Exception:
                                     pass
 
-                            draw_name(annotated, box, name, sim, fh, fw,
+                            draw_name(annotated, box, name, sim, ah, aw,
                                       emotion=emotion, gender=gender, age_range=age_range,
                                       head_pose=_head_pose if '_head_pose' in dir() else None)
                             self._ipc.write_face_state(name, sim, len(face_boxes),
@@ -972,7 +898,7 @@ class InferenceEngine:
                                 annotated, hand_result,
                                 crop_x=cx1, crop_y=cy1,
                                 crop_w=crop_w, crop_h=crop_h,
-                                scale_x=scale_x, scale_y=scale_y,
+                                scale_x=draw_sx, scale_y=draw_sy,
                             )
                         # Hand-Gesture Detection aus 21 MediaPipe Landmarks (W1 Audit-Fix)
                         try:
@@ -1014,7 +940,7 @@ class InferenceEngine:
                     if _pose_data:
                         _pose_draw = _unletterbox_pose(
                             _pose_data, _lb_px, _lb_py, _lb_rw, _lb_rh)
-                        draw_poses(annotated, _pose_draw, scale_x, scale_y)
+                        draw_poses(annotated, _pose_draw, draw_sx, draw_sy)
                         # Tracker mit Pose-Daten fuettern (FACE > BODY Prioritaet)
                         if self._cam._autonomous_mode and self._cam._tracker and not face_fed_to_tracker:
                             try:
@@ -1198,16 +1124,16 @@ class InferenceEngine:
             # Hand-Occlusion Overlay auf Video (nur wenn enabled in settings.json)
             if self._hand_occlusion_enabled and self._perception and self._perception._hand_occlusion:
                 overlay = annotated.copy()
-                cv2.rectangle(overlay, (0, 0), (fw, 30), (0, 0, 180), -1)
+                cv2.rectangle(overlay, (0, 0), (aw, 30), (0, 0, 180), -1)
                 annotated = cv2.addWeighted(overlay, 0.6, annotated, 0.4, 0)
                 cv2.putText(annotated, "HAND OCCLUSION", (10, 22),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
             with self._cam._annotated_lock:
                 self._cam._annotated_frame = annotated
 
-            # Panel IPC: Preview-Groesse fuer SHM (1080p waere 6MB/Frame)
-            self._ipc.write_frame(cv2.resize(annotated, (IPCRouter.PREVIEW_W, IPCRouter.PREVIEW_H)))
+            # Panel IPC: annotated ist bereits Preview-Groesse (640x360)
+            self._ipc.write_frame(annotated)
             self._write_status_cb()
 
             # FPS Profiler: Zeiten akkumulieren und alle N Sekunden loggen
