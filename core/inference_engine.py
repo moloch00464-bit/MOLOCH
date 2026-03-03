@@ -65,6 +65,85 @@ def load_face_db(path: str) -> dict:
         return {}
 
 
+def letterbox_resize(img, target_size=640):
+    """Letterbox-Resize: Aspektverhaeltnis beibehalten, graues Padding.
+
+    Gibt zurueck: (padded_img, scale, pad_x, pad_y, content_w, content_h)
+    """
+    h, w = img.shape[:2]
+    scale = min(target_size / w, target_size / h)
+    new_w = int(round(w * scale))
+    new_h = int(round(h * scale))
+    resized = cv2.resize(img, (new_w, new_h))
+    pad_x = (target_size - new_w) // 2
+    pad_y = (target_size - new_h) // 2
+    padded = np.full((target_size, target_size, 3), 114, dtype=np.uint8)
+    padded[pad_y:pad_y + new_h, pad_x:pad_x + new_w] = resized
+    return padded, scale, pad_x, pad_y, new_w, new_h
+
+
+def _unletterbox_scrfd(boxes, landmarks, pad_x, pad_y, rw, rh, target=640):
+    """Korrigiere SCRFD-Koordinaten: Letterbox-Space -> Frame-Space.
+
+    Input: boxes (N,4) und landmarks (N,10) normalisiert [0,1] auf target x target.
+    Output: korrigierte Werte normalisiert [0,1] relativ zum Original-Content.
+    """
+    if pad_x == 0 and pad_y == 0:
+        return boxes, landmarks
+    bc = boxes.copy()
+    bc[:, [0, 2]] = np.clip((boxes[:, [0, 2]] * target - pad_x) / rw, 0, 1)
+    bc[:, [1, 3]] = np.clip((boxes[:, [1, 3]] * target - pad_y) / rh, 0, 1)
+    lc = landmarks.copy()
+    lc[:, 0::2] = np.clip((landmarks[:, 0::2] * target - pad_x) / rw, 0, 1)
+    lc[:, 1::2] = np.clip((landmarks[:, 1::2] * target - pad_y) / rh, 0, 1)
+    return bc, lc
+
+
+def _unletterbox_yolo(detections, pad_x, pad_y, rw, rh, target=640):
+    """Korrigiere YOLOv8 NMS Detections: Letterbox-Space -> Frame-Space."""
+    if pad_x == 0 and pad_y == 0:
+        return detections
+    corrected = []
+    for d in detections:
+        dc = dict(d)
+        bx = d["bbox"]
+        dc["bbox"] = [
+            float(np.clip((bx[0] * target - pad_x) / rw, 0, 1)),
+            float(np.clip((bx[1] * target - pad_y) / rh, 0, 1)),
+            float(np.clip((bx[2] * target - pad_x) / rw, 0, 1)),
+            float(np.clip((bx[3] * target - pad_y) / rh, 0, 1)),
+        ]
+        corrected.append(dc)
+    return corrected
+
+
+def _unletterbox_pose(poses, pad_x, pad_y, rw, rh, target=640):
+    """Korrigiere Pose-Daten (Model-Pixel) fuer Letterbox-Offset.
+
+    Justiert bbox und keypoints so dass * scale_x/y korrekte Frame-Pixel ergibt.
+    """
+    if pad_x == 0 and pad_y == 0:
+        return poses
+    sx = float(target) / rw
+    sy = float(target) / rh
+    corrected = []
+    for p in poses:
+        pc = dict(p)
+        bx = p["bbox"]
+        pc["bbox"] = [
+            (bx[0] - pad_x) * sx,
+            (bx[1] - pad_y) * sy,
+            (bx[2] - pad_x) * sx,
+            (bx[3] - pad_y) * sy,
+        ]
+        kpts = p["keypoints"].copy()
+        kpts[:, 0] = (kpts[:, 0] - pad_x) * sx
+        kpts[:, 1] = (kpts[:, 1] - pad_y) * sy
+        pc["keypoints"] = kpts
+        corrected.append(pc)
+    return corrected
+
+
 class InferenceEngine:
     """NPU Inference Pipeline mit Auto-Restart.
 
@@ -406,10 +485,10 @@ class InferenceEngine:
             fh, fw = frame.shape[:2]
             self._frame_counter += 1
 
-            # Preprocessing: Resize auf 640x640 fuer Modelle
+            # Preprocessing: Letterbox auf 640x640 (Aspektverhaeltnis beibehalten)
             if _prof:
                 _t_pre = time.perf_counter()
-            input_640 = cv2.resize(frame, (640, 640))
+            input_640, _lb_scale, _lb_px, _lb_py, _lb_rw, _lb_rh = letterbox_resize(frame, 640)
             input_rgb = cv2.cvtColor(input_640, cv2.COLOR_BGR2RGB)
 
             scale_x = fw / 640.0
@@ -430,6 +509,7 @@ class InferenceEngine:
             _allowed_draws = set(enforce_draw_priority(_draw_candidates))
 
             face_boxes = []
+            _face_raw_640 = None  # Original SCRFD-Boxes fuer Tracker + Hand-Crop
             face_detected = False
             face_fed_to_tracker = False
             _markus_recognized = False
@@ -456,20 +536,25 @@ class InferenceEngine:
                     self._model_health.record_inference("scrfd", dt * 1000)
 
                     if len(boxes) > 0:
+                        # Letterbox-Korrektur: Model-Space -> Frame-Space
+                        boxes_c, lm_c = _unletterbox_scrfd(
+                            boxes, landmarks, _lb_px, _lb_py, _lb_rw, _lb_rh)
                         if "face" in _allowed_draws:
-                            draw_faces(annotated, boxes, scores, landmarks, scale_x, scale_y)
-                        face_boxes = list(zip(boxes, scores, landmarks))
+                            draw_faces(annotated, boxes_c, scores, lm_c, scale_x, scale_y)
+                        face_boxes = list(zip(boxes_c, scores, lm_c))
+                        _face_raw_640 = boxes  # Original fuer Tracker + Hand-Crop
                         face_detected = True
                         # Head Pose fuer erstes Gesicht (CPU, ~5ms)
-                        _head_pose = estimate_head_pose(landmarks[0], fw, fh)
-                        # Face hat PRIORITAET fuer Tracker
+                        _head_pose = estimate_head_pose(lm_c[0], fw, fh)
+                        # Face hat PRIORITAET fuer Tracker (Original Model-Space)
                         if self._cam._autonomous_mode and self._cam._tracker:
                             try:
                                 face_dets = []
-                                for box, score, _ in face_boxes:
+                                for i in range(len(boxes)):
                                     face_dets.append({
-                                        "bbox": [box[0] * 640, box[1] * 640, box[2] * 640, box[3] * 640],
-                                        "confidence": float(score),
+                                        "bbox": [float(boxes[i, 0] * 640), float(boxes[i, 1] * 640),
+                                                 float(boxes[i, 2] * 640), float(boxes[i, 3] * 640)],
+                                        "confidence": float(scores[i]),
                                         "class": "face"
                                     })
                                 self._cam._tracker.update_detection(
@@ -691,9 +776,11 @@ class InferenceEngine:
                     persons = [d for d in all_dets if d.get("class_id", -1) == 0]
                     objects = [d for d in all_dets if d.get("class_id", -1) != 0]
 
-                    # Nicht-Person-Objekte zeichnen (orange)
+                    # Nicht-Person-Objekte zeichnen (Letterbox-korrigiert)
                     if objects:
-                        draw_objects(annotated, objects, scale_x, scale_y)
+                        objects_c = _unletterbox_yolo(
+                            objects, _lb_px, _lb_py, _lb_rw, _lb_rh)
+                        draw_objects(annotated, objects_c, scale_x, scale_y)
                         _detected_objects = [
                             {"class": d["class"], "confidence": round(d["confidence"], 2)}
                             for d in objects
@@ -701,7 +788,9 @@ class InferenceEngine:
 
                     if persons:
                         _persons_detected = True
-                        draw_persons(annotated, persons, scale_x, scale_y)
+                        persons_c = _unletterbox_yolo(
+                            persons, _lb_px, _lb_py, _lb_rw, _lb_rh)
+                        draw_persons(annotated, persons_c, scale_x, scale_y)
                         if self._cam._moloch_has_control:
                             self._cam._last_interesting_time = time.time()
                             self._cam._takeover_found_something = True
@@ -745,9 +834,9 @@ class InferenceEngine:
                         # Obere 60% der Person (Haende/Arme)
                         ch = cy2 - cy1
                         cy2 = cy1 + int(ch * 0.6)
-                    elif face_boxes:
-                        # Face-BBox erweitert (Haende sind in der Naehe)
-                        fb = face_boxes[0][0]  # (x1, y1, x2, y2) normalisiert
+                    elif _face_raw_640 is not None:
+                        # Face-BBox erweitert (Original Model-Space fuer 640x640 Crop)
+                        fb = _face_raw_640[0]  # (x1, y1, x2, y2) normalisiert auf 640x640
                         cx = int((fb[0] + fb[2]) / 2 * 640)
                         cy = int((fb[1] + fb[3]) / 2 * 640)
                         cx1 = max(0, cx - 160)
@@ -829,7 +918,9 @@ class InferenceEngine:
                     self._model_health.record_inference("pose", dt * 1000)
 
                     if _pose_data:
-                        draw_poses(annotated, _pose_data, scale_x, scale_y)
+                        _pose_draw = _unletterbox_pose(
+                            _pose_data, _lb_px, _lb_py, _lb_rw, _lb_rh)
+                        draw_poses(annotated, _pose_draw, scale_x, scale_y)
                         # Tracker mit Pose-Daten fuettern (FACE > BODY Prioritaet)
                         if self._cam._autonomous_mode and self._cam._tracker and not face_fed_to_tracker:
                             try:

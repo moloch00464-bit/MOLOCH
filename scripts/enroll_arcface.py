@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.expanduser("~/moloch"))
 
 from hailo_platform import HEF, VDevice, FormatType
 from core.perception.hailo_postprocess import decode_scrfd, normalize_arcface
+from core.inference_engine import letterbox_resize, _unletterbox_scrfd
 
 MODEL_DIR = "/mnt/moloch-data/hailo/models"
 SCRFD_PATH = f"{MODEL_DIR}/scrfd_10g.hef"
@@ -99,8 +100,8 @@ def run_enrollment(name, source_filter=None):
                 print(f"  [{idx+1}/{len(images)}] SKIP (nicht lesbar): {os.path.basename(img_path)}")
                 continue
 
-            # Resize auf 640x640 fuer SCRFD
-            input_640 = cv2.resize(img, (640, 640))
+            # Letterbox auf 640x640 (Aspektverhaeltnis beibehalten)
+            input_640, _lb_s, _lb_px, _lb_py, _lb_rw, _lb_rh = letterbox_resize(img, 640)
             input_rgb = cv2.cvtColor(input_640, cv2.COLOR_BGR2RGB)
 
             # SCRFD laufen lassen
@@ -114,12 +115,16 @@ def run_enrollment(name, source_filter=None):
                 print(f"  [{idx+1}/{len(images)}] Kein Gesicht: {os.path.basename(img_path)}")
                 continue
 
+            # Letterbox-Korrektur -> Frame-Space
+            boxes, landmarks = _unletterbox_scrfd(
+                boxes, landmarks, _lb_px, _lb_py, _lb_rw, _lb_rh)
+
             # Bestes Gesicht (hoechster Score)
             best = np.argmax(scores)
             box = boxes[best]
             fh, fw = img.shape[:2]
 
-            # Box in Pixel-Koordinaten
+            # Box in Pixel-Koordinaten (jetzt korrekt durch Letterbox-Fix)
             x1 = max(0, int(box[0] * fw))
             y1 = max(0, int(box[1] * fh))
             x2 = min(fw, int(box[2] * fw))
@@ -264,8 +269,8 @@ def run_snapshots_multi(name, conf_thresh=0.7, dedup_thresh=0.95):
                 stats["unlesbar"] += 1
                 continue
 
-            # Resize auf 640x640 fuer SCRFD
-            input_640 = cv2.resize(img, (640, 640))
+            # Letterbox auf 640x640 (Aspektverhaeltnis beibehalten)
+            input_640, _lb_s, _lb_px, _lb_py, _lb_rw, _lb_rh = letterbox_resize(img, 640)
             input_rgb = cv2.cvtColor(input_640, cv2.COLOR_BGR2RGB)
 
             # SCRFD laufen lassen (niedrigerer Threshold zum Finden, conf_thresh filtert danach)
@@ -281,6 +286,10 @@ def run_snapshots_multi(name, conf_thresh=0.7, dedup_thresh=0.95):
                     print(f"  [{idx+1}/{len(images)}] ...")
                 continue
 
+            # Letterbox-Korrektur -> Frame-Space
+            boxes, landmarks = _unletterbox_scrfd(
+                boxes, landmarks, _lb_px, _lb_py, _lb_rw, _lb_rh)
+
             # Bestes Gesicht pruefen
             best = np.argmax(scores)
             best_score = scores[best]
@@ -292,7 +301,7 @@ def run_snapshots_multi(name, conf_thresh=0.7, dedup_thresh=0.95):
             box = boxes[best]
             fh, fw = img.shape[:2]
 
-            # Box in Pixel-Koordinaten
+            # Box in Pixel-Koordinaten (jetzt korrekt durch Letterbox-Fix)
             x1 = max(0, int(box[0] * fw))
             y1 = max(0, int(box[1] * fh))
             x2 = min(fw, int(box[2] * fw))
