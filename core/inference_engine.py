@@ -208,6 +208,7 @@ class InferenceEngine:
         # Frame Counter
         self._frame_counter = 0
         self._letterbox_debug_done = False  # Einmalig Letterbox-Parameter loggen
+        self._bbox_debug_last_save = 0.0  # Cooldown fuer BBox-Debug Snapshots
 
         # Pose Energy Tracker
         self._prev_keypoints = None
@@ -558,6 +559,70 @@ class InferenceEngine:
                         # auf Brust/Hand statt im Gesicht.
                         boxes_c, lm_c = _unletterbox_scrfd(
                             boxes, landmarks, _lb_px, _lb_py, _lb_rw, _lb_rh)
+
+                        # === BBox Debug: Koordinaten-Log + Full-HD Snapshots ===
+                        _dbg_now = time.time()
+                        if _dbg_now - self._bbox_debug_last_save >= 5.0:
+                            self._bbox_debug_last_save = _dbg_now
+                            _dbg_dir = os.path.expanduser("~/moloch/logs/bbox_debug")
+                            os.makedirs(_dbg_dir, exist_ok=True)
+                            _ts = time.strftime("%Y%m%d_%H%M%S")
+                            for i in range(len(boxes)):
+                                # RAW Koordinaten (normalisiert auf 640x640 Space)
+                                raw = boxes[i]
+                                logger.info(
+                                    f"[BBox-Debug] Face {i} RAW (norm 640x640): "
+                                    f"x1={raw[0]:.4f} y1={raw[1]:.4f} "
+                                    f"x2={raw[2]:.4f} y2={raw[3]:.4f}")
+                                # Unletterbox Koordinaten (normalisiert auf Content)
+                                ulb = boxes_c[i]
+                                logger.info(
+                                    f"[BBox-Debug] Face {i} UNLETTERBOX (norm): "
+                                    f"x1={ulb[0]:.4f} y1={ulb[1]:.4f} "
+                                    f"x2={ulb[2]:.4f} y2={ulb[3]:.4f}")
+                                # Pixel-Koordinaten auf Original-Frame
+                                px1 = int(ulb[0] * fw)
+                                py1 = int(ulb[1] * fh)
+                                px2 = int(ulb[2] * fw)
+                                py2 = int(ulb[3] * fh)
+                                logger.info(
+                                    f"[BBox-Debug] Face {i} PIXEL ({fw}x{fh}): "
+                                    f"x1={px1} y1={py1} x2={px2} y2={py2}")
+                                logger.info(
+                                    f"[BBox-Debug] Letterbox: pad_x={_lb_px} "
+                                    f"pad_y={_lb_py} rw={_lb_rw} rh={_lb_rh} "
+                                    f"score={scores[i]:.3f}")
+                                # Full-HD Frame mit roter BBox speichern
+                                frame_dbg = frame.copy()
+                                cv2.rectangle(frame_dbg, (px1, py1),
+                                              (px2, py2), (0, 0, 255), 3)
+                                cv2.putText(
+                                    frame_dbg,
+                                    f"Face{i} s={scores[i]:.2f}",
+                                    (px1, max(py1 - 10, 20)),
+                                    cv2.FONT_HERSHEY_SIMPLEX,
+                                    1.0, (0, 0, 255), 2)
+                                _fname_full = os.path.join(
+                                    _dbg_dir, f"{_ts}_face{i}_fullhd.jpg")
+                                cv2.imwrite(_fname_full, frame_dbg)
+                                # Crop mit 20% Margin
+                                bw = px2 - px1
+                                bh = py2 - py1
+                                margin_x = int(bw * 0.2)
+                                margin_y = int(bh * 0.2)
+                                cx1 = max(0, px1 - margin_x)
+                                cy1 = max(0, py1 - margin_y)
+                                cx2 = min(fw, px2 + margin_x)
+                                cy2 = min(fh, py2 + margin_y)
+                                crop = frame[cy1:cy2, cx1:cx2]
+                                if crop.size > 0:
+                                    _fname_crop = os.path.join(
+                                        _dbg_dir,
+                                        f"{_ts}_face{i}_crop.jpg")
+                                    cv2.imwrite(_fname_crop, crop)
+                                logger.info(
+                                    f"[BBox-Debug] Gespeichert: {_fname_full}")
+                        # === Ende BBox Debug ===
 
                         if "face" in _allowed_draws:
                             draw_faces(annotated, boxes_c, scores, lm_c, draw_sx, draw_sy)
