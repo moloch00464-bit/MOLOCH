@@ -207,6 +207,7 @@ class InferenceEngine:
 
         # Frame Counter
         self._frame_counter = 0
+        self._letterbox_debug_done = False  # Einmalig Letterbox-Parameter loggen
 
         # Pose Energy Tracker
         self._prev_keypoints = None
@@ -491,6 +492,15 @@ class InferenceEngine:
             input_640, _lb_scale, _lb_px, _lb_py, _lb_rw, _lb_rh = letterbox_resize(frame, 640)
             input_rgb = cv2.cvtColor(input_640, cv2.COLOR_BGR2RGB)
 
+            # === EINMALIGES DEBUG-LOGGING: Letterbox-Parameter ===
+            if not self._letterbox_debug_done:
+                logger.warning(
+                    "[LETTERBOX-DEBUG] frame=%dx%d (hw=%dx%d), "
+                    "scale=%.4f, pad_x=%d, pad_y=%d, content_w=%d, content_h=%d, "
+                    "input_640.shape=%s",
+                    fw, fh, fh, fw, _lb_scale, _lb_px, _lb_py, _lb_rw, _lb_rh,
+                    input_640.shape)
+
             scale_x = fw / 640.0
             scale_y = fh / 640.0
             if _prof:
@@ -536,9 +546,93 @@ class InferenceEngine:
                     self._model_health.record_inference("scrfd", dt * 1000)
 
                     if len(boxes) > 0:
+                        # === EINMALIGES DEBUG-LOGGING: Rohe SCRFD-Werte ===
+                        if not self._letterbox_debug_done:
+                            b0 = boxes[0]
+                            lm0 = landmarks[0]
+                            logger.warning(
+                                "[LETTERBOX-DEBUG] RAW SCRFD box[0]: "
+                                "[%.4f, %.4f, %.4f, %.4f] "
+                                "(px: [%.1f, %.1f, %.1f, %.1f])",
+                                b0[0], b0[1], b0[2], b0[3],
+                                b0[0]*640, b0[1]*640, b0[2]*640, b0[3]*640)
+                            logger.warning(
+                                "[LETTERBOX-DEBUG] RAW SCRFD lm[0]: "
+                                "[%.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f]",
+                                *lm0[:10])
+
                         # Letterbox-Korrektur: Model-Space -> Frame-Space
                         boxes_c, lm_c = _unletterbox_scrfd(
                             boxes, landmarks, _lb_px, _lb_py, _lb_rw, _lb_rh)
+
+                        # === EINMALIGES DEBUG-LOGGING: Korrigierte Werte + Snapshot ===
+                        if not self._letterbox_debug_done:
+                            bc0 = boxes_c[0]
+                            lc0 = lm_c[0]
+                            logger.warning(
+                                "[LETTERBOX-DEBUG] CORRECTED box[0]: "
+                                "[%.4f, %.4f, %.4f, %.4f] "
+                                "(draw_px: [%.1f, %.1f, %.1f, %.1f])",
+                                bc0[0], bc0[1], bc0[2], bc0[3],
+                                bc0[0]*fw, bc0[1]*fh, bc0[2]*fw, bc0[3]*fh)
+                            logger.warning(
+                                "[LETTERBOX-DEBUG] CORRECTED lm[0]: "
+                                "[%.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f] "
+                                "(draw_px: le=[%.1f,%.1f] re=[%.1f,%.1f] nose=[%.1f,%.1f])",
+                                *lc0[:10],
+                                lc0[0]*fw, lc0[1]*fh,
+                                lc0[2]*fw, lc0[3]*fh,
+                                lc0[4]*fw, lc0[5]*fh)
+                            # Visueller Debug: RAW Boxen auf padded 640x640 Bild
+                            try:
+                                _dbg_padded = input_640.copy()
+                                # Content-Area Grenzen (gruen gestrichelt)
+                                cv2.line(_dbg_padded, (0, _lb_py), (640, _lb_py), (0, 255, 0), 1)
+                                cv2.line(_dbg_padded, (0, _lb_py + _lb_rh), (640, _lb_py + _lb_rh), (0, 255, 0), 1)
+                                cv2.putText(_dbg_padded, f"content: y={_lb_py}..{_lb_py+_lb_rh}", (5, _lb_py - 5),
+                                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
+                                # RAW SCRFD Boxen (rot) + Landmarks (gelb)
+                                for bi in range(len(boxes)):
+                                    bx = boxes[bi]
+                                    rx1 = int(bx[0] * 640)
+                                    ry1 = int(bx[1] * 640)
+                                    rx2 = int(bx[2] * 640)
+                                    ry2 = int(bx[3] * 640)
+                                    cv2.rectangle(_dbg_padded, (rx1, ry1), (rx2, ry2), (0, 0, 255), 2)
+                                    cv2.putText(_dbg_padded, f"RAW {scores[bi]:.2f}", (rx1, ry1 - 3),
+                                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
+                                    lm = landmarks[bi]
+                                    for p in range(5):
+                                        lx = int(lm[p*2] * 640)
+                                        ly = int(lm[p*2+1] * 640)
+                                        cv2.circle(_dbg_padded, (lx, ly), 3, (0, 255, 255), -1)
+                                _snap_path = os.path.expanduser("~/moloch/snapshots/letterbox_debug_padded.jpg")
+                                cv2.imwrite(_snap_path, _dbg_padded)
+                                # Auch annotated Frame speichern (mit korrigierten Boxen)
+                                _dbg_ann = annotated.copy()
+                                for bi in range(len(boxes_c)):
+                                    bx = boxes_c[bi]
+                                    ax1 = int(bx[0] * fw)
+                                    ay1 = int(bx[1] * fh)
+                                    ax2 = int(bx[2] * fw)
+                                    ay2 = int(bx[3] * fh)
+                                    cv2.rectangle(_dbg_ann, (ax1, ay1), (ax2, ay2), (255, 0, 0), 3)
+                                    cv2.putText(_dbg_ann, "CORRECTED", (ax1, ay1 - 5),
+                                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
+                                    lm = lm_c[bi]
+                                    for p in range(5):
+                                        lx = int(lm[p*2] * fw)
+                                        ly = int(lm[p*2+1] * fh)
+                                        cv2.circle(_dbg_ann, (lx, ly), 5, (0, 255, 255), -1)
+                                _snap_ann = os.path.expanduser("~/moloch/snapshots/letterbox_debug_annotated.jpg")
+                                cv2.imwrite(_snap_ann, _dbg_ann)
+                                logger.warning(
+                                    "[LETTERBOX-DEBUG] Snapshots gespeichert: %s + %s",
+                                    _snap_path, _snap_ann)
+                            except Exception as _dbg_err:
+                                logger.warning("[LETTERBOX-DEBUG] Snapshot-Fehler: %s", _dbg_err)
+                            self._letterbox_debug_done = True
+
                         if "face" in _allowed_draws:
                             draw_faces(annotated, boxes_c, scores, lm_c, scale_x, scale_y)
                         face_boxes = list(zip(boxes_c, scores, lm_c))
