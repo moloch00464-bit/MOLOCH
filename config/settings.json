@@ -1,12 +1,12 @@
 {
   "version": 1,
   "thresholds": {
-    "scrfd_conf": 0.65,
-    "scrfd_nms": 0.6,
-    "arcface_thresh": 0.6,
+    "scrfd_conf": 0.45,
+    "scrfd_nms": 0.5,
+    "arcface_thresh": 0.65,
     "yolo_conf": 0.5,
-    "pose_conf": 0.5,
-    "hand_conf": 0.3
+    "pose_conf": 0.6,
+    "hand_conf": 0.65
   },
   "hand_occlusion": {
     "enabled": false,
@@ -36,11 +36,11 @@
     "pose"
   ],
   "mpo": {
-    "tension_tau": 300.0,
+    "tension_tau": 240.0,
     "dominance_drift": 0.041,
-    "zone_hysteresis": 0.15,
-    "berserker_threshold": 0.95,
-    "thermal_damping_start": 70.0
+    "zone_hysteresis": 0.1,
+    "berserker_threshold": 0.92,
+    "thermal_damping_start": 61.0
   },
   "gestures": {
     "wave_enabled": true,
