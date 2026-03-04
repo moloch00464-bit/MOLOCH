@@ -1150,7 +1150,7 @@ class AutonomousTracker:
 
         # === PD-REGLER: Proportional + Derivative (Bremse) ===
         # P-Term: proportional zum Fehler
-        pan_p = -error_x_norm * self.config.fov_horizontal * self.config.pan_gain
+        pan_p = error_x_norm * self.config.fov_horizontal * self.config.pan_gain
         tilt_p = -error_y_norm * self.config.fov_vertical * self.config.tilt_gain
 
         # D-Term: Bremse wenn Fehler ABNIMMT (Kamera naehert sich dem Ziel)
@@ -1160,7 +1160,7 @@ class AutonomousTracker:
             d_error_x = (error_x_norm - self._prev_error_x) / dt
             d_error_y = (error_y_norm - self._prev_error_y) / dt
             # D-Term: Aenderungsrate * Gain -> bremst ab wenn Fehler schrumpft
-            pan_d = -d_error_x * self.config.fov_horizontal * d_gain * self.config.pan_gain
+            pan_d = d_error_x * self.config.fov_horizontal * d_gain * self.config.pan_gain
             tilt_d = -d_error_y * self.config.fov_vertical * d_gain * self.config.tilt_gain
         else:
             pan_d = 0.0
@@ -1236,7 +1236,7 @@ class AutonomousTracker:
             pan_delta = pd_pan_delta
             tilt_delta = pd_tilt_delta
         else:
-            pan_delta = -error_x_norm * self.config.fov_horizontal * self.config.pan_gain
+            pan_delta = error_x_norm * self.config.fov_horizontal * self.config.pan_gain
             tilt_delta = -error_y_norm * self.config.fov_vertical * self.config.tilt_gain
             pan_delta = max(-self.config.max_step_pan, min(self.config.max_step_pan, pan_delta))
             tilt_delta = max(-self.config.max_step_tilt, min(self.config.max_step_tilt, tilt_delta))
