@@ -132,10 +132,10 @@ class TrackingConfig:
     frame_height: int = 640
 
     # === Detection filtering ===
-    min_bbox_height_ratio: float = 0.40
+    min_bbox_height_ratio: float = 0.10   # war 0.40 — filterte ALLE Personen auf Distanz (13% Height)
     max_bbox_center_y_ratio: float = 0.92   # Gate 0 Phase 3: war 0.75, filterte ALLE Gesichter raus
     min_bbox_area_ratio: float = 0.08
-    min_confidence: float = 0.50
+    min_confidence: float = 0.30   # war 0.50 — filterte Faces mit 0.45-0.49 Confidence
     min_aspect_ratio: float = 0.35
 
     # === Target persistence ===
@@ -449,7 +449,7 @@ class AutonomousTracker:
 
                 # Gate 0 Phase 3: Face-Filter stark relaxt - SCRFD Confidence reicht
                 min_height = 0.03 if is_face else self.config.min_bbox_height_ratio
-                min_area = 0.002 if is_face else self.config.min_bbox_area_ratio
+                min_area = 0.0005 if is_face else self.config.min_bbox_area_ratio  # war 0.002 — filterte kleine Gesichter
 
                 height_ratio = height / frame_height
                 if height_ratio < min_height:
