@@ -2236,7 +2236,10 @@ class MolochUnifiedPanel:
                 "[Snapshot] Face Detection...", "system"))
             try:
                 from core.perception.hailo_postprocess import decode_scrfd, normalize_arcface
-                input_640 = cv2.resize(frame, (640, 640))
+                from core.inference_engine import letterbox_resize, _unletterbox_scrfd
+
+                # Letterbox-Resize: Aspektverhaeltnis beibehalten (kein Verzerren)
+                input_640, _lb_s, _lb_px, _lb_py, _lb_rw, _lb_rh = letterbox_resize(frame, 640)
                 input_rgb = cv2.cvtColor(input_640, cv2.COLOR_BGR2RGB)
 
                 outputs = self.service._run_model("scrfd", input_rgb)
@@ -2245,25 +2248,29 @@ class MolochUnifiedPanel:
                         "[Snapshot] SCRFD Inference fehlgeschlagen", "system"))
                     return
 
-                out_names = self.service._output_names["scrfd"]
-                raw_outputs = [outputs[n] for n in out_names]
-                faces = decode_scrfd(raw_outputs, score_thresh=0.4)
+                boxes, scores, landmarks = decode_scrfd(
+                    outputs, img_size=640, conf_thresh=0.4)
 
-                if not faces:
+                if len(boxes) == 0:
                     self.root.after(0, lambda: self._append_chat(
                         "[Snapshot] Kein Gesicht erkannt!", "system"))
                     return
+
+                # Letterbox-Korrektur: Model-Space (640x640) -> Frame-Space
+                boxes_c, lm_c = _unletterbox_scrfd(
+                    boxes, landmarks, _lb_px, _lb_py, _lb_rw, _lb_rh)
 
             except Exception as e:
                 self.root.after(0, lambda: self._append_chat(
                     f"[Snapshot] SCRFD Fehler: {e}", "system"))
                 return
 
-            # Find largest face
-            largest = max(faces, key=lambda f: (f[0][2]-f[0][0]) * (f[0][3]-f[0][1]))
-            box = largest[0]  # normalized xyxy in 640x640 space
+            # Groesstes Gesicht finden
+            areas = (boxes_c[:, 2] - boxes_c[:, 0]) * (boxes_c[:, 3] - boxes_c[:, 1])
+            best_idx = int(np.argmax(areas))
+            box = boxes_c[best_idx]
 
-            # Crop face with 20% margin (map to original frame)
+            # Crop mit 20% Margin (Frame-Space Koordinaten)
             x1 = max(0, int(box[0] * fw))
             y1 = max(0, int(box[1] * fh))
             x2 = min(fw, int(box[2] * fw))

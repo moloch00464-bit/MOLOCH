@@ -3,9 +3,9 @@
   "thresholds": {
     "scrfd_conf": 0.45,
     "scrfd_nms": 0.45,
-    "arcface_thresh": 0.55,
+    "arcface_thresh": 0.6,
     "yolo_conf": 0.6,
-    "pose_conf": 0.55,
+    "pose_conf": 0.6,
     "hand_conf": 0.65
   },
   "hand_occlusion": {
