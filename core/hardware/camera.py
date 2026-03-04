@@ -709,7 +709,7 @@ class SonoffCameraController:
         self.last_detection = detection
         self.last_detection_time = now
 
-        error_x = detection.center_x - 0.5
+        error_x = 0.5 - detection.center_x
         error_y = detection.center_y - 0.5
 
         if abs(error_x) < self.DEADZONE and abs(error_y) < self.DEADZONE:
