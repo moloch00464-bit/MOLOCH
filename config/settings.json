@@ -4,7 +4,7 @@
     "scrfd_conf": 0.45,
     "scrfd_nms": 0.45,
     "arcface_thresh": 0.55,
-    "yolo_conf": 0.35,
+    "yolo_conf": 0.45,
     "pose_conf": 0.6,
     "hand_conf": 0.65
   },

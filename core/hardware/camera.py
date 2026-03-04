@@ -718,7 +718,7 @@ class SonoffCameraController:
 
         self._set_tracking_state(TrackingState.TRACKING)
 
-        pan_delta = error_x * self.FOV_HORIZONTAL * self.TRACKING_GAIN_PAN
+        pan_delta = -error_x * self.FOV_HORIZONTAL * self.TRACKING_GAIN_PAN
         tilt_delta = -error_y * self.FOV_VERTICAL * self.TRACKING_GAIN_TILT
 
         pan_delta = max(-self.MAX_STEP_PAN, min(self.MAX_STEP_PAN, pan_delta))
