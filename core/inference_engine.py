@@ -530,6 +530,12 @@ class InferenceEngine:
                 try:
                     t0 = time.perf_counter()
                     outputs = self._orchestrator.run("scrfd", input_rgb)
+                    # Einmaliger Shape-Log fuer SCRFD Output-Tensoren
+                    if not self._letterbox_debug_done:
+                        self._letterbox_debug_done = True
+                        for k, v in sorted(outputs.items()):
+                            logger.info(f"[SCRFD-Shape] {k}: shape={v.shape} "
+                                        f"dtype={v.dtype} min={v.min():.3f} max={v.max():.3f}")
                     if _prof:
                         _t_npu_end = time.perf_counter()
                         _prof_npu += _t_npu_end - t0
@@ -592,7 +598,23 @@ class InferenceEngine:
                                     f"[BBox-Debug] Letterbox: pad_x={_lb_px} "
                                     f"pad_y={_lb_py} rw={_lb_rw} rh={_lb_rh} "
                                     f"score={scores[i]:.3f}")
-                                # Full-HD Frame mit roter BBox speichern
+                                # Landmarks loggen (5 Punkte: left_eye, right_eye, nose, left_mouth, right_mouth)
+                                lm_raw = landmarks[i]  # RAW (640x640 space)
+                                lm_ulb = lm_c[i]       # UNLETTERBOX (content space)
+                                _lm_names = ["L-Eye", "R-Eye", "Nose", "L-Mouth", "R-Mouth"]
+                                for p in range(5):
+                                    lx_r = lm_raw[p * 2]
+                                    ly_r = lm_raw[p * 2 + 1]
+                                    lx_u = lm_ulb[p * 2]
+                                    ly_u = lm_ulb[p * 2 + 1]
+                                    lx_px = int(lx_u * fw)
+                                    ly_px = int(ly_u * fh)
+                                    logger.info(
+                                        f"[BBox-Debug] Face {i} LM {_lm_names[p]}: "
+                                        f"RAW=({lx_r:.4f},{ly_r:.4f}) "
+                                        f"ULB=({lx_u:.4f},{ly_u:.4f}) "
+                                        f"PX=({lx_px},{ly_px})")
+                                # Full-HD Frame mit roter BBox + gruenen Landmarks
                                 frame_dbg = frame.copy()
                                 cv2.rectangle(frame_dbg, (px1, py1),
                                               (px2, py2), (0, 0, 255), 3)
@@ -602,6 +624,16 @@ class InferenceEngine:
                                     (px1, max(py1 - 10, 20)),
                                     cv2.FONT_HERSHEY_SIMPLEX,
                                     1.0, (0, 0, 255), 2)
+                                # Landmarks als gruene Punkte + Labels
+                                for p in range(5):
+                                    lx_px = int(lm_ulb[p * 2] * fw)
+                                    ly_px = int(lm_ulb[p * 2 + 1] * fh)
+                                    cv2.circle(frame_dbg, (lx_px, ly_px),
+                                               6, (0, 255, 0), -1)
+                                    cv2.putText(frame_dbg, _lm_names[p],
+                                                (lx_px + 8, ly_px),
+                                                cv2.FONT_HERSHEY_SIMPLEX,
+                                                0.5, (0, 255, 0), 1)
                                 _fname_full = os.path.join(
                                     _dbg_dir, f"{_ts}_face{i}_fullhd.jpg")
                                 cv2.imwrite(_fname_full, frame_dbg)
