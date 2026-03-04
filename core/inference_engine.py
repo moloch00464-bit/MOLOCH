@@ -65,85 +65,6 @@ def load_face_db(path: str) -> dict:
         return {}
 
 
-def letterbox_resize(img, target_size=640):
-    """Letterbox-Resize: Aspektverhaeltnis beibehalten, graues Padding.
-
-    Gibt zurueck: (padded_img, scale, pad_x, pad_y, content_w, content_h)
-    """
-    h, w = img.shape[:2]
-    scale = min(target_size / w, target_size / h)
-    new_w = int(round(w * scale))
-    new_h = int(round(h * scale))
-    resized = cv2.resize(img, (new_w, new_h))
-    pad_x = (target_size - new_w) // 2
-    pad_y = (target_size - new_h) // 2
-    padded = np.full((target_size, target_size, 3), 114, dtype=np.uint8)
-    padded[pad_y:pad_y + new_h, pad_x:pad_x + new_w] = resized
-    return padded, scale, pad_x, pad_y, new_w, new_h
-
-
-def _unletterbox_scrfd(boxes, landmarks, pad_x, pad_y, rw, rh, target=640):
-    """Korrigiere SCRFD-Koordinaten: Letterbox-Space -> Frame-Space.
-
-    Input: boxes (N,4) und landmarks (N,10) normalisiert [0,1] auf target x target.
-    Output: korrigierte Werte normalisiert [0,1] relativ zum Original-Content.
-    """
-    if pad_x == 0 and pad_y == 0:
-        return boxes, landmarks
-    bc = boxes.copy()
-    bc[:, [0, 2]] = np.clip((boxes[:, [0, 2]] * target - pad_x) / rw, 0, 1)
-    bc[:, [1, 3]] = np.clip((boxes[:, [1, 3]] * target - pad_y) / rh, 0, 1)
-    lc = landmarks.copy()
-    lc[:, 0::2] = np.clip((landmarks[:, 0::2] * target - pad_x) / rw, 0, 1)
-    lc[:, 1::2] = np.clip((landmarks[:, 1::2] * target - pad_y) / rh, 0, 1)
-    return bc, lc
-
-
-def _unletterbox_yolo(detections, pad_x, pad_y, rw, rh, target=640):
-    """Korrigiere YOLOv8 NMS Detections: Letterbox-Space -> Frame-Space."""
-    if pad_x == 0 and pad_y == 0:
-        return detections
-    corrected = []
-    for d in detections:
-        dc = dict(d)
-        bx = d["bbox"]
-        dc["bbox"] = [
-            float(np.clip((bx[0] * target - pad_x) / rw, 0, 1)),
-            float(np.clip((bx[1] * target - pad_y) / rh, 0, 1)),
-            float(np.clip((bx[2] * target - pad_x) / rw, 0, 1)),
-            float(np.clip((bx[3] * target - pad_y) / rh, 0, 1)),
-        ]
-        corrected.append(dc)
-    return corrected
-
-
-def _unletterbox_pose(poses, pad_x, pad_y, rw, rh, target=640):
-    """Korrigiere Pose-Daten (Model-Pixel) fuer Letterbox-Offset.
-
-    Justiert bbox und keypoints so dass * scale_x/y korrekte Frame-Pixel ergibt.
-    """
-    if pad_x == 0 and pad_y == 0:
-        return poses
-    sx = float(target) / rw
-    sy = float(target) / rh
-    corrected = []
-    for p in poses:
-        pc = dict(p)
-        bx = p["bbox"]
-        pc["bbox"] = [
-            (bx[0] - pad_x) * sx,
-            (bx[1] - pad_y) * sy,
-            (bx[2] - pad_x) * sx,
-            (bx[3] - pad_y) * sy,
-        ]
-        kpts = p["keypoints"].copy()
-        kpts[:, 0] = (kpts[:, 0] - pad_x) * sx
-        kpts[:, 1] = (kpts[:, 1] - pad_y) * sy
-        pc["keypoints"] = kpts
-        corrected.append(pc)
-    return corrected
-
-
 class InferenceEngine:
     """NPU Inference Pipeline mit Auto-Restart.
 
@@ -207,8 +128,6 @@ class InferenceEngine:
 
         # Frame Counter
         self._frame_counter = 0
-        self._letterbox_debug_done = False  # Einmalig Letterbox-Parameter loggen
-        self._bbox_debug_last_save = 0.0  # Cooldown fuer BBox-Debug Snapshots
 
         # Pose Energy Tracker
         self._prev_keypoints = None
@@ -483,26 +402,18 @@ class InferenceEngine:
                     with self._fps_lock:
                         self._fps["total"] = 1.0 / _dt_loop
             self._t_prev_loop = t_total
+            annotated = frame.copy()
             fh, fw = frame.shape[:2]
             self._frame_counter += 1
 
-            # Preview-Frame: Explizit auf 640x360 skalieren, dann darauf zeichnen
-            # So werden BBox-Koordinaten direkt im Preview-Space berechnet
-            annotated = cv2.resize(frame, (IPCRouter.PREVIEW_W, IPCRouter.PREVIEW_H))
-            ah, aw = annotated.shape[:2]  # 360, 640
-
-            # Preprocessing: Letterbox auf 640x640 (Aspektverhaeltnis beibehalten)
+            # Preprocessing: Resize auf 640x640 fuer Modelle
             if _prof:
                 _t_pre = time.perf_counter()
-            input_640, _lb_scale, _lb_px, _lb_py, _lb_rw, _lb_rh = letterbox_resize(frame, 640)
+            input_640 = cv2.resize(frame, (640, 640))
             input_rgb = cv2.cvtColor(input_640, cv2.COLOR_BGR2RGB)
 
-            # Scale-Faktoren: Modell-Space (640x640) -> Frame-Space (1920x1080)
             scale_x = fw / 640.0
             scale_y = fh / 640.0
-            # Draw-Scale: Modell-Space (640x640) -> Preview-Space (640x360)
-            draw_sx = aw / 640.0   # 640/640 = 1.0
-            draw_sy = ah / 640.0   # 360/640 = 0.5625
             if _prof:
                 _prof_pre = time.perf_counter() - _t_pre
                 _prof_npu = 0.0
@@ -519,7 +430,6 @@ class InferenceEngine:
             _allowed_draws = set(enforce_draw_priority(_draw_candidates))
 
             face_boxes = []
-            _face_raw_640 = None  # Original SCRFD-Boxes fuer Tracker + Hand-Crop
             face_detected = False
             face_fed_to_tracker = False
             _markus_recognized = False
@@ -530,12 +440,6 @@ class InferenceEngine:
                 try:
                     t0 = time.perf_counter()
                     outputs = self._orchestrator.run("scrfd", input_rgb)
-                    # Einmaliger Shape-Log fuer SCRFD Output-Tensoren
-                    if not self._letterbox_debug_done:
-                        self._letterbox_debug_done = True
-                        for k, v in sorted(outputs.items()):
-                            logger.info(f"[SCRFD-Shape] {k}: shape={v.shape} "
-                                        f"dtype={v.dtype} min={v.min():.3f} max={v.max():.3f}")
                     if _prof:
                         _t_npu_end = time.perf_counter()
                         _prof_npu += _t_npu_end - t0
@@ -552,126 +456,20 @@ class InferenceEngine:
                     self._model_health.record_inference("scrfd", dt * 1000)
 
                     if len(boxes) > 0:
-                        # Letterbox-Korrektur: Model-Space -> Frame-Space
-                        #
-                        # Das Kamerabild kommt in 1920x1080 rein. SCRFD braucht
-                        # 640x640, also wird das Bild runterskaliert und dabei
-                        # gepaddet (Letterboxing, weil 16:9 -> 1:1). Die NPU gibt
-                        # Landmark-Koordinaten zurueck die auf 640x640 passen.
-                        # Diese Koordinaten muessen korrekt auf 1920x1080
-                        # zurueckgerechnet werden — inklusive Padding-Offset
-                        # abziehen und Skalierungsfaktor anwenden. Wenn das fehlt
-                        # oder falsch ist, landen BBox und Landmarks verschoben
-                        # auf Brust/Hand statt im Gesicht.
-                        boxes_c, lm_c = _unletterbox_scrfd(
-                            boxes, landmarks, _lb_px, _lb_py, _lb_rw, _lb_rh)
-
-                        # === BBox Debug: Koordinaten-Log + Full-HD Snapshots ===
-                        _dbg_now = time.time()
-                        if _dbg_now - self._bbox_debug_last_save >= 5.0:
-                            self._bbox_debug_last_save = _dbg_now
-                            _dbg_dir = os.path.expanduser("~/moloch/logs/bbox_debug")
-                            os.makedirs(_dbg_dir, exist_ok=True)
-                            _ts = time.strftime("%Y%m%d_%H%M%S")
-                            for i in range(len(boxes)):
-                                # RAW Koordinaten (normalisiert auf 640x640 Space)
-                                raw = boxes[i]
-                                logger.info(
-                                    f"[BBox-Debug] Face {i} RAW (norm 640x640): "
-                                    f"x1={raw[0]:.4f} y1={raw[1]:.4f} "
-                                    f"x2={raw[2]:.4f} y2={raw[3]:.4f}")
-                                # Unletterbox Koordinaten (normalisiert auf Content)
-                                ulb = boxes_c[i]
-                                logger.info(
-                                    f"[BBox-Debug] Face {i} UNLETTERBOX (norm): "
-                                    f"x1={ulb[0]:.4f} y1={ulb[1]:.4f} "
-                                    f"x2={ulb[2]:.4f} y2={ulb[3]:.4f}")
-                                # Pixel-Koordinaten auf Original-Frame
-                                px1 = int(ulb[0] * fw)
-                                py1 = int(ulb[1] * fh)
-                                px2 = int(ulb[2] * fw)
-                                py2 = int(ulb[3] * fh)
-                                logger.info(
-                                    f"[BBox-Debug] Face {i} PIXEL ({fw}x{fh}): "
-                                    f"x1={px1} y1={py1} x2={px2} y2={py2}")
-                                logger.info(
-                                    f"[BBox-Debug] Letterbox: pad_x={_lb_px} "
-                                    f"pad_y={_lb_py} rw={_lb_rw} rh={_lb_rh} "
-                                    f"score={scores[i]:.3f}")
-                                # Landmarks loggen (5 Punkte: left_eye, right_eye, nose, left_mouth, right_mouth)
-                                lm_raw = landmarks[i]  # RAW (640x640 space)
-                                lm_ulb = lm_c[i]       # UNLETTERBOX (content space)
-                                _lm_names = ["L-Eye", "R-Eye", "Nose", "L-Mouth", "R-Mouth"]
-                                for p in range(5):
-                                    lx_r = lm_raw[p * 2]
-                                    ly_r = lm_raw[p * 2 + 1]
-                                    lx_u = lm_ulb[p * 2]
-                                    ly_u = lm_ulb[p * 2 + 1]
-                                    lx_px = int(lx_u * fw)
-                                    ly_px = int(ly_u * fh)
-                                    logger.info(
-                                        f"[BBox-Debug] Face {i} LM {_lm_names[p]}: "
-                                        f"RAW=({lx_r:.4f},{ly_r:.4f}) "
-                                        f"ULB=({lx_u:.4f},{ly_u:.4f}) "
-                                        f"PX=({lx_px},{ly_px})")
-                                # Full-HD Frame mit roter BBox + gruenen Landmarks
-                                frame_dbg = frame.copy()
-                                cv2.rectangle(frame_dbg, (px1, py1),
-                                              (px2, py2), (0, 0, 255), 3)
-                                cv2.putText(
-                                    frame_dbg,
-                                    f"Face{i} s={scores[i]:.2f}",
-                                    (px1, max(py1 - 10, 20)),
-                                    cv2.FONT_HERSHEY_SIMPLEX,
-                                    1.0, (0, 0, 255), 2)
-                                # Landmarks als gruene Punkte + Labels
-                                for p in range(5):
-                                    lx_px = int(lm_ulb[p * 2] * fw)
-                                    ly_px = int(lm_ulb[p * 2 + 1] * fh)
-                                    cv2.circle(frame_dbg, (lx_px, ly_px),
-                                               6, (0, 255, 0), -1)
-                                    cv2.putText(frame_dbg, _lm_names[p],
-                                                (lx_px + 8, ly_px),
-                                                cv2.FONT_HERSHEY_SIMPLEX,
-                                                0.5, (0, 255, 0), 1)
-                                _fname_full = os.path.join(
-                                    _dbg_dir, f"{_ts}_face{i}_fullhd.jpg")
-                                cv2.imwrite(_fname_full, frame_dbg)
-                                # Crop mit 20% Margin
-                                bw = px2 - px1
-                                bh = py2 - py1
-                                margin_x = int(bw * 0.2)
-                                margin_y = int(bh * 0.2)
-                                cx1 = max(0, px1 - margin_x)
-                                cy1 = max(0, py1 - margin_y)
-                                cx2 = min(fw, px2 + margin_x)
-                                cy2 = min(fh, py2 + margin_y)
-                                crop = frame[cy1:cy2, cx1:cx2]
-                                if crop.size > 0:
-                                    _fname_crop = os.path.join(
-                                        _dbg_dir,
-                                        f"{_ts}_face{i}_crop.jpg")
-                                    cv2.imwrite(_fname_crop, crop)
-                                logger.info(
-                                    f"[BBox-Debug] Gespeichert: {_fname_full}")
-                        # === Ende BBox Debug ===
-
                         if "face" in _allowed_draws:
-                            draw_faces(annotated, boxes_c, scores, lm_c, draw_sx, draw_sy)
-                        face_boxes = list(zip(boxes_c, scores, lm_c))
-                        _face_raw_640 = boxes  # Original fuer Tracker + Hand-Crop
+                            draw_faces(annotated, boxes, scores, landmarks, scale_x, scale_y)
+                        face_boxes = list(zip(boxes, scores, landmarks))
                         face_detected = True
                         # Head Pose fuer erstes Gesicht (CPU, ~5ms)
-                        _head_pose = estimate_head_pose(lm_c[0], fw, fh)
-                        # Face hat PRIORITAET fuer Tracker (Original Model-Space)
+                        _head_pose = estimate_head_pose(landmarks[0], fw, fh)
+                        # Face hat PRIORITAET fuer Tracker
                         if self._cam._autonomous_mode and self._cam._tracker:
                             try:
                                 face_dets = []
-                                for i in range(len(boxes)):
+                                for box, score, _ in face_boxes:
                                     face_dets.append({
-                                        "bbox": [float(boxes[i, 0] * 640), float(boxes[i, 1] * 640),
-                                                 float(boxes[i, 2] * 640), float(boxes[i, 3] * 640)],
-                                        "confidence": float(scores[i]),
+                                        "bbox": [box[0] * 640, box[1] * 640, box[2] * 640, box[3] * 640],
+                                        "confidence": float(score),
                                         "class": "face"
                                     })
                                 self._cam._tracker.update_detection(
@@ -802,7 +600,7 @@ class InferenceEngine:
                                 except Exception:
                                     pass
 
-                            draw_name(annotated, box, name, sim, ah, aw,
+                            draw_name(annotated, box, name, sim, fh, fw,
                                       emotion=emotion, gender=gender, age_range=age_range,
                                       head_pose=_head_pose if '_head_pose' in dir() else None)
                             self._ipc.write_face_state(name, sim, len(face_boxes),
@@ -893,11 +691,9 @@ class InferenceEngine:
                     persons = [d for d in all_dets if d.get("class_id", -1) == 0]
                     objects = [d for d in all_dets if d.get("class_id", -1) != 0]
 
-                    # Nicht-Person-Objekte zeichnen (Letterbox-korrigiert)
+                    # Nicht-Person-Objekte zeichnen (orange)
                     if objects:
-                        objects_c = _unletterbox_yolo(
-                            objects, _lb_px, _lb_py, _lb_rw, _lb_rh)
-                        draw_objects(annotated, objects_c, scale_x, scale_y)
+                        draw_objects(annotated, objects, scale_x, scale_y)
                         _detected_objects = [
                             {"class": d["class"], "confidence": round(d["confidence"], 2)}
                             for d in objects
@@ -905,9 +701,7 @@ class InferenceEngine:
 
                     if persons:
                         _persons_detected = True
-                        persons_c = _unletterbox_yolo(
-                            persons, _lb_px, _lb_py, _lb_rw, _lb_rh)
-                        draw_persons(annotated, persons_c, scale_x, scale_y)
+                        draw_persons(annotated, persons, scale_x, scale_y)
                         if self._cam._moloch_has_control:
                             self._cam._last_interesting_time = time.time()
                             self._cam._takeover_found_something = True
@@ -951,9 +745,9 @@ class InferenceEngine:
                         # Obere 60% der Person (Haende/Arme)
                         ch = cy2 - cy1
                         cy2 = cy1 + int(ch * 0.6)
-                    elif _face_raw_640 is not None:
-                        # Face-BBox erweitert (Original Model-Space fuer 640x640 Crop)
-                        fb = _face_raw_640[0]  # (x1, y1, x2, y2) normalisiert auf 640x640
+                    elif face_boxes:
+                        # Face-BBox erweitert (Haende sind in der Naehe)
+                        fb = face_boxes[0][0]  # (x1, y1, x2, y2) normalisiert
                         cx = int((fb[0] + fb[2]) / 2 * 640)
                         cy = int((fb[1] + fb[3]) / 2 * 640)
                         cx1 = max(0, cx - 160)
@@ -995,7 +789,7 @@ class InferenceEngine:
                                 annotated, hand_result,
                                 crop_x=cx1, crop_y=cy1,
                                 crop_w=crop_w, crop_h=crop_h,
-                                scale_x=draw_sx, scale_y=draw_sy,
+                                scale_x=scale_x, scale_y=scale_y,
                             )
                         # Hand-Gesture Detection aus 21 MediaPipe Landmarks (W1 Audit-Fix)
                         try:
@@ -1035,9 +829,7 @@ class InferenceEngine:
                     self._model_health.record_inference("pose", dt * 1000)
 
                     if _pose_data:
-                        _pose_draw = _unletterbox_pose(
-                            _pose_data, _lb_px, _lb_py, _lb_rw, _lb_rh)
-                        draw_poses(annotated, _pose_draw, draw_sx, draw_sy)
+                        draw_poses(annotated, _pose_data, scale_x, scale_y)
                         # Tracker mit Pose-Daten fuettern (FACE > BODY Prioritaet)
                         if self._cam._autonomous_mode and self._cam._tracker and not face_fed_to_tracker:
                             try:
@@ -1221,16 +1013,16 @@ class InferenceEngine:
             # Hand-Occlusion Overlay auf Video (nur wenn enabled in settings.json)
             if self._hand_occlusion_enabled and self._perception and self._perception._hand_occlusion:
                 overlay = annotated.copy()
-                cv2.rectangle(overlay, (0, 0), (aw, 30), (0, 0, 180), -1)
+                cv2.rectangle(overlay, (0, 0), (fw, 30), (0, 0, 180), -1)
                 annotated = cv2.addWeighted(overlay, 0.6, annotated, 0.4, 0)
                 cv2.putText(annotated, "HAND OCCLUSION", (10, 22),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
             with self._cam._annotated_lock:
                 self._cam._annotated_frame = annotated
 
-            # Panel IPC: annotated ist bereits Preview-Groesse (640x360)
-            self._ipc.write_frame(annotated)
+            # Panel IPC: Preview-Groesse fuer SHM (1080p waere 6MB/Frame)
+            self._ipc.write_frame(cv2.resize(annotated, (IPCRouter.PREVIEW_W, IPCRouter.PREVIEW_H)))
             self._write_status_cb()
 
             # FPS Profiler: Zeiten akkumulieren und alle N Sekunden loggen

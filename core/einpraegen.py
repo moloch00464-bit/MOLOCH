@@ -26,7 +26,6 @@ import numpy as np
 from core.perception.hailo_postprocess import (
     decode_scrfd, decode_yolov8_pose,
 )
-from core.inference_engine import letterbox_resize, _unletterbox_scrfd
 
 logger = logging.getLogger("Einpraegen")
 
@@ -224,27 +223,20 @@ class Einpraegen:
                         continue
                     fh, fw = frame.shape[:2]
 
-                    # SCRFD: Letterbox-Resize auf 640x640 (Aspektverhaeltnis beibehalten)
-                    input_640, _lb_s, _lb_px, _lb_py, _lb_rw, _lb_rh = letterbox_resize(frame, 640)
+                    # SCRFD: 640x640 resize
+                    input_640 = cv2.resize(frame, (640, 640))
                     input_rgb = cv2.cvtColor(input_640, cv2.COLOR_BGR2RGB)
                     scrfd_outputs = self._orchestrator.run("scrfd", input_rgb)
                     if not scrfd_outputs:
                         continue
 
-                    boxes, scores, landmarks = decode_scrfd(
-                        scrfd_outputs, 640, SCRFD_CONF, SCRFD_NMS)
-                    if len(boxes) == 0:
+                    faces = decode_scrfd(scrfd_outputs, 640, SCRFD_CONF, SCRFD_NMS)
+                    if not faces:
                         continue
-
-                    # Letterbox-Korrektur: Model-Space (640x640) -> Frame-Space
-                    boxes_c, lm_c = _unletterbox_scrfd(
-                        boxes, landmarks, _lb_px, _lb_py, _lb_rw, _lb_rh)
 
                     image_faces[img_path] = []
 
-                    for i in range(len(boxes_c)):
-                        x1n, y1n, x2n, y2n = boxes_c[i]
-                        conf = float(scores[i])
+                    for (x1n, y1n, x2n, y2n, conf) in faces:
                         # Pixel-Koordinaten im Original
                         x1 = max(0, int(x1n * fw))
                         y1 = max(0, int(y1n * fh))

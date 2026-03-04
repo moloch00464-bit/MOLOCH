@@ -9087,3 +9087,7 @@
 {"ts": "2026-02-14T17:18:17.058251", "type": "interaction", "event": "user_input", "chars": 64, "interface": "voice"}
 {"ts": "2026-02-14T17:22:01.212185", "type": "system", "event": "moloch_startup", "component": "push_to_talk", "offline_seconds": 224.2, "offline_minutes": 3.7, "crash_recovery": true, "last_event": "user_input"}
 {"ts": "2026-02-14T17:22:01.212303", "type": "system", "event": "push_to_talk_start"}
+{"ts": "2026-03-04T12:24:36.640419", "type": "system", "event": "moloch_startup", "component": "console", "claude": true, "tts": true, "offline_seconds": 1537355.4, "offline_minutes": 25622.6, "crash_recovery": true, "last_event": "push_to_talk_start"}
+{"ts": "2026-03-04T12:24:36.640550", "type": "system", "event": "console_start", "claude": true, "tts": true}
+{"ts": "2026-03-04T12:24:59.663261", "type": "system", "event": "moloch_startup", "component": "console", "claude": true, "tts": true, "offline_seconds": 23.0, "offline_minutes": 0.4, "crash_recovery": true, "last_event": "console_start"}
+{"ts": "2026-03-04T12:24:59.663427", "type": "system", "event": "console_start", "claude": true, "tts": true}
