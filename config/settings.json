@@ -36,9 +36,9 @@
     "pose"
   ],
   "mpo": {
-    "tension_tau": 100.0,
-    "dominance_drift": 0.041,
-    "zone_hysteresis": 0.09,
+    "tension_tau": 600.0,
+    "dominance_drift": 0.05,
+    "zone_hysteresis": 0.18,
     "berserker_threshold": 0.92,
     "thermal_damping_start": 61.0
   },

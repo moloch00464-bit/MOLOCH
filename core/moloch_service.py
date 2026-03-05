@@ -304,39 +304,46 @@ class MolochService:
                                                    version="4.0"))
 
         # 1. Hailo VDevice + Models (via ModelOrchestrator)
-        self._hailo_manager = get_hailo_manager()
-        self._orchestrator._hailo_manager = self._hailo_manager
-        self._hailo_manager.acquire_for_vision(timeout=10.0)
-        self._orchestrator.load_models()
-        for name in self._orchestrator._models:
-            logger.info(f"Modell geladen: {name} ({len(self._orchestrator._output_names[name])} outputs)")
+        # Bei TAPPAS: NPU wird von GStreamer Model Scheduler verwaltet — NICHT hier oeffnen!
+        if not USE_TAPPAS:
+            self._hailo_manager = get_hailo_manager()
+            self._orchestrator._hailo_manager = self._hailo_manager
+            self._hailo_manager.acquire_for_vision(timeout=10.0)
+            self._orchestrator.load_models()
+            for name in self._orchestrator._models:
+                logger.info(f"Modell geladen: {name} ({len(self._orchestrator._output_names[name])} outputs)")
 
-        # 1b. Whisper VDevice uebergeben (On-Demand: wird erst bei PTT geladen)
-        try:
-            from core.speech.hailo_whisper import get_whisper
-            whisper = get_whisper()
-            whisper.set_vdevice(self._orchestrator.vdevice)
-        except Exception as e:
-            logger.error(f"[INIT] Whisper VDevice-Uebergabe fehlgeschlagen: {e}")
+            # 1b. Whisper VDevice uebergeben (On-Demand: wird erst bei PTT geladen)
+            try:
+                from core.speech.hailo_whisper import get_whisper
+                whisper = get_whisper()
+                whisper.set_vdevice(self._orchestrator.vdevice)
+            except Exception as e:
+                logger.error(f"[INIT] Whisper VDevice-Uebergabe fehlgeschlagen: {e}")
 
-        # 1c. NPU Idle-Modus: NUR yolov8m beim Start konfigurieren
-        # Weitere Modelle werden von PerceptionEngine stufenweise dazugeschaltet:
-        #   IDLE (nur yolov8m) → PERSON (+scrfd) → FACE (+arcface)
-        idle_models = ["yolov8m"]
-        if self._perception:
-            idle_models = self._perception.get_stage_models()  # Stage "idle" → ["yolov8m"]
-        for name in idle_models:
-            if name in self._orchestrator._models:
-                self._orchestrator.configure(name)
-        self._orchestrator.sync_flags()
-        self._inference.sync_flags_from_npu()
-        logger.info(f"[INIT] Boot → Idle-Modus — nur Person-Waechter aktiv: {self._orchestrator.active_models}")
+            # 1c. NPU Idle-Modus: NUR yolov8m beim Start konfigurieren
+            # Weitere Modelle werden von PerceptionEngine stufenweise dazugeschaltet:
+            #   IDLE (nur yolov8m) → PERSON (+scrfd) → FACE (+arcface)
+            idle_models = ["yolov8m"]
+            if self._perception:
+                idle_models = self._perception.get_stage_models()  # Stage "idle" → ["yolov8m"]
+            for name in idle_models:
+                if name in self._orchestrator._models:
+                    self._orchestrator.configure(name)
+            self._orchestrator.sync_flags()
+            self._inference.sync_flags_from_npu()
+            logger.info(f"[INIT] Boot → Idle-Modus — nur Person-Waechter aktiv: {self._orchestrator.active_models}")
+        else:
+            logger.info("[INIT] TAPPAS aktiv — NPU wird von GStreamer Model Scheduler verwaltet")
 
         # 2. Face DB (via InferenceEngine)
         self._inference.reload_face_db()
 
-        # 3. RTSP (via CameraManager)
-        self._cam.start_rtsp()
+        # 3. RTSP (via CameraManager) — NICHT bei TAPPAS (GStreamer oeffnet eigenen rtspsrc)
+        if not USE_TAPPAS:
+            self._cam.start_rtsp()
+        else:
+            logger.info("[INIT] TAPPAS aktiv — ueberspringe CameraManager RTSP (GStreamer hat eigenen rtspsrc)")
 
         # 4. Cloud (via CameraManager, im Hintergrund)
         threading.Thread(target=self._cam.connect_cloud, daemon=True).start()
@@ -367,8 +374,16 @@ class MolochService:
             self._core_integrator.start()
             logger.info("[START] CoreIntegrator 1Hz-Thread gestartet")
 
-        # Inference Loop (via InferenceEngine)
-        self._inference.start()
+        # Inference Loop — bei TAPPAS mit 3s Delay (ONVIF muss zuerst verbinden fuer PTZ)
+        if USE_TAPPAS:
+            def _start_tappas_delayed():
+                logger.info("[START] TAPPAS: Warte 3s auf ONVIF-Verbindung...")
+                time.sleep(3)
+                self._inference.start()
+                logger.info("[START] TAPPAS Pipeline gestartet")
+            threading.Thread(target=_start_tappas_delayed, daemon=True, name="TappasDelayedStart").start()
+        else:
+            self._inference.start()
 
         # Kamera-Status + IPC Polling (via CameraManager)
         self._cam.start_cam_status_loop(write_status_callback=self._write_status_json)
@@ -405,7 +420,11 @@ class MolochService:
                 logger.debug(f"[START] nightVision Reset fehlgeschlagen: {e}")
         threading.Thread(target=_reset_night_vision, daemon=True, name="NightVisionReset").start()
 
-        self._cam.start_watchdog()
+        # Watchdog (Frozen Frame Detection) — NICHT bei TAPPAS (GStreamer managed Stream)
+        if not USE_TAPPAS:
+            self._cam.start_watchdog()
+        else:
+            logger.info("[START] TAPPAS aktiv — ueberspringe RTSP Watchdog")
 
         # Spontane Kommentare Monitor starten (CoreIntegrator-gesteuert)
         if self._voice_pipeline:
