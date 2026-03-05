@@ -499,6 +499,12 @@ class TappasPipeline:
             conf = det.get_confidence()
             bbox = det.get_bbox()
 
+            # Threshold-Filterung (Panel-Slider Werte anwenden)
+            if label == "person" and conf < self.yolo_conf_val:
+                continue
+            if label == "face" and conf < self.scrfd_conf_val:
+                continue
+
             # Normalisierte BBox [0.0-1.0]
             x1 = bbox.xmin()
             y1 = bbox.ymin()
@@ -672,7 +678,7 @@ class TappasPipeline:
 
             best_name = None
             best_sim = 0.0
-            threshold = 0.5  # Minimale Cosine-Similarity fuer Match
+            threshold = self.arcface_thresh_val  # Panel-Slider Wert
 
             for name, db_emb in self._face_db.items():
                 sim = float(np.dot(embedding, db_emb))

@@ -281,6 +281,91 @@ class MolochService:
                     f"limits=[{cfg.pan_limit_min:.1f},{cfg.pan_limit_max:.1f}]")
 
     # =========================================================================
+    # TAPPAS → Perception Loop (PFrame → PerceptionEngine/CoreIntegrator/LED/DailyLearner)
+    # =========================================================================
+
+    def _tappas_perception_loop(self):
+        """Pollt TAPPAS PFrames und fuettert den Rest des Systems.
+
+        Ersetzt die Integrations-Logik die bei InferenceEngine INTERN laeuft.
+        Hier extern, weil TappasPipeline nur Daten liefert (Separation of Concerns).
+        Laeuft mit ~5 Hz (200ms) — schnell genug fuer LED/Perception, langsam genug fuer CPU.
+        """
+        POLL_INTERVAL = 0.2  # 5 Hz
+        _last_pframe_id = None  # Duplikat-Erkennung
+
+        while self.running and self._inference.is_running():
+            try:
+                pframe = self._inference.get_current_pframe()
+                if pframe is None:
+                    time.sleep(POLL_INTERVAL)
+                    continue
+
+                # Duplikat-Check (gleiches Frame nicht doppelt verarbeiten)
+                pf_id = id(pframe)
+                if pf_id == _last_pframe_id:
+                    time.sleep(POLL_INTERVAL)
+                    continue
+                _last_pframe_id = pf_id
+
+                # --- PerceptionEngine: NPU-Stufen-Logik ---
+                if self._perception:
+                    try:
+                        self._perception.update(pframe)
+                    except Exception as e:
+                        logger.debug(f"[TAPPAS-PERC] PerceptionEngine update: {e}")
+
+                # --- CoreIntegrator: Tension/Dominance Updates ---
+                if self._core_integrator:
+                    try:
+                        face_id = getattr(pframe, 'face_id', None)
+                        person_detected = getattr(pframe, 'person_detected', False)
+                        face_detected = getattr(pframe, 'face_detected', False)
+
+                        if face_id and face_id != "unknown":
+                            # Bekannte Person → Dominance Richtung Guardian
+                            self._core_integrator.feed_event("markus_recognized", 0.1)
+                        elif face_detected and (not face_id or face_id == "unknown"):
+                            # Unbekanntes Gesicht → Dominance Richtung Shadow
+                            self._core_integrator.feed_event("unknown_person", 0.1)
+                    except Exception as e:
+                        logger.debug(f"[TAPPAS-PERC] CoreIntegrator feed: {e}")
+
+                # --- LED: Markus-Erkennung Hysterese ---
+                if self._led:
+                    try:
+                        face_id = getattr(pframe, 'face_id', None)
+                        is_markus = face_id == "markus" if face_id else False
+                        self._led.update_hysteresis(is_markus)
+                    except Exception as e:
+                        logger.debug(f"[TAPPAS-PERC] LED update: {e}")
+
+                # --- DailyLearner: Snapshot-Triggers ---
+                if self._daily_learner and self._daily_learner.enabled:
+                    try:
+                        face_detected = getattr(pframe, 'face_detected', False)
+                        face_id = getattr(pframe, 'face_id', None)
+                        confidence = getattr(pframe, 'face_confidence', 0.0)
+                        if face_detected and confidence > 0.5:
+                            frame = self._inference.get_annotated_frame()
+                            if frame is not None:
+                                self._daily_learner.check_snapshot(
+                                    face_detected=True,
+                                    face_id=face_id,
+                                    confidence=confidence,
+                                    frame=frame,
+                                )
+                    except Exception as e:
+                        logger.debug(f"[TAPPAS-PERC] DailyLearner: {e}")
+
+            except Exception as e:
+                logger.debug(f"[TAPPAS-PERC] Loop error: {e}")
+
+            time.sleep(POLL_INTERVAL)
+
+        logger.info("[TAPPAS] Perception-Loop beendet")
+
+    # =========================================================================
     # TAPPAS → Tracker Feed (ersetzt InferenceEngine-interne Tracker-Aufrufe)
     # =========================================================================
 
@@ -454,6 +539,10 @@ class MolochService:
                 threading.Thread(target=self._tappas_tracker_feed_loop, daemon=True,
                                  name="TappasTrackerFeed").start()
                 logger.info("[START] TAPPAS Tracker-Feed Loop gestartet")
+                # Perception-Loop: PFrame → PerceptionEngine/CoreIntegrator/LED/DailyLearner
+                threading.Thread(target=self._tappas_perception_loop, daemon=True,
+                                 name="TappasPerceptionLoop").start()
+                logger.info("[START] TAPPAS Perception-Loop gestartet (5 Hz)")
             threading.Thread(target=_start_tappas_delayed, daemon=True, name="TappasDelayedStart").start()
         else:
             self._inference.start()
@@ -621,28 +710,30 @@ class MolochService:
                 active_models = list(self._active_ctx.keys())
 
             _inf = self._inference
+            # TAPPAS: Modelle laufen immer alle parallel — getattr fuer Kompatibilitaet
             status = {
-                "scrfd_active": _inf.scrfd_active,
-                "arcface_active": _inf.arcface_active,
-                "yolo_active": _inf.yolo_active,
-                "hand_active": _inf.hand_active,
-                "pose_active": _inf.pose_active,
+                "scrfd_active": getattr(_inf, 'scrfd_active', True),
+                "arcface_active": getattr(_inf, 'arcface_active', True),
+                "yolo_active": getattr(_inf, 'yolo_active', True),
+                "hand_active": getattr(_inf, 'hand_active', False),
+                "pose_active": getattr(_inf, 'pose_active', False),
                 "npu_paused": self._orchestrator._npu_paused,
-                "active_models": active_models,
+                "active_models": active_models if active_models else (
+                    ["scrfd", "arcface", "yolov8m"] if USE_TAPPAS else []),
                 "autonomous_mode": self._cam._autonomous_mode,
                 "manual_mode": self._cam._manual_mode,
                 "moloch_has_control": self._cam._moloch_has_control,
                 "tentakel_enabled": self._cam._tentakel_enabled,
                 "daily_learner_enabled": self._daily_learner.enabled if self._daily_learner else False,
-                "learner_flash": _inf._learner_flash,
+                "learner_flash": getattr(_inf, '_learner_flash', False),
                 "frame_age": round(time.time() - self._cam._last_frame_write, 1) if self._cam._last_frame_write else -1,
                 "frozen_restarts": self._cam._frozen_restart_count,
                 "fps": {k: round(v, 1) for k, v in fps_snapshot.items()},
                 "thresholds": {
-                    "scrfd_conf": _inf.scrfd_conf_val,
-                    "scrfd_nms": _inf.scrfd_nms_val,
-                    "arcface_thresh": _inf.arcface_thresh_val,
-                    "yolo_conf": _inf.yolo_conf_val,
+                    "scrfd_conf": getattr(_inf, 'scrfd_conf_val', 0.6),
+                    "scrfd_nms": getattr(_inf, 'scrfd_nms_val', 0.5),
+                    "arcface_thresh": getattr(_inf, 'arcface_thresh_val', 0.45),
+                    "yolo_conf": getattr(_inf, 'yolo_conf_val', 0.5),
                 },
                 "led_markus_on": self._led.markus_on,
                 "led_personality_mode": self._led.personality_mode,
@@ -655,6 +746,16 @@ class MolochService:
                 },
                 "voice": self._voice_pipeline.get_state() if self._voice_pipeline else {},
             }
+            # TAPPAS: PFrame-Daten in Status einpflegen (Panel braucht person/face/mode)
+            if USE_TAPPAS:
+                pframe = _inf.get_current_pframe()
+                if pframe:
+                    status["person_detected"] = getattr(pframe, 'person_detected', False)
+                    status["face_detected"] = getattr(pframe, 'face_detected', False)
+                    status["face_id"] = getattr(pframe, 'face_id', None)
+                    status["face_confidence"] = round(getattr(pframe, 'face_confidence', 0.0), 3)
+                    status["mode"] = "tappas"
+
             # Einpraegen Status
             if self._einpraegen:
                 status["einpraegen_running"] = self._einpraegen.is_running
