@@ -29,6 +29,58 @@ from core.perception.hailo_postprocess import (
 
 logger = logging.getLogger("Einpraegen")
 
+
+def _letterbox_resize(frame, target_size=640):
+    """Letterbox-Resize: Aspect-Ratio erhalten, schwarz auffuellen.
+
+    Gleiche Logik wie TAPPAS hailocropper use-letterbox=true.
+    Returns: (letterboxed_frame_rgb, scale, pad_x, pad_y)
+    """
+    h, w = frame.shape[:2]
+    scale = target_size / max(h, w)
+    new_w = int(w * scale)
+    new_h = int(h * scale)
+
+    resized = cv2.resize(frame, (new_w, new_h))
+
+    # Auf target_size x target_size mit Schwarz auffuellen
+    canvas = np.zeros((target_size, target_size, 3), dtype=np.uint8)
+    pad_x = (target_size - new_w) // 2
+    pad_y = (target_size - new_h) // 2
+    canvas[pad_y:pad_y + new_h, pad_x:pad_x + new_w] = resized
+
+    # BGR → RGB
+    canvas_rgb = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB)
+    return canvas_rgb, scale, pad_x, pad_y
+
+
+def _unletterbox_coords(x1n, y1n, x2n, y2n, target_size, scale, pad_x, pad_y, orig_w, orig_h):
+    """Normalisierte BBox-Koordinaten aus Letterbox zurueck in Originalkoordinaten (Pixel).
+
+    SCRFD gibt normalisierte Koordinaten bezogen auf 640x640 Letterbox-Bild.
+    Diese muessen zurueck auf Originalbild gemappt werden.
+    """
+    # Normalisiert → Pixel im 640x640 Bild
+    px1 = x1n * target_size
+    py1 = y1n * target_size
+    px2 = x2n * target_size
+    py2 = y2n * target_size
+
+    # Padding entfernen
+    px1 = (px1 - pad_x) / scale
+    py1 = (py1 - pad_y) / scale
+    px2 = (px2 - pad_x) / scale
+    py2 = (py2 - pad_y) / scale
+
+    # Clamp auf Originalbild
+    px1 = max(0, int(px1))
+    py1 = max(0, int(py1))
+    px2 = min(orig_w, int(px2))
+    py2 = min(orig_h, int(py2))
+
+    return px1, py1, px2, py2
+
+
 # Pfade
 SNAPSHOTS_DIR = os.path.expanduser("~/moloch/snapshots")
 DAILY_DIR = "/mnt/moloch-data/daily"
@@ -223,9 +275,8 @@ class Einpraegen:
                         continue
                     fh, fw = frame.shape[:2]
 
-                    # SCRFD: 640x640 resize
-                    input_640 = cv2.resize(frame, (640, 640))
-                    input_rgb = cv2.cvtColor(input_640, cv2.COLOR_BGR2RGB)
+                    # SCRFD: Letterbox 640x640 (gleich wie TAPPAS Pipeline)
+                    input_rgb, lb_scale, lb_pad_x, lb_pad_y = _letterbox_resize(frame, 640)
                     scrfd_outputs = self._orchestrator.run("scrfd", input_rgb)
                     if not scrfd_outputs:
                         continue
@@ -237,11 +288,10 @@ class Einpraegen:
                     image_faces[img_path] = []
 
                     for (x1n, y1n, x2n, y2n, conf) in faces:
-                        # Pixel-Koordinaten im Original
-                        x1 = max(0, int(x1n * fw))
-                        y1 = max(0, int(y1n * fh))
-                        x2 = min(fw, int(x2n * fw))
-                        y2 = min(fh, int(y2n * fh))
+                        # Letterbox-Koordinaten zurueck auf Originalbild
+                        x1, y1, x2, y2 = _unletterbox_coords(
+                            x1n, y1n, x2n, y2n, 640,
+                            lb_scale, lb_pad_x, lb_pad_y, fw, fh)
                         bw, bh = x2 - x1, y2 - y1
 
                         # Mindestgroesse
@@ -338,9 +388,8 @@ class Einpraegen:
                                 continue
                             fh, fw = frame.shape[:2]
 
-                            # Pose: 640x640 resize
-                            input_640 = cv2.resize(frame, (640, 640))
-                            input_rgb = cv2.cvtColor(input_640, cv2.COLOR_BGR2RGB)
+                            # Pose: Letterbox 640x640 (gleich wie TAPPAS Pipeline)
+                            input_rgb, _, _, _ = _letterbox_resize(frame, 640)
                             pose_outputs = self._orchestrator.run("pose", input_rgb)
                             if not pose_outputs:
                                 continue

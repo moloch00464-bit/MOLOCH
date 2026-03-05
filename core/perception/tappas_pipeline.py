@@ -26,10 +26,12 @@ Nutzung:
 
 import os
 import time
+import struct
 import threading
 import logging
 from typing import List, Dict, Optional
 
+import cv2
 import numpy as np
 
 import gi
@@ -61,6 +63,11 @@ FACE_CROP_FUNC = "face_recognition"
 WHOLE_BUFFER_SO = "/usr/lib/aarch64-linux-gnu/hailo/tappas/post_processes/cropping_algorithms/libwhole_buffer.so"
 
 VDEVICE_GROUP_ID = "SHARED"
+
+# IPC: Frame-Preview fuer Panel (gleicher Weg wie InferenceEngine → IPCRouter)
+SHM_FRAME_PATH = "/dev/shm/moloch_frame"
+SHM_PREVIEW_W = 640
+SHM_PREVIEW_H = 360
 
 
 def _build_rtsp_url() -> str:
@@ -121,6 +128,9 @@ class TappasPipeline:
         self._fps_last_count = 0
         self._fps_last_time = 0.0
         self._current_fps = 0.0
+
+        # SHM IPC Sequenznummer
+        self._shm_seq = 0
 
         # GStreamer einmal initialisieren
         if not Gst.is_initialized():
@@ -480,6 +490,10 @@ class TappasPipeline:
             if frame is not None:
                 self._annotated_frame = frame
 
+        # SHM IPC: Frame fuer Panel Preview
+        if frame is not None:
+            self._write_shm_frame(frame)
+
         # FPS Tracking
         self._update_fps()
 
@@ -633,3 +647,29 @@ class TappasPipeline:
                 self._current_fps = frames / elapsed
                 self._fps_last_time = now
                 self._fps_last_count = self._frame_count
+
+    # =====================================================================
+    # SHM IPC (Panel Preview)
+    # =====================================================================
+
+    def _write_shm_frame(self, frame: np.ndarray):
+        """Frame nach /dev/shm/moloch_frame schreiben (gleicher IPC-Weg wie InferenceEngine).
+
+        Konvertiert RGB→BGR und skaliert auf Preview-Groesse.
+        """
+        try:
+            # RGB → BGR (Panel erwartet BGR)
+            bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            h, w = bgr.shape[:2]
+            if h != SHM_PREVIEW_H or w != SHM_PREVIEW_W:
+                bgr = cv2.resize(bgr, (SHM_PREVIEW_W, SHM_PREVIEW_H))
+                h, w = SHM_PREVIEW_H, SHM_PREVIEW_W
+            c = bgr.shape[2] if len(bgr.shape) > 2 else 1
+            self._shm_seq = (self._shm_seq + 1) & 0xFFFFFFFF
+            header = struct.pack('<IIII', h, w, c, self._shm_seq)
+            with open(SHM_FRAME_PATH + '.tmp', 'wb') as f:
+                f.write(header)
+                f.write(bgr.tobytes())
+            os.rename(SHM_FRAME_PATH + '.tmp', SHM_FRAME_PATH)
+        except Exception:
+            pass
