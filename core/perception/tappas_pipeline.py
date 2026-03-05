@@ -551,19 +551,10 @@ class TappasPipeline:
         pf = self._build_pframe(persons, faces, best_face_conf,
                                 best_face_bbox, face_id, face_similarity)
 
-        # Annotierten Frame extrahieren (fuer Panel-Preview)
-        frame = self._extract_frame(buffer, pad)
-
-        # Thread-safe update
+        # Thread-safe update (Frame kommt aus appsink — NACH hailooverlay)
         with self._lock:
             self._detections = detections
             self._current_pframe = pf
-            if frame is not None:
-                self._annotated_frame = frame
-
-        # SHM IPC: Frame fuer Panel Preview
-        if frame is not None:
-            self._write_shm_frame(frame)
 
         # FPS Tracking
         self._update_fps()
@@ -571,8 +562,41 @@ class TappasPipeline:
         return Gst.PadProbeReturn.OK
 
     def _on_appsink_sample(self, appsink):
-        """appsink Callback — Frames abholen damit Pipeline nicht blockiert."""
-        appsink.emit("pull-sample")
+        """appsink Callback — annotiertes Frame (MIT BBoxen von hailooverlay) extrahieren."""
+        sample = appsink.emit("pull-sample")
+        if sample is None:
+            return Gst.FlowReturn.OK
+
+        buf = sample.get_buffer()
+        caps = sample.get_caps()
+        if buf is None or caps is None:
+            return Gst.FlowReturn.OK
+
+        struct = caps.get_structure(0)
+        width = struct.get_value("width")
+        height = struct.get_value("height")
+
+        success, mapinfo = buf.map(Gst.MapFlags.READ)
+        if not success:
+            return Gst.FlowReturn.OK
+        try:
+            data = np.frombuffer(mapinfo.data, dtype=np.uint8).copy()
+        finally:
+            buf.unmap(mapinfo)
+
+        expected = width * height * 3
+        if len(data) != expected:
+            return Gst.FlowReturn.OK
+
+        frame = data.reshape(height, width, 3)
+
+        # Thread-safe: annotiertes Frame speichern
+        with self._lock:
+            self._annotated_frame = frame
+
+        # SHM IPC: Annotiertes Frame (MIT BBoxen) fuer Panel Preview
+        self._write_shm_frame(frame)
+
         return Gst.FlowReturn.OK
 
     def _on_bus_message(self, bus, message):
