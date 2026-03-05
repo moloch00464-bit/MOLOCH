@@ -47,8 +47,8 @@ def decode_scrfd(outputs: Dict[str, np.ndarray], img_size: int = 640,
 
         # Anchor-Zentren (vectorized)
         cols, rows = np.meshgrid(np.arange(W), np.arange(H))
-        cx = (cols + 0.5) * stride / img_size  # (H, W)
-        cy = (rows + 0.5) * stride / img_size
+        cx = cols * stride / img_size  # (H, W) - Hailo Standard: kein +0.5 Offset
+        cy = rows * stride / img_size
         sx = stride / img_size
         sy = stride / img_size
 

@@ -1,10 +1,10 @@
 {
   "version": 1,
   "thresholds": {
-    "scrfd_conf": 0.45,
-    "scrfd_nms": 0.4,
-    "arcface_thresh": 0.55,
-    "yolo_conf": 0.6,
+    "scrfd_conf": 0.6,
+    "scrfd_nms": 0.6,
+    "arcface_thresh": 0.65,
+    "yolo_conf": 0.5,
     "pose_conf": 0.6,
     "hand_conf": 0.65
   },
@@ -36,9 +36,9 @@
     "pose"
   ],
   "mpo": {
-    "tension_tau": 240.0,
+    "tension_tau": 100.0,
     "dominance_drift": 0.041,
-    "zone_hysteresis": 0.1,
+    "zone_hysteresis": 0.09,
     "berserker_threshold": 0.92,
     "thermal_damping_start": 61.0
   },
