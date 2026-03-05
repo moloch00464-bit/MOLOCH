@@ -308,12 +308,21 @@ class MolochService:
                     continue
                 _last_pframe_id = pf_id
 
-                # --- PerceptionEngine: NPU-Stufen-Logik ---
+                # --- PerceptionEngine: Stage-Tracking (Option C: Modelle immer aktiv) ---
                 if self._perception:
                     try:
-                        self._perception.update(pframe)
+                        ctx = {
+                            "face_detected": getattr(pframe, 'face_detected', False),
+                            "face_bbox": getattr(pframe, 'face_bbox', None),
+                            "person_detected": getattr(pframe, 'person_detected', False),
+                            "unknown_person": getattr(pframe, 'face_id', None) in (None, "unknown"),
+                            "motion_level": 0.0,
+                            "camera_moving": False,
+                        }
+                        # tick() fuer Stage-Tracking, Return ignorieren (TAPPAS = alle Modelle aktiv)
+                        self._perception.tick(ctx)
                     except Exception as e:
-                        logger.debug(f"[TAPPAS-PERC] PerceptionEngine update: {e}")
+                        logger.debug(f"[TAPPAS-PERC] PerceptionEngine tick: {e}")
 
                 # --- CoreIntegrator: Tension/Dominance Updates ---
                 if self._core_integrator:
