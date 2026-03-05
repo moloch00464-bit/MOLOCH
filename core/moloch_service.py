@@ -337,7 +337,10 @@ class MolochService:
                     except Exception as e:
                         logger.debug(f"[TAPPAS-POLL] DailyLearner: {e}")
 
-                # 4. Status-JSON aktualisieren
+                # 4. Frame-Timestamp fuer Status-JSON (CameraManager trackt das sonst)
+                self._cam._last_frame_write = time.time()
+
+                # 5. Status-JSON aktualisieren
                 self._write_status_json()
 
             except Exception as e:
@@ -425,8 +428,11 @@ class MolochService:
         # 2. Face DB (via InferenceEngine)
         self._inference.reload_face_db()
 
-        # 3. RTSP (via CameraManager)
-        self._cam.start_rtsp()
+        # 3. RTSP (via CameraManager) — NICHT bei TAPPAS (eigener rtspsrc in GStreamer)
+        if not USE_TAPPAS:
+            self._cam.start_rtsp()
+        else:
+            logger.info("[INIT] RTSP via CameraManager uebersprungen (TAPPAS hat eigenen rtspsrc)")
 
         # 4. Cloud (via CameraManager, im Hintergrund)
         threading.Thread(target=self._cam.connect_cloud, daemon=True).start()
@@ -503,7 +509,11 @@ class MolochService:
                 logger.debug(f"[START] nightVision Reset fehlgeschlagen: {e}")
         threading.Thread(target=_reset_night_vision, daemon=True, name="NightVisionReset").start()
 
-        self._cam.start_watchdog()
+        # Watchdog nur ohne TAPPAS (wuerde sonst RTSP via CameraManager neu starten)
+        if not USE_TAPPAS:
+            self._cam.start_watchdog()
+        else:
+            logger.info("[START] RTSP Watchdog uebersprungen (TAPPAS managed Stream selbst)")
 
         # Spontane Kommentare Monitor starten (CoreIntegrator-gesteuert)
         if self._voice_pipeline:
