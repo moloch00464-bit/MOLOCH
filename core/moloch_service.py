@@ -255,6 +255,96 @@ class MolochService:
         """Delegiert an InferenceEngine.sync_flags_from_npu()."""
         self._inference.sync_flags_from_npu()
 
+    # =========================================================================
+    # TAPPAS Poll-Thread (ersetzt InferenceEngine-interne Loop-Logik)
+    # =========================================================================
+
+    def _tappas_poll_loop(self):
+        """Holt PFrame von TappasPipeline und fuettert PerceptionEngine,
+        CoreIntegrator, DailyLearner, LED, Status-JSON.
+
+        Laeuft alle 50ms (20 Hz) — gleiche Kadenz wie InferenceEngine.
+        """
+        _last_pframe_ts = 0.0
+        while getattr(self, '_tappas_poll_running', False) and self.running:
+            try:
+                pframe = self._inference.get_current_pframe()
+                if pframe is None or pframe.timestamp == _last_pframe_ts:
+                    time.sleep(0.05)
+                    continue
+                _last_pframe_ts = pframe.timestamp
+
+                # 1. PerceptionBuffer fuettern
+                if self._perception_buffer:
+                    self._perception_buffer.push(pframe)
+
+                # 2. CoreIntegrator fuettern
+                if self._core_integrator:
+                    try:
+                        self._core_integrator.update_inputs("perception", {
+                            "face_detected": 1.0 if pframe.face_detected else 0.0,
+                            "face_confidence": pframe.face_confidence,
+                            "person_detected": 1.0 if pframe.person_detected else 0.0,
+                            "markus_recognized": 1.0 if pframe.markus_recognized else 0.0,
+                            "unknown_person": 1.0 if pframe.unknown_face else 0.0,
+                            "proximity": pframe.distance_ratio,
+                        })
+                        self._core_integrator.update_input(
+                            "system", "alarm_active",
+                            1.0 if self._cam._alarm_on else 0.0
+                        )
+                        # TAPPAS = 3 Modelle permanent → feste Last
+                        self._core_integrator.update_input(
+                            "system", "system_load", 0.5
+                        )
+                    except Exception:
+                        pass
+
+                # 3. DailyLearner: Snapshot bei Face-Detection
+                if (self._daily_learner and self._daily_learner.enabled
+                        and pframe.face_detected and pframe.face_id
+                        and pframe.face_confidence >= 0.65):
+                    try:
+                        frame = self._inference.get_annotated_frame()
+                        if frame is not None and pframe.face_bbox:
+                            fh, fw = frame.shape[:2]
+                            x1, y1, x2, y2 = pframe.face_bbox
+                            # Pixel-Koordinaten (BBox ist normalisiert 0-1)
+                            px1 = max(0, int(x1 * fw))
+                            py1 = max(0, int(y1 * fh))
+                            px2 = min(fw, int(x2 * fw))
+                            py2 = min(fh, int(y2 * fh))
+                            # 50% Margin
+                            bw, bh = px2 - px1, py2 - py1
+                            mx, my = int(bw * 0.5), int(bh * 0.5)
+                            px1 = max(0, px1 - mx)
+                            py1 = max(0, py1 - my)
+                            px2 = min(fw, px2 + mx)
+                            py2 = min(fh, py2 + my)
+                            crop = frame[py1:py2, px1:px2]
+                            _saved = self._daily_learner.maybe_snapshot(
+                                face_crop=crop,
+                                name=pframe.face_id,
+                                confidence=pframe.face_similarity,
+                                bbox=(float(px1), float(py1), float(px2), float(py2)),
+                                frame_height=fh,
+                                full_frame=frame,
+                            )
+                            if _saved and self._inference._learner_flash:
+                                threading.Thread(
+                                    target=self._led.flash_white, daemon=True
+                                ).start()
+                    except Exception as e:
+                        logger.debug(f"[TAPPAS-POLL] DailyLearner: {e}")
+
+                # 4. Status-JSON aktualisieren
+                self._write_status_json()
+
+            except Exception as e:
+                logger.debug(f"[TAPPAS-POLL] Fehler: {e}")
+
+            time.sleep(0.05)
+
     def toggle_model(self, model_key, enabled):
         """Thin Wrapper -> ModelOrchestrator.toggle_model()."""
         self._orchestrator.toggle_model(model_key, enabled)
@@ -367,8 +457,16 @@ class MolochService:
             self._core_integrator.start()
             logger.info("[START] CoreIntegrator 1Hz-Thread gestartet")
 
-        # Inference Loop (via InferenceEngine)
+        # Inference Loop (via InferenceEngine / TappasPipeline)
         self._inference.start()
+
+        # TAPPAS: Poll-Thread der PFrame abholt und an Perception/CoreIntegrator weitergibt
+        if USE_TAPPAS:
+            self._tappas_poll_running = True
+            threading.Thread(
+                target=self._tappas_poll_loop, daemon=True, name="TappasPoll"
+            ).start()
+            logger.info("[START] TAPPAS Poll-Thread gestartet (50ms)")
 
         # Kamera-Status + IPC Polling (via CameraManager)
         self._cam.start_cam_status_loop(write_status_callback=self._write_status_json)
@@ -469,6 +567,8 @@ class MolochService:
         logger.info("M.O.L.O.C.H. Service wird gestoppt...")
         self.running = False
         self._cam.running = False
+        if hasattr(self, '_tappas_poll_running'):
+            self._tappas_poll_running = False
         self._inference.stop()
 
         # Langzeitgedaechtnis: Core State SOFORT sichern

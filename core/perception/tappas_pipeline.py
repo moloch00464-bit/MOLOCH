@@ -132,6 +132,25 @@ class TappasPipeline:
         # SHM IPC Sequenznummer
         self._shm_seq = 0
 
+        # --- Model-Active-Flags (TAPPAS = immer aktiv, Panel liest diese) ---
+        self.scrfd_active = True
+        self.arcface_active = True
+        self.yolo_active = True
+        self.hand_active = False   # Hand-Modell nicht in TAPPAS Pipeline
+        self.pose_active = False   # Pose-Modell nicht in TAPPAS Pipeline
+
+        # --- Threshold-Werte (Panel setzt diese, TAPPAS managed intern) ---
+        self.scrfd_conf_val = 0.30
+        self.scrfd_nms_val = 0.45
+        self.arcface_thresh_val = 0.50
+        self.yolo_conf_val = 0.30
+        self.pose_conf_val = 0.30
+        self.hand_conf_val = 0.30
+
+        # --- Feature-Flags (Panel/Settings lesen/schreiben diese) ---
+        self._learner_flash = False
+        self._hand_occlusion_enabled = False
+
         # GStreamer einmal initialisieren
         if not Gst.is_initialized():
             Gst.init(None)
@@ -262,11 +281,63 @@ class TappasPipeline:
             }
 
     def reload_face_db(self, face_db: dict = None):
-        """Face-DB aktualisieren (z.B. nach neuem Embedding-Training)."""
+        """Face-DB aktualisieren.
+
+        Wenn face_db=None (Service ruft ohne Parameter auf), wird die DB
+        aus data/face_embeddings.json geladen (gleicher Weg wie InferenceEngine).
+        """
+        if face_db is None:
+            face_db = self._load_face_db_from_disk()
         with self._face_db_lock:
-            if face_db is not None:
-                self._face_db = face_db
+            self._face_db = face_db
         logger.info(f"Face-DB aktualisiert: {len(self._face_db)} Personen")
+
+    def sync_flags_from_npu(self):
+        """No-op: TAPPAS Pipeline hat alle Modelle permanent aktiv."""
+        pass
+
+    def reset_fps(self):
+        """FPS-Counter zuruecksetzen (z.B. nach Stream-Restart)."""
+        with self._fps_lock:
+            self._frame_count = 0
+            self._fps_start = time.time()
+            self._fps_last_count = 0
+            self._fps_last_time = self._fps_start
+            self._current_fps = 0.0
+
+    # =====================================================================
+    # Face-DB von Disk laden
+    # =====================================================================
+
+    def _load_face_db_from_disk(self) -> dict:
+        """Face-Embeddings aus data/face_embeddings.json laden.
+
+        Gleicher Pfad wie InferenceEngine nutzt.
+        Returns: {name: np.array} oder {} bei Fehler.
+        """
+        import json
+        embeddings_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+            "data", "face_embeddings.json"
+        )
+        if not os.path.exists(embeddings_path):
+            logger.warning(f"Face-DB nicht gefunden: {embeddings_path}")
+            return {}
+        try:
+            with open(embeddings_path, 'r') as f:
+                raw = json.load(f)
+            db = {}
+            for name, emb_list in raw.items():
+                emb = np.array(emb_list, dtype=np.float32)
+                norm = np.linalg.norm(emb)
+                if norm > 0:
+                    emb = emb / norm
+                db[name] = emb
+            logger.info(f"Face-DB von Disk geladen: {len(db)} Personen aus {embeddings_path}")
+            return db
+        except Exception as e:
+            logger.error(f"Face-DB laden fehlgeschlagen: {e}")
+            return {}
 
     # =====================================================================
     # GStreamer Pipeline String
