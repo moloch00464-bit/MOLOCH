@@ -281,6 +281,75 @@ class MolochService:
                     f"limits=[{cfg.pan_limit_min:.1f},{cfg.pan_limit_max:.1f}]")
 
     # =========================================================================
+    # TAPPAS → Tracker Feed (ersetzt InferenceEngine-interne Tracker-Aufrufe)
+    # =========================================================================
+
+    def _tappas_tracker_feed_loop(self):
+        """Pollt TAPPAS-Detections und fuettert den AutonomousTracker.
+
+        Gleiche Logik wie in InferenceEngine._inference_loop():
+        - Face hat IMMER Prioritaet (face_fed_to_tracker)
+        - BBoxen sind normalisiert (0-1) → skaliert auf 640x640 Pixel
+        - Laeuft mit ~15 Hz (alle 66ms) um Tracker nicht zu ueberlasten
+        """
+        FEED_INTERVAL = 0.066  # ~15 Hz
+        FRAME_DIM = 640  # Tracker erwartet 640x640 Referenz-Koordinaten
+
+        while self.running and self._inference.is_running():
+            try:
+                tracker = self._cam._tracker
+                if not tracker or not self._cam._autonomous_mode:
+                    time.sleep(FEED_INTERVAL)
+                    continue
+
+                detections = self._inference.get_detections()
+                if not detections:
+                    time.sleep(FEED_INTERVAL)
+                    continue
+
+                # Face/Person trennen — Face hat Prioritaet
+                face_dets = []
+                person_dets = []
+                for d in detections:
+                    cls = d.get("class", "")
+                    bbox = d.get("bbox", [0, 0, 0, 0])
+                    conf = d.get("confidence", 0)
+                    # Normalisiert → Pixel (640x640)
+                    pixel_bbox = [bbox[0] * FRAME_DIM, bbox[1] * FRAME_DIM,
+                                  bbox[2] * FRAME_DIM, bbox[3] * FRAME_DIM]
+                    entry = {"bbox": pixel_bbox, "confidence": conf, "class": cls}
+                    if cls == "face":
+                        face_dets.append(entry)
+                    elif cls == "person":
+                        person_dets.append(entry)
+
+                # Face hat Prioritaet — nur wenn keine Face, dann Person
+                if face_dets:
+                    tracker.update_detection(
+                        detections=face_dets,
+                        frame_width=FRAME_DIM, frame_height=FRAME_DIM
+                    )
+                elif person_dets:
+                    tracker.update_detection(
+                        detections=person_dets,
+                        frame_width=FRAME_DIM, frame_height=FRAME_DIM
+                    )
+
+                # Fliessender Takeover: erste Detection signalisieren
+                if self._cam._waiting_for_first_detection:
+                    self._cam._first_detection_event.set()
+                if self._cam._moloch_has_control:
+                    self._cam._last_interesting_time = time.time()
+                    self._cam._takeover_found_something = True
+
+            except Exception as e:
+                logger.debug(f"[TAPPAS] Tracker feed error: {e}")
+
+            time.sleep(FEED_INTERVAL)
+
+        logger.info("[TAPPAS] Tracker-Feed Loop beendet")
+
+    # =========================================================================
     # Lifecycle
     # =========================================================================
 
@@ -381,6 +450,10 @@ class MolochService:
                 time.sleep(3)
                 self._inference.start()
                 logger.info("[START] TAPPAS Pipeline gestartet")
+                # Tracker-Feed Thread starten (liest Detections aus Pipeline → Tracker)
+                threading.Thread(target=self._tappas_tracker_feed_loop, daemon=True,
+                                 name="TappasTrackerFeed").start()
+                logger.info("[START] TAPPAS Tracker-Feed Loop gestartet")
             threading.Thread(target=_start_tappas_delayed, daemon=True, name="TappasDelayedStart").start()
         else:
             self._inference.start()
