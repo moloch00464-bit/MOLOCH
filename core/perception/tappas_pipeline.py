@@ -142,7 +142,7 @@ class TappasPipeline:
         # --- Threshold-Werte (Panel setzt diese, TAPPAS managed intern) ---
         self.scrfd_conf_val = 0.30
         self.scrfd_nms_val = 0.45
-        self.arcface_thresh_val = 0.50
+        self.arcface_thresh_val = 0.35
         self.yolo_conf_val = 0.30
         self.pose_conf_val = 0.30
         self.hand_conf_val = 0.30
@@ -312,8 +312,9 @@ class TappasPipeline:
     def _load_face_db_from_disk(self) -> dict:
         """Face-Embeddings aus data/face_embeddings.json laden.
 
-        Gleicher Pfad wie InferenceEngine nutzt.
-        Returns: {name: np.array} oder {} bei Fehler.
+        Gruppiert nach Person (Name vor '#') und bildet Durchschnitt.
+        z.B. "Markus", "Markus#snap_1", "Markus#train_42_0" → ein Embedding fuer "Markus".
+        Returns: {person_name: np.array} oder {} bei Fehler.
         """
         import json
         embeddings_path = os.path.join(
@@ -326,14 +327,27 @@ class TappasPipeline:
         try:
             with open(embeddings_path, 'r') as f:
                 raw = json.load(f)
-            db = {}
-            for name, emb_list in raw.items():
+            # Gruppiere nach Person (Name vor '#')
+            groups = {}
+            for key, emb_list in raw.items():
+                person = key.split('#')[0].lower()
                 emb = np.array(emb_list, dtype=np.float32)
                 norm = np.linalg.norm(emb)
                 if norm > 0:
                     emb = emb / norm
-                db[name] = emb
-            logger.info(f"Face-DB von Disk geladen: {len(db)} Personen aus {embeddings_path}")
+                if person not in groups:
+                    groups[person] = []
+                groups[person].append(emb)
+            # Durchschnitt pro Person (normalisiert)
+            db = {}
+            for person, embs in groups.items():
+                mean_emb = np.mean(embs, axis=0).astype(np.float32)
+                norm = np.linalg.norm(mean_emb)
+                if norm > 0:
+                    mean_emb = mean_emb / norm
+                db[person] = mean_emb
+            total_embs = sum(len(e) for e in groups.values())
+            logger.info(f"Face-DB geladen: {len(db)} Personen aus {total_embs} Embeddings ({embeddings_path})")
             return db
         except Exception as e:
             logger.error(f"Face-DB laden fehlgeschlagen: {e}")
@@ -535,6 +549,12 @@ class TappasPipeline:
 
                     # Face-Matching gegen DB
                     matched_name, matched_sim = self._match_face(emb_data)
+                    # Temporaeres Debug-Log (alle 50 Frames)
+                    self._match_log_count = getattr(self, '_match_log_count', 0) + 1
+                    if self._match_log_count % 50 == 1:
+                        logger.info(f"[FACE-MATCH] best={matched_name} sim={matched_sim:.3f} "
+                                    f"thresh={self.arcface_thresh_val:.2f} emb_dim={len(emb_data)} "
+                                    f"db_size={len(self._face_db)}")
                     if matched_name:
                         entry["face_id"] = matched_name
                         entry["face_similarity"] = matched_sim
@@ -687,7 +707,9 @@ class TappasPipeline:
                     best_name = name
 
             if best_sim >= threshold:
+                logger.debug(f"[FACE-MATCH] {best_name} sim={best_sim:.3f} (thresh={threshold:.2f})")
                 return (best_name, best_sim)
+            logger.debug(f"[FACE-MATCH] KEIN Match: best={best_name} sim={best_sim:.3f} < thresh={threshold:.2f}")
             return (None, 0.0)
 
     # =====================================================================
