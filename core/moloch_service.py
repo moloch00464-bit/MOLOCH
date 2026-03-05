@@ -31,12 +31,18 @@ import logging
 # Moloch path
 sys.path.insert(0, os.path.expanduser("~/moloch"))
 
+# Feature-Flag: MOLOCH_USE_TAPPAS=1 → GStreamer/TAPPAS Pipeline statt InferenceEngine
+USE_TAPPAS = os.environ.get("MOLOCH_USE_TAPPAS", "0") == "1"
+
 from core.hardware.hailo_manager import get_hailo_manager
 from core.led_controller import LEDController
 from core.ipc_router import IPCRouter
 from core.model_orchestrator import ModelOrchestrator, MODEL_PATHS
 from core.camera_manager import CameraManager
-from core.inference_engine import InferenceEngine
+if USE_TAPPAS:
+    from core.perception.tappas_pipeline import TappasPipeline
+else:
+    from core.inference_engine import InferenceEngine
 from core.longterm_memory import get_memory
 from core.perception.perception_buffer import get_perception_buffer
 from core.perception.model_health import get_model_health
@@ -166,21 +172,25 @@ class MolochService:
         # IPC Router (extrahiert aus moloch_service.py, Phase 4)
         self._ipc = IPCRouter()
 
-        # InferenceEngine (NPU Pipeline + Inference Loop, Phase 4 Schritt 5)
-        self._inference = InferenceEngine(
-            orchestrator=self._orchestrator,
-            camera=self._cam,
-            led=self._led,
-            ipc=self._ipc,
-            perception=self._perception,
-            core_integrator=self._core_integrator,
-            daily_learner=self._daily_learner,
-            perception_buffer=self._perception_buffer,
-            model_health=self._model_health,
-            notify_callback=self._notify,
-            write_status_callback=self._write_status_json,
-            update_status_callback=self._update_status,
-        )
+        # NPU Pipeline (Phase 4 Schritt 5)
+        if USE_TAPPAS:
+            logger.info("[INIT] TAPPAS Pipeline (GStreamer + Model Scheduler)")
+            self._inference = TappasPipeline()
+        else:
+            self._inference = InferenceEngine(
+                orchestrator=self._orchestrator,
+                camera=self._cam,
+                led=self._led,
+                ipc=self._ipc,
+                perception=self._perception,
+                core_integrator=self._core_integrator,
+                daily_learner=self._daily_learner,
+                perception_buffer=self._perception_buffer,
+                model_health=self._model_health,
+                notify_callback=self._notify,
+                write_status_callback=self._write_status_json,
+                update_status_callback=self._update_status,
+            )
 
         # Audio-Defaults VOR _load_settings() (W4 Audit-Fix)
         self._saved_mic_gain = 1.0
