@@ -8,7 +8,7 @@ Bekommt parent_frame (LabelFrame) und ServiceProxy von panel_main.
 
 - Aufloesung waehlbar: SD 640x360, HD 800x450, HD+ 960x540, Full (960 fit)
 - Max Canvas-Groesse 960x540, groessere Aufloesungen werden eingepasst
-- 28ms Update-Intervall (35 FPS Ziel), BILINEAR Resize
+- 33ms Update-Intervall (30 FPS Ziel), BILINEAR Resize
 - Frame-Skip wenn Verarbeitung laenger als 28ms dauert
 - BGR->RGB Konvertierung, Resize auf gewaehlte Preview-Groesse
 - FPS-Zaehler oben rechts als gelbes Overlay
@@ -41,8 +41,8 @@ RESOLUTIONS = [
 MAX_CANVAS_W = 960
 MAX_CANVAS_H = 540
 
-# Festes Update-Intervall: 100ms = 10 FPS Ziel (Gate0 Phase 9: CPU unter 15%)
-UPDATE_INTERVAL_MS = 100
+# Festes Update-Intervall: 33ms = 30 FPS Ziel (Gate1: Preview-Latenz unter 100ms)
+UPDATE_INTERVAL_MS = 33
 
 
 class PreviewModule:

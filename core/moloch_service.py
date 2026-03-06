@@ -534,6 +534,17 @@ class MolochService:
             self._music_vis = None
             logger.warning(f"[INIT] MusicVisualizer nicht verfuegbar: {e}")
 
+        # 6. Spotify Bridge (Track-Info + Audio Features → Event Bus)
+        self._spotify_bridge = None
+        try:
+            from core.music.spotify_bridge import get_spotify_bridge
+            self._spotify_bridge = get_spotify_bridge()
+            self._spotify_bridge.start()
+            logger.info("[INIT] SpotifyBridge gestartet")
+        except Exception as e:
+            self._spotify_bridge = None
+            logger.warning(f"[INIT] SpotifyBridge nicht verfuegbar: {e}")
+
         self._update_status("M.O.L.O.C.H. Service bereit")
 
     def start(self, blocking=True):
@@ -548,6 +559,30 @@ class MolochService:
         if self._core_integrator:
             self._core_integrator.start()
             logger.info("[START] CoreIntegrator 1Hz-Thread gestartet")
+
+        # Spotify Bridge Events → CoreIntegrator (Musik beeinflusst Tension)
+        if self._spotify_bridge and self._core_integrator:
+            try:
+                from core.moloch_event_bus import get_event_bus
+                bus = get_event_bus()
+
+                def _on_music_mood(event):
+                    mood = event.get("payload", {}).get("mood", "neutral")
+                    if mood in ("aggressive", "dark"):
+                        self._core_integrator.feed_event("unknown_person", 0.05)
+                    elif mood in ("euphoric", "neutral"):
+                        self._core_integrator.feed_event("markus_recognized", 0.05)
+
+                def _on_music_features(event):
+                    energy = event.get("payload", {}).get("features", {}).get("energy", 0.0)
+                    if energy > 0.8:
+                        self._core_integrator.feed_event("unknown_person", 0.03)
+
+                bus.subscribe("music_mood_changed", _on_music_mood)
+                bus.subscribe("music_features_received", _on_music_features)
+                logger.info("[START] Spotify Bridge Events → CoreIntegrator registriert")
+            except Exception as e:
+                logger.warning(f"[START] Spotify Bridge Event-Subscriber fehlgeschlagen: {e}")
 
         # Inference Loop — bei TAPPAS mit 3s Delay (ONVIF muss zuerst verbinden fuer PTZ)
         if USE_TAPPAS:
@@ -779,6 +814,14 @@ class MolochService:
             try:
                 self._music_vis.stop()
                 logger.info("[STOP] MusicVisualizer gestoppt")
+            except Exception:
+                pass
+
+        # SpotifyBridge stoppen
+        if hasattr(self, '_spotify_bridge') and self._spotify_bridge:
+            try:
+                self._spotify_bridge.stop()
+                logger.info("[STOP] SpotifyBridge gestoppt")
             except Exception:
                 pass
 
