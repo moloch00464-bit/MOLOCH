@@ -264,9 +264,9 @@ class EwelinkModule:
         led_on = status.get("led_markus_on", False)
         led_mode = status.get("led_personality_mode", "guardian")
 
-        # Face-ID Name + Score aus Status lesen
+        # Face-ID Name + ArcFace Similarity aus Status lesen
         face_id = status.get("face_id", "")
-        face_conf = status.get("face_confidence", 0.0)
+        face_sim = status.get("face_similarity", 0.0)
         face_detected = status.get("face_detected", False)
 
         if led_on != self._erkannt_led_on or led_mode != self._erkannt_mode:
@@ -274,11 +274,11 @@ class EwelinkModule:
             self._erkannt_mode = led_mode
             self._update_erkannt_button()
 
-        # Label unter ERKANNT: Face-ID Name + Score
+        # Label unter ERKANNT: Face-ID Name + ArcFace Similarity
         if face_id and face_detected:
             self._lbl_erkannt.config(
-                text=f"{face_id} ({face_conf:.2f})",
-                fg=ACCENT_CYAN if face_conf > 0.6 else "#ffcc00",
+                text=f"{face_id} ({face_sim:.0%})",
+                fg=ACCENT_CYAN if face_sim > 0.5 else "#ffcc00",
             )
         elif face_detected:
             self._lbl_erkannt.config(text="unbekannt", fg="#ffcc00")

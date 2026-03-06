@@ -263,15 +263,15 @@ class SystemStatusModule:
         dec = bridge.get("decisions", 0)
         self._lbl_bridge_decisions.config(text=f"Dec: {dec}")
 
-        # Face-ID + Confidence
+        # Face-ID + ArcFace Similarity
         face_id = status.get("face_id", "")
-        face_conf = status.get("face_confidence", 0.0)
+        face_sim = status.get("face_similarity", 0.0)
         face_detected = status.get("face_detected", False)
 
         if face_id and face_detected:
             self._lbl_face_id.config(
-                text=f"{face_id} ({face_conf:.2f})",
-                fg=ACCENT_CYAN if face_conf > 0.6 else STATUS_YELLOW,
+                text=f"{face_id} ({face_sim:.0%})",
+                fg=ACCENT_CYAN if face_sim > 0.5 else STATUS_YELLOW,
             )
         elif face_detected:
             self._lbl_face_id.config(text="unbekannt", fg=STATUS_YELLOW)

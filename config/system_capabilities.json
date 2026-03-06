@@ -1,122 +1,370 @@
 {
-  "_meta": {
-    "description": "M.O.L.O.C.H. System Capabilities — Was Moloch kann",
-    "generated": "2026-03-06",
-    "version": "1.0"
+  "version": 1,
+  "generated": "2026-03-06T18:30:49",
+  "generation_ms": 2319.2,
+  "summary": {
+    "core_modules": "38/38",
+    "external_deps": "11/11",
+    "hef_models": "4/4",
+    "voice_models": 8,
+    "tappas_active": true
   },
-
-  "vision_models": [
-    {"name": "yolov8m_h10", "task": "person_detection", "input": "640x640", "size_mb": 21, "active": true},
-    {"name": "scrfd_10g", "task": "face_detection", "input": "640x640", "size_mb": 5.8, "active": true},
-    {"name": "arcface_mobilefacenet", "task": "face_recognition", "input": "112x112", "size_mb": 2.6, "active": true},
-    {"name": "yolov8s_pose_h10", "task": "pose_estimation", "input": "640x640", "size_mb": 14, "active": true},
-    {"name": "yolov8m_pose_h10", "task": "pose_estimation", "input": "640x640", "size_mb": 28, "active": false},
-    {"name": "yolov11m_h10", "task": "object_detection", "input": "640x640", "size_mb": 27, "active": false},
-    {"name": "yolov5n_seg_h10", "task": "segmentation", "input": "640x640", "size_mb": 3.4, "active": false},
-    {"name": "face_attr_resnet_v1_18", "task": "face_attributes", "input": "224x224", "size_mb": 6.6, "active": false},
-    {"name": "hand_landmark_lite", "task": "hand_tracking", "input": "224x224", "size_mb": 1.3, "active": false},
-    {"name": "resnet_v1_50_h10", "task": "classification", "input": "224x224", "size_mb": 23, "active": false}
-  ],
-
-  "hardware": {
-    "brain": {"device": "Raspberry Pi 5", "ram_gb": 4, "ip": "192.168.178.24"},
-    "npu": {"device": "Hailo-10H", "tops": 40, "ram_gb": 8, "interface": "PCIe Gen3 x4"},
-    "camera": {"device": "Sonoff CAM-PT2", "ip": "192.168.178.25", "resolution": "1920x1080", "fps": 20, "protocols": ["RTSP", "ONVIF"], "ptz": true},
-    "audio_input": ["SmartMic BT", "ReSpeaker Lite USB"],
-    "audio_output": "HDMI-1 via PipeWire",
-    "storage": [
-      {"mount": "/home/molochzuhause/moloch", "fs": "ext4", "size_gb": 465, "role": "Code + Configs"},
-      {"mount": "/mnt/moloch-data", "fs": "NTFS", "size_gb": 477, "role": "AI-Modelle + Qdrant DB"}
-    ]
-  },
-
-  "abilities": {
-    "sehen": {
-      "person_erkennen": true,
-      "gesicht_erkennen": true,
-      "besitzer_identifizieren": true,
-      "pose_schaetzen": true,
-      "hand_tracking": false,
-      "segmentierung": false
+  "gates": {
+    "gate_0": {
+      "name": "Vier Inseln",
+      "date": "2026-03-01",
+      "status": "PASS",
+      "modules_total": 12,
+      "modules_available": 12,
+      "ready": true
     },
-    "hoeren": {
-      "sprache_zu_text": true,
-      "engine": "hailo_whisper",
-      "sprache": "de"
+    "gate_0.5": {
+      "name": "TAPPAS Pipeline",
+      "date": "2026-03-05",
+      "status": "PASS",
+      "modules_total": 7,
+      "modules_available": 7,
+      "ready": true
     },
-    "sprechen": {
-      "tts": true,
-      "engine": "piper",
-      "stimmen": [
-        "eva_k-x_low", "karlsson-low", "kerstin-low",
-        "pavoque-low", "ramona-low",
-        "thorsten-high", "thorsten-medium", "thorsten-low"
-      ]
+    "gate_1": {
+      "name": "Action Bridge + Autonomie",
+      "date": "2026-03-06",
+      "status": "AKTIV",
+      "modules_total": 14,
+      "modules_available": 14,
+      "ready": true
     },
-    "bewegen": {
-      "ptz_steuerung": true,
-      "tracking": true,
-      "suchverhalten": true,
-      "park_position": true
-    },
-    "musik": {
-      "spotify_playback": true,
-      "emotionale_musikwahl": true,
-      "track_index_artists": 4941,
-      "track_index_tracks": 24454
-    },
-    "gedaechtnis": {
-      "episodisch": true,
-      "langzeit": true,
-      "personen_reid": true,
-      "musik_assoziationen": true,
-      "vektor_db": "qdrant"
-    },
-    "selbststeuerung": {
-      "entscheidungen": true,
-      "atmosphaere": true,
-      "selbstueberwachung": true,
-      "nachtverarbeitung": true
+    "gate_2": {
+      "name": "Identity (ReID + Qdrant)",
+      "date": null,
+      "status": "GEPLANT",
+      "modules_total": 5,
+      "modules_available": 5,
+      "ready": true
     }
   },
-
-  "gates": {
-    "gate_0":   {"name": "Vier Inseln verdrahtet", "status": "PASS", "date": "2026-03-01"},
-    "gate_0_5": {"name": "TAPPAS Pipeline", "status": "PASS", "date": "2026-03-05"},
-    "gate_1":   {"name": "Action Bridge + Tracking", "status": "AKTIV", "date": "2026-03-06"},
-    "gate_2":   {"name": "Identity (ReID + Qdrant)", "status": "GEPLANT"},
-    "gate_3":   {"name": "Awareness (Timing/Behaviour)", "status": "GEPLANT"},
-    "gate_4":   {"name": "Personality (Tension/Mood)", "status": "GEPLANT"},
-    "gate_5":   {"name": "Night Cycle (Dreaming)", "status": "GEPLANT"}
+  "feature_flags": {
+    "MOLOCH_USE_TAPPAS": true,
+    "MOLOCH_CAMERA_HOST": "192.168.178.25",
+    "MOLOCH_RTSP_URL_SET": true
   },
-
-  "modules": {
-    "core": [
-      "action_bridge", "moloch_event_bus", "moloch_service", "core_integrator",
-      "perception_engine", "ptz_tracker", "ptz_arbiter", "arbitration",
-      "camera_manager", "led_controller", "spotify_controller",
-      "voice_pipeline", "tts", "moloch_sprache", "keyword_handler",
-      "daily_learner", "longterm_memory", "ipc_router", "status",
-      "inference_engine", "model_orchestrator", "calibration_engine",
-      "dashboard", "timeline", "eye_viewer", "einpraegen",
-      "environment_watcher", "cloud_controller"
-    ],
-    "awareness": ["room_map", "motion_analyzer", "activity_analyzer", "context_evaluator"],
-    "personality": ["tension_integrator", "mood_engine", "behavior_rules", "personality_engine"],
-    "autonomy": ["decision_engine", "atmosphere_controller", "homeostasis", "night_cycle"],
-    "memory": ["episodic_memory", "persistent_memory", "person_reid", "vector_memory"],
-    "music": ["spotify_bridge", "music_memory"],
-    "perception": ["tappas_pipeline", "perception_buffer", "perception_frame", "perception_manager", "hailo_postprocess", "spatial_learning", "model_health"],
-    "hardware": ["camera", "hailo_manager", "thermal_manager", "camera_cloud_bridge", "ptz_calibration"],
-    "speech": ["hailo_whisper", "audio_pipeline"]
+  "hardware": {
+    "ram_gb": 3.9,
+    "cpu_model": "Raspberry Pi 5 Model B Rev 1.1",
+    "hailo_device": true,
+    "ssd1_code": {
+      "total_gb": 457.9,
+      "free_gb": 410.1
+    },
+    "ssd2_data": {
+      "total_gb": 476.9,
+      "free_gb": 459.6
+    }
   },
-
-  "pipeline": {
-    "type": "TAPPAS/GStreamer",
-    "feature_flag": "MOLOCH_USE_TAPPAS=1",
-    "fps": 20,
-    "ram_mb": 200,
-    "active_models": ["yolov8m_h10", "scrfd_10g", "arcface_mobilefacenet", "yolov8s_pose_h10"],
-    "scheduling": "vdevice-group-id=SHARED"
-  }
+  "core_modules": {
+    "core.moloch_service": {
+      "available": true,
+      "gate": "0",
+      "description": "Service-Kern"
+    },
+    "core.camera_manager": {
+      "available": true,
+      "gate": "0",
+      "description": "ONVIF/RTSP Kamera"
+    },
+    "core.ptz_tracker": {
+      "available": true,
+      "gate": "0",
+      "description": "PTZ Tracker"
+    },
+    "core.ptz_arbiter": {
+      "available": true,
+      "gate": "0",
+      "description": "PTZ Arbiter (Auto/Manuell)"
+    },
+    "core.perception_engine": {
+      "available": true,
+      "gate": "0",
+      "description": "Perception Stage Machine"
+    },
+    "core.model_orchestrator": {
+      "available": true,
+      "gate": "0",
+      "description": "Model Scheduling (legacy)"
+    },
+    "core.inference_engine": {
+      "available": true,
+      "gate": "0",
+      "description": "NPU Inference (legacy)"
+    },
+    "core.led_controller": {
+      "available": true,
+      "gate": "0",
+      "description": "eWeLink LED"
+    },
+    "core.voice_pipeline": {
+      "available": true,
+      "gate": "0",
+      "description": "Voice Pipeline"
+    },
+    "core.longterm_memory": {
+      "available": true,
+      "gate": "0",
+      "description": "Langzeitgedaechtnis"
+    },
+    "core.ipc_router": {
+      "available": true,
+      "gate": "0",
+      "description": "Service/Panel IPC"
+    },
+    "core.core_integrator": {
+      "available": true,
+      "gate": "0",
+      "description": "Tension/Dominance Core"
+    },
+    "core.perception.tappas_pipeline": {
+      "available": true,
+      "gate": "0.5",
+      "description": "GStreamer TAPPAS Pipeline"
+    },
+    "core.perception.perception_frame": {
+      "available": true,
+      "gate": "0.5",
+      "description": "PFrame Datenstruktur"
+    },
+    "core.perception.perception_buffer": {
+      "available": true,
+      "gate": "0.5",
+      "description": "PFrame Ring-Buffer"
+    },
+    "core.perception.hailo_postprocess": {
+      "available": true,
+      "gate": "0.5",
+      "description": "TAPPAS Postprocessing"
+    },
+    "core.perception.perception_manager": {
+      "available": true,
+      "gate": "0.5",
+      "description": "Perception Manager"
+    },
+    "core.perception.model_health": {
+      "available": true,
+      "gate": "0.5",
+      "description": "NPU Health Monitor"
+    },
+    "core.speech.hailo_whisper": {
+      "available": true,
+      "gate": "0.5",
+      "description": "Hailo Whisper (shared VDevice)"
+    },
+    "core.action_bridge": {
+      "available": true,
+      "gate": "1",
+      "description": "Action Bridge FSM"
+    },
+    "core.moloch_event_bus": {
+      "available": true,
+      "gate": "1",
+      "description": "Priority Event Bus"
+    },
+    "core.capability_monitor": {
+      "available": true,
+      "gate": "1",
+      "description": "System Capability Monitor"
+    },
+    "core.keyword_handler": {
+      "available": true,
+      "gate": "1",
+      "description": "Sprach-Keyword Triggers"
+    },
+    "core.autonomy.decision_engine": {
+      "available": true,
+      "gate": "1",
+      "description": "Decision Engine"
+    },
+    "core.autonomy.atmosphere_controller": {
+      "available": true,
+      "gate": "1",
+      "description": "Atmosphaeren-Controller"
+    },
+    "core.autonomy.homeostasis": {
+      "available": true,
+      "gate": "1",
+      "description": "Selbstregulation"
+    },
+    "core.awareness.room_map": {
+      "available": true,
+      "gate": "1",
+      "description": "Raum-Kartierung"
+    },
+    "core.awareness.motion_analyzer": {
+      "available": true,
+      "gate": "1",
+      "description": "Bewegungs-Analyse"
+    },
+    "core.awareness.activity_analyzer": {
+      "available": true,
+      "gate": "1",
+      "description": "Aktivitaets-Klassifikation"
+    },
+    "core.awareness.context_evaluator": {
+      "available": true,
+      "gate": "1",
+      "description": "Kontext-Evaluator"
+    },
+    "core.personality.mood_engine": {
+      "available": true,
+      "gate": "1",
+      "description": "Mood Engine"
+    },
+    "core.personality.personality_engine": {
+      "available": true,
+      "gate": "1",
+      "description": "Personality Engine"
+    },
+    "core.personality.behavior_rules": {
+      "available": true,
+      "gate": "1",
+      "description": "Behavior Rules"
+    },
+    "core.memory.episodic_memory": {
+      "available": true,
+      "gate": "2",
+      "description": "Episodisches Gedaechtnis (Qdrant)"
+    },
+    "core.memory.vector_memory": {
+      "available": true,
+      "gate": "2",
+      "description": "Semantisches Vector Memory"
+    },
+    "core.memory.person_reid": {
+      "available": true,
+      "gate": "2",
+      "description": "Person ReID"
+    },
+    "core.daily_learner": {
+      "available": true,
+      "gate": "2",
+      "description": "Daily Learner"
+    },
+    "core.einpraegen": {
+      "available": true,
+      "gate": "2",
+      "description": "Batch Enrollment"
+    }
+  },
+  "external_dependencies": {
+    "hailo": {
+      "available": true,
+      "description": "Hailo NPU SDK"
+    },
+    "gi": {
+      "available": true,
+      "description": "GObject Introspection"
+    },
+    "cv2": {
+      "available": true,
+      "description": "OpenCV"
+    },
+    "numpy": {
+      "available": true,
+      "description": "NumPy"
+    },
+    "PIL": {
+      "available": true,
+      "description": "Pillow"
+    },
+    "tkinter": {
+      "available": true,
+      "description": "Tkinter GUI"
+    },
+    "pygame": {
+      "available": true,
+      "description": "PyGame"
+    },
+    "spotipy": {
+      "available": true,
+      "description": "Spotify API"
+    },
+    "qdrant_client": {
+      "available": true,
+      "description": "Qdrant Vector DB"
+    },
+    "piper": {
+      "available": true,
+      "description": "Piper TTS"
+    },
+    "rich": {
+      "available": true,
+      "description": "Rich TUI"
+    }
+  },
+  "npu_models": [
+    {
+      "name": "yolov8m_h10",
+      "file": "yolov8m_h10.hef",
+      "description": "Person Detection",
+      "exists": true,
+      "active_in_pipeline": true,
+      "size_mb": 20.8
+    },
+    {
+      "name": "scrfd_10g",
+      "file": "scrfd_10g.hef",
+      "description": "Face Detection",
+      "exists": true,
+      "active_in_pipeline": true,
+      "size_mb": 5.8
+    },
+    {
+      "name": "arcface_mobilefacenet",
+      "file": "arcface_mobilefacenet.hef",
+      "description": "Face Recognition",
+      "exists": true,
+      "active_in_pipeline": true,
+      "size_mb": 2.5
+    },
+    {
+      "name": "yolov8s_pose_h10",
+      "file": "yolov8s_pose_h10.hef",
+      "description": "Pose Estimation",
+      "exists": true,
+      "active_in_pipeline": false,
+      "size_mb": 13.0
+    }
+  ],
+  "voice_models": [
+    {
+      "name": "de_DE-eva_k-x_low",
+      "has_config": true
+    },
+    {
+      "name": "de_DE-karlsson-low",
+      "has_config": true
+    },
+    {
+      "name": "de_DE-kerstin-low",
+      "has_config": true
+    },
+    {
+      "name": "de_DE-pavoque-low",
+      "has_config": true
+    },
+    {
+      "name": "de_DE-ramona-low",
+      "has_config": true
+    },
+    {
+      "name": "de_DE-thorsten-high",
+      "has_config": true
+    },
+    {
+      "name": "de_DE-thorsten-low",
+      "has_config": true
+    },
+    {
+      "name": "de_DE-thorsten-medium",
+      "has_config": true
+    }
+  ]
 }

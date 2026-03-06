@@ -1379,6 +1379,7 @@ class MolochService:
                     status["face_detected"] = getattr(pframe, 'face_detected', False)
                     status["face_id"] = getattr(pframe, 'face_id', None)
                     status["face_confidence"] = round(getattr(pframe, 'face_confidence', 0.0), 3)
+                    status["face_similarity"] = round(getattr(pframe, 'face_similarity', 0.0), 3)
                     status["mode"] = "tappas"
 
             # Einpraegen Status

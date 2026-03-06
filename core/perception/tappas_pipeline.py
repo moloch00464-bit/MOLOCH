@@ -710,12 +710,13 @@ class TappasPipeline:
 
                     # Face-Matching gegen DB
                     matched_name, matched_sim = self._match_face(emb_data)
-                    # Temporaeres Debug-Log (alle 50 Frames)
+                    # Debug-Log (alle 50 Frames): SCRFD-Score vs ArcFace-Similarity klar trennen
                     self._match_log_count = getattr(self, '_match_log_count', 0) + 1
                     if self._match_log_count % 50 == 1:
-                        logger.info(f"[FACE-MATCH] best={matched_name} sim={matched_sim:.3f} "
-                                    f"thresh={self.arcface_thresh_val:.2f} emb_dim={len(emb_data)} "
-                                    f"db_size={len(self._face_db)}")
+                        logger.info(f"[FACE-MATCH] SCRFD={conf:.3f} ArcFace={matched_sim:.3f} "
+                                    f"thresh={self.arcface_thresh_val:.2f} → "
+                                    f"{'✓ ' + matched_name if matched_name else '✗ kein Match'} "
+                                    f"(db={len(self._face_db)} emb={len(emb_data)})")
                     if matched_name:
                         entry["face_id"] = matched_name
                         entry["face_similarity"] = matched_sim

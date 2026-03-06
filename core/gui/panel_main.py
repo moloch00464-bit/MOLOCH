@@ -600,11 +600,11 @@ class MolochPanel:
             bridge = status.get("bridge", {})
             bridge_state = bridge.get("state", "?")
             face_id = status.get("face_id", "")
-            face_conf = status.get("face_confidence", 0.0)
+            face_sim = status.get("face_similarity", 0.0)
             zone = status.get("core", {}).get("zone", "")
             tension = status.get("core", {}).get("tension", 0.0)
 
-            face_str = f"{face_id}({face_conf:.2f})" if face_id else "---"
+            face_str = f"{face_id}({face_sim:.0%})" if face_id else "---"
             zone_str = zone.upper() if zone else "?"
 
             self.status_bar.config(
