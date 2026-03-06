@@ -90,6 +90,24 @@
             ]
         },
         {
+            "id": "diagnostics",
+            "description": "Systemdiagnose ausfuehren — Moloch prueft seinen eigenen Zustand",
+            "action": "diagnostics",
+            "response": "",
+            "keywords": [
+                "diagnose",
+                "systemcheck",
+                "systemstatus",
+                "selbstcheck",
+                "wie geht es dir",
+                "wie gehts dir",
+                "wie geht's dir",
+                "alles okay bei dir",
+                "status report",
+                "gesundheitscheck"
+            ]
+        },
+        {
             "id": "enrollment",
             "description": "Face-Enrollment starten — Name wird aus Text extrahiert",
             "action": "enrollment_start",

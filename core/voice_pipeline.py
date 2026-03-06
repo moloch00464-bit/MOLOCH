@@ -201,7 +201,26 @@ def _get_hardware_status() -> str:
 
     if not parts:
         return ""
-    return "\n--- DEINE HARDWARE (live) ---\n" + ", ".join(parts)
+    result = "\n--- DEINE HARDWARE (live) ---\n" + ", ".join(parts)
+
+    # Diagnose-Warnungen anhaengen (fuer kontextbezogene Antworten)
+    try:
+        from core.diagnostics import self_diagnose, collect_diagnostics
+        diag = collect_diagnostics()
+        warnungen = self_diagnose()
+        extras = []
+        extras.append(f"Tension: {diag.get('tension', 0):.2f}")
+        extras.append(f"Stimmung: {diag.get('mood', 'neutral')}")
+        extras.append(f"Bridge: {diag.get('bridge_state', '?')}")
+        if diag.get("face_id"):
+            extras.append(f"Gesicht: {diag['face_id']}")
+        result += "\n" + ", ".join(extras)
+        if warnungen:
+            result += "\nWARNUNGEN: " + "; ".join(warnungen)
+    except Exception:
+        pass
+
+    return result
 
 
 def _load_capabilities_block() -> str:

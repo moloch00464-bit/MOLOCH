@@ -111,6 +111,8 @@ class KeywordHandler:
             return self._action_alarm(False, response)
         elif action == "enrollment_start":
             return self._action_enrollment(text, response)
+        elif action == "diagnostics":
+            return self._action_diagnostics()
         else:
             logger.warning(f"[KEYWORD] Unbekannte Aktion: {action}")
             return None
@@ -209,6 +211,15 @@ class KeywordHandler:
             return m.group(1)
 
         return "unbekannt"
+
+    def _action_diagnostics(self) -> str:
+        """Selbstdiagnose ausfuehren und Ergebnis als Text zurueckgeben."""
+        try:
+            from core.diagnostics import get_diagnostics_text
+            return get_diagnostics_text()
+        except Exception as e:
+            logger.error(f"[KEYWORD] Diagnostics fehlgeschlagen: {e}")
+            return "Diagnose konnte nicht ausgefuehrt werden."
 
     # =========================================================================
     # IPC Helper

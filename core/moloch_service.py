@@ -1038,6 +1038,14 @@ class MolochService:
             self._homeostasis.start()
             logger.info("[START] Homeostasis Monitoring gestartet")
 
+        # Diagnostics HTTP-Server starten (Port 5000)
+        try:
+            from core.diagnostics import start_diagnostics_server
+            start_diagnostics_server(port=5000)
+            logger.info("[START] Diagnostics HTTP-Server auf Port 5000")
+        except Exception as e:
+            logger.warning(f"[START] Diagnostics Server fehlgeschlagen: {e}")
+
         # Night Cycle: Background-Thread starten
         if self._night_cycle:
             self._night_cycle.start()
@@ -1304,6 +1312,13 @@ class MolochService:
                 logger.info("[STOP] SpotifyBridge gestoppt")
             except Exception:
                 pass
+
+        # Diagnostics HTTP-Server stoppen
+        try:
+            from core.diagnostics import stop_diagnostics_server
+            stop_diagnostics_server()
+        except Exception:
+            pass
 
         # Autonomy Module stoppen (Gate 5)
         if hasattr(self, '_homeostasis') and self._homeostasis:
