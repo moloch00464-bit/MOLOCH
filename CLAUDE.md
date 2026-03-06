@@ -210,6 +210,7 @@ REGELN: 1 Datei = 1 Aufgabe. Nur ServiceProxy/IPC. Panel_styles.py NIE ändern (
 8. Deploy & Verify: Nach Reboot prüfen ob Service läuft.
 9. Regressionstest: python3 ~/moloch/moloch_audit.py --auto
 10. KEIN Weitermachen bei FAIL.
+11. ArcFace Enrollment NUR über Live-Pipeline (IPC `enrollment_start`), NIEMALS über Offline-Scripts. HailoRT-direkt und GStreamer-hailonet produzieren inkompatible Embeddings.
 
 ---
 
