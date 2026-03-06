@@ -48,6 +48,7 @@ from core.perception.perception_buffer import get_perception_buffer
 from core.perception.model_health import get_model_health
 from core.ptz_tracker import get_ptz_tracker
 from core.memory.episodic_memory import get_episodic_memory
+from core.music.music_memory import get_music_memory
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger("MolochService")
@@ -661,6 +662,46 @@ class MolochService:
                 logger.info("[START] Spotify Bridge Events → CoreIntegrator registriert")
             except Exception as e:
                 logger.warning(f"[START] Spotify Bridge Event-Subscriber fehlgeschlagen: {e}")
+
+        # Music Memory: Track-Person-Mood Assoziationen speichern
+        if self._spotify_bridge:
+            try:
+                from core.moloch_event_bus import get_event_bus
+                bus = get_event_bus()
+                self._last_music_mood = None
+
+                def _on_mood_for_memory(event):
+                    self._last_music_mood = event.get("payload", {}).get("mood")
+
+                def _on_track_for_memory(event):
+                    payload = event.get("payload", {})
+                    track_id = payload.get("uri", "")
+                    track_name = f"{payload.get('artist', '?')} - {payload.get('track', '?')}"
+                    # Aktuelle Person aus letztem PFrame
+                    face_id = None
+                    tension = None
+                    try:
+                        pframe = self._inference.get_current_pframe() if self._inference else None
+                        if pframe:
+                            face_id = getattr(pframe, 'face_id', None)
+                    except Exception:
+                        pass
+                    if self._core_integrator:
+                        tension = getattr(self._core_integrator, 'tension', None)
+                    if face_id and face_id != "unknown":
+                        get_music_memory().store_association(
+                            track_id=track_id,
+                            track_name=track_name,
+                            person=face_id,
+                            mood=self._last_music_mood,
+                            tension=tension,
+                        )
+
+                bus.subscribe("music_mood_changed", _on_mood_for_memory)
+                bus.subscribe("music_track_started", _on_track_for_memory)
+                logger.info("[START] Music Memory Events registriert")
+            except Exception as e:
+                logger.warning(f"[START] Music Memory Event-Subscriber fehlgeschlagen: {e}")
 
         # Inference Loop — bei TAPPAS mit 3s Delay (ONVIF muss zuerst verbinden fuer PTZ)
         if USE_TAPPAS:
