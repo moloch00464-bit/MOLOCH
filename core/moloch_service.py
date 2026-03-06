@@ -57,6 +57,10 @@ from core.personality.tension_integrator import get_tension_integrator
 from core.personality.mood_engine import get_mood_engine
 from core.personality.behavior_rules import get_behavior_rules
 from core.debug.event_logger import log_event
+from core.autonomy.decision_engine import get_decision_engine
+from core.autonomy.atmosphere_controller import get_atmosphere_controller
+from core.autonomy.homeostasis import get_homeostasis
+from core.autonomy.night_cycle import get_night_cycle
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger("MolochService")
@@ -517,6 +521,59 @@ class MolochService:
                     except Exception as e:
                         logger.debug(f"[TAPPAS-PERC] MoodEngine: {e}")
 
+                # --- Decision Engine + Atmosphere: Signale updaten ---
+                if self._decision_engine:
+                    try:
+                        _de_tension = 0.0
+                        _de_dominance = 0.0
+                        _de_alertness = 0.0
+                        _de_engagement = 0.0
+                        _de_context_score = 0.0
+                        if self._core_integrator:
+                            _de_tension = self._core_integrator.get_tension()
+                            _de_dominance = self._core_integrator.get_dominance()
+                        if self._context_evaluator:
+                            _ce_state = self._context_evaluator.get_state()
+                            _de_alertness = _ce_state.get("alertness", 0.0)
+                            _de_engagement = _ce_state.get("engagement", 0.0)
+                            _de_context_score = _ce_state.get("score", 0.0)
+                        self._decision_engine.update_signals(
+                            mood=self._mood_engine.current_mood if self._mood_engine else "calm",
+                            tension=_de_tension,
+                            dominance=_de_dominance,
+                            activity=self._activity_analyzer.current_activity if self._activity_analyzer else "away",
+                            zone=self._room_map.current_zone if self._room_map else None,
+                            face_id=getattr(pframe, 'face_id', None),
+                            music_energy=getattr(self, '_last_awareness_music_energy', 0.0),
+                            context_score=_de_context_score,
+                            alertness=_de_alertness,
+                            engagement=_de_engagement,
+                            music_playing=getattr(self, '_last_awareness_music_energy', 0.0) > 0.01,
+                        )
+                        self._decision_engine.decide()
+                    except Exception as e:
+                        logger.debug(f"[TAPPAS-PERC] DecisionEngine: {e}")
+
+                # --- Atmosphere Controller: Tageszeit + Face updaten ---
+                if self._atmosphere:
+                    try:
+                        self._atmosphere.update_signals(
+                            hour=time.localtime().tm_hour,
+                            face_id=getattr(pframe, 'face_id', None),
+                        )
+                    except Exception as e:
+                        logger.debug(f"[TAPPAS-PERC] Atmosphere: {e}")
+
+                # --- Homeostasis: FPS-Wert updaten ---
+                if self._homeostasis:
+                    try:
+                        fps = self._inference.get_fps() if hasattr(self._inference, 'get_fps') else 20.0
+                        if isinstance(fps, dict):
+                            fps = fps.get("current", 20.0)
+                        self._homeostasis.set_fps(fps)
+                    except Exception as e:
+                        logger.debug(f"[TAPPAS-PERC] Homeostasis FPS: {e}")
+
             except Exception as e:
                 logger.debug(f"[TAPPAS-PERC] Loop error: {e}")
 
@@ -739,6 +796,20 @@ class MolochService:
         except Exception as e:
             logger.warning(f"[INIT] Emergent Personality nicht verfuegbar: {e}")
 
+        # 11. Autonomy (Gate 5: Decision Engine + Atmosphere + Homeostasis + Night Cycle)
+        self._decision_engine = None
+        self._atmosphere = None
+        self._homeostasis = None
+        self._night_cycle = None
+        try:
+            self._decision_engine = get_decision_engine()
+            self._atmosphere = get_atmosphere_controller()
+            self._homeostasis = get_homeostasis()
+            self._night_cycle = get_night_cycle()
+            logger.info("[INIT] Autonomy Module bereit (Decision/Atmosphere/Homeostasis/NightCycle)")
+        except Exception as e:
+            logger.warning(f"[INIT] Autonomy Module nicht verfuegbar: {e}")
+
         self._update_status("M.O.L.O.C.H. Service bereit")
 
     def start(self, blocking=True):
@@ -915,12 +986,56 @@ class MolochService:
             except Exception as e:
                 logger.warning(f"[START] Emergent Personality Event-Subscriber fehlgeschlagen: {e}")
 
-        # Event Trace Logger (Gate 3/4 Debug)
+        # Autonomy: Atmosphere Controller Events + Homeostasis + Night Cycle + Decision Engine
+        if self._atmosphere:
+            try:
+                from core.moloch_event_bus import get_event_bus
+                bus = get_event_bus()
+                bus.subscribe("activity_changed", self._atmosphere.on_activity_changed)
+                bus.subscribe("mood_changed", self._atmosphere.on_mood_changed)
+
+                # Atmosphere → Decision Engine: atmosphere_changed → LED/Music ausfuehren
+                if self._decision_engine:
+                    def _on_atmosphere_changed(event):
+                        profile = event.get("payload", {}).get("profile", {})
+                        # LED-Kommando aus Atmosphaere-Profil ausfuehren
+                        led_cmd = profile.get("led")
+                        if self._led and led_cmd:
+                            try:
+                                if led_cmd == "on":
+                                    self._led.on()
+                                elif led_cmd == "off":
+                                    self._led.off()
+                                elif led_cmd == "blink":
+                                    self._led.blink(count=4, interval=0.4)
+                                elif led_cmd == "blink_slow":
+                                    self._led.blink(count=3, interval=0.6)
+                            except Exception:
+                                pass
+                    bus.subscribe("atmosphere_changed", _on_atmosphere_changed)
+
+                logger.info("[START] Atmosphere Controller Events registriert")
+            except Exception as e:
+                logger.warning(f"[START] Atmosphere Event-Subscriber fehlgeschlagen: {e}")
+
+        # Homeostasis: Background-Monitoring starten
+        if self._homeostasis:
+            self._homeostasis.start()
+            logger.info("[START] Homeostasis Monitoring gestartet")
+
+        # Night Cycle: Background-Thread starten
+        if self._night_cycle:
+            self._night_cycle.start()
+            logger.info("[START] Night Cycle Thread gestartet")
+
+        # Event Trace Logger (Gate 3/4/5 Debug)
         try:
             from core.moloch_event_bus import get_event_bus
             _trace_bus = get_event_bus()
             for _evt in ("zone_entered", "motion_state_changed", "activity_changed",
-                         "context_update", "mood_changed", "behavior_trigger"):
+                         "context_update", "mood_changed", "behavior_trigger",
+                         "atmosphere_changed", "decision_made", "health_alert",
+                         "night_cycle_complete"):
                 _trace_bus.subscribe(_evt, lambda e, et=_evt: log_event(et, e.get("payload", {})))
             logger.info("[START] Event Trace Logger registriert")
         except Exception as e:
@@ -1172,6 +1287,20 @@ class MolochService:
             try:
                 self._spotify_bridge.stop()
                 logger.info("[STOP] SpotifyBridge gestoppt")
+            except Exception:
+                pass
+
+        # Autonomy Module stoppen (Gate 5)
+        if hasattr(self, '_homeostasis') and self._homeostasis:
+            try:
+                self._homeostasis.stop()
+                logger.info("[STOP] Homeostasis gestoppt")
+            except Exception:
+                pass
+        if hasattr(self, '_night_cycle') and self._night_cycle:
+            try:
+                self._night_cycle.stop()
+                logger.info("[STOP] NightCycle gestoppt")
             except Exception:
                 pass
 
