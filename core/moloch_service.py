@@ -49,6 +49,10 @@ from core.perception.model_health import get_model_health
 from core.ptz_tracker import get_ptz_tracker
 from core.memory.episodic_memory import get_episodic_memory
 from core.music.music_memory import get_music_memory
+from core.awareness.room_map import get_room_map
+from core.awareness.motion_analyzer import get_motion_analyzer
+from core.awareness.activity_analyzer import get_activity_analyzer
+from core.awareness.context_evaluator import get_context_evaluator
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger("MolochService")
@@ -428,6 +432,64 @@ class MolochService:
                     except Exception as e:
                         logger.debug(f"[TAPPAS-PERC] DailyLearner: {e}")
 
+                # --- Awareness: RoomMap + Motion + Activity + Context ---
+                if self._context_evaluator:
+                    try:
+                        _aw_face_id = getattr(pframe, 'face_id', None)
+                        _aw_face_conf = getattr(pframe, 'face_confidence', 0.0)
+                        _aw_person_det = getattr(pframe, 'person_detected', False)
+                        _aw_person_count = getattr(pframe, 'person_count', 0)
+                        _aw_face_bbox = getattr(pframe, 'face_bbox', None)
+                        _aw_dist_ratio = getattr(pframe, 'distance_ratio', 0.0)
+
+                        # RoomMap: PTZ-Position → Zone
+                        _aw_zone = None
+                        if self._room_map and self._cam:
+                            try:
+                                pos = self._cam.get_position()
+                                if pos and hasattr(pos, 'pan'):
+                                    self._room_map.update(pos.pan)
+                                _aw_zone = self._room_map.current_zone
+                            except Exception:
+                                pass
+
+                        # MotionAnalyzer: BBox-Deltas
+                        _aw_motion = "stationary"
+                        if self._motion_analyzer:
+                            self._motion_analyzer.update(
+                                person_detected=_aw_person_det,
+                                face_bbox=_aw_face_bbox,
+                                distance_ratio=_aw_dist_ratio,
+                            )
+                            _aw_motion = self._motion_analyzer.current_state
+
+                        # ActivityAnalyzer: Kombinierte Signale
+                        _aw_activity = "away"
+                        if self._activity_analyzer:
+                            self._activity_analyzer.update_signals(
+                                person_count=_aw_person_count,
+                                motion_state=_aw_motion,
+                                music_energy=getattr(self, '_last_awareness_music_energy', 0.0),
+                                zone=_aw_zone,
+                                voice_active=getattr(self, '_last_awareness_voice_active', False),
+                                face_id=_aw_face_id,
+                            )
+                            self._activity_analyzer.evaluate()
+                            _aw_activity = self._activity_analyzer.current_activity
+
+                        # ContextEvaluator: Gesamtbewertung
+                        self._context_evaluator.evaluate(
+                            room_zone=_aw_zone,
+                            motion_state=_aw_motion,
+                            activity=_aw_activity,
+                            face_id=_aw_face_id,
+                            face_confidence=_aw_face_conf,
+                            person_count=_aw_person_count,
+                            voice_active=getattr(self, '_last_awareness_voice_active', False),
+                        )
+                    except Exception as e:
+                        logger.debug(f"[TAPPAS-PERC] Awareness: {e}")
+
             except Exception as e:
                 logger.debug(f"[TAPPAS-PERC] Loop error: {e}")
 
@@ -619,6 +681,22 @@ class MolochService:
             self._spotify_bridge = None
             logger.warning(f"[INIT] SpotifyBridge nicht verfuegbar: {e}")
 
+        # 9. Awareness Module (Gate 3: Situational Awareness)
+        self._room_map = None
+        self._motion_analyzer = None
+        self._activity_analyzer = None
+        self._context_evaluator = None
+        try:
+            self._room_map = get_room_map()
+            self._motion_analyzer = get_motion_analyzer()
+            self._activity_analyzer = get_activity_analyzer()
+            self._context_evaluator = get_context_evaluator()
+            self._last_awareness_music_energy = 0.0
+            self._last_awareness_voice_active = False
+            logger.info("[INIT] Awareness Module bereit (RoomMap/Motion/Activity/Context)")
+        except Exception as e:
+            logger.warning(f"[INIT] Awareness Module nicht verfuegbar: {e}")
+
         self._update_status("M.O.L.O.C.H. Service bereit")
 
     def start(self, blocking=True):
@@ -702,6 +780,31 @@ class MolochService:
                 logger.info("[START] Music Memory Events registriert")
             except Exception as e:
                 logger.warning(f"[START] Music Memory Event-Subscriber fehlgeschlagen: {e}")
+
+        # Awareness: context_update → CoreIntegrator + Music Energy fuer ActivityAnalyzer
+        if self._context_evaluator and self._core_integrator:
+            try:
+                from core.moloch_event_bus import get_event_bus
+                bus = get_event_bus()
+
+                def _on_context_update(event):
+                    p = event.get("payload", {})
+                    alertness = p.get("alertness", 0.0)
+                    # Hohe Alertness → Tension steigt, niedrige → Tension sinkt
+                    if alertness > 0.6:
+                        self._core_integrator.feed_event("unknown_person", 0.02)
+                    elif alertness < 0.3:
+                        self._core_integrator.feed_event("markus_recognized", 0.02)
+
+                def _on_music_energy_for_awareness(event):
+                    energy = event.get("payload", {}).get("features", {}).get("energy", 0.0)
+                    self._last_awareness_music_energy = energy
+
+                bus.subscribe("context_update", _on_context_update)
+                bus.subscribe("music_features_received", _on_music_energy_for_awareness)
+                logger.info("[START] Awareness → CoreIntegrator Events registriert")
+            except Exception as e:
+                logger.warning(f"[START] Awareness Event-Subscriber fehlgeschlagen: {e}")
 
         # Inference Loop — bei TAPPAS mit 3s Delay (ONVIF muss zuerst verbinden fuer PTZ)
         if USE_TAPPAS:
