@@ -710,7 +710,7 @@ class TappasPipeline:
                 logger.debug(f"[FACE-MATCH] {best_name} sim={best_sim:.3f} (thresh={threshold:.2f})")
                 return (best_name, best_sim)
             logger.debug(f"[FACE-MATCH] KEIN Match: best={best_name} sim={best_sim:.3f} < thresh={threshold:.2f}")
-            return (None, 0.0)
+            return (None, best_sim)
 
     # =====================================================================
     # PerceptionFrame Builder

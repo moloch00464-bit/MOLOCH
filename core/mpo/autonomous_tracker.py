@@ -107,7 +107,9 @@ class TrackingConfig:
     tilt_limit_max: float = 78.8
 
     # Search mode parameters
-    search_speed: float = 0.15          # Langsam schwenken, nicht hektisch (war 0.3)
+    search_speed_min: float = 0.08      # Minimum bei kurzen Distanzen
+    search_speed_max: float = 0.30      # Maximum bei weiten Sprüngen (>120 Grad)
+    search_speed: float = 0.15          # Fallback/Default (wird dynamisch ueberschrieben)
     search_direction_interval: float = 6.0  # 6s pro Position, mehr Zeit zum Scannen (war 4.0)
     search_reset_to_center: bool = False
     search_patrol_positions: list = field(default_factory=lambda: [
@@ -237,6 +239,7 @@ class AutonomousTracker:
         self.search_patrol_index = 0
         self.search_move_time = 0.0
         self._returning_home = False  # Phase-2 Flag: langsam Home fahren
+        self._visited_positions: set = set()  # Bereits abgefahrene Patrol-Positionen
 
         # === Real Camera Position (replaces virtual position) ===
         self.last_known_pan = 0.0
@@ -1337,8 +1340,11 @@ class AutonomousTracker:
             self.search_patrol_index = 0
             self.search_move_time = now
             self._search_start_time = now
+            self._visited_positions.clear()  # Neue Suche, alles reset
 
-            logger.info(f"[SEARCH] Idle-Patrol gestartet (langsam, speed={self.config.search_speed})")
+            logger.info(f"[SEARCH] Intelligente Suche gestartet "
+                       f"({len(self.config.search_patrol_positions)} Positionen, "
+                       f"speed={self.config.search_speed})")
 
             # Reset dwell state for next target acquisition
             self.dwell_target_acquired = False
@@ -1352,21 +1358,22 @@ class AutonomousTracker:
                     pass
             return
 
-        # === PATROL: Definierte Positionen abfahren ===
+        # === PATROL: Positionen abfahren, besuchte ueberspringen ===
         search_duration = now - getattr(self, '_search_start_time', now)
         patrol_positions = self.config.search_patrol_positions
 
-        # === PARK-MODUS: Nach search_park_timeout (180s) -> Home, NPU IDLE ===
-        if search_duration > self.config.search_park_timeout:
+        # === ALLE POSITIONEN ABGEFAHREN -> Home + Park ===
+        if len(self._visited_positions) >= len(patrol_positions):
             if self.state != TrackerState.PARKED:
-                logger.info(f"[PARK] {self.config.search_park_timeout:.0f}s ohne Detection "
-                           f"-> Home + Park-Modus (NPU IDLE)")
-                # Kamera auf Home-Position fahren
+                logger.info(f"[SEARCH] Alle {len(patrol_positions)} Positionen abgefahren, "
+                           f"nichts gefunden -> Home + Park "
+                           f"(Dauer: {search_duration:.0f}s)")
+                # Grundstellung
                 if self.camera and self.camera.is_connected:
                     self.camera.move_absolute(0.0, 0.0, speed=0.15)
                 self._park_time = now
                 self._set_state(TrackerState.PARKED)
-                # NPU auf IDLE-Stufe (nur YOLO)
+                # NPU auf IDLE-Stufe
                 if self.on_park_change:
                     try:
                         self.on_park_change(True)
@@ -1381,17 +1388,24 @@ class AutonomousTracker:
                         pass
             return
 
-        # Nach search_home_timeout (120s) ohne Fund: Zurueck zu Home, stoppen
-        if search_duration > self.config.search_home_timeout:
-            if self.search_patrol_index != 0 or self.search_move_time == 0:
-                logger.info(f"[SEARCH] {self.config.search_home_timeout:.0f}s ohne Fund -> Home + Idle")
-                self._send_search_move(0.0, 0.0)
-                self.search_patrol_index = 0
-                # CoreIntegrator: Presence auf 0
+        # === PARK-MODUS: Fallback nach search_park_timeout (180s) ===
+        if search_duration > self.config.search_park_timeout:
+            if self.state != TrackerState.PARKED:
+                logger.info(f"[PARK] {self.config.search_park_timeout:.0f}s ohne Detection "
+                           f"-> Home + Park-Modus (NPU IDLE)")
+                if self.camera and self.camera.is_connected:
+                    self.camera.move_absolute(0.0, 0.0, speed=0.15)
+                self._park_time = now
+                self._set_state(TrackerState.PARKED)
+                if self.on_park_change:
+                    try:
+                        self.on_park_change(True)
+                    except Exception as e:
+                        logger.error(f"[PARK] on_park_change(True) Fehler: {e}")
                 if self._core_integrator:
                     try:
-                        self._core_integrator.update_input("tracker", "time_since_interaction", 1.0)
                         self._core_integrator.update_input("tracker", "user_proximity", 0.0)
+                        self._core_integrator.update_input("tracker", "time_since_interaction", 1.0)
                     except Exception:
                         pass
             return
@@ -1399,12 +1413,28 @@ class AutonomousTracker:
         # Patrol-Position wechseln alle search_direction_interval Sekunden
         time_at_position = now - self.search_move_time
         if time_at_position >= self.config.search_direction_interval:
-            self.search_patrol_index = (self.search_patrol_index + 1) % len(patrol_positions)
+            # Aktuelle Position als besucht markieren
+            self._visited_positions.add(self.search_patrol_index)
+
+            # Naechste UNBESUCHTE Position finden
+            next_idx = None
+            for offset in range(1, len(patrol_positions) + 1):
+                candidate = (self.search_patrol_index + offset) % len(patrol_positions)
+                if candidate not in self._visited_positions:
+                    next_idx = candidate
+                    break
+
+            if next_idx is None:
+                # Alle besucht — naechster Cycle-Aufruf geht in den Park-Block oben
+                return
+
+            self.search_patrol_index = next_idx
             target_pan, target_tilt = patrol_positions[self.search_patrol_index]
 
-            logger.info(f"[SEARCH] Patrol [{self.search_patrol_index}/{len(patrol_positions)}] "
+            remaining = len(patrol_positions) - len(self._visited_positions)
+            logger.info(f"[SEARCH] Position [{self.search_patrol_index}/{len(patrol_positions)}] "
                        f"-> ({target_pan:+.1f},{target_tilt:+.1f}) "
-                       f"(seit {search_duration:.0f}s, speed={self.config.search_speed})")
+                       f"(noch {remaining} uebrig, seit {search_duration:.0f}s)")
 
             self._send_search_move(target_pan, target_tilt)
 
@@ -1416,8 +1446,23 @@ class AutonomousTracker:
                 except Exception:
                     pass
 
+    def _calc_search_speed(self, target_pan: float, target_tilt: float) -> float:
+        """Distanzabhaengige Speed: kurze Wege langsam, weite schneller.
+
+        Lineare Interpolation zwischen search_speed_min und search_speed_max
+        basierend auf der Winkeldistanz (0-240 Grad mapped auf min-max).
+        """
+        delta_pan = abs(target_pan - self.last_known_pan)
+        delta_tilt = abs(target_tilt - self.last_known_tilt)
+        distance = (delta_pan**2 + delta_tilt**2) ** 0.5
+
+        # 0 Grad -> min speed, 240 Grad (max moegliche Distanz) -> max speed
+        t = min(1.0, distance / 240.0)
+        speed = self.config.search_speed_min + t * (self.config.search_speed_max - self.config.search_speed_min)
+        return round(speed, 3)
+
     def _send_search_move(self, pan_deg: float, tilt_deg: float) -> bool:
-        """Send AbsoluteMove for search/patrol."""
+        """Send AbsoluteMove for search/patrol mit distanzabhaengiger Speed."""
         if not self.camera or not self.camera.is_connected:
             return False
 
@@ -1432,12 +1477,14 @@ class AutonomousTracker:
         except Exception:
             pass
 
-        result = self.camera.move_absolute(pan_deg, tilt_deg, speed=self.config.search_speed)
+        speed = self._calc_search_speed(pan_deg, tilt_deg)
+        result = self.camera.move_absolute(pan_deg, tilt_deg, speed=speed)
 
         if result:
             self.search_move_time = time.time()
             self.last_move_time = time.time()
             self.stats["search_moves"] += 1
+            logger.debug(f"[SEARCH] Move -> ({pan_deg:+.1f},{tilt_deg:+.1f}) speed={speed:.3f}")
 
         return result
 

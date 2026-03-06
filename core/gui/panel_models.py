@@ -61,14 +61,21 @@ except ImportError:
 class ModelsModule:
     """Model Controls und Popup-Buttons im uebergebenen LabelFrame."""
 
-    # Model Definitionen: (Anzeigename, Service-Key)
-    MODELS = [
+    # TAPPAS Pipeline Modelle (immer aktiv, nicht togglebar)
+    TAPPAS_MODELS = [
         ("SCRFD", "scrfd"),
         ("ArcFace", "arcface"),
         ("YOLOv8m", "yolov8m"),
-        ("Hand LM", "hand_landmark"),
-        ("Pose", "pose"),
     ]
+
+    # Zusaetzliche Modelle (HEFs vorhanden, noch nicht in Pipeline)
+    EXTRA_MODELS = [
+        ("Pose", "pose"),
+        ("Hand LM", "hand_landmark"),
+    ]
+
+    # Alle Modelle zusammen (fuer Kompatibilitaet)
+    MODELS = TAPPAS_MODELS + EXTRA_MODELS
 
     def __init__(self, parent_frame, service_proxy):
         """
@@ -96,6 +103,7 @@ class ModelsModule:
         self.on_popup_settings = self._open_settings_popup
 
         # GUI aufbauen
+        self._build_pipeline_status()
         self._build_model_checkboxes()
         self._build_fps_display()
         self._build_save_button()
@@ -156,11 +164,29 @@ class ModelsModule:
             print("FEHLER: popup_settings.py konnte nicht importiert werden")
 
     # =========================================================================
+    # Pipeline Status (TAPPAS/Legacy Anzeige)
+    # =========================================================================
+
+    def _build_pipeline_status(self):
+        """TAPPAS/Legacy Pipeline Status-Zeile."""
+        row = tk.Frame(self._parent, bg=BG_FRAME)
+        row.pack(fill=tk.X, padx=10, pady=(5, 0))
+
+        tk.Label(
+            row, text="Pipeline:", bg=BG_FRAME, fg=FG_LABEL, font=FONT_LABEL,
+        ).pack(side=tk.LEFT)
+
+        self._lbl_pipeline = tk.Label(
+            row, text="--", bg=BG_FRAME, fg=FG_DIM, font=FONT_MONO,
+        )
+        self._lbl_pipeline.pack(side=tk.LEFT, padx=5)
+
+    # =========================================================================
     # Model Checkboxen
     # =========================================================================
 
     def _build_model_checkboxes(self):
-        """Checkbuttons fuer alle AI-Modelle."""
+        """Checkbuttons: TAPPAS-Modelle (locked) + Extra-Modelle (togglebar)."""
         section = tk.LabelFrame(
             self._parent,
             text="Modelle",
@@ -170,23 +196,50 @@ class ModelsModule:
         )
         section.pack(fill=tk.X, padx=5, pady=(5, 2))
 
-        row = tk.Frame(section, bg=BG_FRAME)
-        row.pack(pady=5, padx=5)
+        # Zeile 1: TAPPAS Pipeline Modelle (immer aktiv)
+        row_tappas = tk.Frame(section, bg=BG_FRAME)
+        row_tappas.pack(pady=(5, 0), padx=5)
 
         self._checkboxes = {}
-        for i, (label, key) in enumerate(self.MODELS):
+        for i, (label, key) in enumerate(self.TAPPAS_MODELS):
             cb = tk.Checkbutton(
-                row, text=label,
+                row_tappas, text=label,
                 variable=self._model_vars[key],
-                bg=BG_FRAME, fg=FG_WHITE,
+                bg=BG_FRAME, fg=ACCENT_GREEN,
                 selectcolor=BG_FRAME,
                 activebackground=BG_FRAME,
-                activeforeground=FG_WHITE,
+                activeforeground=ACCENT_GREEN,
+                disabledforeground=ACCENT_GREEN,
                 font=FONT_BUTTON,
-                command=lambda k=key: self._toggle_model(k),
+                state=tk.DISABLED,
             )
             cb.grid(row=0, column=i, padx=6, pady=2)
             self._checkboxes[key] = cb
+
+        # Label "TAPPAS" rechts neben den Checkboxen
+        tk.Label(
+            row_tappas, text="TAPPAS",
+            bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
+        ).grid(row=0, column=len(self.TAPPAS_MODELS), padx=(10, 0))
+
+        # Zeile 2: Extra-Modelle (togglebar)
+        if self.EXTRA_MODELS:
+            row_extra = tk.Frame(section, bg=BG_FRAME)
+            row_extra.pack(pady=(0, 5), padx=5)
+
+            for i, (label, key) in enumerate(self.EXTRA_MODELS):
+                cb = tk.Checkbutton(
+                    row_extra, text=label,
+                    variable=self._model_vars[key],
+                    bg=BG_FRAME, fg=FG_WHITE,
+                    selectcolor=BG_FRAME,
+                    activebackground=BG_FRAME,
+                    activeforeground=FG_WHITE,
+                    font=FONT_BUTTON,
+                    command=lambda k=key: self._toggle_model(k),
+                )
+                cb.grid(row=0, column=i, padx=6, pady=2)
+                self._checkboxes[key] = cb
 
     def _toggle_model(self, model_key):
         """Model an/aus und Command senden."""
@@ -201,7 +254,7 @@ class ModelsModule:
     # =========================================================================
 
     def _build_fps_display(self):
-        """FPS Label in STATUS_YELLOW."""
+        """FPS Anzeige: Total + pro Modell."""
         row = tk.Frame(self._parent, bg=BG_FRAME)
         row.pack(fill=tk.X, padx=10, pady=2)
 
@@ -214,6 +267,13 @@ class ModelsModule:
             bg=BG_FRAME, fg=STATUS_YELLOW, font=FONT_MONO,
         )
         self._lbl_fps.pack(side=tk.LEFT, padx=5)
+
+        # Detail-FPS (scrfd/arcface/yolo)
+        self._lbl_fps_detail = tk.Label(
+            row, text="",
+            bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
+        )
+        self._lbl_fps_detail.pack(side=tk.LEFT, padx=5)
 
     # =========================================================================
     # SAVE SETTINGS
@@ -307,21 +367,37 @@ class ModelsModule:
     # =========================================================================
 
     def _poll_status(self):
-        """Status vom Service lesen: FPS und aktive Modelle aktualisieren."""
+        """Status vom Service lesen: Pipeline, FPS und aktive Modelle aktualisieren."""
         status = self._service.read_status()
 
         if status:
-            # FPS ist ein dict mit scrfd/arcface/yolov8m/hand_landmark/total
+            # Pipeline-Typ (TAPPAS oder Legacy)
+            active_models = status.get("active_models", [])
+            is_tappas = len(active_models) >= 3 and "scrfd" in active_models
+            if is_tappas:
+                self._lbl_pipeline.config(text="TAPPAS", fg=ACCENT_GREEN)
+            else:
+                self._lbl_pipeline.config(text="Legacy", fg=STATUS_YELLOW)
+
+            # FPS Total
             try:
                 fps_dict = status.get("fps", {})
                 fps = float(fps_dict.get("total", 0.0)) if isinstance(fps_dict, dict) else 0.0
                 self._lbl_fps.config(text=f"{fps:.1f}")
+
+                # Detail-FPS pro Modell
+                if isinstance(fps_dict, dict):
+                    parts = []
+                    for name in ["scrfd", "arcface", "yolov8m"]:
+                        val = fps_dict.get(name, 0.0)
+                        if val and float(val) > 0:
+                            parts.append(f"{name}:{float(val):.0f}")
+                    self._lbl_fps_detail.config(text="  ".join(parts))
             except (TypeError, ValueError):
                 self._lbl_fps.config(text="--")
+                self._lbl_fps_detail.config(text="")
 
-            # Model-Checkboxen: einzelne Keys statt "models" dict
-            # scrfd->scrfd_active, arcface->arcface_active,
-            # yolov8m->yolo_active, hand_landmark->hand_active
+            # Model-Checkboxen Status synchronisieren
             status_key_map = {
                 "scrfd": "scrfd_active",
                 "arcface": "arcface_active",

@@ -542,8 +542,67 @@ class MolochService:
             def _start_tappas_delayed():
                 logger.info("[START] TAPPAS: Warte 3s auf ONVIF-Verbindung...")
                 time.sleep(3)
-                self._inference.start()
-                logger.info("[START] TAPPAS Pipeline gestartet")
+                # Retry-Logik: Pipeline kann beim Boot durch RTSP-Timing crashen
+                max_retries = 5
+                for attempt in range(1, max_retries + 1):
+                    try:
+                        self._inference.start()
+                        logger.info("[START] TAPPAS Pipeline gestartet")
+                        break
+                    except Exception as e:
+                        logger.error(f"[START] TAPPAS Pipeline Versuch {attempt}/{max_retries} fehlgeschlagen: {e}")
+                        if attempt < max_retries:
+                            wait = 3 * attempt
+                            logger.info(f"[START] TAPPAS Retry in {wait}s...")
+                            time.sleep(wait)
+                        else:
+                            logger.error("[START] TAPPAS Pipeline konnte nach 5 Versuchen nicht gestartet werden!")
+                            return
+                # Watchdog: Prueft ob Pipeline nach Start ueberlebt, startet bei Crash neu
+                # Exponentielles Backoff + RTSP-Probe vor Neustart
+                def _rtsp_probe() -> bool:
+                    """Prueft ob RTSP-Stream erreichbar ist bevor Pipeline gestartet wird."""
+                    import subprocess
+                    rtsp_url = self._inference._rtsp_url
+                    try:
+                        result = subprocess.run(
+                            ["ffprobe", "-rtsp_transport", "tcp", "-v", "error",
+                             "-timeout", "5000000", rtsp_url],
+                            capture_output=True, timeout=8
+                        )
+                        return result.returncode == 0
+                    except Exception:
+                        return False
+
+                def _tappas_watchdog():
+                    time.sleep(5)  # Pipeline 5s laufen lassen
+                    consecutive_fails = 0
+                    while self.running:
+                        if not self._inference._running:
+                            consecutive_fails += 1
+                            # Backoff: 5s, 10s, 15s, 20s, max 30s
+                            wait = min(5 * consecutive_fails, 30)
+                            logger.warning(f"[WATCHDOG] TAPPAS Pipeline ist tot — Neustart in {wait}s (Versuch {consecutive_fails})...")
+                            try:
+                                self._inference.stop()
+                            except Exception:
+                                pass
+                            time.sleep(wait)
+                            # RTSP-Probe: Stream erreichbar?
+                            if not _rtsp_probe():
+                                logger.warning(f"[WATCHDOG] RTSP-Stream nicht erreichbar — warte...")
+                                continue
+                            try:
+                                self._inference.start()
+                                logger.info(f"[WATCHDOG] TAPPAS Pipeline neu gestartet (nach {consecutive_fails} Versuchen)")
+                                consecutive_fails = 0
+                            except Exception as e:
+                                logger.error(f"[WATCHDOG] TAPPAS Neustart fehlgeschlagen: {e}")
+                                continue
+                        else:
+                            consecutive_fails = 0
+                        time.sleep(5)
+                threading.Thread(target=_tappas_watchdog, daemon=True, name="TappasWatchdog").start()
                 # Tracker-Feed Thread starten (liest Detections aus Pipeline → Tracker)
                 threading.Thread(target=self._tappas_tracker_feed_loop, daemon=True,
                                  name="TappasTrackerFeed").start()

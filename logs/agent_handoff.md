@@ -1,88 +1,108 @@
 # AGENT HANDOFF — Gate 0.5
-# Geschrieben: 2026-03-05 20:16 UTC
+# Geschrieben: 2026-03-05 20:37 UTC
 # Naechste Instanz: Lies dies NACH CLAUDE.md und GATE_05_KONTEXT.md
 
 ## AKTUELLER STAND
 
-Gate 0.5 | Phase 5 (Stabilitaet) | LAEUFT — 6h Monitor aktiv
+Gate 0.5 | Phase 5 (Stabilitaet) + Face-ID BLOCKER | Service LAEUFT
 
-## WAS ERLEDIGT WURDE
+## KRITISCHER BLOCKER: Face-ID Match = sim=0.000
 
-### Phase 2 (vorige Session): ALLE 4 TEST-SCRIPTS PASS
-```
-Test 1 (RTSP basic):     20.7 FPS | 1080p       | PASS
-Test 2 (YOLO single):    20.0 FPS | 162 MB RAM  | 512 Persons   | PASS
-Test 3 (SCRFD single):   20.0 FPS | 160 MB RAM  | 563 Faces     | PASS
-Test 4 (Multi 3-Modell): 20.0 FPS | 199 MB RAM  | 567 Embeddings | PASS
-```
+ArcFace-Embeddings aus der GStreamer TAPPAS-Pipeline (hailofilter + libface_recognition_post.so)
+sind INKOMPATIBEL mit Embeddings aus direkter HailoRT-Inference (train_faces_batch.py).
+Cosine-Similarity ist EXAKT 0.000 — das bedeutet die Embeddings sind orthogonal/anders formatiert.
 
-### Phase 3 (diese Session): SERVICE-INTEGRATION KOMPLETT
+### Ursache (Hypothesen):
+1. GStreamer arcface_hailofilter Postprocess normalisiert anders als direkte NPU-Inference
+2. Face-Align im GStreamer-Pfad (libvms_face_align.so) veraendert das Crop anders
+3. Preprocessing-Unterschied: GStreamer Pipeline skaliert auf 112x112 intern vs. Script macht cv2.resize
+
+### Loesung (naechste Instanz muss dies fixen):
+Option A: Face-Training INNERHALB der TAPPAS-Pipeline machen:
+  - Fotos durch die GStreamer-Pipeline schicken (als file-source statt rtspsrc)
+  - Embeddings aus dem Pad-Probe extrahieren
+  - So sind Training und Inference identisch
+
+Option B: Embedding-Format aus GStreamer-Pipeline reverse-engineeren:
+  - Live ein Embedding aus _on_buffer extrahieren und loggen (Form, Range, Norm)
+  - Mit dem Training-Embedding vergleichen
+  - Transformation finden (z.B. L2 vs Cosine, andere Dimensionsreihenfolge)
+
+Option C: Die _match_face Methode anpassen:
+  - Statt face_embeddings.json aus dem Batch-Script zu nutzen,
+    die Live-Pipeline ein paar Sekunden laufen lassen und Embeddings sammeln
+  - "Einpraegen per Live-Kamera" statt aus Fotos
+
+### EMPFEHLUNG: Option A oder C — Training muss den gleichen Pfad wie Inference nutzen!
+
+### Debug-Info die schon da ist:
+- Temporaeres INFO-Log in _on_buffer: alle 50 Frames loggt es sim, emb_dim, db_size
+- Face-DB hat 1 Person (markus) aus 308 Embeddings (Durchschnitt)
+- db_size=1 ist korrekt, emb_dim=512 ist korrekt
+- sim=0.000 → Embeddings sind KOMPLETT inkompatibel
+
+## WAS DIESE SESSION ERLEDIGT HAT
+
+### Phase 3 (Service-Integration) — DONE
 - Poll-Thread `_tappas_perception_loop()` deployed (5 Hz)
-- PFrame -> PerceptionEngine/CoreIntegrator/LED/DailyLearner
-- `_write_status_json` TAPPAS-kompatibel (getattr + PFrame-Daten im IPC)
-- Feature-Flag `MOLOCH_USE_TAPPAS=1` in ~/.profile aktiviert
-- Threshold-Propagation: Panel-Slider -> Detection-Filter in _on_buffer
-- ArcFace nutzt `arcface_thresh_val` statt hartcodiert 0.5
+- `_write_status_json` TAPPAS-kompatibel (getattr + PFrame-Daten)
+- Feature-Flag `MOLOCH_USE_TAPPAS=1` in ~/.profile
+- Threshold-Propagation: Panel-Slider → `_on_buffer` Detection-Filter
+- ArcFace nutzt `arcface_thresh_val` statt hartcodiert
 
-### Phase 4 (diese Session): NPU-STUFENLOGIK KOMPLETT (Option C)
-- PerceptionEngine.tick(context) statt nicht-existierendes update(pframe)
-- Context-Dict aus PFrame-Attributen gebaut
-- Stage-Machine: idle->person->face korrekt getriggert
+### Phase 4 (NPU-Stufenlogik) — DONE (Option C)
+- PerceptionEngine.tick(context) statt nicht-existierendes update()
+- Stage-Machine: idle→person→face korrekt getriggert
 - Alle TAPPAS-Modelle permanent aktiv, Stages nur fuer Tracking/Logging
-- face_streak, scores, decision_count incrementieren korrekt
 
-### Phase 5 (AKTIV): STABILITAETSTEST LAEUFT
-- Monitor PID: laeuft als nohup Hintergrund-Prozess
-- Logfile: `logs/stability_phase5.log` (alle 5 Minuten)
-- Baseline: 855 MB RSS, 62.25°C CPU, 20.6 FPS, 2.4 GB RAM belegt
+### Phase 5 (Stabilitaet) — LAEUFT
+- Monitor in `logs/stability_phase5.log` (alle 5 Min)
+- Baseline: 855 MB RSS, 62°C CPU, 20.0 FPS
 
-## LIVE-SYSTEM STATUS (20:16 UTC)
+### Face Training — DONE aber INKOMPATIBEL
+- Script: `scripts/train_faces_batch.py` (stoppt Service, NPU direkt, startet Service)
+- 369 Bilder → 287 Markus-Embeddings gespeichert
+- Face-DB: 21 → 308 Embeddings
+- TAPPAS lädt DB korrekt: 1 Person aus 308 Embeddings (Durchschnitt)
+- ABER: sim=0.000 → Embeddings aus unterschiedlichen Pfaden inkompatibel!
 
-```
-Service:        ACTIVE (TAPPAS)
-FPS:            20.6 (steady)
-Mode:           tappas
-NPU Stage:      face
-Person:         detected
-Face:           detected (conf ~0.62)
-Face ID:        None (zu weit weg oder nicht Markus)
-Tracker:        tracking (aktiv)
-CoreIntegrator: zone=guardian, tension=0.04
-LED:            markus_off
-RAM:            2.4 GB / 3.9 GB
-CPU Temp:       62.25°C
-Active Models:  scrfd, arcface, yolov8m
-```
+### Face-DB Lade-Logik verbessert
+- Jetzt Durchschnitt pro Person (Name vor '#') statt alle einzeln
+- face_embeddings.json: {key: embedding} → gruppiert nach Person → ein Mean-Embedding
 
-## WAS ALS NAECHSTES KOMMT
-
-### Phase 5 auswerten (nach 6h)
-1. `cat ~/moloch/logs/stability_phase5.log` — Monitor-Daten pruefen
-2. Kriterien: FPS >= 10, RAM < 3.5 GB, Temp < 70°C, 0 Crashes
-3. Wenn PASS: 24h laufen lassen
-4. Dann: `python3 ~/moloch/moloch_audit.py --auto`
-
-### Offene Items (nicht blockierend)
-- Face-ID Match testen (Markus direkt vor Kamera)
-- Whisper + TAPPAS Parallel-Test (Voice-Command waehrend Detection)
-- Panel-GUI: TAPPAS-Status korrekt anzeigen pruefen
-- Pose-Modell Integration (yolov8s_pose_h10.hef) — spaeter
-
-## GEAENDERTE DATEIEN (seit letztem Handoff)
+## GEAENDERTE DATEIEN
 
 - `core/moloch_service.py` — Poll-Thread, Status-JSON Fix, PerceptionEngine tick()
-- `core/perception/tappas_pipeline.py` — Threshold-Filterung, ArcFace Threshold
+- `core/perception/tappas_pipeline.py` — Threshold-Filter, Face-DB Gruppierung, Debug-Log
+- `scripts/train_faces_batch.py` — NEU: Batch Face Training (HailoRT direkt)
 - `~/.profile` — MOLOCH_USE_TAPPAS=1
 
 ## GIT COMMITS (diese Session)
 
+- `c4dca13` BACKUP vor Phase 3 TAPPAS Service-Integration (vorige Session)
 - `043a67d` Phase 3 KOMPLETT: Poll-Thread + Status-JSON + Threshold-Propagation
 - `06f70df` Phase 4: PerceptionEngine Stage-Tracking via tick() + Option C
+- `d094497` Handoff aktualisiert
+
+## SERVICE-STATUS
+
+- Moloch Service: ACTIVE (TAPPAS, 20 FPS)
+- MOLOCH_USE_TAPPAS=1: AKTIV
+- Face-Detection: FUNKTIONIERT (conf ~0.77)
+- Face-ID Match: KAPUTT (sim=0.000 — Embedding-Inkompatibilitaet)
+- Tracker: FUNKTIONIERT (tracking/searching)
+- Person Detection: FUNKTIONIERT
+
+## TEMPORAERE DEBUG-LOGS (ENTFERNEN WENN GEFIXT)
+
+- `tappas_pipeline.py` Zeile ~551: alle 50 Frames ein FACE-MATCH INFO-Log
+- Zeile ~691-694: debug-log fuer Match/Kein-Match
 
 ## WICHTIG FUER NAECHSTE INSTANZ
 
-1. Service laeuft MIT TAPPAS — NICHT resetten ohne Grund
-2. Stability Monitor laeuft im Hintergrund — Log checken
-3. Pan-Vorzeichen in camera.py NICHT ANFASSEN
-4. Filter-Thresholds NICHT ANFASSEN
-5. Definition of Done: siehe GATE_05_ARBEITSPAKET.md (unten)
+1. BLOCKER: Face-ID sim=0.000 → Embeddings Training vs Live inkompatibel
+2. Service laeuft MIT TAPPAS — 20 FPS, alles ausser Face-ID funktioniert
+3. Face-DB hat 308 Embeddings aber sie sind NUTZLOS fuer TAPPAS-Matching
+4. Pan-Vorzeichen in camera.py NICHT ANFASSEN
+5. Stability Monitor laeuft noch im Hintergrund
+6. Lies GATE_05_ARBEITSPAKET.md fuer Definition of Done
