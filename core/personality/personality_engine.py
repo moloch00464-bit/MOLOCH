@@ -172,6 +172,7 @@ class MolochEvent(enum.Enum):
     GOOD_MORNING = "good_morning"
     GOOD_NIGHT = "good_night"
     VOICE_COMMAND = "voice_command"
+    TRACKING_RESUMED = "tracking_resumed"  # G1-T03: Auto-Resume nach Manuell
 
 
 # ============================================================
@@ -572,6 +573,7 @@ class PersonalityEngine:
             MolochEvent.WGT_MODE: "WGT-Modus aktiviert. Crew-Erkennung aktiv.",
             MolochEvent.GOOD_MORNING: "Guten Morgen, Markus. Kaffee steht hoffentlich bereit.",
             MolochEvent.GOOD_NIGHT: "Gute Nacht. Nachtwache aktiv.",
+            MolochEvent.TRACKING_RESUMED: "Ich uebernehme wieder.",
         }
         return responses.get(event, "Verstanden.")
 
@@ -591,6 +593,7 @@ class PersonalityEngine:
             MolochEvent.WGT_MODE: "SKULL FLAG FLIEGT! Scanning...",
             MolochEvent.GOOD_MORNING: "Ey Markus, dein Gesicht sagt du brauchst Kaffee. Oder Schlaf. Oder beides.",
             MolochEvent.GOOD_NIGHT: "Nachtschicht. Ich bin wach, du nicht. Deal?",
+            MolochEvent.TRACKING_RESUMED: "So, genug rumgespielt. Ich hab wieder das Sagen.",
         }
         return responses.get(event, "Wie auch immer.")
 
@@ -610,6 +613,7 @@ class PersonalityEngine:
             MolochEvent.WGT_MODE: "WAVE GOTIK. ALLE SYSTEME ONLINE.",
             MolochEvent.GOOD_MORNING: "Aufstehen.",
             MolochEvent.GOOD_NIGHT: "Schluss.",
+            MolochEvent.TRACKING_RESUMED: "Meins.",
         }
         return responses.get(event, "Hmm.")
 

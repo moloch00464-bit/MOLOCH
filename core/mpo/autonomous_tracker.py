@@ -90,13 +90,13 @@ class TrackingConfig:
     # Kamera Motor-Speed: ~30 deg/s (Kalibrierung: 342deg in ~12s)
     fov_horizontal: float = 110.0
     fov_vertical: float = 65.0
-    pan_gain: float = 0.25          # sanft, kein Ueberschwinger (war 0.45 = zu aggressiv)
-    tilt_gain: float = 0.20         # sanft (war 0.40 = zu aggressiv)
-    max_step_pan: float = 5.0       # max 5 Grad pro Move (war 12.0 = VIEL zu viel)
-    max_step_tilt: float = 3.0      # max 3 Grad pro Move (war 8.0 = zu viel)
+    pan_gain: float = 0.20          # G1-T05: sanfter (war 0.25), weniger Ueberschwinger
+    tilt_gain: float = 0.15         # G1-T05: sanfter (war 0.20)
+    max_step_pan: float = 4.0       # G1-T05: max 4 Grad (war 5.0)
+    max_step_tilt: float = 2.5      # G1-T05: max 2.5 Grad (war 3.0)
     min_step_deg: float = 0.3
-    tracking_speed: float = 0.7     # 70% ONVIF Speed, nie Vollgas (war 1.0)
-    move_cooldown_ms: float = 400.0  # 400ms zwischen Moves (war 300, vorher 800)
+    tracking_speed: float = 0.6     # G1-T05: 60% Speed (war 0.7)
+    move_cooldown_ms: float = 500.0  # G1-T05: 500ms (war 400), weniger Ueberschwinger
     smooth_alpha: float = 0.20      # EMA etwas schneller fuer bessere Reaktion (war 0.15)
 
     # Kamera Hardware-Limits (SonoffCameraController clampt intern,
@@ -113,13 +113,16 @@ class TrackingConfig:
     search_direction_interval: float = 6.0  # 6s pro Position, mehr Zeit zum Scannen (war 4.0)
     search_reset_to_center: bool = False
     search_patrol_positions: list = field(default_factory=lambda: [
-        (0.0, 0.0),        # Home (Markus' Sitzplatz)
+        (0.0, 0.0),        # Markus' Sitzplatz
         (-60.0, 0.0),      # Leicht links
-        (-120.0, 0.0),     # Weiter links
+        (-120.0, 0.0),     # Tuer (Park-Position)
         (0.0, 20.0),       # Mitte hoch
         (60.0, 0.0),       # Leicht rechts
         (120.0, 0.0),      # Weiter rechts
     ])
+    # G1-T06: Park-Position = Tuer (links ~-120 Grad)
+    park_pan: float = -120.0
+    park_tilt: float = 0.0
     search_home_timeout: float = 120.0  # 120s ohne Fund -> Home
     search_park_timeout: float = 180.0  # 3 Min ohne Detection -> Park-Modus (keine Bewegung, NPU IDLE)
 
@@ -1337,14 +1340,25 @@ class AutonomousTracker:
         # === START SEARCH: Reset and begin patrol ===
         if self.state != TrackerState.SEARCHING:
             self._set_state(TrackerState.SEARCHING)
-            self.search_patrol_index = 0
             self.search_move_time = now
             self._search_start_time = now
             self._visited_positions.clear()  # Neue Suche, alles reset
 
-            logger.info(f"[SEARCH] Intelligente Suche gestartet "
-                       f"({len(self.config.search_patrol_positions)} Positionen, "
-                       f"speed={self.config.search_speed})")
+            # G1-T04: Suchrichtung = Richtung wo Person zuletzt war
+            # Starte bei Patrol-Position naechst zur letzten Kamera-Pan
+            last_pan = self.last_known_pan
+            positions = self.config.search_patrol_positions
+            nearest_idx = 0
+            min_dist = float('inf')
+            for i, (pp, _pt) in enumerate(positions):
+                dist = abs(pp - last_pan)
+                if dist < min_dist:
+                    min_dist = dist
+                    nearest_idx = i
+            self.search_patrol_index = nearest_idx
+
+            logger.info(f"[SEARCH] Suche gestartet Richtung pan={last_pan:+.1f} "
+                       f"(start={nearest_idx}, {len(positions)} Positionen)")
 
             # Reset dwell state for next target acquisition
             self.dwell_target_acquired = False
@@ -1366,11 +1380,11 @@ class AutonomousTracker:
         if len(self._visited_positions) >= len(patrol_positions):
             if self.state != TrackerState.PARKED:
                 logger.info(f"[SEARCH] Alle {len(patrol_positions)} Positionen abgefahren, "
-                           f"nichts gefunden -> Home + Park "
+                           f"nichts gefunden -> Park bei Tuer "
                            f"(Dauer: {search_duration:.0f}s)")
-                # Grundstellung
+                # G1-T06: Park-Position = Tuer
                 if self.camera and self.camera.is_connected:
-                    self.camera.move_absolute(0.0, 0.0, speed=0.15)
+                    self.camera.move_absolute(self.config.park_pan, self.config.park_tilt, speed=0.15)
                 self._park_time = now
                 self._set_state(TrackerState.PARKED)
                 # NPU auf IDLE-Stufe
@@ -1392,9 +1406,9 @@ class AutonomousTracker:
         if search_duration > self.config.search_park_timeout:
             if self.state != TrackerState.PARKED:
                 logger.info(f"[PARK] {self.config.search_park_timeout:.0f}s ohne Detection "
-                           f"-> Home + Park-Modus (NPU IDLE)")
+                           f"-> Park bei Tuer (NPU IDLE)")
                 if self.camera and self.camera.is_connected:
-                    self.camera.move_absolute(0.0, 0.0, speed=0.15)
+                    self.camera.move_absolute(self.config.park_pan, self.config.park_tilt, speed=0.15)
                 self._park_time = now
                 self._set_state(TrackerState.PARKED)
                 if self.on_park_change:

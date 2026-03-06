@@ -648,6 +648,22 @@ class MolochService:
         self._ptz_tracker.start()
         logger.info("[START] PTZ-Tracker gestartet (Bewegungs-Analyse)")
 
+        # G1-T03: Auto-Resume Callback — TTS Spruch bei Manuell→Autonom
+        try:
+            from core.ptz_arbiter import get_ptz_arbiter
+            arbiter = get_ptz_arbiter()
+            def _on_auto_resume():
+                logger.info("[ARBITER] Auto-Resume: Manuell -> Autonom, TTS Spruch")
+                try:
+                    from core.personality import get_personality_engine, MolochEvent
+                    engine = get_personality_engine()
+                    engine.speak_event(MolochEvent.TRACKING_RESUMED)
+                except Exception as e:
+                    logger.debug(f"[ARBITER] TTS Auto-Resume Fehler: {e}")
+            arbiter.on_auto_resume = _on_auto_resume
+        except Exception as e:
+            logger.warning(f"[START] Arbiter Auto-Resume Callback Fehler: {e}")
+
         # nightVision auf day setzen (verhindert IR-Modus nach Reboot)
         def _reset_night_vision():
             try:

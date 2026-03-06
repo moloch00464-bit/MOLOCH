@@ -55,6 +55,9 @@ class PTZArbiter:
         self._smart_tracking_on = False
         self._moloch_tracking_on = True
 
+        # G1-T03: Callback bei Auto-Resume (Manuell -> Autonom)
+        self.on_auto_resume = None  # Callable[[], None]
+
     # =========================================================================
     # Properties (Thread-safe)
     # =========================================================================
@@ -156,7 +159,7 @@ class PTZArbiter:
     # =========================================================================
 
     def check_timeout(self):
-        """Manuell-Timeout: zurueck zu AUTONOM nach 30s."""
+        """Manuell-Timeout: zurueck zu AUTONOM nach 30s. G1-T03: mit Callback."""
         with self._lock:
             if self._mode != ArbiterMode.MOLOCH_MANUELL:
                 return
@@ -166,6 +169,12 @@ class PTZArbiter:
                 self._moloch_tracking_on = True
                 self._switch_mode(ArbiterMode.MOLOCH_AUTONOM,
                                   f"manual_timeout_{elapsed:.0f}s")
+                # G1-T03: Auto-Resume Callback (TTS Spruch etc.)
+                if self.on_auto_resume:
+                    try:
+                        self.on_auto_resume()
+                    except Exception as e:
+                        logger.warning(f"[ARBITER] on_auto_resume Fehler: {e}")
 
     # =========================================================================
     # Sync (Legacy-Kompatibilitaet)
