@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Read(//usr/local/**)",
+      "Bash(dpkg -L hailo-tappas)",
+      "Bash(dpkg -L hailo-tappas-apps)",
+      "Bash(nm -D /usr/lib/aarch64-linux-gnu/hailo/tappas/post_processes/libface_attributes_post.so)"
     ]
   }
 }

@@ -157,9 +157,15 @@ class TappasPipeline:
         self._enroll_name = ""
         self._enroll_target = 20
         self._enroll_candidates = []  # (score, embedding_copy)
-        self._enroll_min_score = 0.50
-        self._enroll_diversity = 0.85  # Cosine-Sim Schwelle
+        self._enroll_min_score = 0.70
+        self._enroll_diversity = 0.92  # Cosine-Sim Schwelle (hoch = weniger diverse, besserer Durchschnitt)
         self._enroll_lock = threading.Lock()
+
+        # Temporal Smoothing fuer ArcFace (Ringbuffer der letzten Similarities)
+        self._sim_history = []  # (name, similarity) der letzten N Frames
+        self._sim_history_size = 5  # 5 Frames ~0.25s bei 20 FPS
+        self._smoothed_face_id = None
+        self._smoothed_face_sim = 0.0
 
         # Event Bus fuer Action Bridge
         self._event_bus = get_event_bus()
@@ -466,9 +472,10 @@ class TappasPipeline:
     def _load_face_db_from_disk(self) -> dict:
         """Face-Embeddings aus data/face_embeddings.json laden.
 
-        Gruppiert nach Person (Name vor '#') und bildet Durchschnitt.
-        z.B. "Markus", "Markus#snap_1", "Markus#train_42_0" → ein Embedding fuer "Markus".
-        Returns: {person_name: np.array} oder {} bei Fehler.
+        Gruppiert nach Person (Name vor '#'), speichert ALLE Embeddings als Liste.
+        _match_face() vergleicht gegen alle und nimmt den besten Match.
+        z.B. "Markus", "Markus#snap_1" → {"markus": [emb0, emb1, ...]}
+        Returns: {person_name: list[np.array]} oder {} bei Fehler.
         """
         import json
         embeddings_path = os.path.join(
@@ -482,25 +489,17 @@ class TappasPipeline:
             with open(embeddings_path, 'r') as f:
                 raw = json.load(f)
             # Gruppiere nach Person (Name vor '#')
-            groups = {}
+            db = {}
             for key, emb_list in raw.items():
                 person = key.split('#')[0].lower()
                 emb = np.array(emb_list, dtype=np.float32)
                 norm = np.linalg.norm(emb)
                 if norm > 0:
                     emb = emb / norm
-                if person not in groups:
-                    groups[person] = []
-                groups[person].append(emb)
-            # Durchschnitt pro Person (normalisiert)
-            db = {}
-            for person, embs in groups.items():
-                mean_emb = np.mean(embs, axis=0).astype(np.float32)
-                norm = np.linalg.norm(mean_emb)
-                if norm > 0:
-                    mean_emb = mean_emb / norm
-                db[person] = mean_emb
-            total_embs = sum(len(e) for e in groups.values())
+                if person not in db:
+                    db[person] = []
+                db[person].append(emb)
+            total_embs = sum(len(e) for e in db.values())
             logger.info(f"Face-DB geladen: {len(db)} Personen aus {total_embs} Embeddings ({embeddings_path})")
             return db
         except Exception as e:
@@ -710,9 +709,9 @@ class TappasPipeline:
 
                     # Face-Matching gegen DB
                     matched_name, matched_sim = self._match_face(emb_data)
-                    # Debug-Log (alle 50 Frames): SCRFD-Score vs ArcFace-Similarity klar trennen
+                    # Debug-Log (alle 40 Frames ~2s): SCRFD-Score vs ArcFace-Similarity klar trennen
                     self._match_log_count = getattr(self, '_match_log_count', 0) + 1
-                    if self._match_log_count % 50 == 1:
+                    if self._match_log_count % 40 == 1:
                         logger.info(f"[FACE-MATCH] SCRFD={conf:.3f} ArcFace={matched_sim:.3f} "
                                     f"thresh={self.arcface_thresh_val:.2f} → "
                                     f"{'✓ ' + matched_name if matched_name else '✗ kein Match'} "
@@ -729,11 +728,53 @@ class TappasPipeline:
 
             detections.append(entry)
 
-        # Bestes Face-Match fuer PerceptionFrame
+        # Bestes Face-Match fuer PerceptionFrame (Rohwerte aus aktuellem Frame)
+        raw_face_id = None
+        raw_face_sim = 0.0
         for f in faces:
-            if f.get("face_similarity", 0) > face_similarity:
-                face_id = f.get("face_id")
-                face_similarity = f.get("face_similarity", 0)
+            if f.get("face_similarity", 0) > raw_face_sim:
+                raw_face_id = f.get("face_id")
+                raw_face_sim = f.get("face_similarity", 0)
+
+        # Temporal Smoothing: Ringbuffer der letzten N Similarities
+        # Auch Frames ohne Match (sim < thresh) werden mit Rohwert gespeichert
+        if faces:
+            best_raw_sim = max((f.get("face_similarity", 0) for f in faces), default=0)
+            self._sim_history.append((raw_face_id, best_raw_sim))
+            if len(self._sim_history) > self._sim_history_size:
+                self._sim_history = self._sim_history[-self._sim_history_size:]
+        # Geglättete Entscheidung: Mehrheitsvotum aus History
+        if self._sim_history:
+            # Zaehle Matches pro Name
+            match_counts = {}
+            total_sims = {}
+            for name, sim in self._sim_history:
+                if name:
+                    match_counts[name] = match_counts.get(name, 0) + 1
+                    total_sims[name] = total_sims.get(name, 0.0) + sim
+            # Bester Kandidat: Mehrheit der letzten Frames
+            if match_counts:
+                best_name = max(match_counts, key=match_counts.get)
+                avg_sim = total_sims[best_name] / match_counts[best_name]
+                # Mindestens 2 von 5 Frames muessen matchen
+                if match_counts[best_name] >= 2:
+                    face_id = best_name
+                    face_similarity = avg_sim
+                    self._smoothed_face_id = best_name
+                    self._smoothed_face_sim = avg_sim
+                else:
+                    face_id = raw_face_id
+                    face_similarity = raw_face_sim
+                    self._smoothed_face_id = None
+                    self._smoothed_face_sim = 0.0
+            else:
+                face_id = raw_face_id
+                face_similarity = raw_face_sim
+                self._smoothed_face_id = None
+                self._smoothed_face_sim = 0.0
+        else:
+            face_id = raw_face_id
+            face_similarity = raw_face_sim
 
         # PerceptionFrame bauen
         pf = self._build_pframe(persons, faces, best_face_conf,
@@ -922,7 +963,7 @@ class TappasPipeline:
     # =====================================================================
 
     def _match_face(self, embedding: np.ndarray) -> tuple:
-        """Face-Embedding gegen DB matchen.
+        """Face-Embedding gegen DB matchen (Max-Match ueber alle Einzel-Embeddings).
 
         Returns:
             (name, similarity) oder (None, 0.0)
@@ -940,11 +981,15 @@ class TappasPipeline:
             best_sim = 0.0
             threshold = self.arcface_thresh_val  # Panel-Slider Wert
 
-            for name, db_emb in self._face_db.items():
-                sim = float(np.dot(embedding, db_emb))
-                if sim > best_sim:
-                    best_sim = sim
-                    best_name = name
+            for name, db_embs in self._face_db.items():
+                # db_embs ist Liste von Embeddings (oder einzelnes Array fuer Kompatibilitaet)
+                if isinstance(db_embs, np.ndarray) and db_embs.ndim == 1:
+                    db_embs = [db_embs]
+                for db_emb in db_embs:
+                    sim = float(np.dot(embedding, db_emb))
+                    if sim > best_sim:
+                        best_sim = sim
+                        best_name = name
 
             if best_sim >= threshold:
                 logger.debug(f"[FACE-MATCH] {best_name} sim={best_sim:.3f} (thresh={threshold:.2f})")
