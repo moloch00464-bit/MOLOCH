@@ -290,11 +290,21 @@ class MolochService:
         Ersetzt die Integrations-Logik die bei InferenceEngine INTERN laeuft.
         Hier extern, weil TappasPipeline nur Daten liefert (Separation of Concerns).
         Laeuft mit ~5 Hz (200ms) — schnell genug fuer LED/Perception, langsam genug fuer CPU.
+
+        WICHTIG: Loop ueberlebt Pipeline-Restart! Prueft is_running() intern
+        und wartet bis Watchdog die Pipeline neu startet.
         """
         POLL_INTERVAL = 0.2  # 5 Hz
-        _last_pframe_id = None  # Duplikat-Erkennung
+        OFFLINE_POLL = 1.0   # 1 Hz wenn Pipeline offline
+        _last_pframe_id = None
 
-        while self.running and self._inference.is_running():
+        while self.running:
+            # Pipeline offline → langsam pollen, warten auf Watchdog-Restart
+            if not self._inference.is_running():
+                time.sleep(OFFLINE_POLL)
+                _last_pframe_id = None  # Reset nach Reconnect
+                continue
+
             try:
                 pframe = self._inference.get_current_pframe()
                 if pframe is None:
@@ -319,7 +329,6 @@ class MolochService:
                             "motion_level": 0.0,
                             "camera_moving": False,
                         }
-                        # tick() fuer Stage-Tracking, Return ignorieren (TAPPAS = alle Modelle aktiv)
                         self._perception.tick(ctx)
                     except Exception as e:
                         logger.debug(f"[TAPPAS-PERC] PerceptionEngine tick: {e}")
@@ -328,14 +337,11 @@ class MolochService:
                 if self._core_integrator:
                     try:
                         face_id = getattr(pframe, 'face_id', None)
-                        person_detected = getattr(pframe, 'person_detected', False)
                         face_detected = getattr(pframe, 'face_detected', False)
 
                         if face_id and face_id != "unknown":
-                            # Bekannte Person → Dominance Richtung Guardian
                             self._core_integrator.feed_event("markus_recognized", 0.1)
                         elif face_detected and (not face_id or face_id == "unknown"):
-                            # Unbekanntes Gesicht → Dominance Richtung Shadow
                             self._core_integrator.feed_event("unknown_person", 0.1)
                     except Exception as e:
                         logger.debug(f"[TAPPAS-PERC] CoreIntegrator feed: {e}")
@@ -372,7 +378,7 @@ class MolochService:
 
             time.sleep(POLL_INTERVAL)
 
-        logger.info("[TAPPAS] Perception-Loop beendet")
+        logger.info("[TAPPAS] Perception-Loop beendet (Service gestoppt)")
 
     # =========================================================================
     # TAPPAS → Tracker Feed (ersetzt InferenceEngine-interne Tracker-Aufrufe)
@@ -385,11 +391,19 @@ class MolochService:
         - Face hat IMMER Prioritaet (face_fed_to_tracker)
         - BBoxen sind normalisiert (0-1) → skaliert auf 640x640 Pixel
         - Laeuft mit ~15 Hz (alle 66ms) um Tracker nicht zu ueberlasten
+
+        WICHTIG: Loop ueberlebt Pipeline-Restart! Wartet wenn Pipeline offline.
         """
         FEED_INTERVAL = 0.066  # ~15 Hz
-        FRAME_DIM = 640  # Tracker erwartet 640x640 Referenz-Koordinaten
+        OFFLINE_POLL = 1.0     # 1 Hz wenn Pipeline offline
+        FRAME_DIM = 640
 
-        while self.running and self._inference.is_running():
+        while self.running:
+            # Pipeline offline → langsam pollen
+            if not self._inference.is_running():
+                time.sleep(OFFLINE_POLL)
+                continue
+
             try:
                 tracker = self._cam._tracker
                 if not tracker or not self._cam._autonomous_mode:
@@ -408,7 +422,6 @@ class MolochService:
                     cls = d.get("class", "")
                     bbox = d.get("bbox", [0, 0, 0, 0])
                     conf = d.get("confidence", 0)
-                    # Normalisiert → Pixel (640x640)
                     pixel_bbox = [bbox[0] * FRAME_DIM, bbox[1] * FRAME_DIM,
                                   bbox[2] * FRAME_DIM, bbox[3] * FRAME_DIM]
                     entry = {"bbox": pixel_bbox, "confidence": conf, "class": cls}
@@ -417,7 +430,6 @@ class MolochService:
                     elif cls == "person":
                         person_dets.append(entry)
 
-                # Face hat Prioritaet — nur wenn keine Face, dann Person
                 if face_dets:
                     tracker.update_detection(
                         detections=face_dets,
@@ -429,7 +441,6 @@ class MolochService:
                         frame_width=FRAME_DIM, frame_height=FRAME_DIM
                     )
 
-                # Fliessender Takeover: erste Detection signalisieren
                 if self._cam._waiting_for_first_detection:
                     self._cam._first_detection_event.set()
                 if self._cam._moloch_has_control:
@@ -441,7 +452,7 @@ class MolochService:
 
             time.sleep(FEED_INTERVAL)
 
-        logger.info("[TAPPAS] Tracker-Feed Loop beendet")
+        logger.info("[TAPPAS] Tracker-Feed Loop beendet (Service gestoppt)")
 
     # =========================================================================
     # Lifecycle
@@ -814,6 +825,9 @@ class MolochService:
                 },
                 "voice": self._voice_pipeline.get_state() if self._voice_pipeline else {},
             }
+            # Pipeline-Status fuer Panel (Kamera offline/online Anzeige)
+            status["pipeline_alive"] = _inf.is_running()
+
             # TAPPAS: PFrame-Daten in Status einpflegen (Panel braucht person/face/mode)
             if USE_TAPPAS:
                 pframe = _inf.get_current_pframe()

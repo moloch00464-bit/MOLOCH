@@ -218,12 +218,14 @@ class TappasPipeline:
         logger.info("TAPPAS Pipeline gestartet")
 
     def stop(self):
-        """Pipeline sauber beenden."""
-        if not self._running:
-            return
-
-        logger.info("Stoppe TAPPAS Pipeline...")
+        """Pipeline sauber beenden. Funktioniert auch wenn _running schon False (z.B. nach Bus-Error)."""
+        was_running = self._running
         self._running = False
+
+        if was_running:
+            logger.info("Stoppe TAPPAS Pipeline...")
+        else:
+            logger.info("Raeume tote TAPPAS Pipeline auf...")
 
         if self._loop and self._loop.is_running():
             self._loop.quit()
@@ -238,7 +240,10 @@ class TappasPipeline:
         self._loop = None
         self._loop_thread = None
 
-        logger.info("TAPPAS Pipeline gestoppt")
+        # SHM-Frame loeschen damit Panel "Kein Signal" zeigt statt Frozen Frame
+        self._cleanup_shm()
+
+        logger.info("TAPPAS Pipeline gestoppt + aufgeraeumt")
 
     def is_running(self) -> bool:
         return self._running
@@ -361,8 +366,11 @@ class TappasPipeline:
         """Komplette Multi-Model Pipeline (YOLO + SCRFD + Tracker + ArcFace)."""
 
         # --- Source: RTSP → H264 depay → decode → scale → RGB ---
+        # retry=5: rtspsrc versucht 5x reconnect bei Verbindungsverlust
+        # timeout=5000000: 5s Timeout (Microsekunden)
         source = (
-            f'rtspsrc location="{self._rtsp_url}" name=source latency=300 protocols=tcp ! '
+            f'rtspsrc location="{self._rtsp_url}" name=source latency=300 protocols=tcp '
+            f'retry=5 timeout=5000000 tcp-timeout=5000000 ! '
             f'rtph264depay name=source_depay ! '
             f'queue name=source_queue_decode leaky=downstream max-size-buffers=5 max-size-bytes=0 max-size-time=0 ! '
             f'avdec_h264 name=source_decode ! '
@@ -626,18 +634,32 @@ class TappasPipeline:
         return Gst.FlowReturn.OK
 
     def _on_bus_message(self, bus, message):
-        """GStreamer Bus Messages verarbeiten."""
+        """GStreamer Bus Messages verarbeiten. Raeumt auf bei ERROR/EOS."""
         t = message.type
         if t == Gst.MessageType.ERROR:
             err, debug = message.parse_error()
-            logger.error(f"GStreamer Fehler: {err}")
-            logger.debug(f"GStreamer Debug: {debug}")
+            logger.error(f"[BUS] GStreamer Fehler: {err}")
+            logger.error(f"[BUS] Debug: {debug}")
             self._running = False
+            # Pipeline auf NULL setzen damit NPU-Resources freigegeben werden
+            if self._pipeline:
+                try:
+                    self._pipeline.set_state(Gst.State.NULL)
+                except Exception:
+                    pass
+            # SHM loeschen damit Panel "Kein Signal" zeigt
+            self._cleanup_shm()
             if self._loop and self._loop.is_running():
                 self._loop.quit()
         elif t == Gst.MessageType.EOS:
-            logger.warning("End-of-Stream — Pipeline beendet")
+            logger.warning("[BUS] End-of-Stream — Pipeline beendet")
             self._running = False
+            if self._pipeline:
+                try:
+                    self._pipeline.set_state(Gst.State.NULL)
+                except Exception:
+                    pass
+            self._cleanup_shm()
             if self._loop and self._loop.is_running():
                 self._loop.quit()
         return True
@@ -774,6 +796,15 @@ class TappasPipeline:
     # =====================================================================
     # SHM IPC (Panel Preview)
     # =====================================================================
+
+    def _cleanup_shm(self):
+        """SHM-Frame loeschen damit Panel sofort 'Kein Signal' zeigt."""
+        for path in [SHM_FRAME_PATH, SHM_FRAME_PATH + '.tmp']:
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except OSError:
+                pass
 
     def _write_shm_frame(self, frame: np.ndarray):
         """Frame nach /dev/shm/moloch_frame schreiben (gleicher IPC-Weg wie InferenceEngine).
