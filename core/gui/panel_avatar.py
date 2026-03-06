@@ -889,7 +889,7 @@ class AvatarModule:
 
         self._state_label.config(
             text=f"T:{self._tension:.2f} | D:{self._dominance:+.2f}",
-            fg=_hex_scale(main_hex, bright * 0.7),
+            fg=_hex_scale(main_hex, max(0.65, bright * 0.85)),
         )
 
         cpu_str = f"CPU: {self._cpu_temp_celsius:.0f}\u00b0C" if self._cpu_temp_celsius > 0 else ""
@@ -905,7 +905,7 @@ class AvatarModule:
             parts.append(self._status_text)
         self._status_label.config(
             text=" | ".join(parts),
-            fg=_hex_scale(main_hex, bright * 0.6),
+            fg=_hex_scale(main_hex, max(0.55, bright * 0.75)),
         )
 
         # Berserker Flash bei Eintritt
