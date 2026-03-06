@@ -1304,6 +1304,15 @@ class MolochConsole:
             if perception_ctx:
                 system = system + "\n\n--- AKTUELLE WAHRNEHMUNG ---\n" + perception_ctx
 
+            # Hardware-Status (live Werte bei jedem Call)
+            try:
+                from core.voice_pipeline import _get_hardware_status
+                hw_status = _get_hardware_status()
+                if hw_status:
+                    system = system + "\n" + hw_status
+            except Exception:
+                pass
+
             response = self.claude_client.messages.create(
                 model="claude-sonnet-4-20250514",
                 max_tokens=1024,

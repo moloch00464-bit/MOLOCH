@@ -140,6 +140,70 @@ def _perception_to_text() -> str:
         return ""
 
 
+def _get_hardware_status() -> str:
+    """Aktuelle Hardware-Werte lesen (CPU-Temp, RAM, Luefter, NPU, Disk, Uptime)."""
+    parts = []
+    # CPU-Temperatur
+    try:
+        with open("/sys/class/thermal/thermal_zone0/temp") as f:
+            temp_c = int(f.read().strip()) / 1000
+            parts.append(f"CPU {temp_c:.0f}°C")
+    except Exception:
+        pass
+    # RAM (aus /proc/meminfo, kein psutil noetig)
+    try:
+        meminfo = {}
+        with open("/proc/meminfo") as f:
+            for line in f:
+                k, v = line.split(":")
+                meminfo[k.strip()] = int(v.strip().split()[0])
+        total_mb = meminfo["MemTotal"] // 1024
+        avail_mb = meminfo.get("MemAvailable", meminfo["MemFree"]) // 1024
+        used_mb = total_mb - avail_mb
+        parts.append(f"RAM {used_mb}/{total_mb}MB")
+    except Exception:
+        pass
+    # Luefter-Stufe
+    try:
+        with open("/sys/class/thermal/cooling_device0/cur_state") as f:
+            fan_cur = int(f.read().strip())
+        with open("/sys/class/thermal/cooling_device0/max_state") as f:
+            fan_max = int(f.read().strip())
+        parts.append(f"Luefter Stufe {fan_cur}/{fan_max}")
+    except Exception:
+        pass
+    # NPU (Hailo Device vorhanden?)
+    try:
+        npu_ok = os.path.exists("/dev/hailo0")
+        parts.append(f"NPU {'aktiv' if npu_ok else 'offline'}")
+    except Exception:
+        pass
+    # Disk (SSD1)
+    try:
+        st = os.statvfs(str(Path(__file__).resolve().parent.parent))
+        free_gb = (st.f_bavail * st.f_frsize) / (1024**3)
+        total_gb = (st.f_blocks * st.f_frsize) / (1024**3)
+        parts.append(f"Disk {free_gb:.0f}/{total_gb:.0f}GB frei")
+    except Exception:
+        pass
+    # Uptime
+    try:
+        with open("/proc/uptime") as f:
+            uptime_sec = float(f.read().split()[0])
+            hours = int(uptime_sec // 3600)
+            mins = int((uptime_sec % 3600) // 60)
+            if hours > 0:
+                parts.append(f"Uptime {hours}h{mins:02d}m")
+            else:
+                parts.append(f"Uptime {mins}m")
+    except Exception:
+        pass
+
+    if not parts:
+        return ""
+    return "\n--- DEINE HARDWARE (live) ---\n" + ", ".join(parts)
+
+
 def _load_capabilities_block() -> str:
     """system_capabilities.json laden und als Prompt-Block formatieren."""
     cap_path = Path(__file__).resolve().parent.parent / "config" / "system_capabilities.json"
@@ -529,6 +593,11 @@ class VoicePipeline:
         perception_ctx = _perception_to_text()
         if perception_ctx:
             system = system + "\n\n--- AKTUELLE WAHRNEHMUNG ---\n" + _sanitize_text(perception_ctx)
+
+        # Hardware-Status (live Werte bei jedem Call)
+        hw_status = _get_hardware_status()
+        if hw_status:
+            system = system + "\n" + _sanitize_text(hw_status)
 
         try:
             from core.personality.personality_engine import get_personality_engine
@@ -1254,6 +1323,11 @@ Sei natuerlich. Kein erzwungener Humor. Situationsbezogen."""
         perception_ctx = _perception_to_text()
         if perception_ctx:
             system += "\n\n--- AKTUELLE WAHRNEHMUNG ---\n" + perception_ctx
+
+        # Hardware-Status (live)
+        hw_status = _get_hardware_status()
+        if hw_status:
+            system += "\n" + hw_status
 
         # Personality Zone
         try:
