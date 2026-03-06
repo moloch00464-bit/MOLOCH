@@ -347,6 +347,33 @@ class MolochService:
                     except Exception as e:
                         logger.debug(f"[TAPPAS-PERC] CoreIntegrator feed: {e}")
 
+                # --- ReID: Person ohne face_id gegen Embedding-DB matchen ---
+                if self._reid:
+                    try:
+                        person_det = getattr(pframe, 'person_detected', False)
+                        f_id = getattr(pframe, 'face_id', None)
+                        if person_det and not f_id:
+                            # Face-Embedding aus TAPPAS-Detections holen
+                            dets = self._inference.get_detections()
+                            for det in dets:
+                                if det.get("class") == "face" and det.get("embedding") is not None:
+                                    reid_name, reid_sim = self._reid.match(det["embedding"])
+                                    if reid_name:
+                                        from core.moloch_event_bus import get_event_bus
+                                        get_event_bus().publish(
+                                            event_type="perception.reid",
+                                            payload={
+                                                "name": reid_name,
+                                                "similarity": reid_sim,
+                                                "source": "arcface_embedding",
+                                            },
+                                            source="moloch_service",
+                                            priority=1,
+                                        )
+                                    break  # Nur bestes Face-Embedding verwenden
+                    except Exception as e:
+                        logger.debug(f"[TAPPAS-PERC] ReID: {e}")
+
                 # --- LED: Markus-Erkennung Hysterese ---
                 if self._led:
                     try:
@@ -544,7 +571,17 @@ class MolochService:
             self._action_bridge = None
             logger.warning(f"[INIT] ActionBridge nicht verfuegbar: {e}")
 
-        # 7. Spotify Bridge (Track-Info + Audio Features → Event Bus)
+        # 7. Person ReID (Embedding-basierte Wiedererkennung ohne Gesicht)
+        self._reid = None
+        try:
+            from core.memory.person_reid import get_reid
+            self._reid = get_reid()
+            logger.info(f"[INIT] PersonReID bereit: {len(self._reid.get_identities())} Identitaeten")
+        except Exception as e:
+            self._reid = None
+            logger.warning(f"[INIT] PersonReID nicht verfuegbar: {e}")
+
+        # 8. Spotify Bridge (Track-Info + Audio Features → Event Bus)
         self._spotify_bridge = None
         try:
             from core.music.spotify_bridge import get_spotify_bridge
