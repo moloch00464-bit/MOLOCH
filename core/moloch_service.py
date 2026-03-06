@@ -667,6 +667,17 @@ class MolochService:
         """Hardware initialisieren: VDevice, Models, RTSP, Cloud."""
         logger.info("M.O.L.O.C.H. Service initialisiert...")
 
+        # System Capabilities generieren (config/system_capabilities.json)
+        try:
+            import subprocess
+            cap_script = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                      "scripts", "generate_capabilities.py")
+            if os.path.exists(cap_script):
+                subprocess.run(["python3", cap_script], timeout=30)
+                logger.info("[INIT] system_capabilities.json aktualisiert")
+        except Exception as e:
+            logger.warning(f"[INIT] Capabilities-Generator fehlgeschlagen: {e}")
+
         # 0. Langzeitgedaechtnis initialisieren (SSD2, persistent)
         try:
             self._memory = get_memory()

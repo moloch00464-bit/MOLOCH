@@ -346,7 +346,39 @@ Beispiel: "Klar, ich leg Suicide Commando auf! [SPOTIFY:artist=Suicide Commando]
     # Add brain context
     brain_context = load_brain_context()
 
-    return base_prompt + "\n" + brain_context + "\n\nDu bist auf einem Raspberry Pi zu Hause bei Markus in Nuernberg. Sei hilfreich, sei frech, sei M.O.L.O.C.H.!"
+    # System Capabilities einfuegen
+    cap_block = ""
+    cap_path = Path(__file__).resolve().parent.parent.parent / "config" / "system_capabilities.json"
+    if cap_path.exists():
+        try:
+            with open(cap_path, "r", encoding="utf-8") as f:
+                caps = json.load(f)
+            lines = ["\nDeine aktuellen Faehigkeiten:"]
+            s = caps.get("summary", {})
+            lines.append(f"- Core-Module: {s.get('core_modules', '?')}")
+            lines.append(f"- Externe Deps: {s.get('external_deps', '?')}")
+            lines.append(f"- NPU-Modelle: {s.get('hef_models', '?')}")
+            lines.append(f"- Voice-Modelle: {s.get('voice_models', '?')}")
+            lines.append(f"- TAPPAS aktiv: {s.get('tappas_active', False)}")
+            for gid, info in caps.get("gates", {}).items():
+                lines.append(f"- {gid}: {info.get('name', '?')} [{info.get('status', '?')}] ({info.get('modules_available', 0)}/{info.get('modules_total', 0)} Module)")
+            hw = caps.get("hardware", {})
+            if hw:
+                lines.append(f"- CPU: {hw.get('cpu_model', '?')}, RAM: {hw.get('ram_gb', '?')} GB")
+                lines.append(f"- Hailo NPU: {'verfuegbar' if hw.get('hailo_device') else 'nicht gefunden'}")
+            npu = [m for m in caps.get("npu_models", []) if m.get("active_in_pipeline")]
+            if npu:
+                names = ", ".join(m.get("description", m.get("name", "?")) for m in npu)
+                lines.append(f"- Aktive NPU-Pipeline: {names}")
+            voices = caps.get("voice_models", [])
+            if voices:
+                names = ", ".join(v.get("name", "?") for v in voices)
+                lines.append(f"- Stimmen: {names}")
+            cap_block = "\n".join(lines)
+        except Exception:
+            pass
+
+    return base_prompt + "\n" + brain_context + "\n" + cap_block + "\n\nDu bist auf einem Raspberry Pi zu Hause bei Markus in Nuernberg. Sei hilfreich, sei frech, sei M.O.L.O.C.H.!"
 
 
 # ============================================================================
