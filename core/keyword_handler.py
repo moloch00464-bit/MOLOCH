@@ -17,6 +17,7 @@ Aktionen:
 """
 
 import os
+import re
 import json
 import time
 import logging
@@ -108,6 +109,8 @@ class KeywordHandler:
             return self._action_alarm(True, response)
         elif action == "alarm_off":
             return self._action_alarm(False, response)
+        elif action == "enrollment_start":
+            return self._action_enrollment(text, response)
         else:
             logger.warning(f"[KEYWORD] Unbekannte Aktion: {action}")
             return None
@@ -165,6 +168,47 @@ class KeywordHandler:
         """Alarm steuern via IPC Command."""
         self._send_ipc_command("cloud_alarm", on=on)
         return response
+
+    def _action_enrollment(self, text: str, response_template: str) -> str:
+        """Face-Enrollment via Chat starten.
+
+        Extrahiert den Namen aus dem Text:
+          "merk dir das ist Peter" → name=peter
+          "das ist Hans" → name=hans
+          "enrollment markus" → name=markus
+          "gesicht merken" → name=unbekannt (Fallback)
+        """
+        name = self._extract_enrollment_name(text)
+        self._send_ipc_command("enrollment_start", name=name, n=20)
+        response = response_template.replace("{name}", name.capitalize())
+        logger.info(f"[KEYWORD] Enrollment gestartet fuer '{name}'")
+        return response
+
+    def _extract_enrollment_name(self, text: str) -> str:
+        """Name aus Enrollment-Befehl extrahieren."""
+        lower = text.lower().strip()
+
+        # Pattern: "merk dir das ist <NAME>"
+        m = re.search(r"merk dir das ist\s+(\w+)", lower)
+        if m:
+            return m.group(1)
+
+        # Pattern: "das ist <NAME>" (aber nicht "das ist gut/ok/etc")
+        m = re.search(r"das ist\s+(\w+)", lower)
+        if m and m.group(1) not in ("gut", "ok", "okay", "toll", "super", "richtig", "falsch", "egal"):
+            return m.group(1)
+
+        # Pattern: "enrollment <NAME>" / "enroll <NAME>"
+        m = re.search(r"enroll(?:ment)?\s+(\w+)", lower)
+        if m:
+            return m.group(1)
+
+        # Pattern: "einpraegen <NAME>"
+        m = re.search(r"einpr[aä]gen\s+(\w+)", lower)
+        if m:
+            return m.group(1)
+
+        return "unbekannt"
 
     # =========================================================================
     # IPC Helper

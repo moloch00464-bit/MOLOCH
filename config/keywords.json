@@ -88,6 +88,23 @@
                 "alarm einschalten",
                 "alarm aktivieren"
             ]
+        },
+        {
+            "id": "enrollment",
+            "description": "Face-Enrollment starten — Name wird aus Text extrahiert",
+            "action": "enrollment_start",
+            "response": "Enrollment gestartet fuer {name}. Schau in die Kamera, ich sammle 20 Aufnahmen.",
+            "keywords": [
+                "merk dir das ist",
+                "das ist ",
+                "enrollment ",
+                "enroll ",
+                "einpraegen ",
+                "gesicht merken",
+                "gesicht lernen",
+                "gesicht speichern",
+                "lern mein gesicht"
+            ]
         }
     ]
 }
