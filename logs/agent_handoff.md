@@ -51,18 +51,24 @@ Service: AKTIV, MOLOCH_USE_TAPPAS=1, nach Reboot verifiziert
 
 1. **Face-ID Threshold zu niedrig**: sim=0.30-0.56 im Live-Betrieb, ArcFace Threshold
    steht auf 0.30 → erkennt fast alles als Markus. Nach Re-Enrollment auf 0.60+ hochsetzen.
-2. **ReID HEF fehlt**: repvgg_a0_person_reid_512.hef nicht auf dem Pi.
-   person_reid.py ist Stub fuer Gate 2.
-3. **G1-T11 Labelme**: Keine Spezifikation vorhanden. Uebersprungen.
+2. **G1-T11 Labelme**: Keine Spezifikation vorhanden. Uebersprungen.
+
+## REID-MODELL RECHERCHE (2026-03-06)
+
+- repvgg_a0_person_reid_512.hef existiert NICHT fuer Hailo-10H
+- Hailo reid_multisource Pipeline nutzt SCRFD + ArcFace (KEIN separates ReID-HEF)
+- librepvgg_reid_postprocess.so ist kompiliert (hailo-apps), aber nur Postprocessor
+- **Entscheidung**: ArcFace-Embeddings fuer Person-ReID nutzen (wie Hailo selbst)
+- person_reid.py umgebaut: Kein NPU-Inference, nur DB-Verwaltung + Matching
+- DB persistent auf SSD2: /mnt/moloch-data/memory/reid_db.json
 
 ## NAECHSTE SCHRITTE — GATE 2 (Identity)
 
 Gate 2 Fokus: ReID + Qdrant VITALE (laut CLAUDE.md Roadmap)
-- ReID HEF beschaffen und deployen
-- person_reid.py VDevice-Verdrahtung in moloch_service.py
+- person_reid.py in moloch_service.py verdrahten (TAPPAS Embeddings → ReID DB)
 - Qdrant Vector-DB fuer Identity-Embeddings
 - Face-DB Re-Enrollment durch TAPPAS-Pipeline (Threshold 0.60+)
-- GStreamer vs HailoRT Embedding-Inkompatibilitaet endgueltig loesen
+- Track-ID → Identitaet Mapping (hailotracker IDs + ReID Embeddings)
 
 ## SERVICE-STATUS
 - MOLOCH_USE_TAPPAS=1 AKTIV
