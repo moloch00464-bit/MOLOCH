@@ -164,6 +164,18 @@ class CoreIntegrator:
     # Public API
     # =========================================================================
 
+    def feed_event(self, event_type: str, weight: float = 0.1):
+        """Event als Tension/Dominance-Input einspeisen.
+
+        Convenience-Alias fuer update_input(). Mappt event_type direkt
+        auf den passenden Input-Key (z.B. "markus_recognized", "unknown_person").
+
+        Args:
+            event_type: Key aus TENSION_WEIGHTS oder DOMINANCE_WEIGHTS
+            weight: Staerke des Inputs (0.0-1.0)
+        """
+        self.update_input("event", event_type, weight)
+
     def update_input(self, source: str, key: str, value: float):
         """Module fuettern Inputs hierueber.
 
