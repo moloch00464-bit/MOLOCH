@@ -935,6 +935,22 @@ class MolochService:
                     }
                 except Exception:
                     pass
+            # Action Bridge Status + Event Bus Stats (Dashboard)
+            try:
+                from core.action_bridge import get_action_bridge
+                bridge = get_action_bridge()
+                status["bridge"] = bridge.get_status()
+                status["bridge_decisions"] = bridge.get_decisions(5)
+            except Exception:
+                pass
+            try:
+                from core.moloch_event_bus import get_event_bus
+                bus = get_event_bus()
+                status["bus_stats"] = bus.get_stats()
+                status["silence_level"] = bus.silence_level
+            except Exception:
+                pass
+
             self._ipc.write_status(status)
 
             # MolochSprache Retention-Tick (1x/Stunde Cleanup)

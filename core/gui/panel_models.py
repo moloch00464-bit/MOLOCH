@@ -57,6 +57,12 @@ try:
 except ImportError:
     SettingsPopup = None
 
+# Dashboard Popup importieren (optional)
+try:
+    from core.gui.popups.popup_dashboard import DashboardPopup
+except ImportError:
+    DashboardPopup = None
+
 
 class ModelsModule:
     """Model Controls und Popup-Buttons im uebergebenen LabelFrame."""
@@ -101,6 +107,7 @@ class ModelsModule:
         self.on_popup_npu = self._open_npu_popup
         self.on_popup_tracker = self._open_tracker_popup
         self.on_popup_settings = self._open_settings_popup
+        self.on_popup_dashboard = self._open_dashboard_popup
 
         # GUI aufbauen
         self._build_pipeline_status()
@@ -162,6 +169,13 @@ class ModelsModule:
             SettingsPopup(self._parent, self._service)
         else:
             print("FEHLER: popup_settings.py konnte nicht importiert werden")
+
+    def _open_dashboard_popup(self):
+        """NPU Dashboard Popup oeffnen."""
+        if DashboardPopup is not None:
+            DashboardPopup(self._parent, self._service)
+        else:
+            print("FEHLER: popup_dashboard.py konnte nicht importiert werden")
 
     # =========================================================================
     # Pipeline Status (TAPPAS/Legacy Anzeige)
@@ -351,6 +365,7 @@ class ModelsModule:
             ("HARDWARE", lambda: self.on_popup_hardware()),
             ("NPU/MPO", lambda: self.on_popup_npu()),
             ("TRACKER", lambda: self.on_popup_tracker()),
+            ("DASHBOARD", lambda: self.on_popup_dashboard()),
             ("SETTINGS", lambda: self.on_popup_settings()),
         ]
 
