@@ -151,6 +151,15 @@ class TappasPipeline:
         self._learner_flash = False
         self._hand_occlusion_enabled = False
 
+        # --- Live-Enrollment ---
+        self._enroll_active = False
+        self._enroll_name = ""
+        self._enroll_target = 20
+        self._enroll_candidates = []  # (score, embedding_copy)
+        self._enroll_min_score = 0.50
+        self._enroll_diversity = 0.85  # Cosine-Sim Schwelle
+        self._enroll_lock = threading.Lock()
+
         # GStreamer einmal initialisieren
         if not Gst.is_initialized():
             Gst.init(None)
@@ -296,6 +305,141 @@ class TappasPipeline:
         with self._face_db_lock:
             self._face_db = face_db
         logger.info(f"Face-DB aktualisiert: {len(self._face_db)} Personen")
+
+    # =====================================================================
+    # Live-Enrollment
+    # =====================================================================
+
+    def start_enrollment(self, name: str, n: int = 20):
+        """Live-Enrollment starten: sammelt N ArcFace-Embeddings aus dem GStreamer-Stream.
+
+        Embeddings kommen aus dem GLEICHEN Pipeline-Pfad wie die Erkennung
+        (libvms_face_align.so → hailonet arcface → postprocess).
+        Kein TAPPAS-vs-HailoRT Inkompatibilitaetsproblem.
+
+        Args:
+            name: Personenname (z.B. "Markus")
+            n: Maximale Anzahl Kandidaten zum Sammeln (beste 20 werden gespeichert)
+        """
+        with self._enroll_lock:
+            self._enroll_name = name.lower()
+            self._enroll_target = n
+            self._enroll_candidates = []
+            self._enroll_active = True
+        logger.info(f"[ENROLLMENT] Gestartet fuer '{name}', sammle bis zu {n} Embeddings (Score >{self._enroll_min_score})")
+
+    def get_enrollment_status(self) -> dict:
+        """Enrollment-Status fuer IPC/Panel."""
+        with self._enroll_lock:
+            return {
+                "active": self._enroll_active,
+                "name": self._enroll_name,
+                "collected": len(self._enroll_candidates),
+                "target": self._enroll_target,
+            }
+
+    def _collect_enrollment_embedding(self, embedding: np.ndarray, score: float):
+        """Embedding-Kandidat fuer Enrollment sammeln (aus _on_buffer Callback).
+
+        Filtert nach Score und Limit, ruft _finish_enrollment wenn genug da sind.
+        """
+        with self._enroll_lock:
+            if not self._enroll_active:
+                return
+            if score < self._enroll_min_score:
+                return
+            # Embedding kopieren (Buffer wird wiederverwendet)
+            emb = embedding.copy()
+            norm = np.linalg.norm(emb)
+            if norm > 0:
+                emb = emb / norm
+            self._enroll_candidates.append((score, emb))
+            count = len(self._enroll_candidates)
+            target = self._enroll_target
+
+        logger.info(f"[ENROLLMENT] Embedding #{count} gesammelt (score={score:.3f})")
+
+        # Genug Kandidaten? → Enrollment abschliessen
+        if count >= target:
+            self._finish_enrollment()
+
+    def _finish_enrollment(self):
+        """Enrollment abschliessen: Diversitaets-Selektion + Face-DB speichern."""
+        import json
+
+        with self._enroll_lock:
+            if not self._enroll_active:
+                return
+            self._enroll_active = False
+            name = self._enroll_name
+            candidates = list(self._enroll_candidates)
+            diversity_thresh = self._enroll_diversity
+
+        if not candidates:
+            logger.warning("[ENROLLMENT] Keine Embeddings gesammelt!")
+            return
+
+        # Nach Score sortieren (hoechster zuerst)
+        candidates.sort(key=lambda x: x[0], reverse=True)
+
+        # Greedy diverse selection
+        selected = []
+        for score, emb in candidates:
+            if len(selected) >= 20:
+                break
+            is_diverse = all(
+                float(np.dot(emb, sel_emb)) < diversity_thresh
+                for _, sel_emb in selected
+            )
+            if is_diverse:
+                selected.append((score, emb))
+
+        # Falls nicht genug diverse: Rest nach Score auffuellen
+        if len(selected) < 20:
+            selected_embs = {id(emb) for _, emb in selected}
+            for score, emb in candidates:
+                if len(selected) >= 20:
+                    break
+                if id(emb) not in selected_embs:
+                    selected.append((score, emb))
+
+        logger.info(f"[ENROLLMENT] {len(selected)} diverse Embeddings ausgewaehlt fuer '{name}'")
+
+        # Face-DB laden, alte Eintraege entfernen, neue speichern
+        embeddings_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+            "data", "face_embeddings.json"
+        )
+        db = {}
+        if os.path.exists(embeddings_path):
+            try:
+                with open(embeddings_path, 'r') as f:
+                    db = json.load(f)
+            except Exception:
+                pass
+
+        # Alte Eintraege fuer diesen Namen entfernen
+        old_keys = [k for k in db if k.split('#')[0].lower() == name]
+        for k in old_keys:
+            del db[k]
+        logger.info(f"[ENROLLMENT] {len(old_keys)} alte '{name}' Eintraege entfernt")
+
+        # Neues Haupt-Embedding + Varianten speichern
+        db[name] = selected[0][1].tolist()
+        for i, (score, emb) in enumerate(selected[1:]):
+            db[f"{name}#snap_{i}"] = emb.tolist()
+
+        # Atomar speichern
+        os.makedirs(os.path.dirname(embeddings_path), exist_ok=True)
+        tmp = embeddings_path + ".tmp"
+        with open(tmp, 'w') as f:
+            json.dump(db, f, indent=1, ensure_ascii=False)
+        os.replace(tmp, embeddings_path)
+
+        logger.info(f"[ENROLLMENT] Face-DB gespeichert: {len(selected)} Embeddings fuer '{name}'")
+
+        # Face-DB neu laden (Durchschnitt bilden)
+        self.reload_face_db()
 
     def sync_flags_from_npu(self):
         """No-op: TAPPAS Pipeline hat alle Modelle permanent aktiv."""
@@ -554,6 +698,10 @@ class TappasPipeline:
                 if embeddings:
                     emb_data = np.array(embeddings[0].get_data(), dtype=np.float32)
                     entry["embedding"] = emb_data
+
+                    # Live-Enrollment: Embedding sammeln wenn aktiv
+                    if self._enroll_active:
+                        self._collect_enrollment_embedding(emb_data, conf)
 
                     # Face-Matching gegen DB
                     matched_name, matched_sim = self._match_face(emb_data)
