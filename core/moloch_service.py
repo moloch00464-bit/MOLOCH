@@ -53,6 +53,9 @@ from core.awareness.room_map import get_room_map
 from core.awareness.motion_analyzer import get_motion_analyzer
 from core.awareness.activity_analyzer import get_activity_analyzer
 from core.awareness.context_evaluator import get_context_evaluator
+from core.personality.tension_integrator import get_tension_integrator
+from core.personality.mood_engine import get_mood_engine
+from core.personality.behavior_rules import get_behavior_rules
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger("MolochService")
@@ -490,6 +493,29 @@ class MolochService:
                     except Exception as e:
                         logger.debug(f"[TAPPAS-PERC] Awareness: {e}")
 
+                # --- MoodEngine: Signale updaten und evaluieren ---
+                if self._mood_engine:
+                    try:
+                        _me_tension = 0.0
+                        _me_dominance = 0.5
+                        _me_zone = "guardian"
+                        if self._core_integrator:
+                            _me_tension = self._core_integrator.get_tension()
+                            _me_dominance = self._core_integrator.get_dominance()
+                            _me_zone = self._core_integrator.get_personality_zone()
+                        self._mood_engine.update_signals(
+                            tension=_me_tension,
+                            dominance=_me_dominance,
+                            personality_zone=_me_zone,
+                            music_mood=getattr(self, '_last_mood_music_mood', None),
+                            activity=self._activity_analyzer.current_activity if self._activity_analyzer else "away",
+                            face_id=getattr(pframe, 'face_id', None),
+                            music_energy=getattr(self, '_last_awareness_music_energy', 0.0),
+                        )
+                        self._mood_engine.evaluate()
+                    except Exception as e:
+                        logger.debug(f"[TAPPAS-PERC] MoodEngine: {e}")
+
             except Exception as e:
                 logger.debug(f"[TAPPAS-PERC] Loop error: {e}")
 
@@ -697,6 +723,21 @@ class MolochService:
         except Exception as e:
             logger.warning(f"[INIT] Awareness Module nicht verfuegbar: {e}")
 
+        # 10. Emergent Personality (Gate 4: Mood Engine + Behavior Rules)
+        self._tension_integrator = None
+        self._mood_engine = None
+        self._behavior_rules = None
+        try:
+            self._tension_integrator = get_tension_integrator()
+            if self._core_integrator:
+                self._tension_integrator.set_core_integrator(self._core_integrator)
+            self._mood_engine = get_mood_engine()
+            self._behavior_rules = get_behavior_rules()
+            self._last_mood_music_mood = None
+            logger.info("[INIT] Emergent Personality bereit (Tension/Mood/Behavior)")
+        except Exception as e:
+            logger.warning(f"[INIT] Emergent Personality nicht verfuegbar: {e}")
+
         self._update_status("M.O.L.O.C.H. Service bereit")
 
     def start(self, blocking=True):
@@ -805,6 +846,73 @@ class MolochService:
                 logger.info("[START] Awareness → CoreIntegrator Events registriert")
             except Exception as e:
                 logger.warning(f"[START] Awareness Event-Subscriber fehlgeschlagen: {e}")
+
+        # Emergent Personality: TensionIntegrator + MoodEngine + BehaviorRules
+        if self._mood_engine:
+            try:
+                from core.moloch_event_bus import get_event_bus
+                bus = get_event_bus()
+
+                # TensionIntegrator: Awareness Events → CoreIntegrator
+                if self._tension_integrator:
+                    bus.subscribe("context_update", self._tension_integrator.on_context_update)
+                    bus.subscribe("activity_changed", self._tension_integrator.on_activity_changed)
+                    bus.subscribe("motion_state_changed", self._tension_integrator.on_motion_state_changed)
+
+                # Music Mood fuer MoodEngine cachen
+                def _on_mood_for_personality(event):
+                    self._last_mood_music_mood = event.get("payload", {}).get("mood")
+                bus.subscribe("music_mood_changed", _on_mood_for_personality)
+
+                # MoodEngine: mood_changed → BehaviorRules evaluieren
+                def _on_mood_changed(event):
+                    if not self._behavior_rules or not self._core_integrator:
+                        return
+                    payload = event.get("payload", {})
+                    self._behavior_rules.evaluate(
+                        mood=payload.get("mood", "calm"),
+                        tension=payload.get("tension", 0.0),
+                        dominance=payload.get("dominance", 0.5),
+                        personality_zone=self._core_integrator.get_personality_zone(),
+                        face_id=payload.get("face_id"),
+                        music_energy=getattr(self, '_last_awareness_music_energy', 0.0),
+                    )
+                bus.subscribe("mood_changed", _on_mood_changed)
+
+                # BehaviorTrigger → LED/Sirene/Personality-Zone ausfuehren
+                def _on_behavior_trigger(event):
+                    payload = event.get("payload", {})
+                    action = payload.get("action", "")
+                    led_cmd = payload.get("led")
+                    sirene = payload.get("sirene", False)
+
+                    # LED steuern
+                    if self._led and led_cmd:
+                        try:
+                            if led_cmd == "on":
+                                self._led.on()
+                            elif led_cmd == "off":
+                                self._led.off()
+                            elif led_cmd == "blink":
+                                self._led.blink(count=4, interval=0.4)
+                            elif led_cmd == "blink_fast":
+                                self._led.blink(count=8, interval=0.15)
+                            elif led_cmd == "blink_slow":
+                                self._led.blink(count=3, interval=0.6)
+                        except Exception:
+                            pass
+
+                    # Sirene (CoreIntegrator Impulse-Flag)
+                    if sirene and self._core_integrator:
+                        try:
+                            self._core_integrator.set_impulse_flag()
+                        except Exception:
+                            pass
+
+                bus.subscribe("behavior_trigger", _on_behavior_trigger)
+                logger.info("[START] Emergent Personality Events registriert")
+            except Exception as e:
+                logger.warning(f"[START] Emergent Personality Event-Subscriber fehlgeschlagen: {e}")
 
         # Inference Loop — bei TAPPAS mit 3s Delay (ONVIF muss zuerst verbinden fuer PTZ)
         if USE_TAPPAS:
