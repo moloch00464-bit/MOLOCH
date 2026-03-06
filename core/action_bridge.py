@@ -50,6 +50,7 @@ class BridgeState(Enum):
     SEARCHING = "searching"
     TRACKING = "tracking"
     INTERACTION = "interaction"
+    MANUAL_OVERRIDE = "manual_override"
 
 
 @dataclass
@@ -83,6 +84,8 @@ class ActionBridge:
     TARGET_LOST_TIMEOUT = 5.0
     # Owner-Interaction Timeout: Kein Owner mehr -> zurueck zu TRACKING/IDLE
     INTERACTION_TIMEOUT = 15.0
+    # Manual Override: Nach 30s automatisch zurueck zu SEARCHING
+    MANUAL_RESUME_TIMEOUT = 30.0
 
     def __init__(self):
         self._state = BridgeState.IDLE
@@ -103,6 +106,7 @@ class ActionBridge:
         self._bus.subscribe("perception.face_confirmed", self._on_face_confirmed, priority=PRIO_PERCEPTION)
         self._bus.subscribe("perception.owner_detected", self._on_owner_detected, priority=PRIO_PERCEPTION)
         self._bus.subscribe("perception.target_lost", self._on_target_lost, priority=PRIO_PERCEPTION)
+        self._bus.subscribe("action.manual_override", self._on_manual_override, priority=PRIO_ACTION)
 
         logger.info(f"[BRIDGE] Initialisiert, State={self._state.value}")
 
@@ -157,6 +161,18 @@ class ActionBridge:
                     intent="park",
                     action_topic="action.park",
                     action_data={"reason": "target_lost_timeout"},
+                )
+
+        # MANUAL_OVERRIDE -> SEARCHING nach 30s
+        if state == BridgeState.MANUAL_OVERRIDE:
+            override_age = now - self._state_enter_time
+            if override_age > self.MANUAL_RESUME_TIMEOUT:
+                self._transition(
+                    BridgeState.SEARCHING,
+                    thought=f"Manual Override abgelaufen ({override_age:.0f}s)",
+                    intent="auto_resume",
+                    action_topic="action.auto_resume",
+                    action_data={"after_s": round(override_age, 1)},
                 )
 
         # INTERACTION -> TRACKING/IDLE bei Owner-Verlust
@@ -258,6 +274,18 @@ class ActionBridge:
             self._context.person_detected = False
             self._context.face_confirmed = False
             # last_detection_time bleibt stehen -> Timeout im Tick
+
+    def _on_manual_override(self, event: dict):
+        """Manueller PTZ-Eingriff — FSM pausiert, nach 30s Auto-Resume."""
+        data = event.get("payload", {})
+        if self._state != BridgeState.MANUAL_OVERRIDE:
+            self._transition(
+                BridgeState.MANUAL_OVERRIDE,
+                thought=f"Manueller PTZ-Eingriff: {data.get('reason', 'user')}",
+                intent="pause",
+                action_topic="action.tracking_paused",
+                action_data={"reason": "manual_override"},
+            )
 
     # ============================================================
     # PTZ TRACK — BBox-Zentrum als Zielkoordinaten publishen
