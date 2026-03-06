@@ -56,6 +56,7 @@ from core.awareness.context_evaluator import get_context_evaluator
 from core.personality.tension_integrator import get_tension_integrator
 from core.personality.mood_engine import get_mood_engine
 from core.personality.behavior_rules import get_behavior_rules
+from core.debug.event_logger import log_event
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger("MolochService")
@@ -913,6 +914,17 @@ class MolochService:
                 logger.info("[START] Emergent Personality Events registriert")
             except Exception as e:
                 logger.warning(f"[START] Emergent Personality Event-Subscriber fehlgeschlagen: {e}")
+
+        # Event Trace Logger (Gate 3/4 Debug)
+        try:
+            from core.moloch_event_bus import get_event_bus
+            _trace_bus = get_event_bus()
+            for _evt in ("zone_entered", "motion_state_changed", "activity_changed",
+                         "context_update", "mood_changed", "behavior_trigger"):
+                _trace_bus.subscribe(_evt, lambda e, et=_evt: log_event(et, e.get("payload", {})))
+            logger.info("[START] Event Trace Logger registriert")
+        except Exception as e:
+            logger.debug(f"[START] Event Trace Logger: {e}")
 
         # Inference Loop — bei TAPPAS mit 3s Delay (ONVIF muss zuerst verbinden fuer PTZ)
         if USE_TAPPAS:

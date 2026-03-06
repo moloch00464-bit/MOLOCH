@@ -35,6 +35,7 @@ class BehaviorRules:
         self._lock = threading.Lock()
         self._last_triggers: Dict[str, float] = {}  # trigger_name → timestamp
         self._active_behavior: Optional[str] = None
+        self._last_mood: Optional[str] = None  # Spam-Schutz: nur bei Mood-Wechsel triggern
 
     def evaluate(self, mood: str, tension: float = 0.0,
                  dominance: float = 0.5, personality_zone: str = "guardian",
@@ -53,6 +54,12 @@ class BehaviorRules:
         Returns:
             Liste von Trigger-Dicts die publiziert werden sollen
         """
+        # Spam-Schutz: Nur bei tatsaechlichem Mood-Wechsel triggern
+        with self._lock:
+            if mood == self._last_mood:
+                return []
+            self._last_mood = mood
+
         triggers = []
         markus_present = face_id and face_id != "unknown"
 
