@@ -205,13 +205,18 @@ class ActionBridge:
                 action_data={"confidence": data.get("confidence", 0)},
             )
 
+        # ptz_track bei aktivem Tracking mit Person-BBox
+        if self._state in (BridgeState.TRACKING, BridgeState.INTERACTION):
+            self._publish_ptz_track()
+
     def _on_face_confirmed(self, event: dict):
-        """Gesicht bestaetigt (SCRFD). SEARCHING -> TRACKING."""
+        """Gesicht bestaetigt (SCRFD). SEARCHING -> TRACKING, ptz_track publishen."""
         data = event.get("payload", {})
         now = time.time()
         with self._lock:
             self._context.face_confirmed = True
             self._context.face_similarity = data.get("similarity", 0.0)
+            self._context.bbox = data.get("bbox", self._context.bbox)
             self._context.last_face_time = now
             self._context.last_detection_time = now
 
@@ -223,6 +228,9 @@ class ActionBridge:
                 action_topic="action.track_start",
                 action_data={"similarity": data.get("similarity", 0)},
             )
+
+        # ptz_track Event mit BBox-Zentrum publishen (TRACKING/INTERACTION)
+        self._publish_ptz_track()
 
     def _on_owner_detected(self, event: dict):
         """Owner erkannt (ArcFace Match). -> INTERACTION."""
@@ -250,6 +258,27 @@ class ActionBridge:
             self._context.person_detected = False
             self._context.face_confirmed = False
             # last_detection_time bleibt stehen -> Timeout im Tick
+
+    # ============================================================
+    # PTZ TRACK — BBox-Zentrum als Zielkoordinaten publishen
+    # ============================================================
+
+    def _publish_ptz_track(self):
+        """Publisht action.ptz_track mit BBox-Zentrum (normalisiert 0-1)."""
+        with self._lock:
+            bbox = self._context.bbox
+        if not bbox or bbox == [0, 0, 0, 0]:
+            return
+        # BBox-Zentrum berechnen (x1, y1, x2, y2 normalisiert)
+        cx = (bbox[0] + bbox[2]) / 2.0
+        cy = (bbox[1] + bbox[3]) / 2.0
+        self._bus.publish(
+            event_type="action.ptz_track",
+            payload={"center_x": round(cx, 4), "center_y": round(cy, 4),
+                     "bbox": bbox},
+            source="action_bridge",
+            priority=PRIO_ACTION,
+        )
 
     # ============================================================
     # TRANSITION — Thought/Intent/Action/Result Pipeline
