@@ -47,6 +47,7 @@ from core.longterm_memory import get_memory
 from core.perception.perception_buffer import get_perception_buffer
 from core.perception.model_health import get_model_health
 from core.ptz_tracker import get_ptz_tracker
+from core.memory.episodic_memory import get_episodic_memory
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger("MolochService")
@@ -373,6 +374,31 @@ class MolochService:
                                     break  # Nur bestes Face-Embedding verwenden
                     except Exception as e:
                         logger.debug(f"[TAPPAS-PERC] ReID: {e}")
+
+                # --- Episodisches Gedaechtnis: Erkannte Personen speichern ---
+                try:
+                    _ep_face_id = getattr(pframe, 'face_id', None)
+                    _ep_conf = getattr(pframe, 'face_confidence', 0.0)
+                    if _ep_face_id and _ep_conf > 0.6:
+                        # ArcFace-Embedding aus TAPPAS-Detections holen
+                        _ep_dets = self._inference.get_detections()
+                        for _ep_det in _ep_dets:
+                            if _ep_det.get("class") == "face" and _ep_det.get("embedding") is not None:
+                                _ep_meta = {
+                                    "confidence": round(_ep_conf, 3),
+                                }
+                                if self._core_integrator:
+                                    _ep_meta["mood"] = getattr(self._core_integrator, 'current_mood', None)
+                                    _ep_meta["tension"] = getattr(self._core_integrator, 'tension', None)
+                                get_episodic_memory().store_episode(
+                                    person=_ep_face_id,
+                                    event_type="face_recognized",
+                                    embedding=_ep_det["embedding"],
+                                    metadata=_ep_meta,
+                                )
+                                break
+                except Exception as e:
+                    logger.debug(f"[TAPPAS-PERC] EpisodicMemory: {e}")
 
                 # --- LED: Markus-Erkennung Hysterese ---
                 if self._led:
