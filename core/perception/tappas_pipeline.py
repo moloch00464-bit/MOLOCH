@@ -41,6 +41,7 @@ from gi.repository import Gst, GLib
 import hailo
 
 from core.perception.perception_frame import PerceptionFrame, estimate_distance
+from core.moloch_event_bus import get_event_bus, PRIO_PERCEPTION
 
 logger = logging.getLogger("TappasPipeline")
 
@@ -142,7 +143,7 @@ class TappasPipeline:
         # --- Threshold-Werte (Panel setzt diese, TAPPAS managed intern) ---
         self.scrfd_conf_val = 0.30
         self.scrfd_nms_val = 0.45
-        self.arcface_thresh_val = 0.35
+        self.arcface_thresh_val = 0.60
         self.yolo_conf_val = 0.30
         self.pose_conf_val = 0.30
         self.hand_conf_val = 0.30
@@ -159,6 +160,10 @@ class TappasPipeline:
         self._enroll_min_score = 0.50
         self._enroll_diversity = 0.85  # Cosine-Sim Schwelle
         self._enroll_lock = threading.Lock()
+
+        # Event Bus fuer Action Bridge
+        self._event_bus = get_event_bus()
+        self._last_person_state = False  # Fuer target_lost Erkennung
 
         # GStreamer einmal initialisieren
         if not Gst.is_initialized():
@@ -738,10 +743,74 @@ class TappasPipeline:
             self._detections = detections
             self._current_pframe = pf
 
+        # --- Perception Events auf Event Bus publishen (fuer Action Bridge) ---
+        self._publish_perception_events(persons, faces, face_id, face_similarity)
+
         # FPS Tracking
         self._update_fps()
 
         return Gst.PadProbeReturn.OK
+
+    def _publish_perception_events(self, persons: list, faces: list,
+                                       face_id: Optional[str], face_similarity: float):
+        """Perception-Events auf Event Bus publishen (fuer Action Bridge FSM).
+
+        Events:
+          perception.person_detected  — Person erkannt (YOLO)
+          perception.face_confirmed   — Gesicht erkannt (SCRFD)
+          perception.owner_detected   — Owner erkannt (ArcFace Match)
+          perception.target_lost      — Keine Person mehr im Frame
+        """
+        has_person = len(persons) > 0 or len(faces) > 0
+
+        if has_person:
+            # Beste Person-BBox fuer Tracking
+            best_bbox = [0, 0, 0, 0]
+            best_conf = 0.0
+            if persons:
+                best = max(persons, key=lambda p: p["confidence"])
+                best_bbox = best["bbox"]
+                best_conf = best["confidence"]
+
+            self._event_bus.publish(
+                event_type="perception.person_detected",
+                payload={"confidence": best_conf, "bbox": best_bbox,
+                         "count": len(persons)},
+                source="tappas_pipeline",
+                priority=PRIO_PERCEPTION,
+            )
+
+            # Face confirmed (SCRFD hat Gesicht gefunden)
+            if faces:
+                best_face = max(faces, key=lambda f: f["confidence"])
+                self._event_bus.publish(
+                    event_type="perception.face_confirmed",
+                    payload={"confidence": best_face["confidence"],
+                             "bbox": best_face["bbox"],
+                             "similarity": face_similarity or 0.0},
+                    source="tappas_pipeline",
+                    priority=PRIO_PERCEPTION,
+                )
+
+            # Owner detected (ArcFace Match ueber Threshold)
+            if face_id and face_similarity >= self.arcface_thresh_val:
+                self._event_bus.publish(
+                    event_type="perception.owner_detected",
+                    payload={"name": face_id, "similarity": face_similarity},
+                    source="tappas_pipeline",
+                    priority=PRIO_PERCEPTION,
+                )
+
+        # Target lost: War Person da, jetzt nicht mehr
+        if self._last_person_state and not has_person:
+            self._event_bus.publish(
+                event_type="perception.target_lost",
+                payload={"reason": "no_detection"},
+                source="tappas_pipeline",
+                priority=PRIO_PERCEPTION,
+            )
+
+        self._last_person_state = has_person
 
     def _on_appsink_sample(self, appsink):
         """appsink Callback — annotiertes Frame (MIT BBoxen von hailooverlay) extrahieren."""

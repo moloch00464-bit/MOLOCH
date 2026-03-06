@@ -534,7 +534,17 @@ class MolochService:
             self._music_vis = None
             logger.warning(f"[INIT] MusicVisualizer nicht verfuegbar: {e}")
 
-        # 6. Spotify Bridge (Track-Info + Audio Features → Event Bus)
+        # 6. Action Bridge FSM (Perception → Entscheidung → Action)
+        self._action_bridge = None
+        try:
+            from core.action_bridge import get_action_bridge
+            self._action_bridge = get_action_bridge()
+            logger.info("[INIT] ActionBridge initialisiert")
+        except Exception as e:
+            self._action_bridge = None
+            logger.warning(f"[INIT] ActionBridge nicht verfuegbar: {e}")
+
+        # 7. Spotify Bridge (Track-Info + Audio Features → Event Bus)
         self._spotify_bridge = None
         try:
             from core.music.spotify_bridge import get_spotify_bridge
@@ -559,6 +569,11 @@ class MolochService:
         if self._core_integrator:
             self._core_integrator.start()
             logger.info("[START] CoreIntegrator 1Hz-Thread gestartet")
+
+        # Action Bridge FSM starten (1 Hz Tick-Loop)
+        if self._action_bridge:
+            self._action_bridge.start()
+            logger.info("[START] ActionBridge gestartet")
 
         # Spotify Bridge Events → CoreIntegrator (Musik beeinflusst Tension)
         if self._spotify_bridge and self._core_integrator:
@@ -814,6 +829,14 @@ class MolochService:
             try:
                 self._music_vis.stop()
                 logger.info("[STOP] MusicVisualizer gestoppt")
+            except Exception:
+                pass
+
+        # ActionBridge stoppen
+        if hasattr(self, '_action_bridge') and self._action_bridge:
+            try:
+                self._action_bridge.stop()
+                logger.info("[STOP] ActionBridge gestoppt")
             except Exception:
                 pass
 
