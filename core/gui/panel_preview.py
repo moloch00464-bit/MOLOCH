@@ -10,7 +10,7 @@ Bekommt parent_frame (LabelFrame) und ServiceProxy von panel_main.
 - Max Canvas-Groesse 960x540, groessere Aufloesungen werden eingepasst
 - 33ms Update-Intervall (30 FPS Ziel), BILINEAR Resize
 - Frame-Skip wenn Verarbeitung laenger als 28ms dauert
-- BGR->RGB Konvertierung, Resize auf gewaehlte Preview-Groesse
+- SHM liefert RGB direkt (kein BGR-Umweg), Resize auf gewaehlte Preview-Groesse
 - FPS-Zaehler oben rechts als gelbes Overlay
 - "Kein Signal" bei fehlendem Frame
 """
@@ -228,9 +228,9 @@ class PreviewModule:
                     return
                 self._last_seq = seq
 
-                # BGR -> RGB via numpy (schneller als PIL split/merge)
+                # SHM ist bereits RGB (TAPPAS schreibt RGB direkt)
                 arr = np.frombuffer(raw, dtype=np.uint8).reshape((shm_h, shm_w, 3))
-                img = Image.fromarray(arr[:, :, ::-1])
+                img = Image.fromarray(arr)
 
                 # Auf Canvas-Groesse resizen (gekappt auf MAX_CANVAS)
                 if img.size != (self._canvas_w, self._canvas_h):

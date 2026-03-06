@@ -1024,23 +1024,21 @@ class TappasPipeline:
                 pass
 
     def _write_shm_frame(self, frame: np.ndarray):
-        """Frame nach /dev/shm/moloch_frame schreiben (gleicher IPC-Weg wie InferenceEngine).
+        """Frame nach /dev/shm/moloch_frame schreiben (RGB direkt, kein BGR-Umweg).
 
-        Konvertiert RGB→BGR und skaliert auf Preview-Groesse.
+        GStreamer liefert RGB, Panel braucht RGB — kein cvtColor noetig.
         """
         try:
-            # RGB → BGR (Panel erwartet BGR)
-            bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-            h, w = bgr.shape[:2]
+            h, w = frame.shape[:2]
             if h != SHM_PREVIEW_H or w != SHM_PREVIEW_W:
-                bgr = cv2.resize(bgr, (SHM_PREVIEW_W, SHM_PREVIEW_H))
+                frame = cv2.resize(frame, (SHM_PREVIEW_W, SHM_PREVIEW_H))
                 h, w = SHM_PREVIEW_H, SHM_PREVIEW_W
-            c = bgr.shape[2] if len(bgr.shape) > 2 else 1
+            c = frame.shape[2] if len(frame.shape) > 2 else 1
             self._shm_seq = (self._shm_seq + 1) & 0xFFFFFFFF
             header = struct.pack('<IIII', h, w, c, self._shm_seq)
             with open(SHM_FRAME_PATH + '.tmp', 'wb') as f:
                 f.write(header)
-                f.write(bgr.tobytes())
+                f.write(frame.tobytes())
             os.rename(SHM_FRAME_PATH + '.tmp', SHM_FRAME_PATH)
         except Exception:
             pass
