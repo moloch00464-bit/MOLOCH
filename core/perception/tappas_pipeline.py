@@ -41,6 +41,7 @@ from gi.repository import Gst, GLib
 import hailo
 
 from core.perception.perception_frame import PerceptionFrame, estimate_distance
+from core.perception.face_attributes import parse_face_attributes
 from core.moloch_event_bus import get_event_bus, PRIO_PERCEPTION
 
 logger = logging.getLogger("TappasPipeline")
@@ -49,6 +50,7 @@ logger = logging.getLogger("TappasPipeline")
 YOLO_HEF = "/mnt/moloch-data/hailo/models/yolov8m_h10.hef"
 SCRFD_HEF = "/mnt/moloch-data/hailo/models/scrfd_10g.hef"
 ARCFACE_HEF = "/mnt/moloch-data/hailo/models/arcface_mobilefacenet.hef"
+FACE_ATTR_HEF = "/mnt/moloch-data/hailo/models/face_attr_resnet_v1_18.hef"
 
 # --- Postprocess SOs ---
 YOLO_POSTPROCESS_SO = "/usr/local/hailo/resources/so/libyolo_hailortpp_postprocess.so"
@@ -626,6 +628,31 @@ class TappasPipeline:
             f'face_crop_agg. ! queue name=face_crop_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
         )
 
+        # --- Stage 4: Face Attributes (gender/smiling via face_attr_resnet_v1_18) ---
+        # Zweiter Face-Cropper: gleiche Detections, resize auf 178x218, kein Postprocess
+        face_attr_inner = (
+            f'queue name=fattr_scale_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'videoscale name=fattr_videoscale n-threads=2 qos=false ! '
+            f'queue name=fattr_convert_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'video/x-raw, pixel-aspect-ratio=1/1 ! '
+            f'videoconvert name=fattr_videoconvert n-threads=2 ! '
+            f'queue name=fattr_hailonet_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'hailonet name=fattr_hailonet hef-path={FACE_ATTR_HEF} batch-size=1 '
+            f'vdevice-group-id={VDEVICE_GROUP_ID} '
+            f'force-writable=true ! '
+            f'queue name=fattr_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
+        )
+
+        face_attr_cropper = (
+            f'queue name=fattr_crop_input_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'hailocropper name=fattr_cropper so-path={FACE_CROP_SO} function-name={FACE_CROP_FUNC} '
+            f'use-letterbox=true no-scaling-bbox=true internal-offset=true resize-method=bilinear '
+            f'hailoaggregator name=fattr_crop_agg '
+            f'fattr_cropper. ! queue name=fattr_crop_bypass_q leaky=no max-size-buffers=20 max-size-bytes=0 max-size-time=0 ! fattr_crop_agg.sink_0 '
+            f'fattr_cropper. ! {face_attr_inner} ! fattr_crop_agg.sink_1 '
+            f'fattr_crop_agg. ! queue name=fattr_crop_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
+        )
+
         # --- Callback + Overlay + appsink ---
         callback_and_sink = (
             f'queue name=cb_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
@@ -644,6 +671,7 @@ class TappasPipeline:
             f'{scrfd_wrapper} ! '
             f'{tracker} ! '
             f'{face_cropper} ! '
+            f'{face_attr_cropper} ! '
             f'{callback_and_sink}'
         )
 
@@ -727,6 +755,16 @@ class TappasPipeline:
                     if matched_name:
                         entry["face_id"] = matched_name
                         entry["face_similarity"] = matched_sim
+
+                # Face Attributes (gender/smiling) aus Raw-Tensor extrahieren
+                tensors = det.get_objects_typed(hailo.HAILO_TENSOR)
+                for t in tensors:
+                    tdata = np.array(t.get_data(), dtype=np.float32)
+                    if len(tdata.flatten()) == 80:
+                        attrs = parse_face_attributes(tdata)
+                        entry["gender"] = attrs["gender"]
+                        entry["smiling"] = attrs["smiling"]
+                        break
 
                 faces.append(entry)
 
@@ -997,8 +1035,16 @@ class TappasPipeline:
             pf.face_id = face_id.lower()
             pf.face_similarity = face_similarity
 
+        # Face Attributes (bestes Face mit Attributen)
+        if faces:
+            best_attr_face = max(faces, key=lambda f: f.get("confidence", 0))
+            if best_attr_face.get("gender"):
+                pf.gender = best_attr_face["gender"]
+            if best_attr_face.get("smiling") is not None:
+                pf.emotion = "happy" if best_attr_face["smiling"] else "neutral"
+
         # Active Models (TAPPAS Pipeline = alle immer aktiv)
-        pf.active_models = ["yolov8m", "scrfd", "arcface"]
+        pf.active_models = ["yolov8m", "scrfd", "arcface", "face_attr"]
 
         return pf
 
