@@ -80,6 +80,12 @@ try:
 except Exception:
     _SPOTIFY_OK = False
 
+try:
+    from core.gui.panel_systemstatus import SystemStatusModule
+    _SYSTEMSTATUS_OK = True
+except Exception:
+    _SYSTEMSTATUS_OK = False
+
 
 # =============================================================================
 # ServiceProxy — IPC zum M.O.L.O.C.H. Backend
@@ -500,6 +506,15 @@ class MolochPanel:
             tk.Label(self.frame_steuerung, text="Modul nicht geladen: eWeLink",
                      bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL).pack(pady=5)
 
+        # (C2) Systemstatus -> frame_steuerung (unter eWeLink)
+        self._systemstatus = None
+        if _SYSTEMSTATUS_OK:
+            try:
+                self._systemstatus = SystemStatusModule(self.frame_steuerung, self.service)
+                self.logger.info("Modul geladen: Systemstatus")
+            except Exception as e:
+                self.logger.error(f"Systemstatus fehlgeschlagen: {e}")
+
         # (D) Models -> frame_steuerung (unter eWeLink)
         if _MODELS_OK:
             try:
@@ -581,8 +596,21 @@ class MolochPanel:
             auto = not status.get("manual_mode", True)
             mode = "AUTONOM" if auto else "MANUELL"
 
+            # Bridge State + Face-ID + Zone fuer Status-Bar
+            bridge = status.get("bridge", {})
+            bridge_state = bridge.get("state", "?")
+            face_id = status.get("face_id", "")
+            face_conf = status.get("face_confidence", 0.0)
+            zone = status.get("core", {}).get("zone", "")
+            tension = status.get("core", {}).get("tension", 0.0)
+
+            face_str = f"{face_id}({face_conf:.2f})" if face_id else "---"
+            zone_str = zone.upper() if zone else "?"
+
             self.status_bar.config(
-                text=f"Service: aktiv | FPS: {fps:.1f} | Modus: {mode}",
+                text=(f"Service: aktiv | FPS: {fps:.1f} | {mode} | "
+                      f"Bridge: {bridge_state} | Face: {face_str} | "
+                      f"Zone: {zone_str} | T: {tension:.2f}"),
                 fg=STATUS_GREEN,
             )
 

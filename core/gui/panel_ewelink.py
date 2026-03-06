@@ -259,13 +259,31 @@ class EwelinkModule:
         """Vom panel_main Poll aufgerufen: ERKANNT-Indikator aktualisieren.
 
         Gate0 Phase 6: LED zeigt Wahrheit — Farbe folgt personality_mode.
+        Gate 1+: Zeigt Face-ID Name + Confidence Score.
         """
         led_on = status.get("led_markus_on", False)
         led_mode = status.get("led_personality_mode", "guardian")
+
+        # Face-ID Name + Score aus Status lesen
+        face_id = status.get("face_id", "")
+        face_conf = status.get("face_confidence", 0.0)
+        face_detected = status.get("face_detected", False)
+
         if led_on != self._erkannt_led_on or led_mode != self._erkannt_mode:
             self._erkannt_led_on = led_on
             self._erkannt_mode = led_mode
             self._update_erkannt_button()
+
+        # Label unter ERKANNT: Face-ID Name + Score
+        if face_id and face_detected:
+            self._lbl_erkannt.config(
+                text=f"{face_id} ({face_conf:.2f})",
+                fg=ACCENT_CYAN if face_conf > 0.6 else "#ffcc00",
+            )
+        elif face_detected:
+            self._lbl_erkannt.config(text="unbekannt", fg="#ffcc00")
+        elif not self._erkannt_led_on:
+            self._lbl_erkannt.config(text="---", fg=FG_DIM)
 
     def _open_gallery(self):
         """Snapshot Galerie Popup oeffnen."""
