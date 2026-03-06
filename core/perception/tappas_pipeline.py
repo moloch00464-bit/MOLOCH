@@ -65,6 +65,9 @@ WHOLE_BUFFER_SO = "/usr/lib/aarch64-linux-gnu/hailo/tappas/post_processes/croppi
 
 VDEVICE_GROUP_ID = "SHARED"
 
+# YOLO Klassen-Whitelist (nur diese werden verarbeitet, Rest ignoriert)
+YOLO_ALLOWED_CLASSES = {"person", "cell phone", "laptop", "bottle", "cup", "chair", "couch", "tv"}
+
 # IPC: Frame-Preview fuer Panel (gleicher Weg wie InferenceEngine → IPCRouter)
 SHM_FRAME_PATH = "/dev/shm/moloch_frame"
 SHM_PREVIEW_W = 640
@@ -670,8 +673,12 @@ class TappasPipeline:
             conf = det.get_confidence()
             bbox = det.get_bbox()
 
+            # YOLO-Klassenfilter: nur erlaubte Klassen durchlassen
+            if label != "face" and label not in YOLO_ALLOWED_CLASSES:
+                continue
+
             # Threshold-Filterung (Panel-Slider Werte anwenden)
-            if label == "person" and conf < self.yolo_conf_val:
+            if label in YOLO_ALLOWED_CLASSES and conf < self.yolo_conf_val:
                 continue
             if label == "face" and conf < self.scrfd_conf_val:
                 continue
