@@ -41,7 +41,6 @@ from gi.repository import Gst, GLib
 import hailo
 
 from core.perception.perception_frame import PerceptionFrame, estimate_distance
-from core.perception.face_attributes import parse_face_attributes
 from core.moloch_event_bus import get_event_bus, PRIO_PERCEPTION
 
 logger = logging.getLogger("TappasPipeline")
@@ -60,6 +59,8 @@ SCRFD_POSTPROCESS_FUNC = "scrfd_10g_letterbox"
 SCRFD_CONFIG_JSON = "/usr/local/hailo/resources/json/scrfd.json"
 ARCFACE_POSTPROCESS_SO = "/usr/local/hailo/resources/so/libface_recognition_post.so"
 ARCFACE_POSTPROCESS_FUNC = "filter"
+FACE_ATTR_POSTPROCESS_SO = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "lib", "libface_attributes_fc2.so")
+FACE_ATTR_POSTPROCESS_FUNC = "filter"
 FACE_ALIGN_SO = "/usr/local/hailo/resources/so/libvms_face_align.so"
 FACE_CROP_SO = "/usr/local/hailo/resources/so/libvms_croppers.so"
 FACE_CROP_FUNC = "face_recognition"
@@ -138,6 +139,10 @@ class TappasPipeline:
         # SHM IPC Sequenznummer
         self._shm_seq = 0
 
+        # Face Attributes Cache (befuellt von _on_face_attr_buffer Probe)
+        self._face_attr_cache = {}  # {"gender": "M"|"F", "smiling": True|False}
+        self._face_attr_lock = threading.Lock()
+
         # --- Model-Active-Flags (TAPPAS = immer aktiv, Panel liest diese) ---
         self.scrfd_active = True
         self.arcface_active = True
@@ -202,6 +207,17 @@ class TappasPipeline:
             raise RuntimeError("identity_callback Element nicht in Pipeline gefunden")
         pad = identity.get_static_pad("src")
         pad.add_probe(Gst.PadProbeType.BUFFER, self._on_buffer, None)
+
+        # Face Attributes Probe: Tensor NACH hailonet, VOR Aggregator abgreifen
+        # fattr_output_q ist die Queue zwischen hailonet und aggregator
+        fattr_out_q = self._pipeline.get_by_name("fattr_output_q")
+        if fattr_out_q:
+            fattr_src_pad = fattr_out_q.get_static_pad("src")
+            if fattr_src_pad:
+                fattr_src_pad.add_probe(Gst.PadProbeType.BUFFER, self._on_face_attr_buffer, None)
+                logger.info("[FACE-ATTR] Pad-Probe auf fattr_output_q src registriert")
+        else:
+            logger.warning("[FACE-ATTR] fattr_output_q Element nicht gefunden")
 
         # appsink — Frames abholen damit Pipeline nicht blockiert
         appsink = self._pipeline.get_by_name("sink")
@@ -640,6 +656,9 @@ class TappasPipeline:
             f'hailonet name=fattr_hailonet hef-path={FACE_ATTR_HEF} batch-size=1 '
             f'vdevice-group-id={VDEVICE_GROUP_ID} '
             f'force-writable=true ! '
+            f'queue name=fattr_hailofilter_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'hailofilter name=fattr_hailofilter so-path={FACE_ATTR_POSTPROCESS_SO} '
+            f'function-name={FACE_ATTR_POSTPROCESS_FUNC} qos=false ! '
             f'queue name=fattr_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
         )
 
@@ -678,6 +697,46 @@ class TappasPipeline:
     # =====================================================================
     # GStreamer Callbacks
     # =====================================================================
+
+    def _on_face_attr_buffer(self, pad, info, user_data):
+        """Pad-Probe nach fattr_hailofilter — liest HAILO_CLASSIFICATION (gender/smiling)."""
+        buffer = info.get_buffer()
+        if buffer is None:
+            return Gst.PadProbeReturn.OK
+        try:
+            roi = hailo.get_roi_from_buffer(buffer)
+            classifications = roi.get_objects_typed(hailo.HAILO_CLASSIFICATION)
+            if not classifications:
+                return Gst.PadProbeReturn.OK
+
+            gender = None
+            smiling = False
+            self._fattr_probe_count = getattr(self, '_fattr_probe_count', 0) + 1
+
+            for c in classifications:
+                label = c.get_label()
+                if label == "Male":
+                    gender = "M"
+                elif label == "Female":
+                    gender = "F"
+                elif label == "Smiling":
+                    smiling = True
+
+            if gender is not None:
+                with self._face_attr_lock:
+                    self._face_attr_cache = {"gender": gender, "smiling": smiling}
+
+            if self._fattr_probe_count % 100 == 1:
+                cls_info = [(c.get_label(), round(c.get_confidence(), 2))
+                            for c in classifications]
+                logger.info(f"[FACE-ATTR] #{self._fattr_probe_count}: gender={gender} "
+                            f"smiling={smiling} attrs={cls_info[:6]}")
+
+        except Exception as e:
+            self._fattr_err_count = getattr(self, '_fattr_err_count', 0) + 1
+            if self._fattr_err_count % 100 == 1:
+                logger.error(f"[FACE-ATTR] Probe-Fehler: {e}")
+        return Gst.PadProbeReturn.OK
 
     def _on_buffer(self, pad, info, user_data):
         """Pad-Probe auf identity element — extrahiert Detections + baut PerceptionFrame."""
@@ -756,15 +815,11 @@ class TappasPipeline:
                         entry["face_id"] = matched_name
                         entry["face_similarity"] = matched_sim
 
-                # Face Attributes (gender/smiling) aus Raw-Tensor extrahieren
-                tensors = det.get_objects_typed(hailo.HAILO_TENSOR)
-                for t in tensors:
-                    tdata = np.array(t.get_data(), dtype=np.float32)
-                    if len(tdata.flatten()) == 80:
-                        attrs = parse_face_attributes(tdata)
-                        entry["gender"] = attrs["gender"]
-                        entry["smiling"] = attrs["smiling"]
-                        break
+                # Face Attributes aus Cache (befuellt von _on_face_attr_buffer Probe)
+                with self._face_attr_lock:
+                    if self._face_attr_cache:
+                        entry["gender"] = self._face_attr_cache.get("gender")
+                        entry["smiling"] = self._face_attr_cache.get("smiling", False)
 
                 faces.append(entry)
 
