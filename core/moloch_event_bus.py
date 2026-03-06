@@ -203,12 +203,16 @@ class MolochEventBus:
         self._disk_writer = _DiskWriter()
         self._disk_writer.start()
 
+        # Silence-Level: 0=normal, 1=reduced (nur PRIO<=2), 2=silent (nur PRIO 0)
+        self._silence_level = 0
+
         # Statistik
         self._stats = {
             "total_published": 0,
             "total_deduplicated": 0,
             "total_delivered": 0,
             "total_errors": 0,
+            "total_silenced": 0,
         }
 
         logger.info("[EVENT-BUS] Initialisiert (Priority 0-9, Dedup 1s, Disk-Writer aktiv)")
@@ -301,6 +305,14 @@ class MolochEventBus:
         # --- DEDUPLICATION ---
         if self._is_duplicate(event):
             self._stats["total_deduplicated"] += 1
+            return False
+
+        # --- SILENCE-LEVEL FILTER ---
+        if self._silence_level == 2 and priority > PRIO_CRITICAL:
+            self._stats["total_silenced"] += 1
+            return False
+        if self._silence_level == 1 and priority > PRIO_ACTION:
+            self._stats["total_silenced"] += 1
             return False
 
         self._stats["total_published"] += 1
@@ -400,6 +412,15 @@ class MolochEventBus:
         total = sum(len(subs) for subs in self._subscribers.values())
         total += sum(len(subs) for subs in self._async_subscribers.values())
         return total
+
+    def set_silence_level(self, level: int):
+        """Silence-Level setzen: 0=normal, 1=reduced (PRIO<=2), 2=silent (nur CRITICAL)."""
+        self._silence_level = max(0, min(2, level))
+        logger.info(f"[EVENT-BUS] Silence-Level: {self._silence_level}")
+
+    @property
+    def silence_level(self) -> int:
+        return self._silence_level
 
     # ============================================================
     # LIFECYCLE

@@ -317,6 +317,7 @@ class MolochService:
                     time.sleep(POLL_INTERVAL)
                     continue
                 _last_pframe_id = pf_id
+                self._perception_buffer.push(pframe)
 
                 # --- PerceptionEngine: Stage-Tracking (Option C: Modelle immer aktiv) ---
                 if self._perception:
@@ -973,6 +974,18 @@ class MolochService:
             logger.info(f"[IPC] autonomous={self._cam._autonomous_mode} tentakel={self._cam._tentakel_enabled}")
         elif action == 'reload_face_db':
             self._inference.reload_face_db()
+        elif action == 'enrollment_start':
+            enroll_name = cmd.get('name', 'markus')
+            enroll_n = cmd.get('n', 20)
+            if hasattr(self._inference, 'start_enrollment'):
+                self._inference.start_enrollment(enroll_name, enroll_n)
+                logger.info(f"[IPC] Enrollment gestartet: name={enroll_name} n={enroll_n}")
+            else:
+                logger.warning("[IPC] Enrollment nur mit TAPPAS Pipeline verfuegbar")
+        elif action == 'enrollment_status':
+            if hasattr(self._inference, 'get_enrollment_status'):
+                status = self._inference.get_enrollment_status()
+                logger.info(f"[IPC] Enrollment-Status: {status}")
         elif action == 'set_threshold':
             attr = cmd.get('attr')
             value = cmd.get('value')
@@ -1029,6 +1042,12 @@ class MolochService:
                 self._perception._MIN_FACE_STREAK = int(_ho.get('streak', 3))
                 self._perception._FACE_RECENCY = float(_ho.get('recency', 2.0))
             self._save_settings()
+        elif action == 'set_silence_level':
+            level = int(cmd.get('level', 0))
+            from core.moloch_event_bus import get_event_bus
+            get_event_bus().set_silence_level(level)
+            logger.info(f"[IPC] Silence-Level: {level}")
+
         elif action == 'toggle_daily_learner':
             if self._daily_learner:
                 enabled = self._daily_learner.toggle()
