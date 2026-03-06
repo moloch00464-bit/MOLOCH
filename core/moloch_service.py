@@ -187,6 +187,7 @@ class MolochService:
         self._ipc = IPCRouter()
 
         # NPU Pipeline (Phase 4 Schritt 5)
+        self._face_attrs = None  # FaceAttributes Thread (wird bei TAPPAS gestartet)
         if USE_TAPPAS:
             logger.info("[INIT] TAPPAS Pipeline (GStreamer + Model Scheduler)")
             self._inference = TappasPipeline()
@@ -1130,6 +1131,16 @@ class MolochService:
                 threading.Thread(target=self._tappas_perception_loop, daemon=True,
                                  name="TappasPerceptionLoop").start()
                 logger.info("[START] TAPPAS Perception-Loop gestartet (5 Hz)")
+
+                # FaceAttributes: Separater NPU-Thread fuer gender/smiling
+                try:
+                    from core.perception.face_attributes import FaceAttributes
+                    self._face_attrs = FaceAttributes(self._inference, interval=0.3)
+                    self._face_attrs.start()
+                    logger.info("[START] FaceAttributes-Thread gestartet")
+                except Exception as e:
+                    logger.error(f"[START] FaceAttributes fehlgeschlagen: {e}")
+                    self._face_attrs = None
             threading.Thread(target=_start_tappas_delayed, daemon=True, name="TappasDelayedStart").start()
         else:
             self._inference.start()
@@ -1254,6 +1265,13 @@ class MolochService:
         self.running = False
         self._cam.running = False
         self._inference.stop()
+
+        # FaceAttributes stoppen
+        if self._face_attrs:
+            try:
+                self._face_attrs.stop()
+            except Exception:
+                pass
 
         # Langzeitgedaechtnis: Core State SOFORT sichern
         if self._memory and self._core_integrator:
