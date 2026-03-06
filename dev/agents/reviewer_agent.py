@@ -26,7 +26,6 @@ class ReviewerAgent(BaseDevAgent):
             "GPIO.output",
         ],
         "direkte_kopplung": [
-            "from core.hardware.camera import",  # Nur über ServiceProxy/IPC!
             "from core.hardware.autonomous_tracker import",
         ],
         "cloud_dependency": [

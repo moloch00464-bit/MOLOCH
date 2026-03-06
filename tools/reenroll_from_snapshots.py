@@ -32,6 +32,16 @@ sys.path.insert(0, PROJECT_ROOT)
 
 from core.perception.hailo_postprocess import decode_scrfd
 
+# ArcFace Standard-Referenz-Landmarks fuer 112x112
+# (gleiche Positionen wie TAPPAS libvms_face_align.so)
+ARCFACE_REF_LANDMARKS = np.array([
+    [38.2946, 51.6963],  # linkes Auge
+    [73.5318, 51.5014],  # rechtes Auge
+    [56.0252, 71.7366],  # Nase
+    [41.5493, 92.3655],  # linker Mundwinkel
+    [70.7299, 92.2041],  # rechter Mundwinkel
+], dtype=np.float32)
+
 # Pfade
 SNAPSHOTS_DIR = os.path.join(PROJECT_ROOT, "snapshots")
 FACE_DB_PATH = os.path.join(PROJECT_ROOT, "data", "face_embeddings.json")
@@ -40,7 +50,7 @@ SCRFD_HEF = os.path.join(MODEL_DIR, "scrfd_10g.hef")
 ARCFACE_HEF = os.path.join(MODEL_DIR, "arcface_mobilefacenet.hef")
 
 # Parameter
-SCRFD_CONF = 0.50       # Hoeherer Threshold = nur klare Gesichter
+SCRFD_CONF = 0.70       # Gute Gesichter, select_diverse bevorzugt >0.85
 SCRFD_NMS = 0.40
 MIN_FACE_PIX = 40       # Minimale Gesichtsgroesse in Pixel (auf Full-HD)
 TARGET_COUNT = 20        # Ziel-Anzahl Embeddings
@@ -61,14 +71,35 @@ def letterbox_resize(img, target_size=640):
     return padded, scale, pad_x, pad_y, new_w, new_h
 
 
-def unletterbox_scrfd(boxes, pad_x, pad_y, rw, rh, target=640):
+def unletterbox_scrfd(boxes, landmarks, pad_x, pad_y, rw, rh, target=640):
     """Letterbox-Space -> normalisierte [0,1] Koordinaten relativ zum Content."""
-    if pad_x == 0 and pad_y == 0:
-        return boxes.copy()
     bc = boxes.copy()
+    lc = landmarks.copy()
+    if pad_x == 0 and pad_y == 0 and rw == target and rh == target:
+        return bc, lc
     bc[:, [0, 2]] = np.clip((boxes[:, [0, 2]] * target - pad_x) / rw, 0, 1)
     bc[:, [1, 3]] = np.clip((boxes[:, [1, 3]] * target - pad_y) / rh, 0, 1)
-    return bc
+    for i in range(5):
+        lc[:, i * 2] = np.clip((landmarks[:, i * 2] * target - pad_x) / rw, 0, 1)
+        lc[:, i * 2 + 1] = np.clip((landmarks[:, i * 2 + 1] * target - pad_y) / rh, 0, 1)
+    return bc, lc
+
+
+def align_face(img, landmarks_5pt):
+    """Face Alignment via 5-Point Affine Transform (wie TAPPAS libvms_face_align.so).
+
+    Args:
+        img: Original-Frame (BGR)
+        landmarks_5pt: 5 Landmark-Punkte als Pixel-Koordinaten [(x,y), ...]
+
+    Returns:
+        aligned: 112x112 BGR Bild oder None bei Fehler
+    """
+    src_pts = np.array(landmarks_5pt, dtype=np.float32)
+    tform, _ = cv2.estimateAffinePartial2D(src_pts, ARCFACE_REF_LANDMARKS)
+    if tform is None:
+        return None
+    return cv2.warpAffine(img, tform, (112, 112), borderValue=(0, 0, 0))
 
 
 def backup_face_db():
@@ -216,6 +247,10 @@ def main():
             continue
         fh, fw = frame.shape[:2]
 
+        # Nur Full-HD verwenden (640x480 hat zu niedrige SCRFD-Scores)
+        if fw < 1280:
+            continue
+
         # Letterbox auf 640x640 (identisch zur Live-Pipeline)
         input_640, _scale, pad_x, pad_y, rw, rh = letterbox_resize(frame, 640)
         input_rgb = cv2.cvtColor(input_640, cv2.COLOR_BGR2RGB)
@@ -230,13 +265,14 @@ def main():
             skipped_no_face += 1
             continue
 
-        # Unletterbox: Model-Space -> Frame-Space
-        boxes_c = unletterbox_scrfd(boxes, pad_x, pad_y, rw, rh)
+        # Unletterbox: Model-Space -> Frame-Space (Boxes + Landmarks)
+        boxes_c, lms_c = unletterbox_scrfd(boxes, landmarks, pad_x, pad_y, rw, rh)
 
         # Bestes Gesicht pro Bild (hoechster Score)
         best_idx = np.argmax(scores)
         best_score = float(scores[best_idx])
         box = boxes_c[best_idx]
+        lm = lms_c[best_idx]  # (10,) = 5 Punkte x (x, y) normalisiert
 
         # Pixel-Koordinaten auf Original-Frame
         px1 = max(0, int(box[0] * fw))
@@ -249,19 +285,16 @@ def main():
             skipped_too_small += 1
             continue
 
-        # Crop mit 20% Margin aus Original Full-HD
-        mx, my = int(bw * 0.2), int(bh * 0.2)
-        cx1 = max(0, px1 - mx)
-        cy1 = max(0, py1 - my)
-        cx2 = min(fw, px2 + mx)
-        cy2 = min(fh, py2 + my)
-        crop = frame[cy1:cy2, cx1:cx2]
-        if crop.size == 0:
-            continue
+        # Landmarks -> Pixel-Koordinaten fuer Alignment
+        lm_pts = []
+        for p in range(5):
+            lm_pts.append([lm[p * 2] * fw, lm[p * 2 + 1] * fh])
 
-        # ArcFace: 112x112 RGB
-        crop_112 = cv2.resize(crop, (112, 112))
-        crop_rgb = cv2.cvtColor(crop_112, cv2.COLOR_BGR2RGB)
+        # Face Alignment: 5-Point Affine → 112x112 (wie TAPPAS)
+        aligned = align_face(frame, lm_pts)
+        if aligned is None:
+            continue
+        crop_rgb = cv2.cvtColor(aligned, cv2.COLOR_BGR2RGB)
 
         arcface_bindings.input().set_buffer(np.ascontiguousarray(crop_rgb))
         arcface_ctx.run([arcface_bindings], timeout=10000)

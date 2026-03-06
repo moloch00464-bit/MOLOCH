@@ -10,9 +10,12 @@ ArcFace: L2-Normalize Face Embedding (1 Output-Layer)
 Author: M.O.L.O.C.H. System
 """
 
+import logging
 import numpy as np
 import cv2
 from typing import Dict, List, Tuple, Optional
+
+logger = logging.getLogger("HailoPostprocess")
 
 
 # ============================================================
@@ -61,7 +64,7 @@ def decode_scrfd(outputs: Dict[str, np.ndarray], img_size: int = 640,
             sc = score_map[mask]
             cx_m, cy_m = cx[mask], cy[mask]
 
-            # Box decode: offset * anchor_scale
+            # Box decode: b in Stride-Einheiten (Werte ~2-5), * sx normalisiert
             bi = a * 4
             b = boxes[:, :, bi:bi + 4][mask]  # (N, 4)
             x1 = cx_m - b[:, 0] * sx
@@ -90,7 +93,26 @@ def decode_scrfd(outputs: Dict[str, np.ndarray], img_size: int = 640,
 
     # NMS
     keep = _nms(boxes, scores, iou_thresh)
-    return boxes[keep], scores[keep], landmarks[keep]
+    boxes, scores, landmarks = boxes[keep], scores[keep], landmarks[keep]
+
+    # Einmal-Diagnostik: Box-Center vs Nose-Landmark (Punkt 3 = Index 4,5)
+    if not getattr(decode_scrfd, '_diag_done', False) and len(boxes) > 0:
+        decode_scrfd._diag_done = True
+        for di in range(min(3, len(boxes))):
+            bcx = (boxes[di, 0] + boxes[di, 2]) / 2
+            bcy = (boxes[di, 1] + boxes[di, 3]) / 2
+            nose_x = landmarks[di, 4]
+            nose_y = landmarks[di, 5]
+            bw = boxes[di, 2] - boxes[di, 0]
+            bh = boxes[di, 3] - boxes[di, 1]
+            logger.info(
+                f"[SCRFD-DIAG] #{di} box_center=({bcx:.4f},{bcy:.4f}) "
+                f"nose=({nose_x:.4f},{nose_y:.4f}) "
+                f"delta=({bcx - nose_x:.4f},{bcy - nose_y:.4f}) "
+                f"box_size=({bw:.4f}x{bh:.4f})"
+            )
+
+    return boxes, scores, landmarks
 
 
 # ============================================================
