@@ -1,0 +1,122 @@
+{
+  "_meta": {
+    "description": "M.O.L.O.C.H. System Capabilities — Was Moloch kann",
+    "generated": "2026-03-06",
+    "version": "1.0"
+  },
+
+  "vision_models": [
+    {"name": "yolov8m_h10", "task": "person_detection", "input": "640x640", "size_mb": 21, "active": true},
+    {"name": "scrfd_10g", "task": "face_detection", "input": "640x640", "size_mb": 5.8, "active": true},
+    {"name": "arcface_mobilefacenet", "task": "face_recognition", "input": "112x112", "size_mb": 2.6, "active": true},
+    {"name": "yolov8s_pose_h10", "task": "pose_estimation", "input": "640x640", "size_mb": 14, "active": true},
+    {"name": "yolov8m_pose_h10", "task": "pose_estimation", "input": "640x640", "size_mb": 28, "active": false},
+    {"name": "yolov11m_h10", "task": "object_detection", "input": "640x640", "size_mb": 27, "active": false},
+    {"name": "yolov5n_seg_h10", "task": "segmentation", "input": "640x640", "size_mb": 3.4, "active": false},
+    {"name": "face_attr_resnet_v1_18", "task": "face_attributes", "input": "224x224", "size_mb": 6.6, "active": false},
+    {"name": "hand_landmark_lite", "task": "hand_tracking", "input": "224x224", "size_mb": 1.3, "active": false},
+    {"name": "resnet_v1_50_h10", "task": "classification", "input": "224x224", "size_mb": 23, "active": false}
+  ],
+
+  "hardware": {
+    "brain": {"device": "Raspberry Pi 5", "ram_gb": 4, "ip": "192.168.178.24"},
+    "npu": {"device": "Hailo-10H", "tops": 40, "ram_gb": 8, "interface": "PCIe Gen3 x4"},
+    "camera": {"device": "Sonoff CAM-PT2", "ip": "192.168.178.25", "resolution": "1920x1080", "fps": 20, "protocols": ["RTSP", "ONVIF"], "ptz": true},
+    "audio_input": ["SmartMic BT", "ReSpeaker Lite USB"],
+    "audio_output": "HDMI-1 via PipeWire",
+    "storage": [
+      {"mount": "/home/molochzuhause/moloch", "fs": "ext4", "size_gb": 465, "role": "Code + Configs"},
+      {"mount": "/mnt/moloch-data", "fs": "NTFS", "size_gb": 477, "role": "AI-Modelle + Qdrant DB"}
+    ]
+  },
+
+  "abilities": {
+    "sehen": {
+      "person_erkennen": true,
+      "gesicht_erkennen": true,
+      "besitzer_identifizieren": true,
+      "pose_schaetzen": true,
+      "hand_tracking": false,
+      "segmentierung": false
+    },
+    "hoeren": {
+      "sprache_zu_text": true,
+      "engine": "hailo_whisper",
+      "sprache": "de"
+    },
+    "sprechen": {
+      "tts": true,
+      "engine": "piper",
+      "stimmen": [
+        "eva_k-x_low", "karlsson-low", "kerstin-low",
+        "pavoque-low", "ramona-low",
+        "thorsten-high", "thorsten-medium", "thorsten-low"
+      ]
+    },
+    "bewegen": {
+      "ptz_steuerung": true,
+      "tracking": true,
+      "suchverhalten": true,
+      "park_position": true
+    },
+    "musik": {
+      "spotify_playback": true,
+      "emotionale_musikwahl": true,
+      "track_index_artists": 4941,
+      "track_index_tracks": 24454
+    },
+    "gedaechtnis": {
+      "episodisch": true,
+      "langzeit": true,
+      "personen_reid": true,
+      "musik_assoziationen": true,
+      "vektor_db": "qdrant"
+    },
+    "selbststeuerung": {
+      "entscheidungen": true,
+      "atmosphaere": true,
+      "selbstueberwachung": true,
+      "nachtverarbeitung": true
+    }
+  },
+
+  "gates": {
+    "gate_0":   {"name": "Vier Inseln verdrahtet", "status": "PASS", "date": "2026-03-01"},
+    "gate_0_5": {"name": "TAPPAS Pipeline", "status": "PASS", "date": "2026-03-05"},
+    "gate_1":   {"name": "Action Bridge + Tracking", "status": "AKTIV", "date": "2026-03-06"},
+    "gate_2":   {"name": "Identity (ReID + Qdrant)", "status": "GEPLANT"},
+    "gate_3":   {"name": "Awareness (Timing/Behaviour)", "status": "GEPLANT"},
+    "gate_4":   {"name": "Personality (Tension/Mood)", "status": "GEPLANT"},
+    "gate_5":   {"name": "Night Cycle (Dreaming)", "status": "GEPLANT"}
+  },
+
+  "modules": {
+    "core": [
+      "action_bridge", "moloch_event_bus", "moloch_service", "core_integrator",
+      "perception_engine", "ptz_tracker", "ptz_arbiter", "arbitration",
+      "camera_manager", "led_controller", "spotify_controller",
+      "voice_pipeline", "tts", "moloch_sprache", "keyword_handler",
+      "daily_learner", "longterm_memory", "ipc_router", "status",
+      "inference_engine", "model_orchestrator", "calibration_engine",
+      "dashboard", "timeline", "eye_viewer", "einpraegen",
+      "environment_watcher", "cloud_controller"
+    ],
+    "awareness": ["room_map", "motion_analyzer", "activity_analyzer", "context_evaluator"],
+    "personality": ["tension_integrator", "mood_engine", "behavior_rules", "personality_engine"],
+    "autonomy": ["decision_engine", "atmosphere_controller", "homeostasis", "night_cycle"],
+    "memory": ["episodic_memory", "persistent_memory", "person_reid", "vector_memory"],
+    "music": ["spotify_bridge", "music_memory"],
+    "perception": ["tappas_pipeline", "perception_buffer", "perception_frame", "perception_manager", "hailo_postprocess", "spatial_learning", "model_health"],
+    "hardware": ["camera", "hailo_manager", "thermal_manager", "camera_cloud_bridge", "ptz_calibration"],
+    "speech": ["hailo_whisper", "audio_pipeline"]
+  },
+
+  "pipeline": {
+    "type": "TAPPAS/GStreamer",
+    "feature_flag": "MOLOCH_USE_TAPPAS=1",
+    "fps": 20,
+    "ram_mb": 200,
+    "active_models": ["yolov8m_h10", "scrfd_10g", "arcface_mobilefacenet", "yolov8s_pose_h10"],
+    "scheduling": "vdevice-group-id=SHARED"
+  }
+}

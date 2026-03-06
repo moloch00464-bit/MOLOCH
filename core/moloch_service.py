@@ -311,6 +311,7 @@ class MolochService:
         POLL_INTERVAL = 0.2  # 5 Hz
         OFFLINE_POLL = 1.0   # 1 Hz wenn Pipeline offline
         _last_pframe_id = None
+        _decision_counter = 0  # DecisionEngine nur jeden 5. Frame (= 1 Hz)
 
         while self.running:
             # Pipeline offline → langsam pollen, warten auf Watchdog-Restart
@@ -550,7 +551,10 @@ class MolochService:
                             engagement=_de_engagement,
                             music_playing=getattr(self, '_last_awareness_music_energy', 0.0) > 0.01,
                         )
-                        self._decision_engine.decide()
+                        _decision_counter += 1
+                        if _decision_counter >= 5:  # 1 Hz bei 5 Hz Loop
+                            self._decision_engine.decide()
+                            _decision_counter = 0
                     except Exception as e:
                         logger.debug(f"[TAPPAS-PERC] DecisionEngine: {e}")
 

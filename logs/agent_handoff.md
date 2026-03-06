@@ -1,111 +1,118 @@
-# AGENT HANDOFF — Gate 2/3/4 Session
-# Geschrieben: 2026-03-06 ~16:00
+# AGENT HANDOFF — Gate 5 Session
+# Geschrieben: 2026-03-06 ~17:30
 # Naechste Instanz: Lies CLAUDE.md, dann diese Datei
 
 ## AKTUELLER STAND
 
-Gate 2 + 3 + 4 in einer Session implementiert. Alles committed, NICHT deployed.
-Letzter Commit: c2a06ee "Gate 4: Emergent Personality in moloch_service.py verdrahtet"
-Service: NICHT neugestartet seit Aenderungen!
+Gate 5 (Autonomous Environmental Agent) komplett implementiert.
+5 Commits, alle syntax-gecheckt, NICHT deployed (kein Reboot).
+Service laeuft noch mit altem Code (Gate 2/3/4 Stand).
+
+Tag `gate_4_pass` auf Remote gepusht.
+
+Letzter Commit: c3f488a "Gate 5: Autonomy Module in moloch_service.py verdrahtet"
 
 ## COMMITS DIESER SESSION (chronologisch)
 
-### Gate 2: Identity
 | Commit | Beschreibung |
 |--------|--------------|
-| 5f19c2b | Episodisches Gedaechtnis — Qdrant embedded auf SSD2 |
-| 72e5923 | Episodic Memory in _tappas_perception_loop() verdrahtet |
-| 562f20f | Music Memory — Track+Person+Mood Assoziationen auf SSD2 |
-| 9fb08a7 | Music Memory in moloch_service.py verdrahtet |
+| de86b22 | BACKUP vor Gate 5 |
+| 29206b1 | DecisionEngine — Utility-basierte autonome Entscheidungen |
+| 8aa396e | AtmosphereController — Raumatmosphaere als Einheit |
+| b03bcf8 | Homeostasis — Selbstueberwachung + Auto-Heal |
+| d104fb4 | NightCycle — Naechtliche Tagesverarbeitung |
+| c3f488a | Autonomy Module in moloch_service.py verdrahtet |
 
-### Gate 3: Situational Awareness
-| Commit | Beschreibung |
-|--------|--------------|
-| 48413e1 | RoomMap — PTZ-Winkel zu 5 Raumzonen |
-| 3d8e701 | MotionAnalyzer — BBox-Deltas → Bewegungszustand |
-| 9bd8909 | ActivityAnalyzer — Kombinierte Signale → Aktivitaet |
-| b16618f | ContextEvaluator — 4-Achsen Situationsbewertung Score 0-1 |
-| 77391e1 | Awareness Module in moloch_service.py verdrahtet |
-
-### Gate 4: Emergent Personality
-| Commit | Beschreibung |
-|--------|--------------|
-| 1111a67 | TensionIntegrator — Awareness→CoreIntegrator Bridge |
-| cc2faeb | MoodEngine — Emergenter Mood (6 States) |
-| eb6cf24 | BehaviorRules — Mood→Verhalten Regelwerk |
-| c2a06ee | Emergent Personality in moloch_service.py verdrahtet |
-
-## NEUE DATEIEN (10 Module)
+## NEUE DATEIEN (4 Module + Package)
 
 ```
-core/memory/episodic_memory.py        — Qdrant Vector-DB, store_episode()/recall()
-core/music/music_memory.py            — Track+Person+Mood JSON auf SSD2
-core/awareness/__init__.py            — Package Init
-core/awareness/room_map.py            — PTZ-Pan → Zone (Tuer/Schreibtisch/Mitte/Sofa/Fenster)
-core/awareness/motion_analyzer.py     — BBox-Deltas → stationary/walking/approaching/leaving
-core/awareness/activity_analyzer.py   — → alone/working/conversation/party/away
-core/awareness/context_evaluator.py   — → Score 0-1 (familiarity/comfort/alertness/engagement)
-core/personality/tension_integrator.py — Awareness Events → CoreIntegrator update_input()
-core/personality/mood_engine.py        — → calm/focused/alert/agitated/euphoric/dark
-core/personality/behavior_rules.py     — Mood → LED/Sirene/Zone Triggers
+core/autonomy/__init__.py             — Package Init
+core/autonomy/decision_engine.py      — Utility-Scoring: music_change/light_change/ptz_move/speak/silence
+core/autonomy/atmosphere_controller.py — States: intimate/focused/party/alert/night (Musik+LED+PTZ)
+core/autonomy/homeostasis.py          — RAM/CPU/Temp/FPS/Disk Monitoring, Auto-Heal (GC, Log-Rotation)
+core/autonomy/night_cycle.py          — 23:00 Tagesverarbeitung (Episodic Summary, Music Decay, Stats)
 ```
 
-## GEAENDERT: core/moloch_service.py (~250 neue Zeilen)
-- 7 neue Imports (episodic, music, awareness x4, personality x3)
-- Init: Awareness + Personality Module (Bloecke 9 + 10)
-- _tappas_perception_loop(): Awareness-Chain + MoodEngine nach DailyLearner
-- start(): 3 neue Event-Bus Subscriber-Bloecke (Awareness, Personality, Behavior)
+## GEAENDERT: core/moloch_service.py (~130 neue Zeilen)
 
-## ARCHITEKTUR-DATENFLUSS
+- 4 neue Imports (decision_engine, atmosphere_controller, homeostasis, night_cycle)
+- Init Block 11: Alle 4 Autonomy Module
+- _tappas_perception_loop(): DecisionEngine.update_signals()+decide(), Atmosphere.update_signals(), Homeostasis.set_fps()
+- start(): Atmosphere Event-Subscriber (activity_changed, mood_changed, atmosphere_changed→LED)
+- start(): Homeostasis.start(), NightCycle.start()
+- stop(): Homeostasis.stop(), NightCycle.stop()
+- Event Trace Logger erweitert um 4 neue Events
+
+## ARCHITEKTUR-DATENFLUSS (Gate 5 NEU)
 
 ```
-PFrame (5 Hz Perception Loop)
-  ├→ RoomMap(PTZ-Pan) → zone_entered Event
-  ├→ MotionAnalyzer(BBox) → motion_state_changed Event
-  ├→ ActivityAnalyzer(Signale) → activity_changed Event
-  ├→ ContextEvaluator(alles) → context_update Event (Score 0-1)
-  ├→ EpisodicMemory(face_id+embedding) → Qdrant
-  └→ MoodEngine(Tension+Dominance+Musik+Activity) → mood_changed Event
+Perception Loop (5 Hz) — NEUE Bloecke nach MoodEngine:
+  ├→ DecisionEngine.update_signals(mood,tension,dominance,activity,zone,...) + decide()
+  │     → decision_made Event (Priority 3) bei Score > 0.3 (Silence-Baseline)
+  │     → Cooldowns: music=120s, light=15s, ptz=30s, speak=60s
+  ├→ AtmosphereController.update_signals(hour, face_id)
+  └→ Homeostasis.set_fps(current_fps)
 
-Event Bus Kette:
-  context_update ─────→ TensionIntegrator → CoreIntegrator.update_input()
-  activity_changed ───→ TensionIntegrator → CoreIntegrator.update_input()
-  motion_state_changed → TensionIntegrator → CoreIntegrator.update_input()
-  mood_changed ────────→ BehaviorRules.evaluate() → behavior_trigger Event
-  behavior_trigger ────→ LED on/off/blink + CoreIntegrator.set_impulse_flag()
-  music_track_started ─→ MusicMemory.store_association() (wenn Person erkannt)
-  music_features ──────→ music_energy Cache fuer ActivityAnalyzer
+Event Bus (NEU):
+  activity_changed ──→ AtmosphereController.on_activity_changed()
+  mood_changed ──────→ AtmosphereController.on_mood_changed()
+  atmosphere_changed → LED-Kommandos ausfuehren (on/off/blink/blink_slow)
+  health_alert ──────→ Event Log (Priority 0=CRITICAL / 4=SYSTEM)
+  decision_made ─────→ Event Log (Priority 3)
+  night_cycle_complete → Event Log (Priority 9)
+
+Background Threads:
+  Homeostasis → 10s Intervall: RAM/CPU/Temp/Disk, Auto-Heal bei Ueberschreitung
+  NightCycle  → 60s Check, 1x/Tag nach 23:00 (Episoden+Musik+Stats)
 ```
 
 ## BEKANNTE PROBLEME
 
-### Kritisch — Vor Deploy pruefen
-1. **NICHT getestet!** Nur syntax-gecheckt. Service muss neu gestartet werden.
-2. **feed_event() existiert NICHT** in CoreIntegrator — wird in moloch_service.py
-   aufgerufen (Zeilen 350/352/729/731/795/797), aber die Methode fehlt.
-   Alle Aufrufe sind in try/except → silent fail. Neue Module nutzen korrekt update_input().
-3. **Qdrant Import**: qdrant-client muss installiert sein (`pip3 install qdrant-client`)
+### Aus dieser Session
+1. **NICHT deployed!** Nur syntax-gecheckt. Service muss neu gestartet werden.
+2. **Decision Engine feuert bei jedem PFrame** — decide() wird mit 5 Hz aufgerufen.
+   Cooldowns verhindern Spam, aber es erzeugt trotzdem Events wenn Score > 0.3.
+   Bei Bedarf: Frequenz auf 1 Hz reduzieren (Counter im Loop).
+3. **Atmosphere LED-Kommandos** koennten mit BehaviorRules LED-Kommandos kollidieren.
+   Beide reagieren auf mood_changed. Atmosphere hat Hysterese (5s), Behavior nicht.
+   → Kein Crash, aber LED koennte flackern bei schnellen Mood-Wechseln.
+
+### Aus vorheriger Session (unveraendert)
 4. **RoomMap Pan-Winkel**: Default-Werte GESCHAETZT, muessen kalibriert werden
+5. **Preview-Stream Bug**: Doppelte BGR↔RGB Konvertierung, nicht beauftragt
+6. **Face-ID Threshold**: 0.30 evtl. zu niedrig (Markus sim=0.42-0.51)
+7. **feed_event()**: EXISTIERT in CoreIntegrator:167 — altes Handoff war FALSCH
+8. **qdrant-client**: INSTALLIERT (v1.16.2) — kein pip install noetig
 
-### Preview-Stream Bug (analysiert, NICHT gefixt)
-- Moegliche doppelte BGR↔RGB Konvertierung in tappas_pipeline.py:1033
-- SHM immer 640x360, Preview skaliert hoch → Unschaerfe bei HD+
-- Markus informiert, kein Fix beauftragt
-
-### Aus frueherer Session
-- Face-ID Threshold evtl. zu niedrig (0.30)
-- G1-T11 Labelme uebersprungen (keine Spec)
+### GATE_1_BRIEFING_v2.json
+- In CLAUDE.md referenziert, existiert NICHT auf dem Pi
+- Wurde nie auf dem Pi gespeichert (nur in externen AI-Sessions)
 
 ## EMPFEHLUNG NAECHSTE SCHRITTE
 
 1. `sudo reboot` → `journalctl -u moloch -f` auf Import-Fehler pruefen
-2. Falls Qdrant fehlt: `pip3 install qdrant-client`
-3. Bei Crash: Imports einzeln testen (python3 -c "from core.awareness.room_map import ...")
-4. RoomMap kalibrieren (PTZ an Zonengrenzen fahren, Winkel notieren)
-5. Preview-Bug fixen wenn beauftragt
-6. feed_event() in CoreIntegrator implementieren ODER bestehende Aufrufe auf update_input() migrieren
+2. Bei Crash: `python3 -c "from core.autonomy.decision_engine import get_decision_engine"` etc.
+3. Decision Engine Frequenz ggf. drosseln (5 Hz → 1 Hz)
+4. Atmosphere vs BehaviorRules LED-Konflikt beobachten
+5. RoomMap kalibrieren (PTZ an Zonengrenzen fahren, Winkel notieren)
+6. Night Cycle Ergebnisse pruefen: /mnt/moloch-data/memory/night_cycle/
 
 ## SERVICE-STATUS
-- MOLOCH_USE_TAPPAS=1 AKTIV (in ~/.profile)
-- Service: MUSS NEU GESTARTET WERDEN nach Reboot
-- Letzter stabiler Stand VOR dieser Session: Commit 0fe6eec
+
+- MOLOCH_USE_TAPPAS=1 AKTIV
+- Service: AKTIV aber mit ALTEM Code (vor Gate 5)
+- Letzter stabiler Commit: 50b0ecb (Gate 2/3/4 Stabilization Patch)
+- Tag: gate_4_pass auf Remote gepusht
+
+## GATE-ROADMAP UPDATE
+
+```
+Gate 0   PASS — Vier Inseln verdrahtet (01.03.2026)
+Gate 0.5 PASS — TAPPAS Pipeline, 20 FPS (05.03.2026)
+Gate 1   PASS — Action Bridge + Tracking (06.03.2026)
+Gate 2   IMPL — Identity (Episodic+Music Memory)
+Gate 3   IMPL — Situational Awareness (Room/Motion/Activity/Context)
+Gate 4   PASS — Emergent Personality (Tension/Mood/Behavior) — TAG: gate_4_pass
+Gate 5   IMPL — Autonomous Environmental Agent — NICHT DEPLOYED
+Gate 6   GEPLANT — Night Cycle V2 (Dreaming = semantische Verdichtung)
+```
