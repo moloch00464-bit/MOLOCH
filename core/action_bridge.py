@@ -273,6 +273,7 @@ class ActionBridge:
         with self._lock:
             self._context.person_detected = False
             self._context.face_confirmed = False
+            self._context.owner_detected = False
             # last_detection_time bleibt stehen -> Timeout im Tick
 
     def _on_manual_override(self, event: dict):

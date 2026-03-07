@@ -64,7 +64,7 @@ class CoreIntegrator:
 
     # === Dominance Drift ===
     DOMINANCE_DRIFT_TARGET = 0.5    # Homoeostatisches Ziel (leicht Guardian)
-    DOMINANCE_DRIFT_RATE = 0.01 / 60.0  # 0.01 pro Minute, aufgeloest in 1-Hz-Ticks
+    DOMINANCE_DRIFT_RATE = 0.05 / 60.0  # 0.05 pro Minute, aufgeloest in 1-Hz-Ticks
 
     # === Hysterese ===
     ZONE_HYSTERESIS = 0.15  # Mindest-Delta fuer Zone-Wechsel (Dominance-basiert)

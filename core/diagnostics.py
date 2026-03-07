@@ -270,7 +270,9 @@ def _extract_fps(status: Dict[str, Any]) -> float:
     """FPS aus Status-JSON extrahieren."""
     fps_data = status.get("fps", {})
     if isinstance(fps_data, dict):
-        return fps_data.get("current", fps_data.get("avg", 0.0))
+        return fps_data.get("total", fps_data.get("yolov8m", fps_data.get("scrfd", 0.0)))
+    if isinstance(fps_data, (int, float)):
+        return float(fps_data)
     return 0.0
 
 
