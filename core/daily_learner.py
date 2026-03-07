@@ -25,7 +25,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Storage auf moloch-data SSD (nicht System-SSD)
-DAILY_DIR = Path("/mnt/moloch-data/daily")
+DAILY_DIR = Path("/mnt/moloch-data/Teachen")
 
 # Qualitaetscheck: Mindest-Similarity zum bestehenden Basis-Embedding
 LEARN_MIN_SIMILARITY = 0.4

@@ -83,7 +83,7 @@ def _unletterbox_coords(x1n, y1n, x2n, y2n, target_size, scale, pad_x, pad_y, or
 
 # Pfade
 SNAPSHOTS_DIR = os.path.expanduser("~/moloch/snapshots")
-DAILY_DIR = "/mnt/moloch-data/daily"
+DAILY_DIR = "/mnt/moloch-data/Teachen"
 FACE_DB_PATH = os.path.expanduser("~/moloch/data/face_embeddings.json")
 POSE_DB_PATH = os.path.expanduser("~/moloch/data/pose_profiles.json")
 

@@ -31,7 +31,7 @@ from hailo_platform import VDevice, HEF, FormatType
 # --- Pfade ---
 SNAPSHOTS_DIR = os.path.expanduser("~/moloch/snapshots")
 FACES_DIR = os.path.expanduser("~/moloch/faces")
-DAILY_DIR = "/mnt/moloch-data/daily"
+DAILY_DIR = "/mnt/moloch-data/Teachen"
 FACE_DB_PATH = os.path.expanduser("~/moloch/data/face_embeddings.json")
 MODELS_DIR = "/mnt/moloch-data/hailo/models"
 SCRFD_HEF = os.path.join(MODELS_DIR, "scrfd_10g.hef")

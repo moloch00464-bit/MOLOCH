@@ -5,7 +5,7 @@ M.O.L.O.C.H. Snapshot Galerie Popup
 
 Eigenstaendiges Toplevel-Fenster mit 2 Tabs (ttk.Notebook):
   Tab 1: Snapshots — ~/moloch/snapshots/ (manuelle Snap-Button Fotos)
-  Tab 2: Teachen  — /mnt/moloch-data/daily/<YYYY-MM-DD>/ (DailyLearner)
+  Tab 2: Teachen  — /mnt/moloch-data/Teachen/<YYYY-MM-DD>/ (DailyLearner)
 
 Features:
 - Thumbnail-Grid (3 Spalten, 150x112px)
@@ -41,7 +41,7 @@ logger = logging.getLogger("moloch.popup_gallery")
 
 # Pfade
 SNAP_DIR = os.path.expanduser("~/moloch/snapshots")
-DAILY_DIR = "/mnt/moloch-data/daily"
+DAILY_DIR = "/mnt/moloch-data/Teachen"
 
 THUMB_W = 150
 THUMB_H = 112
@@ -96,6 +96,7 @@ class SnapshotGallery:
     def __init__(self, parent):
         self._parent = parent
         self._loading = False
+        self._search_timer = None
 
         # Toplevel erstellen
         self.win = tk.Toplevel(parent)
@@ -106,6 +107,23 @@ class SnapshotGallery:
         self.win.geometry("560x650")
         self.win.resizable(True, True)
         self.win.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # --- Suchleiste oben ---
+        search_frame = tk.Frame(self.win, bg=BG_DARK)
+        search_frame.pack(fill=tk.X, padx=5, pady=(5, 0))
+        tk.Label(search_frame, text="Suche:", bg=BG_DARK, fg=FG_LABEL,
+                 font=FONT_LABEL).pack(side=tk.LEFT, padx=(5, 3))
+        self._search_var = tk.StringVar()
+        self._search_entry = tk.Entry(
+            search_frame, textvariable=self._search_var,
+            bg=BG_FRAME, fg=FG_WHITE, insertbackground=FG_WHITE,
+            font=FONT_LABEL, width=25,
+        )
+        self._search_entry.pack(side=tk.LEFT, padx=3, fill=tk.X, expand=True)
+        self._search_var.trace_add("write", self._on_search_changed)
+        tk.Button(search_frame, text="X", width=3,
+                  bg=BG_BUTTON, fg=FG_LABEL, font=FONT_SMALL,
+                  command=self._clear_search).pack(side=tk.LEFT, padx=3)
 
         # ttk Style fuer dunkle Tabs
         style = ttk.Style()
@@ -205,8 +223,8 @@ class SnapshotGallery:
         days.sort(reverse=True)
         return days
 
-    def _load_snapshots(self):
-        """Tab Snapshots: Fotos aus ~/moloch/snapshots/ laden."""
+    def _load_snapshots(self, query=None):
+        """Tab Snapshots: Fotos aus ~/moloch/snapshots/ laden, optional gefiltert."""
         grid = self._grid_snapshots
         grid.clear()
 
@@ -215,13 +233,15 @@ class SnapshotGallery:
             files = []
             if os.path.isdir(SNAP_DIR):
                 for f in os.listdir(SNAP_DIR):
-                    if f.lower().endswith((".jpg", ".jpeg", ".png")):
-                        path = os.path.join(SNAP_DIR, f)
-                        mtime = os.path.getmtime(path)
-                        files.append((path, f, mtime))
+                    if not f.lower().endswith((".jpg", ".jpeg", ".png")):
+                        continue
+                    if query and query not in f.lower():
+                        continue
+                    path = os.path.join(SNAP_DIR, f)
+                    mtime = os.path.getmtime(path)
+                    files.append((path, f, mtime))
             files.sort(key=lambda x: x[2], reverse=True)
 
-            # Zurueck im Main-Thread
             try:
                 self.win.after(0, lambda: self._populate_grid(
                     grid, files, f"Snapshots ({len(files)})", 0))
@@ -335,11 +355,15 @@ class SnapshotGallery:
                 width=20, height=7,
             ).pack(padx=2, pady=2)
 
-        # Dateiname (gekuerzt)
-        display = fname if len(fname) <= 25 else fname[:22] + "..."
+        # Dateiname (gekuerzt) + Ordner wenn aus Unterordner
+        parent_dir = os.path.basename(os.path.dirname(path))
+        if parent_dir.startswith("20"):
+            display = f"{parent_dir}/{fname}" if len(fname) <= 18 else f"{parent_dir}/{fname[:15]}..."
+        else:
+            display = fname if len(fname) <= 25 else fname[:22] + "..."
         tk.Label(
             cell, text=display, bg=BG_FRAME, fg=FG_LABEL,
-            font=FONT_SMALL, wraplength=THUMB_W,
+            font=FONT_SMALL, wraplength=THUMB_W + 30,
         ).pack()
 
         # Datum
@@ -454,6 +478,69 @@ class SnapshotGallery:
         elif idx == 1:
             return self._grid_teachen
         return None
+
+    # =========================================================================
+    # Suche
+    # =========================================================================
+
+    def _on_search_changed(self, *_args):
+        """Suchfeld geaendert — mit 300ms Debounce beide Tabs neu laden."""
+        if self._search_timer:
+            self.win.after_cancel(self._search_timer)
+        self._search_timer = self.win.after(300, self._apply_search)
+
+    def _apply_search(self):
+        """Suche anwenden: beide Tabs neu laden mit Filter."""
+        query = self._search_var.get().strip().lower()
+        if query:
+            # Bei Suche: Teachen ueber ALLE Tage, Snapshots gefiltert
+            self._load_snapshots(query)
+            self._load_teachen_all(query)
+        else:
+            self._load_snapshots()
+            self._load_teachen()
+
+    def _clear_search(self):
+        """Suchfeld leeren."""
+        self._search_var.set("")
+
+    def _load_teachen_all(self, query):
+        """Teachen-Tab: Alle Tage durchsuchen, nach query filtern."""
+        grid = self._grid_teachen
+        grid.clear()
+
+        def _bg_load():
+            files = []
+            if not os.path.isdir(DAILY_DIR):
+                return
+            for day in os.listdir(DAILY_DIR):
+                day_dir = os.path.join(DAILY_DIR, day)
+                if not os.path.isdir(day_dir) or not day.startswith("20"):
+                    continue
+                for f in os.listdir(day_dir):
+                    if not f.lower().endswith((".jpg", ".jpeg", ".png")):
+                        continue
+                    if query and query not in f.lower():
+                        continue
+                    path = os.path.join(day_dir, f)
+                    mtime = os.path.getmtime(path)
+                    json_path = path.rsplit(".", 1)[0] + ".json"
+                    meta = None
+                    if os.path.exists(json_path):
+                        try:
+                            with open(json_path, "r") as jf:
+                                meta = json.load(jf)
+                        except Exception:
+                            pass
+                    files.append((path, f, mtime, meta))
+            files.sort(key=lambda x: x[2], reverse=True)
+            try:
+                self.win.after(0, lambda: self._populate_teachen_grid(
+                    grid, files, len(files)))
+            except tk.TclError:
+                pass
+
+        threading.Thread(target=_bg_load, daemon=True).start()
 
     def _on_close(self):
         """Fenster schliessen."""
