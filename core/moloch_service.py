@@ -1412,8 +1412,16 @@ class MolochService:
                     status["face_similarity"] = round(getattr(pframe, 'face_similarity', 0.0), 3)
                     status["mode"] = "tappas"
 
-            # Einpraegen Status
-            if self._einpraegen:
+            # Einpraegen Status (TAPPAS Enrollment oder Legacy)
+            if hasattr(self._inference, 'get_enrollment_status'):
+                enr = self._inference.get_enrollment_status()
+                status["einpraegen_running"] = enr["active"]
+                if enr["active"]:
+                    status["einpraegen_progress"] = f"Face {enr['collected']}/{enr['target']}"
+                else:
+                    status["einpraegen_progress"] = ""
+                status["einpraegen_done"] = enr.get("done", False)
+            elif self._einpraegen:
                 status["einpraegen_running"] = self._einpraegen.is_running
                 status["einpraegen_progress"] = self._einpraegen.progress
                 status["einpraegen_done"] = self._einpraegen.is_done
@@ -1791,12 +1799,23 @@ class MolochService:
                 self._voice_pipeline.reset_conversation()
                 logger.info("[IPC] Voice: Konversation zurueckgesetzt")
 
-        # ---- Einpraegen (Batch Face+Pose) ----
+        # ---- Einpraegen (TAPPAS Enrollment mit Teachen/Snapshot-Bildern) ----
         elif action == 'einpraegen':
-            if self._einpraegen:
+            # TAPPAS: start_enrollment() mit Batch-GStreamer-Pipeline (kompatible Embeddings)
+            if hasattr(self._inference, 'start_enrollment'):
+                enr = self._inference.get_enrollment_status()
+                if not enr["active"]:
+                    enroll_name = cmd.get('name', 'markus')
+                    self._inference.start_enrollment(enroll_name)
+                    logger.info(f"[IPC] TAPPAS-Enrollment gestartet fuer '{enroll_name}' "
+                                 f"(Teachen + Snapshots + Live-Stream)")
+                else:
+                    logger.warning("[IPC] Enrollment laeuft bereits")
+            elif self._einpraegen:
+                # Fallback: Legacy Einpraegen (nur wenn kein TAPPAS)
                 if not self._einpraegen.is_running:
                     self._einpraegen.start(orchestrator=self._orchestrator)
-                    logger.info("[IPC] Einpraegen gestartet")
+                    logger.info("[IPC] Legacy-Einpraegen gestartet (kein TAPPAS)")
                 else:
                     logger.warning("[IPC] Einpraegen laeuft bereits")
             else:

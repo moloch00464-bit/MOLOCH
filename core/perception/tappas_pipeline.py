@@ -164,6 +164,7 @@ class TappasPipeline:
 
         # --- Live-Enrollment ---
         self._enroll_active = False
+        self._enroll_done = False
         self._enroll_name = ""
         self._enroll_target = 20
         self._enroll_candidates = []  # (score, embedding_copy)
@@ -337,11 +338,11 @@ class TappasPipeline:
     # =====================================================================
 
     def start_enrollment(self, name: str, n: int = 20):
-        """Live-Enrollment starten: sammelt Embeddings aus GStreamer-Stream + Teachen-Ordner.
+        """Live-Enrollment starten: sammelt Embeddings aus GStreamer-Stream + Teachen/Snapshots.
 
         Ablauf:
-        1. Teachen-JSONs mit gespeicherten Embeddings laden (von frueheren Enrollments)
-        2. Live-Stream Embeddings sammeln (bis zu 60 Kandidaten)
+        1. Sofort aktiv setzen (Panel sieht "laeuft")
+        2. Background-Thread: Teachen-JSONs + Batch-Pipeline + Live-Stream
         3. Diversity-Filter waehlt beste 20 aus allen Kandidaten
 
         Embeddings kommen aus dem GLEICHEN Pipeline-Pfad wie die Erkennung
@@ -351,20 +352,60 @@ class TappasPipeline:
             name: Personenname (z.B. "Markus")
             n: Maximale Anzahl Kandidaten zum Sammeln (beste 20 werden gespeichert)
         """
-        # Offline-Embeddings aus Teachen-JSONs laden
-        offline_candidates = self._load_teachen_embeddings(name)
-
         with self._enroll_lock:
+            if self._enroll_active:
+                logger.warning("[ENROLLMENT] Laeuft bereits!")
+                return
             self._enroll_name = name.lower()
-            self._enroll_target = max(n, 60)  # Mehr sammeln fuer bessere Diversity
-            self._enroll_candidates = list(offline_candidates)
+            self._enroll_target = max(n, 60)
+            self._enroll_candidates = []
             self._enroll_active = True
+            self._enroll_done = False
 
-        n_offline = len(offline_candidates)
+        # Batch-Verarbeitung im Background-Thread (blockiert nicht IPC)
+        threading.Thread(
+            target=self._enrollment_batch_worker,
+            args=(name,),
+            daemon=True,
+            name="EnrollmentBatch",
+        ).start()
+
         logger.info(f"[ENROLLMENT] Gestartet fuer '{name}': "
-                     f"Teachen={n_offline} Offline-Embeddings, "
-                     f"sammle bis zu {self._enroll_target - n_offline} Live-Embeddings "
-                     f"(Score >{self._enroll_min_score})")
+                     f"Batch-Worker + Live-Stream (Score >{self._enroll_min_score})")
+
+    def _enrollment_batch_worker(self, name: str):
+        """Background-Worker: Teachen-JSONs Embeddings laden + Status loggen.
+
+        Laeuft parallel zur Live-Sammlung aus _on_buffer.
+        Teachen-JSON Embeddings (von frueheren Enrollments) werden thread-safe
+        zu _enroll_candidates hinzugefuegt.
+
+        Batch-Bildverarbeitung via separate GStreamer-Pipeline ist NICHT moeglich
+        (Hailo-10H erlaubt nur EIN VDevice — Live-Pipeline belegt es).
+        """
+        try:
+            # 1. Offline-Embeddings aus Teachen-JSONs laden
+            offline_candidates = self._load_teachen_embeddings(name)
+            if offline_candidates:
+                with self._enroll_lock:
+                    self._enroll_candidates.extend(offline_candidates)
+                logger.info(f"[ENROLLMENT] {len(offline_candidates)} Teachen-JSON Embeddings geladen")
+
+            # 2. Status der Bilder ohne Embeddings loggen
+            self._log_enrollment_image_status(name)
+
+            # Pruefen ob Target schon erreicht (Offline + Live zusammen)
+            with self._enroll_lock:
+                count = len(self._enroll_candidates)
+                target = self._enroll_target
+
+            if count >= target:
+                self._finish_enrollment()
+
+        except Exception as e:
+            logger.error(f"[ENROLLMENT] Batch-Worker Fehler: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _load_teachen_embeddings(self, name: str) -> list:
         """Embeddings aus Teachen-JSONs laden (von frueheren Enrollments gespeichert).
@@ -463,11 +504,58 @@ class TappasPipeline:
         if written:
             logger.info(f"[ENROLLMENT] {written} Teachen-JSONs mit Embedding aktualisiert")
 
+    def _log_enrollment_image_status(self, name: str):
+        """Bilder aus Teachen + Snapshots zaehlen und Status loggen.
+
+        HINWEIS: Bilder ohne Embeddings koennen NICHT als separate Batch-Pipeline
+        verarbeitet werden, da der Hailo-10H nur EIN VDevice erlaubt (Live-Pipeline
+        belegt es). Embeddings fuer neue Bilder werden beim naechsten Enrollment
+        ueber den Live-Stream + _save_embeddings_to_teachen() in die JSONs geschrieben.
+        """
+        import json as _json
+        name_lower = name.lower()
+        teachen_without = 0
+        snap_count = 0
+
+        teachen_dir = "/mnt/moloch-data/Teachen"
+        if os.path.isdir(teachen_dir):
+            for day_dir in os.listdir(teachen_dir):
+                day_path = os.path.join(teachen_dir, day_dir)
+                if not os.path.isdir(day_path) or not day_dir.startswith("20"):
+                    continue
+                for fname in os.listdir(day_path):
+                    if not fname.lower().endswith((".jpg", ".jpeg", ".png")):
+                        continue
+                    if name_lower not in fname.lower():
+                        continue
+                    json_path = os.path.join(day_path, fname.rsplit(".", 1)[0] + ".json")
+                    if os.path.exists(json_path):
+                        try:
+                            with open(json_path, 'r') as f:
+                                meta = _json.load(f)
+                            if meta.get("embedding"):
+                                continue
+                        except Exception:
+                            pass
+                    teachen_without += 1
+
+        snap_dir = os.path.expanduser("~/moloch/snapshots")
+        if os.path.isdir(snap_dir):
+            for fname in os.listdir(snap_dir):
+                if fname.lower().endswith((".jpg", ".jpeg", ".png")):
+                    snap_count += 1
+
+        if teachen_without > 0 or snap_count > 0:
+            logger.info(f"[ENROLLMENT] {teachen_without} Teachen-Bilder ohne Embedding, "
+                         f"{snap_count} Snapshots — Batch-NPU nicht moeglich "
+                         f"(Single-VDevice), Embeddings werden ueber Live-Stream gesammelt")
+
     def get_enrollment_status(self) -> dict:
         """Enrollment-Status fuer IPC/Panel."""
         with self._enroll_lock:
             return {
                 "active": self._enroll_active,
+                "done": self._enroll_done,
                 "name": self._enroll_name,
                 "collected": len(self._enroll_candidates),
                 "target": self._enroll_target,
@@ -502,7 +590,7 @@ class TappasPipeline:
         """Enrollment abschliessen: Diversitaets-Selektion + Face-DB speichern.
 
         Kandidaten koennen aus 2 Quellen stammen:
-        1. Teachen-JSONs (Offline, von frueheren Enrollments)
+        1. Teachen-JSONs (Offline, von frueheren Enrollments via GStreamer)
         2. Live-Stream (GStreamer _on_buffer Callback)
         Diversity-Filter waehlt die besten 20 aus allen Kandidaten.
         """
@@ -512,6 +600,7 @@ class TappasPipeline:
             if not self._enroll_active:
                 return
             self._enroll_active = False
+            self._enroll_done = True
             name = self._enroll_name
             candidates = list(self._enroll_candidates)
             diversity_thresh = self._enroll_diversity
