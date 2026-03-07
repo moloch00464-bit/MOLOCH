@@ -287,8 +287,8 @@ class ServiceProxy:
         """
         Kamera-Frame aus Shared Memory lesen.
 
-        Format: 12 Byte Header (width u32 LE, height u32 LE, channels u32 LE)
-                danach width * height * channels Bytes BGR raw
+        Format: 24 Byte Header (h, w, c, seq als uint32 LE + ts als float64 LE)
+                danach h * w * c Bytes RGB raw
 
         Returns:
             (width, height, channels, raw_bytes) oder None bei Fehler
@@ -297,10 +297,13 @@ class ServiceProxy:
             if not os.path.exists(SHM_FRAME):
                 return None
             with open(SHM_FRAME, "rb") as f:
-                header = f.read(12)
-                if len(header) < 12:
+                header = f.read(24)
+                if len(header) >= 24:
+                    height, width, channels, _seq, _ts = struct.unpack("<IIIId", header)
+                elif len(header) >= 12:
+                    width, height, channels = struct.unpack("<III", header[:12])
+                else:
                     return None
-                width, height, channels = struct.unpack("<III", header)
                 expected_size = width * height * channels
                 if expected_size == 0 or expected_size > 10_000_000:
                     return None

@@ -43,25 +43,44 @@ from core.gui.panel_styles import (
 SETTINGS_PATH = os.path.expanduser("~/moloch/config/settings.json")
 
 # ============================================================================
-# Slider Definitionen: (Anzeigename, settings-sektion, settings-key,
-#                        min, max, default, schritt, einheit, tooltip)
+# Modell-Definitionen: Per-Model Gruppierung mit Status
+# (model_name, hef_info, active_default, sliders[])
+#   slider: (Anzeigename, settings-sektion, settings-key,
+#            min, max, default, schritt, einheit, tooltip)
 # ============================================================================
 
-# NPU Modell-Schwellwerte
-THRESHOLD_DEFS = [
-    ("SCRFD Erkennung", "thresholds", "scrfd_conf",
-     0.1, 0.9, 0.5, 0.05, "", "Gesichtserkennung Confidence (hoeher = weniger Fehlalarme)"),
-    ("SCRFD Ueberlappung", "thresholds", "scrfd_nms",
-     0.1, 0.9, 0.4, 0.05, "", "NMS Filter (hoeher = aggressiver, weniger Doppel-Detections)"),
-    ("ArcFace Aehnlichkeit", "thresholds", "arcface_thresh",
-     0.3, 0.9, 0.6, 0.05, "", "Wie aehnlich muss ein Gesicht sein? (hoeher = strenger)"),
-    ("YOLOv8m Erkennung", "thresholds", "yolo_conf",
-     0.1, 0.9, 0.5, 0.05, "", "Person Detection Confidence (hoeher = weniger Fehlalarme)"),
-    ("Pose Erkennung", "thresholds", "pose_conf",
-     0.1, 0.9, 0.5, 0.05, "", "Pose/Keypoint Detection Confidence"),
-    ("Hand Landmark", "thresholds", "hand_conf",
-     0.1, 0.9, 0.3, 0.05, "", "Hand/Gesten Detection Confidence"),
+MODEL_DEFS = [
+    ("SCRFD 10G", "scrfd_10g.hef (5.8 MB)", True, [
+        ("Confidence", "thresholds", "scrfd_conf",
+         0.1, 0.9, 0.5, 0.05, "", "Gesichtserkennung (hoeher = weniger Fehlalarme)"),
+        ("NMS Ueberlappung", "thresholds", "scrfd_nms",
+         0.1, 0.9, 0.4, 0.05, "", "Doppel-Detections filtern (hoeher = aggressiver)"),
+    ]),
+    ("ArcFace MobileFaceNet", "arcface_mobilefacenet.hef (2.6 MB)", True, [
+        ("Aehnlichkeit", "thresholds", "arcface_thresh",
+         0.3, 0.9, 0.6, 0.05, "", "Wie aehnlich muss ein Gesicht sein? (hoeher = strenger)"),
+    ]),
+    ("YOLOv8m Person", "yolov8m_h10.hef (21 MB)", True, [
+        ("Confidence", "thresholds", "yolo_conf",
+         0.1, 0.9, 0.5, 0.05, "", "Person Detection (hoeher = weniger Fehlalarme)"),
+    ]),
+    ("Face Attributes", "face_attr_resnet_v1_18.hef", True, [
+        # Kein eigener Threshold — laeuft immer mit SCRFD
+    ]),
+    ("Pose YOLOv8s", "yolov8s_pose_h10.hef (14 MB)", False, [
+        ("Confidence", "thresholds", "pose_conf",
+         0.1, 0.9, 0.5, 0.05, "", "Pose/Keypoint Detection Confidence"),
+    ]),
+    ("Hand Landmark", "hand_landmarker.hef", False, [
+        ("Confidence", "thresholds", "hand_conf",
+         0.1, 0.9, 0.3, 0.05, "", "Hand/Gesten Detection Confidence"),
+    ]),
 ]
+
+# Flache Liste aller Threshold-Slider (fuer Save/Load Kompatibilitaet)
+THRESHOLD_DEFS = []
+for _mname, _hef, _active, sliders in MODEL_DEFS:
+    THRESHOLD_DEFS.extend(sliders)
 
 # MPO Persoenlichkeits-Dynamik (5.2/5.3)
 MPO_DEFS = [
@@ -100,7 +119,7 @@ class NpuThreshPopup:
         self.win.transient(parent)
         self.win.title("NPU & MPO Einstellungen")
         self.win.configure(bg=BG_DARK)
-        self.win.geometry("460x680")
+        self.win.geometry("480x750")
         self.win.resizable(False, True)
         self.win.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -166,19 +185,66 @@ class NpuThreshPopup:
         self._canvas.bind_all("<Button-5>", _on_mousewheel)
 
     # =========================================================================
-    # NPU Threshold Section
+    # NPU Modell-Sektionen mit Status-LEDs
     # =========================================================================
 
     def _build_threshold_section(self):
-        """Threshold-Slider fuer alle NPU Modelle."""
-        section = tk.LabelFrame(
-            self._inner, text="NPU Modell-Schwellwerte",
-            bg=BG_FRAME, fg=FG_LABEL, font=FONT_LABEL,
-        )
-        section.pack(fill=tk.X, padx=10, pady=(10, 5))
+        """Per-Model Sektionen mit Status-LED, HEF-Info und Threshold-Slidern."""
+        # Aktive Modelle aus settings.json laden
+        active_models = []
+        try:
+            if os.path.exists(SETTINGS_PATH):
+                with open(SETTINGS_PATH, "r") as f:
+                    data = json.load(f)
+                active_models = data.get("active_models", [])
+        except Exception:
+            pass
 
-        for name, sec, key, vmin, vmax, default, step, unit, tip in THRESHOLD_DEFS:
-            self._build_slider_row(section, name, sec, key, vmin, vmax, default, step, unit, tip)
+        # Mapping: model_name → active (aus active_models Liste)
+        active_map = {
+            "SCRFD 10G": "scrfd" in active_models,
+            "ArcFace MobileFaceNet": "arcface" in active_models,
+            "YOLOv8m Person": "yolov8m" in active_models,
+            "Face Attributes": "scrfd" in active_models,  # laeuft immer mit SCRFD
+            "Pose YOLOv8s": "pose" in active_models,
+            "Hand Landmark": "hand_landmark" in active_models,
+        }
+
+        for model_name, hef_info, _default_active, sliders in MODEL_DEFS:
+            is_active = active_map.get(model_name, _default_active)
+
+            # Model-Section als LabelFrame
+            section = tk.LabelFrame(
+                self._inner, text=model_name,
+                bg=BG_FRAME, fg=FG_LABEL, font=FONT_LABEL,
+            )
+            section.pack(fill=tk.X, padx=10, pady=(5, 2))
+
+            # Status-Zeile: LED + HEF-Info
+            status_row = tk.Frame(section, bg=BG_FRAME)
+            status_row.pack(fill=tk.X, padx=8, pady=(3, 2))
+
+            led_color = ACCENT_GREEN if is_active else ACCENT_RED
+            led_text = "AKTIV" if is_active else "INAKTIV"
+            tk.Label(
+                status_row, text="\u25CF", fg=led_color, bg=BG_FRAME,
+                font=FONT_LABEL,
+            ).pack(side=tk.LEFT)
+            tk.Label(
+                status_row, text=f" {led_text}", fg=led_color, bg=BG_FRAME,
+                font=FONT_SMALL,
+            ).pack(side=tk.LEFT)
+            tk.Label(
+                status_row, text=f"  {hef_info}", fg=FG_DIM, bg=BG_FRAME,
+                font=FONT_SMALL,
+            ).pack(side=tk.LEFT, padx=(10, 0))
+
+            # Slider fuer dieses Modell (ausgegraut wenn inaktiv)
+            for name, sec, key, vmin, vmax, default, step, unit, tip in sliders:
+                self._build_slider_row(
+                    section, name, sec, key, vmin, vmax, default, step, unit, tip,
+                    enabled=is_active,
+                )
 
     # =========================================================================
     # MPO Persoenlichkeits-Dynamik Section
@@ -263,22 +329,24 @@ class NpuThreshPopup:
     # =========================================================================
 
     def _build_slider_row(self, parent, name, section, key, vmin, vmax,
-                          default, step, unit, tooltip):
-        """Eine Slider-Zeile: Label + Slider + Live-Wert."""
+                          default, step, unit, tooltip, enabled=True):
+        """Eine Slider-Zeile: Label + Slider + Live-Wert. Ausgegraut wenn enabled=False."""
         row = tk.Frame(parent, bg=BG_FRAME)
         row.pack(fill=tk.X, padx=8, pady=2)
+
+        fg = FG_LABEL if enabled else FG_DIM
 
         # Name links
         tk.Label(
             row, text=name, width=22, anchor=tk.W,
-            bg=BG_FRAME, fg=FG_LABEL, font=FONT_LABEL,
+            bg=BG_FRAME, fg=fg, font=FONT_LABEL,
         ).pack(side=tk.LEFT)
 
         # Wert-Label rechts
         fmt = self._format_value(default, unit, step)
         lbl = tk.Label(
             row, text=fmt, width=9, anchor=tk.E,
-            bg=BG_FRAME, fg=STATUS_YELLOW, font=FONT_LABEL,
+            bg=BG_FRAME, fg=STATUS_YELLOW if enabled else FG_DIM, font=FONT_LABEL,
         )
         lbl.pack(side=tk.RIGHT)
         self._labels[(section, key)] = lbl
@@ -288,12 +356,14 @@ class NpuThreshPopup:
         var = tk.DoubleVar(value=default)
         self._vars[(section, key)] = var
 
+        state = tk.NORMAL if enabled else tk.DISABLED
         slider = tk.Scale(
             row, from_=vmin, to=vmax, resolution=resolution,
             orient=tk.HORIZONTAL, variable=var,
-            bg=BG_FRAME, fg=FG_WHITE, troughcolor=BG_INPUT,
+            bg=BG_FRAME, fg=FG_WHITE if enabled else FG_DIM,
+            troughcolor=BG_INPUT,
             highlightthickness=0, font=FONT_SMALL,
-            showvalue=False,
+            showvalue=False, state=state,
             command=lambda val, s=section, k=key, u=unit, st=step: self._on_slider_changed(s, k, val, u, st),
         )
         slider.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 5))

@@ -84,6 +84,11 @@ class PreviewModule:
         # Watchdog: Letzter erfolgreicher Render (Gate0 Phase 9)
         self.last_render_time = 0.0
 
+        # Lag-Diagnostik: 30s Logging, alle 2s ein Eintrag
+        self._lag_log_start = 0.0
+        self._lag_log_next = 0.0
+        self._lag_log_active = False
+
         # --- Aufloesung-Selector oberhalb des Canvas ---
         self._res_frame = tk.Frame(parent_frame, bg=BG_DARK)
         self._res_frame.pack(padx=5, pady=(5, 0), fill=tk.X)
@@ -143,32 +148,39 @@ class PreviewModule:
         """
         Frame direkt aus SHM lesen mit korrektem Header-Parsing.
 
-        SHM-Format (geschrieben von moloch_service._write_shm):
-          16 Byte Header:
+        SHM-Format (geschrieben von tappas_pipeline._write_shm_frame):
+          24 Byte Header:
             h   (uint32 LE) = Bildhoehe (numpy rows)
             w   (uint32 LE) = Bildbreite (numpy cols)
-            c   (uint32 LE) = Kanaele (3 = BGR)
+            c   (uint32 LE) = Kanaele (3 = RGB)
             seq (uint32 LE) = Sequenznummer
-          Danach: h * w * c Bytes BGR Pixeldaten
+            ts  (float64 LE) = time.monotonic() Zeitstempel
+          Danach: h * w * c Bytes RGB Pixeldaten
 
         Returns:
-            (width, height, raw_bytes) oder None bei Fehler
+            (width, height, seq, ts, raw_bytes) oder None bei Fehler
         """
         try:
             if not os.path.exists(SHM_FRAME):
                 return None
             with open(SHM_FRAME, "rb") as f:
-                header = f.read(16)
-                if len(header) < 16:
+                header = f.read(24)
+                if len(header) >= 24:
+                    # Neuer 24-Byte Header (mit Timestamp)
+                    h, w, c, seq, ts = struct.unpack("<IIIId", header)
+                elif len(header) >= 16:
+                    # Alter 16-Byte Header (ohne Timestamp) — Rueckwaertskompatibel
+                    h, w, c, seq = struct.unpack("<IIII", header[:16])
+                    ts = 0.0
+                else:
                     return None
-                h, w, c, seq = struct.unpack("<IIII", header)
                 expected = w * h * c
                 if expected == 0 or expected > 10_000_000:
                     return None
                 raw = f.read(expected)
                 if len(raw) < expected:
                     return None
-            return (w, h, seq, raw)
+            return (w, h, seq, ts, raw)
         except OSError:
             return None
 
@@ -220,13 +232,27 @@ class PreviewModule:
             result = self._read_shm_frame()
 
             if result is not None:
-                shm_w, shm_h, seq, raw = result
+                shm_w, shm_h, seq, shm_ts, raw = result
 
                 # Gleicher Frame wie letztes Mal — kein Neuzeichnen noetig
                 if seq == self._last_seq:
                     self._after_id = self._parent.after(UPDATE_INTERVAL_MS, self._update)
                     return
                 self._last_seq = seq
+
+                # Lag-Diagnostik: Latenz SHM-Write → Preview-Read
+                now_mono = time.monotonic()
+                lag_ms = (now_mono - shm_ts) * 1000.0 if shm_ts > 0 else -1.0
+
+                if self._lag_log_active and now_mono < self._lag_log_start + 30.0:
+                    if now_mono >= self._lag_log_next:
+                        self._logger.info(
+                            f"[LAG] seq={seq} lag={lag_ms:.1f}ms fps={self._fps:.1f}"
+                        )
+                        self._lag_log_next = now_mono + 2.0
+                elif self._lag_log_active:
+                    self._lag_log_active = False
+                    self._logger.info("[LAG] 30s Lag-Logging beendet")
 
                 # SHM ist bereits RGB (TAPPAS schreibt RGB direkt)
                 arr = np.frombuffer(raw, dtype=np.uint8).reshape((shm_h, shm_w, 3))
@@ -278,12 +304,18 @@ class PreviewModule:
             self._after_id = self._parent.after(UPDATE_INTERVAL_MS, self._update)
 
     def start(self):
-        """Preview-Loop starten."""
+        """Preview-Loop starten. Startet 30s Lag-Diagnostik."""
         if self._running:
             return
         self._running = True
         self._frame_times = []
         self._last_update_start = 0.0
+        # Lag-Logging: 30 Sekunden, alle 2 Sekunden ein Eintrag
+        now = time.monotonic()
+        self._lag_log_start = now
+        self._lag_log_next = now
+        self._lag_log_active = True
+        self._logger.info("[LAG] 30s Lag-Logging gestartet")
         self._update()
 
     def stop(self):

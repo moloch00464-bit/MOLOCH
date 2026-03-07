@@ -284,9 +284,11 @@ class ServiceProxy:
                 # Frame lesen
                 if os.path.exists(self.SHM_FRAME):
                     with open(self.SHM_FRAME, 'rb') as f:
-                        header = f.read(16)
-                        if len(header) == 16:
-                            h, w, c, seq = struct.unpack('<IIII', header)
+                        header = f.read(24)
+                        if len(header) >= 24:
+                            h, w, c, seq, _ts = struct.unpack('<IIIId', header)
+                        elif len(header) >= 16:
+                            h, w, c, seq = struct.unpack('<IIII', header[:16])
                             if seq != self._last_seq and h > 0 and w > 0 or (seq < self._last_seq):
                                 data = f.read(h * w * c)
                                 if len(data) == h * w * c:

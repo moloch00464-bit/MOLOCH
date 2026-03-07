@@ -880,14 +880,14 @@ class TappasPipeline:
 
         # --- Callback + Overlay + appsink ---
         callback_and_sink = (
-            f'queue name=cb_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=cb_q leaky=downstream max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! '
             f'identity name=identity_callback ! '
-            f'queue name=overlay_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=overlay_q leaky=downstream max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! '
             f'hailooverlay name=hailo_overlay ! '
-            f'queue name=sink_convert_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=sink_convert_q leaky=downstream max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! '
             f'videoconvert n-threads=2 qos=false ! '
             f'video/x-raw, format=RGB ! '
-            f'appsink name=sink emit-signals=true drop=true max-buffers=2 sync=false'
+            f'appsink name=sink emit-signals=true drop=true max-buffers=1 sync=false'
         )
 
         return (
@@ -1345,7 +1345,8 @@ class TappasPipeline:
     def _write_shm_frame(self, frame: np.ndarray):
         """Frame nach /dev/shm/moloch_frame schreiben (RGB direkt, kein BGR-Umweg).
 
-        GStreamer liefert RGB, Panel braucht RGB — kein cvtColor noetig.
+        GStreamer liefert RGB, resize auf Preview-Groesse hier in Python.
+        24-Byte Header: h, w, c, seq (uint32 LE) + timestamp (float64 LE).
         """
         try:
             h, w = frame.shape[:2]
@@ -1354,7 +1355,8 @@ class TappasPipeline:
                 h, w = SHM_PREVIEW_H, SHM_PREVIEW_W
             c = frame.shape[2] if len(frame.shape) > 2 else 1
             self._shm_seq = (self._shm_seq + 1) & 0xFFFFFFFF
-            header = struct.pack('<IIII', h, w, c, self._shm_seq)
+            ts = time.monotonic()
+            header = struct.pack('<IIIId', h, w, c, self._shm_seq, ts)
             with open(SHM_FRAME_PATH + '.tmp', 'wb') as f:
                 f.write(header)
                 f.write(frame.tobytes())
