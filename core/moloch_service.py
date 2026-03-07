@@ -419,7 +419,11 @@ class MolochService:
                     try:
                         face_id = getattr(pframe, 'face_id', None)
                         is_markus = face_id == "markus" if face_id else False
-                        self._led.update_hysteresis(is_markus)
+                        face_det = getattr(pframe, 'face_detected', False)
+                        person_det = getattr(pframe, 'person_detected', False)
+                        has_ctrl = self._cam._moloch_has_control if self._cam else True
+                        p_mode = self._led.personality_mode or "guardian"
+                        self._led.update_hysteresis(is_markus, face_det, person_det, has_ctrl, p_mode)
                     except Exception as e:
                         logger.debug(f"[TAPPAS-PERC] LED update: {e}")
 

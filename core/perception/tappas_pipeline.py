@@ -513,14 +513,10 @@ class TappasPipeline:
                 if person not in groups:
                     groups[person] = []
                 groups[person].append(emb)
-            # Durchschnitt pro Person (normalisiert)
+            # Alle Embeddings pro Person speichern (Best-Match statt Mean)
             db = {}
             for person, embs in groups.items():
-                mean_emb = np.mean(embs, axis=0).astype(np.float32)
-                norm = np.linalg.norm(mean_emb)
-                if norm > 0:
-                    mean_emb = mean_emb / norm
-                db[person] = mean_emb
+                db[person] = embs  # Liste von normalisierten Embeddings
             total_embs = sum(len(e) for e in groups.values())
             logger.info(f"Face-DB geladen: {len(db)} Personen aus {total_embs} Embeddings ({embeddings_path})")
             return db
@@ -1040,11 +1036,15 @@ class TappasPipeline:
             best_sim = 0.0
             threshold = self.arcface_thresh_val  # Panel-Slider Wert
 
-            for name, db_emb in self._face_db.items():
-                sim = float(np.dot(embedding, db_emb))
-                if sim > best_sim:
-                    best_sim = sim
-                    best_name = name
+            for name, db_embs in self._face_db.items():
+                # db_embs ist Liste von Embeddings (Best-Match statt Mean)
+                if isinstance(db_embs, np.ndarray) and db_embs.ndim == 1:
+                    db_embs = [db_embs]  # Rueckwaerts-Kompatibilitaet
+                for db_emb in db_embs:
+                    sim = float(np.dot(embedding, db_emb))
+                    if sim > best_sim:
+                        best_sim = sim
+                        best_name = name
 
             if best_sim >= threshold:
                 logger.debug(f"[FACE-MATCH] {best_name} sim={best_sim:.3f} (thresh={threshold:.2f})")

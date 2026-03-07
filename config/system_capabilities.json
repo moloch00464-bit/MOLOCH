@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-03-06T22:41:10",
-  "generation_ms": 1650.5,
+  "generated": "2026-03-07T07:36:23",
+  "generation_ms": 1910.9,
   "summary": {
     "core_modules": "38/38",
     "external_deps": "11/11",
@@ -58,7 +58,7 @@
     },
     "ssd2_data": {
       "total_gb": 476.9,
-      "free_gb": 459.6
+      "free_gb": 459.7
     }
   },
   "core_modules": {
