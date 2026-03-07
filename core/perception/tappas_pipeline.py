@@ -337,22 +337,131 @@ class TappasPipeline:
     # =====================================================================
 
     def start_enrollment(self, name: str, n: int = 20):
-        """Live-Enrollment starten: sammelt N ArcFace-Embeddings aus dem GStreamer-Stream.
+        """Live-Enrollment starten: sammelt Embeddings aus GStreamer-Stream + Teachen-Ordner.
+
+        Ablauf:
+        1. Teachen-JSONs mit gespeicherten Embeddings laden (von frueheren Enrollments)
+        2. Live-Stream Embeddings sammeln (bis zu 60 Kandidaten)
+        3. Diversity-Filter waehlt beste 20 aus allen Kandidaten
 
         Embeddings kommen aus dem GLEICHEN Pipeline-Pfad wie die Erkennung
         (libvms_face_align.so → hailonet arcface → postprocess).
-        Kein TAPPAS-vs-HailoRT Inkompatibilitaetsproblem.
 
         Args:
             name: Personenname (z.B. "Markus")
             n: Maximale Anzahl Kandidaten zum Sammeln (beste 20 werden gespeichert)
         """
+        # Offline-Embeddings aus Teachen-JSONs laden
+        offline_candidates = self._load_teachen_embeddings(name)
+
         with self._enroll_lock:
             self._enroll_name = name.lower()
-            self._enroll_target = n
-            self._enroll_candidates = []
+            self._enroll_target = max(n, 60)  # Mehr sammeln fuer bessere Diversity
+            self._enroll_candidates = list(offline_candidates)
             self._enroll_active = True
-        logger.info(f"[ENROLLMENT] Gestartet fuer '{name}', sammle bis zu {n} Embeddings (Score >{self._enroll_min_score})")
+
+        n_offline = len(offline_candidates)
+        logger.info(f"[ENROLLMENT] Gestartet fuer '{name}': "
+                     f"Teachen={n_offline} Offline-Embeddings, "
+                     f"sammle bis zu {self._enroll_target - n_offline} Live-Embeddings "
+                     f"(Score >{self._enroll_min_score})")
+
+    def _load_teachen_embeddings(self, name: str) -> list:
+        """Embeddings aus Teachen-JSONs laden (von frueheren Enrollments gespeichert).
+
+        Durchsucht /mnt/moloch-data/Teachen/<YYYY-MM-DD>/*.json nach Eintraegen
+        mit passender Person und gespeichertem 'embedding' Feld.
+
+        Returns: Liste von (score, embedding) Tupeln
+        """
+        import json
+        import glob
+
+        teachen_dir = "/mnt/moloch-data/Teachen"
+        snap_dir = os.path.expanduser("~/moloch/snapshots")
+        candidates = []
+        name_lower = name.lower()
+        teachen_files = 0
+        snap_files = 0
+
+        # Teachen-Ordner: Alle Tage durchsuchen
+        if os.path.isdir(teachen_dir):
+            for day_dir in os.listdir(teachen_dir):
+                day_path = os.path.join(teachen_dir, day_dir)
+                if not os.path.isdir(day_path) or not day_dir.startswith("20"):
+                    continue
+                for fname in os.listdir(day_path):
+                    if not fname.lower().endswith(".json"):
+                        continue
+                    # Filename-Match: Name muss im Dateinamen vorkommen
+                    if name_lower not in fname.lower():
+                        continue
+                    teachen_files += 1
+                    json_path = os.path.join(day_path, fname)
+                    try:
+                        with open(json_path, 'r') as f:
+                            meta = json.load(f)
+                        emb_list = meta.get("embedding")
+                        if emb_list and isinstance(emb_list, list):
+                            emb = np.array(emb_list, dtype=np.float32)
+                            norm = np.linalg.norm(emb)
+                            if norm > 0:
+                                emb = emb / norm
+                            score = meta.get("confidence", 0.5)
+                            candidates.append((score, emb))
+                    except Exception:
+                        pass
+
+        logger.info(f"[ENROLLMENT] Teachen: {teachen_files} JSONs fuer '{name}', "
+                     f"davon {len(candidates)} mit Embedding. "
+                     f"Snapshots: {snap_files} Bilder")
+        return candidates
+
+    def _save_embeddings_to_teachen(self, name: str, selected: list):
+        """Nach Enrollment: GStreamer-Embeddings in Teachen-JSONs zurueckschreiben.
+
+        Damit koennen kuenftige Enrollments diese Embeddings wiederverwenden.
+        Schreibt NUR in JSONs die zum Namen passen UND noch kein Embedding haben.
+        """
+        import json
+
+        teachen_dir = "/mnt/moloch-data/Teachen"
+        name_lower = name.lower()
+        written = 0
+
+        if not os.path.isdir(teachen_dir):
+            return
+
+        # Bestes Embedding (hoechster Score) zum Zurueckschreiben
+        if not selected:
+            return
+        best_emb = selected[0][1]  # Score-sortiert, erstes = bestes
+
+        for day_dir in os.listdir(teachen_dir):
+            day_path = os.path.join(teachen_dir, day_dir)
+            if not os.path.isdir(day_path) or not day_dir.startswith("20"):
+                continue
+            for fname in os.listdir(day_path):
+                if not fname.lower().endswith(".json"):
+                    continue
+                if name_lower not in fname.lower():
+                    continue
+                json_path = os.path.join(day_path, fname)
+                try:
+                    with open(json_path, 'r') as f:
+                        meta = json.load(f)
+                    if meta.get("embedding"):
+                        continue  # Schon vorhanden, nicht ueberschreiben
+                    meta["embedding"] = best_emb.tolist()
+                    meta["embedding_learned"] = True
+                    with open(json_path, 'w') as f:
+                        json.dump(meta, f, indent=2, ensure_ascii=False)
+                    written += 1
+                except Exception:
+                    pass
+
+        if written:
+            logger.info(f"[ENROLLMENT] {written} Teachen-JSONs mit Embedding aktualisiert")
 
     def get_enrollment_status(self) -> dict:
         """Enrollment-Status fuer IPC/Panel."""
@@ -390,7 +499,13 @@ class TappasPipeline:
             self._finish_enrollment()
 
     def _finish_enrollment(self):
-        """Enrollment abschliessen: Diversitaets-Selektion + Face-DB speichern."""
+        """Enrollment abschliessen: Diversitaets-Selektion + Face-DB speichern.
+
+        Kandidaten koennen aus 2 Quellen stammen:
+        1. Teachen-JSONs (Offline, von frueheren Enrollments)
+        2. Live-Stream (GStreamer _on_buffer Callback)
+        Diversity-Filter waehlt die besten 20 aus allen Kandidaten.
+        """
         import json
 
         with self._enroll_lock:
@@ -404,6 +519,8 @@ class TappasPipeline:
         if not candidates:
             logger.warning("[ENROLLMENT] Keine Embeddings gesammelt!")
             return
+
+        n_total = len(candidates)
 
         # Nach Score sortieren (hoechster zuerst)
         candidates.sort(key=lambda x: x[0], reverse=True)
@@ -429,7 +546,8 @@ class TappasPipeline:
                 if id(emb) not in selected_embs:
                     selected.append((score, emb))
 
-        logger.info(f"[ENROLLMENT] {len(selected)} diverse Embeddings ausgewaehlt fuer '{name}'")
+        logger.info(f"[ENROLLMENT] {n_total} Kandidaten → "
+                     f"{len(selected)} diverse Embeddings ausgewaehlt fuer '{name}'")
 
         # Face-DB laden, alte Eintraege entfernen, neue speichern
         embeddings_path = os.path.join(
@@ -464,7 +582,10 @@ class TappasPipeline:
 
         logger.info(f"[ENROLLMENT] Face-DB gespeichert: {len(selected)} Embeddings fuer '{name}'")
 
-        # Face-DB neu laden (Durchschnitt bilden)
+        # Embeddings in Teachen-JSONs zurueckschreiben (fuer kuenftige Enrollments)
+        self._save_embeddings_to_teachen(name, selected)
+
+        # Face-DB neu laden (Best-Match)
         self.reload_face_db()
 
     def sync_flags_from_npu(self):
