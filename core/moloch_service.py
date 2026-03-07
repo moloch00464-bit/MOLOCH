@@ -36,6 +36,7 @@ USE_TAPPAS = os.environ.get("MOLOCH_USE_TAPPAS", "0") == "1"
 
 from core.hardware.hailo_manager import get_hailo_manager
 from core.led_controller import LEDController
+from core.hardware.rgb_led_controller import get_rgb_led
 from core.ipc_router import IPCRouter
 from core.model_orchestrator import ModelOrchestrator, MODEL_PATHS
 from core.camera_manager import CameraManager
@@ -169,6 +170,9 @@ class MolochService:
         # LED Controller (extrahiert aus moloch_service.py, Phase 4)
         # Cloud wird spaeter via CameraManager.connect_cloud() gesetzt
         self._led = LEDController(core_integrator=self._core_integrator)
+
+        # RGB-LED Controller (ESP32 WS2812 via UDP)
+        self._rgb_led = None
 
         # CameraManager (RTSP + Cloud + Tentakel + Autonomer Modus, Phase 4)
         self._cam = CameraManager(
@@ -829,6 +833,17 @@ class MolochService:
         except Exception as e:
             logger.warning(f"[INIT] Autonomy Module nicht verfuegbar: {e}")
 
+        # RGB-LED (ESP32 WS2812) starten
+        try:
+            from core.moloch_event_bus import get_event_bus
+            bus = get_event_bus()
+            self._rgb_led = get_rgb_led(event_bus=bus)
+            self._rgb_led.start()
+            logger.info("[INIT] RGB-LED Controller gestartet (ESP32)")
+        except Exception as e:
+            self._rgb_led = None
+            logger.warning(f"[INIT] RGB-LED nicht verfuegbar: {e}")
+
         self._update_status("M.O.L.O.C.H. Service bereit")
 
     def start(self, blocking=True):
@@ -1298,6 +1313,14 @@ class MolochService:
             try:
                 self._music_vis.stop()
                 logger.info("[STOP] MusicVisualizer gestoppt")
+            except Exception:
+                pass
+
+        # RGB-LED stoppen
+        if self._rgb_led:
+            try:
+                self._rgb_led.stop()
+                logger.info("[STOP] RGB-LED gestoppt")
             except Exception:
                 pass
 
