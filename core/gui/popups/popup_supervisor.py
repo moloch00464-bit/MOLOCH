@@ -6,10 +6,12 @@ M.O.L.O.C.H. Supervisor Dashboard Popup
 Toplevel-Fenster das alle 2 Sekunden localhost:5000/moloch/diagnostics abfragt.
 
 Sektionen:
-- Ampel oben: GRUEN=alles OK, GELB=Warnungen, ROT=kritisch
+- Ampel oben: Basiert auf Health Score (0-100)
+  90-100=GRUEN, 75-89=GELB, 50-74=ORANGE, unter 50=ROT
 - System-Zeile: FPS, CPU-Temp, RAM%, Luefterstufe, Uptime
 - Core-Zeile: Bridge-State, Face-ID, Tension, Mood
-- Warnungen-Liste (aus "warnungen" Array der API)
+- Nervensystem: 5 Pipeline-Verbindungen mit Farb-Status
+- Warnungen-Liste (aus "warnungen" Array + Pipeline-Alerts)
 - Letzte 5 Events vom Event-Bus
 
 Pollt NUR wenn offen, stoppt beim Schliessen.
@@ -40,6 +42,26 @@ DIAG_URL = "http://localhost:5000/moloch/diagnostics"
 # Ampel-Groesse
 AMPEL_RADIUS = 20
 
+# Orange fuer mittlere Warnstufe (50-74 Score)
+STATUS_ORANGE = "#ff8800"
+
+# Pipeline-Labels (Key -> Anzeigename)
+PIPELINE_LABELS = {
+    "vision_core": "Vision \u2192 Core",
+    "core_bridge": "Core \u2192 Bridge",
+    "bridge_tracker": "Bridge \u2192 Tracker",
+    "esp_audio": "ESP \u2192 Audio",
+    "feedback_loop": "Feedback Loop",
+}
+
+# Farben pro Status
+_STATUS_COLORS = {
+    "OK": STATUS_GREEN,
+    "DEGRADED": STATUS_YELLOW,
+    "BROKEN": STATUS_RED,
+    "MISSING": STATUS_RED,
+}
+
 
 class SupervisorPopup:
     """Supervisor Dashboard als Toplevel-Fenster."""
@@ -56,7 +78,7 @@ class SupervisorPopup:
         self.win.transient(parent)
         self.win.title("Supervisor Dashboard")
         self.win.configure(bg=BG_DARK)
-        self.win.geometry("480x460")
+        self.win.geometry("500x620")
         self.win.resizable(False, False)
         self.win.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -64,6 +86,7 @@ class SupervisorPopup:
         self._build_ampel()
         self._build_system_zeile()
         self._build_core_zeile()
+        self._build_nervensystem()
         self._build_warnungen()
         self._build_events()
 
@@ -71,11 +94,11 @@ class SupervisorPopup:
         self._poll()
 
     # =========================================================================
-    # Ampel (oben)
+    # Ampel (oben) — jetzt Score-basiert
     # =========================================================================
 
     def _build_ampel(self):
-        """Ampel-Kreis oben: GRUEN/GELB/ROT."""
+        """Ampel-Kreis oben mit Health Score."""
         frame = tk.Frame(self.win, bg=BG_DARK)
         frame.pack(fill=tk.X, padx=10, pady=(10, 5))
 
@@ -90,6 +113,13 @@ class SupervisorPopup:
             bg=BG_DARK, fg=FG_DIM, font=FONT_TITLE,
         )
         self._lbl_ampel.pack(side=tk.LEFT, padx=10)
+
+        # Health Score rechts
+        self._lbl_score = tk.Label(
+            frame, text="",
+            bg=BG_DARK, fg=FG_DIM, font=FONT_LABEL,
+        )
+        self._lbl_score.pack(side=tk.RIGHT, padx=10)
 
         # Initial grau
         self._draw_ampel(FG_DIM)
@@ -140,11 +170,45 @@ class SupervisorPopup:
         self._lbl_core.pack(fill=tk.X, padx=8, pady=5)
 
     # =========================================================================
+    # Nervensystem — 5 Pipeline-Verbindungen
+    # =========================================================================
+
+    def _build_nervensystem(self):
+        """5 Pipeline-Zeilen mit farbigem Status."""
+        section = tk.LabelFrame(
+            self.win, text="Nervensystem",
+            bg=BG_FRAME, fg=FG_LABEL, font=FONT_LABEL,
+        )
+        section.pack(fill=tk.X, padx=10, pady=3)
+
+        self._pipe_labels: Dict[str, tk.Label] = {}
+
+        for key, display_name in PIPELINE_LABELS.items():
+            row = tk.Frame(section, bg=BG_FRAME)
+            row.pack(fill=tk.X, padx=8, pady=1)
+
+            # Pipeline-Name links
+            tk.Label(
+                row, text=f"  {display_name}:",
+                bg=BG_FRAME, fg=FG_LABEL, font=FONT_MONO,
+                anchor=tk.W, width=22,
+            ).pack(side=tk.LEFT)
+
+            # Status rechts (wird live aktualisiert)
+            lbl = tk.Label(
+                row, text="---",
+                bg=BG_FRAME, fg=FG_DIM, font=FONT_MONO,
+                anchor=tk.W,
+            )
+            lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            self._pipe_labels[key] = lbl
+
+    # =========================================================================
     # Warnungen-Liste
     # =========================================================================
 
     def _build_warnungen(self):
-        """Warnungen aus dem diagnostics-Array."""
+        """Warnungen aus dem diagnostics-Array + Pipeline-Alerts."""
         section = tk.LabelFrame(
             self.win, text="Warnungen",
             bg=BG_FRAME, fg=FG_LABEL, font=FONT_LABEL,
@@ -154,7 +218,7 @@ class SupervisorPopup:
         self._lbl_warnungen = tk.Label(
             section, text="---",
             bg=BG_FRAME, fg=STATUS_GREEN, font=FONT_SMALL,
-            anchor=tk.W, justify=tk.LEFT, wraplength=440,
+            anchor=tk.W, justify=tk.LEFT, wraplength=460,
         )
         self._lbl_warnungen.pack(fill=tk.X, padx=8, pady=5)
 
@@ -171,7 +235,7 @@ class SupervisorPopup:
         section.pack(fill=tk.BOTH, expand=True, padx=10, pady=(3, 10))
 
         self._txt_events = tk.Text(
-            section, height=6, width=55,
+            section, height=5, width=58,
             bg=BG_INPUT, fg=FG_WHITE, font=FONT_MONO,
             state=tk.DISABLED, wrap=tk.WORD,
             highlightthickness=0, borderwidth=0,
@@ -205,37 +269,64 @@ class SupervisorPopup:
         else:
             self._draw_ampel(FG_DIM)
             self._lbl_ampel.config(text="Keine Verbindung", fg=FG_DIM)
+            self._lbl_score.config(text="", fg=FG_DIM)
 
         # Naechster Poll
         self._after_id = self.win.after(POLL_MS, self._poll)
 
     def _update_gui(self, data: Dict[str, Any]):
         """GUI mit neuen Daten aktualisieren."""
-        warnungen = data.get("warnungen", [])
+        warnungen = list(data.get("warnungen", []))
 
-        # --- Ampel ---
-        if not warnungen:
-            self._draw_ampel(STATUS_GREEN)
-            self._lbl_ampel.config(text="Alles OK", fg=STATUS_GREEN)
+        # --- Nervensystem auswerten ---
+        nervensystem = data.get("nervensystem", {})
+        pipelines = nervensystem.get("pipelines", {})
+        health_score = nervensystem.get("health_score", -1)
+        pipeline_alerts = []
+
+        # Pipeline-Zeilen aktualisieren
+        for key, lbl in self._pipe_labels.items():
+            info = pipelines.get(key, {})
+            status = info.get("status", "BROKEN")
+            detail = info.get("detail", "Unbekannt")
+            color = _STATUS_COLORS.get(status, FG_DIM)
+            lbl.config(text=f"{status}  ({detail})", fg=color)
+
+            # Alerts fuer BROKEN/MISSING Pipelines
+            display_name = PIPELINE_LABELS.get(key, key)
+            if status == "BROKEN":
+                pipeline_alerts.append(f"{display_name}: {detail}")
+            elif status == "MISSING":
+                pipeline_alerts.append(f"{display_name}: FEHLT — {detail}")
+
+        # --- Ampel basierend auf Health Score ---
+        if health_score >= 90:
+            ampel_color = STATUS_GREEN
+            ampel_text = f"Alles OK (Score: {health_score})"
+            ampel_fg = STATUS_GREEN
+        elif health_score >= 75:
+            ampel_color = STATUS_YELLOW
+            ampel_text = f"Warnung (Score: {health_score})"
+            ampel_fg = STATUS_YELLOW
+        elif health_score >= 50:
+            ampel_color = STATUS_ORANGE
+            ampel_text = f"Degradiert (Score: {health_score})"
+            ampel_fg = STATUS_ORANGE
+        elif health_score >= 0:
+            ampel_color = STATUS_RED
+            ampel_text = f"KRITISCH (Score: {health_score})"
+            ampel_fg = STATUS_RED
         else:
-            # Kritisch: NPU offline, Pipeline tot, RAM kritisch, CPU heiss
-            kritisch_keywords = ["offline", "Pipeline nicht", "kritisch", "heiss"]
-            ist_kritisch = any(
-                any(kw in w for kw in kritisch_keywords)
-                for w in warnungen
-            )
-            if ist_kritisch:
-                self._draw_ampel(STATUS_RED)
-                self._lbl_ampel.config(
-                    text=f"KRITISCH ({len(warnungen)} Warnung{'en' if len(warnungen) > 1 else ''})",
-                    fg=STATUS_RED,
-                )
-            else:
-                self._draw_ampel(STATUS_YELLOW)
-                self._lbl_ampel.config(
-                    text=f"Warnung ({len(warnungen)})",
-                    fg=STATUS_YELLOW,
-                )
+            # Kein Nervensystem-Daten (alte API ohne nervensystem-Feld)
+            # Fallback auf Warnungen-basierte Ampel
+            ampel_color, ampel_text, ampel_fg = self._fallback_ampel(warnungen)
+
+        self._draw_ampel(ampel_color)
+        self._lbl_ampel.config(text=ampel_text, fg=ampel_fg)
+        self._lbl_score.config(
+            text=f"Health: {health_score}/100" if health_score >= 0 else "",
+            fg=ampel_fg,
+        )
 
         # --- System-Zeile ---
         fps = data.get("fps", 0.0)
@@ -262,13 +353,14 @@ class SupervisorPopup:
                  f"Tension: {tension:.2f}  |  Mood: {mood}"
         )
 
-        # --- Warnungen ---
-        if warnungen:
-            warn_text = "\n".join(f"\u26a0 {w}" for w in warnungen)
-            # Farbe nach Schwere
+        # --- Warnungen (System + Pipeline-Alerts) ---
+        alle_warnungen = warnungen + pipeline_alerts
+        if alle_warnungen:
+            warn_text = "\n".join(f"\u26a0 {w}" for w in alle_warnungen)
+            kritisch_keywords = ["offline", "Pipeline nicht", "kritisch", "heiss", "BROKEN", "FEHLT"]
             ist_kritisch = any(
-                any(kw in w for kw in ["offline", "Pipeline nicht", "kritisch", "heiss"])
-                for w in warnungen
+                any(kw in w for kw in kritisch_keywords)
+                for w in alle_warnungen
             )
             warn_color = STATUS_RED if ist_kritisch else STATUS_YELLOW
             self._lbl_warnungen.config(text=warn_text, fg=warn_color)
@@ -276,19 +368,15 @@ class SupervisorPopup:
             self._lbl_warnungen.config(text="Keine Warnungen", fg=STATUS_GREEN)
 
         # --- Events ---
-        # Events aus recent_events (falls vorhanden in der API)
         events = data.get("recent_events", [])
         if events:
-            # Neue Events zur History hinzufuegen (nur unique)
             for ev in events:
                 ev_str = str(ev) if not isinstance(ev, str) else ev
                 if ev_str not in self._event_history:
                     self._event_history.append(ev_str)
 
-        # History auf 5 begrenzen
         self._event_history = self._event_history[-5:]
 
-        # Events-Text aktualisieren
         self._txt_events.config(state=tk.NORMAL)
         self._txt_events.delete("1.0", tk.END)
         if self._event_history:
@@ -296,6 +384,19 @@ class SupervisorPopup:
         else:
             self._txt_events.insert(tk.END, "(keine Events)")
         self._txt_events.config(state=tk.DISABLED)
+
+    @staticmethod
+    def _fallback_ampel(warnungen: List[str]):
+        """Fallback-Ampel wenn kein Nervensystem-Score vorhanden."""
+        if not warnungen:
+            return STATUS_GREEN, "Alles OK", STATUS_GREEN
+        kritisch_keywords = ["offline", "Pipeline nicht", "kritisch", "heiss"]
+        ist_kritisch = any(
+            any(kw in w for kw in kritisch_keywords) for w in warnungen
+        )
+        if ist_kritisch:
+            return STATUS_RED, f"KRITISCH ({len(warnungen)})", STATUS_RED
+        return STATUS_YELLOW, f"Warnung ({len(warnungen)})", STATUS_YELLOW
 
     # =========================================================================
     # Schliessen

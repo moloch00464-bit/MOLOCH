@@ -93,6 +93,9 @@ def collect_diagnostics() -> Dict[str, Any]:
     # 9. Pipeline
     diag["pipeline_alive"] = status.get("pipeline_alive", False)
 
+    # 10. Nervensystem — Pipeline-Status
+    diag["nervensystem"] = collect_pipeline_status(status)
+
     return diag
 
 
@@ -190,6 +193,183 @@ def get_diagnostics_text() -> str:
         text += " Alles im gruenen Bereich."
 
     return text
+
+
+# =========================================================================
+# Nervensystem — Pipeline-Verbindungsstatus
+# =========================================================================
+
+# Status-Konstanten
+_PIPE_OK = "OK"
+_PIPE_DEGRADED = "DEGRADED"
+_PIPE_BROKEN = "BROKEN"
+_PIPE_MISSING = "MISSING"
+
+
+def collect_pipeline_status(status: Dict[str, Any] = None) -> Dict[str, Any]:
+    """Nervensystem: 5 Pipeline-Checks mit Health Score.
+
+    Prueft ob die Signalketten zwischen Modulen verbunden sind.
+    Pro Check: OK=20, DEGRADED=10, BROKEN/MISSING=0. Summe = Score.
+
+    Returns:
+        {
+            "pipelines": {
+                "vision_core": {"status": "OK", "detail": "..."},
+                "core_bridge": {...},
+                "bridge_tracker": {...},
+                "esp_audio": {...},
+                "feedback_loop": {...},
+            },
+            "health_score": 0-100,
+        }
+    """
+    if status is None:
+        status = _read_status_json()
+
+    pipelines = {}
+
+    # --- 1. Vision → Core: perception.* hat Subscriber? ---
+    pipelines["vision_core"] = _check_vision_core(status)
+
+    # --- 2. Core → Bridge: action_bridge empfaengt Events? ---
+    pipelines["core_bridge"] = _check_core_bridge(status)
+
+    # --- 3. Bridge → Tracker: PTZ reagiert auf Bridge-Events? ---
+    pipelines["bridge_tracker"] = _check_bridge_tracker(status)
+
+    # --- 4. ESP → Audio: wifi_mic verbunden + UDP-Pakete? ---
+    pipelines["esp_audio"] = _check_esp_audio(status)
+
+    # --- 5. Feedback Loop: Action → Result kommt zurueck? ---
+    pipelines["feedback_loop"] = _check_feedback_loop(status)
+
+    # Health Score berechnen
+    score = 0
+    for info in pipelines.values():
+        s = info["status"]
+        if s == _PIPE_OK:
+            score += 20
+        elif s == _PIPE_DEGRADED:
+            score += 10
+        # BROKEN/MISSING = 0
+
+    return {"pipelines": pipelines, "health_score": score}
+
+
+def _get_bus_subscribers() -> Dict[str, int]:
+    """Event-Bus Subscriber-Counts direkt aus Singleton lesen (falls geladen)."""
+    try:
+        from core.moloch_event_bus import get_event_bus
+        bus = get_event_bus()
+        stats = bus.get_stats()
+        subs = stats.get("subscribers", {})
+        # Sync + Async zusammenfuehren
+        async_subs = stats.get("async_subscribers", {})
+        merged = dict(subs)
+        for topic, cnt in async_subs.items():
+            merged[topic] = merged.get(topic, 0) + cnt
+        return merged
+    except Exception:
+        return {}
+
+
+def _check_vision_core(status: Dict[str, Any]) -> Dict[str, str]:
+    """Vision → Core: perception.* Events haben Subscriber?"""
+    subs = _get_bus_subscribers()
+    perception_topics = [t for t in subs if t.startswith("perception.")]
+    perception_count = sum(subs[t] for t in perception_topics)
+
+    pipeline_alive = status.get("pipeline_alive", False)
+
+    if pipeline_alive and perception_count >= 2:
+        return {"status": _PIPE_OK, "detail": f"Pipeline aktiv, {perception_count} Subscriber"}
+    elif pipeline_alive and perception_count > 0:
+        return {"status": _PIPE_DEGRADED, "detail": f"Pipeline aktiv, nur {perception_count} Subscriber"}
+    elif pipeline_alive:
+        return {"status": _PIPE_DEGRADED, "detail": "Pipeline aktiv, keine Subscriber"}
+    else:
+        return {"status": _PIPE_BROKEN, "detail": "Vision-Pipeline nicht aktiv"}
+
+
+def _check_core_bridge(status: Dict[str, Any]) -> Dict[str, str]:
+    """Core → Bridge: Action Bridge empfaengt Perception-Events?"""
+    bridge = status.get("bridge", {})
+    bridge_state = bridge.get("state", "unknown")
+
+    # Bridge aktiv wenn State != unknown und decisions > 0
+    decisions = bridge.get("decisions", 0)
+
+    if bridge_state != "unknown" and decisions > 0:
+        return {"status": _PIPE_OK, "detail": f"Bridge {bridge_state}, {decisions} Decisions"}
+    elif bridge_state != "unknown":
+        return {"status": _PIPE_DEGRADED, "detail": f"Bridge {bridge_state}, noch keine Decisions"}
+    else:
+        return {"status": _PIPE_BROKEN, "detail": "Action Bridge nicht initialisiert"}
+
+
+def _check_bridge_tracker(status: Dict[str, Any]) -> Dict[str, str]:
+    """Bridge → Tracker: PTZ reagiert auf action.* Events?"""
+    subs = _get_bus_subscribers()
+    action_topics = [t for t in subs if t.startswith("action.")]
+    action_count = sum(subs[t] for t in action_topics)
+
+    # Mindestens action.ptz_track sollte einen Subscriber haben
+    ptz_subs = subs.get("action.ptz_track", 0)
+
+    if ptz_subs > 0:
+        return {"status": _PIPE_OK, "detail": f"PTZ-Tracking verbunden ({action_count} Action-Subs)"}
+    elif action_count > 0:
+        return {"status": _PIPE_DEGRADED, "detail": f"{action_count} Action-Subs, aber kein PTZ-Track"}
+    else:
+        return {"status": _PIPE_BROKEN, "detail": "Keine Action-Subscriber registriert"}
+
+
+def _check_esp_audio(status: Dict[str, Any]) -> Dict[str, str]:
+    """ESP → Audio: WiFi-Mic verbunden und UDP-Pakete kommen?"""
+    # Versuche wifi_mic Singleton direkt
+    try:
+        from core.audio.wifi_mic import get_wifi_mic
+        mic = get_wifi_mic()
+        mic_status = mic.get_status()
+        connected = mic_status.get("connected_16k", False)
+        packets = mic_status.get("packets_recv_16k", 0)
+        source = mic_status.get("source", "none")
+
+        if connected and packets > 0:
+            return {"status": _PIPE_OK, "detail": f"WiFi-Mic verbunden ({packets} Pakete, {source})"}
+        elif source == "usb":
+            return {"status": _PIPE_DEGRADED, "detail": "Fallback auf USB-Mic (WiFi offline)"}
+        else:
+            return {"status": _PIPE_BROKEN, "detail": "Kein Audio-Input (WiFi + USB offline)"}
+    except Exception:
+        # wifi_mic nicht geladen — aus Status-JSON pruefen
+        audio = status.get("audio", {})
+        if audio.get("connected", False):
+            return {"status": _PIPE_OK, "detail": "Audio verbunden (Status-JSON)"}
+        return {"status": _PIPE_BROKEN, "detail": "Audio-Status nicht verfuegbar"}
+
+
+def _check_feedback_loop(status: Dict[str, Any]) -> Dict[str, str]:
+    """Feedback Loop: Bridge-Decisions kommen zurueck (Action → Result)?"""
+    bridge = status.get("bridge", {})
+    decisions = bridge.get("decisions", 0)
+
+    # Pruefe ob Bridge-Decisions vorhanden UND ob letzte Decision aktuell ist
+    bridge_decisions = status.get("bridge_decisions", [])
+    if bridge_decisions:
+        # Letzte Decision Timestamp pruefen
+        last_ts = bridge_decisions[-1].get("timestamp", 0)
+        age_s = time.time() - last_ts if last_ts > 0 else 999
+
+        if age_s < 60:
+            return {"status": _PIPE_OK, "detail": f"Letzte Decision vor {age_s:.0f}s"}
+        elif decisions > 0:
+            return {"status": _PIPE_DEGRADED, "detail": f"Letzte Decision vor {age_s:.0f}s (veraltet)"}
+    elif decisions > 0:
+        return {"status": _PIPE_DEGRADED, "detail": f"{decisions} Decisions, aber keine Details"}
+
+    return {"status": _PIPE_MISSING, "detail": "Kein Feedback — Action Bridge inaktiv oder keine Ereignisse"}
 
 
 # =========================================================================
