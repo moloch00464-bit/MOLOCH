@@ -1,22 +1,23 @@
 #!/usr/bin/env python3
 """
-M.O.L.O.C.H. Audio Popup — ReSpeaker Lite
-============================================
+M.O.L.O.C.H. Audio Popup — WiFi-Mic + ReSpeaker Lite
+======================================================
 
 Eigenstaendiges Toplevel-Fenster fuer Audio-Einstellungen.
-ReSpeaker Lite Voice Assistant Kit per USB am Pi5.
-Audio laeuft ueber PipeWire/WirePlumber.
+Zeigt ESP32 WiFi-Mic Status UND USB ReSpeaker Lite (PipeWire).
 
-Features:
-- ReSpeaker Source ID via wpctl status (Sources-Sektion, aktive * bevorzugt)
-- Status-Label: "ReSpeaker Lite (Node XX)" gruen / "Kein Mikrofon" rot
-- Mic Gain Slider (0.0 - 3.0) mit wpctl set-volume — sofort aktiv
-- Noise Gate Slider (-80 bis -20 dB) — sofort via _write_command
-- AGC Checkbox — sofort via _write_command
-- VU Meter (200px Canvas, 100ms Update, pw-record PCM)
-- MIC TEST (3s Aufnahme + Wiedergabe mit Countdown)
-- Aenderungen gelten sofort und werden in settings.json persistiert
+WiFi-Mic Sektion (oben):
+- ESP32 Verbindungsstatus: IP, Ping, Latenz
+- Audio-Source Anzeige: ESP32 WiFi oder USB ReSpeaker
+- Samplerate-Umschaltung 16kHz / 48kHz via HTTP
+- Mikrofon-Pegel aus ESP32 Status
+- Health/Buffer Status
 
+USB ReSpeaker Sektion (unten):
+- Mic Gain Slider (wpctl), AGC, Noise Gate
+- VU Meter (pw-record PCM), MIC TEST
+
+Update nur wenn Popup offen, max 2 Hz Refresh.
 Importiert NUR panel_styles und tkinter.
 """
 
@@ -31,6 +32,8 @@ import tempfile
 import threading
 import time
 import tkinter as tk
+from urllib.request import urlopen, Request
+from urllib.error import URLError
 
 from core.gui.panel_styles import (
     BG_DARK, BG_FRAME, BG_BUTTON, BG_INPUT,
@@ -47,6 +50,11 @@ VU_UPDATE_MS = 100
 VU_WIDTH = 200
 VU_HEIGHT = 18
 VU_CHUNK_SIZE = 3200  # 100ms @ 16kHz 16bit mono
+
+# WiFi-Mic Konstanten
+ESP32_IP = "10.42.0.2"
+ESP32_BASE_URL = f"http://{ESP32_IP}"
+WIFI_UPDATE_MS = 500  # 2 Hz Refresh
 
 # Settings-Pfad
 SETTINGS_PATH = os.path.expanduser("~/moloch/config/settings.json")
@@ -80,13 +88,21 @@ class AudioPopup:
         # Debounced Save Timer
         self._save_after_id = None
 
+        # WiFi-Mic State
+        self._wifi_after_id = None
+        self._wifi_status = {}  # Letzter ESP32 Status
+        self._wifi_ping_ms = -1.0  # Letzte Ping-Latenz (-1 = offline)
+        self._wifi_connected = False
+        self._wifi_poll_running = False
+        self._current_samplerate = 16000
+
         # Toplevel erstellen
         self.win = tk.Toplevel(parent)
         self.win.attributes('-topmost', True)
         self.win.transient(parent)
-        self.win.title("Audio \u2014 ReSpeaker Lite")
+        self.win.title("Audio \u2014 WiFi-Mic + ReSpeaker")
         self.win.configure(bg=BG_DARK)
-        self.win.geometry("400x470")
+        self.win.geometry("420x700")
         self.win.resizable(False, False)
         self.win.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -95,7 +111,9 @@ class AudioPopup:
         self._noise_gate_var = tk.DoubleVar(value=-60.0)
         self._agc_var = tk.BooleanVar(value=False)
 
-        # GUI aufbauen
+        # GUI aufbauen — WiFi-Mic oben, USB unten
+        self._build_wifi_section()
+        self._build_separator()
         self._build_status_label()
         self._build_gain_slider()
         self._build_agc_checkbox()
@@ -112,6 +130,310 @@ class AudioPopup:
 
         # VU Monitor starten
         self._start_vu_monitor()
+
+        # WiFi-Mic Status-Poll starten (2 Hz, nur bei offenem Popup)
+        self._start_wifi_poll()
+
+    # =========================================================================
+    # WiFi-Mic Sektion (ESP32-S3 via HTTP/Ping)
+    # =========================================================================
+
+    def _build_wifi_section(self):
+        """WiFi-Mic Status-Sektion oben im Popup."""
+        # Titel
+        tk.Label(
+            self.win, text="ESP32 WiFi-Mic",
+            bg=BG_DARK, fg=ACCENT_CYAN, font=FONT_TITLE,
+        ).pack(pady=(10, 3))
+
+        container = tk.Frame(self.win, bg=BG_FRAME, bd=1, relief=tk.GROOVE)
+        container.pack(fill=tk.X, padx=12, pady=(0, 5))
+
+        # Zeile 1: Verbindungsstatus + IP + Latenz
+        row1 = tk.Frame(container, bg=BG_FRAME)
+        row1.pack(fill=tk.X, padx=8, pady=(6, 2))
+
+        self._wifi_conn_dot = tk.Label(
+            row1, text="\u25cf", bg=BG_FRAME, fg=STATUS_RED, font=FONT_LABEL,
+        )
+        self._wifi_conn_dot.pack(side=tk.LEFT)
+
+        self._wifi_conn_label = tk.Label(
+            row1, text=f"  {ESP32_IP}  --  Offline",
+            bg=BG_FRAME, fg=FG_DIM, font=FONT_LABEL,
+        )
+        self._wifi_conn_label.pack(side=tk.LEFT)
+
+        self._wifi_ping_label = tk.Label(
+            row1, text="-- ms",
+            bg=BG_FRAME, fg=FG_DIM, font=FONT_LABEL,
+        )
+        self._wifi_ping_label.pack(side=tk.RIGHT)
+
+        # Zeile 2: Audio-Source + Samplerate
+        row2 = tk.Frame(container, bg=BG_FRAME)
+        row2.pack(fill=tk.X, padx=8, pady=2)
+
+        tk.Label(
+            row2, text="Source:", bg=BG_FRAME, fg=FG_LABEL, font=FONT_LABEL,
+        ).pack(side=tk.LEFT)
+
+        self._wifi_source_label = tk.Label(
+            row2, text="--", bg=BG_FRAME, fg=FG_DIM, font=FONT_LABEL,
+        )
+        self._wifi_source_label.pack(side=tk.LEFT, padx=(5, 0))
+
+        # Samplerate Button
+        self._btn_samplerate = tk.Button(
+            row2, text="16 kHz", width=8,
+            bg=BG_BUTTON, fg=ACCENT_CYAN, font=FONT_BUTTON,
+            activebackground=BG_FRAME,
+            command=self._on_toggle_samplerate,
+        )
+        self._btn_samplerate.pack(side=tk.RIGHT)
+
+        tk.Label(
+            row2, text="Rate:", bg=BG_FRAME, fg=FG_LABEL, font=FONT_LABEL,
+        ).pack(side=tk.RIGHT, padx=(0, 5))
+
+        # Zeile 3: Streaming + RSSI + Uptime
+        row3 = tk.Frame(container, bg=BG_FRAME)
+        row3.pack(fill=tk.X, padx=8, pady=2)
+
+        self._wifi_stream_label = tk.Label(
+            row3, text="Stream: --",
+            bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
+        )
+        self._wifi_stream_label.pack(side=tk.LEFT)
+
+        self._wifi_rssi_label = tk.Label(
+            row3, text="RSSI: --",
+            bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
+        )
+        self._wifi_rssi_label.pack(side=tk.RIGHT)
+
+        # Zeile 4: Health + FW Version
+        row4 = tk.Frame(container, bg=BG_FRAME)
+        row4.pack(fill=tk.X, padx=8, pady=(2, 6))
+
+        self._wifi_health_label = tk.Label(
+            row4, text="Health: --",
+            bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
+        )
+        self._wifi_health_label.pack(side=tk.LEFT)
+
+        self._wifi_fw_label = tk.Label(
+            row4, text="FW: --",
+            bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
+        )
+        self._wifi_fw_label.pack(side=tk.RIGHT)
+
+    def _build_separator(self):
+        """Trennlinie zwischen WiFi und USB Sektion."""
+        sep = tk.Frame(self.win, bg=FG_DIM, height=1)
+        sep.pack(fill=tk.X, padx=15, pady=5)
+
+        tk.Label(
+            self.win, text="USB ReSpeaker (PipeWire)",
+            bg=BG_DARK, fg=FG_LABEL, font=FONT_SMALL,
+        ).pack(pady=(0, 3))
+
+    # =========================================================================
+    # WiFi-Mic Poll (2 Hz, nur bei offenem Popup)
+    # =========================================================================
+
+    def _start_wifi_poll(self):
+        """WiFi-Mic Status-Abfrage starten (Ping + HTTP, 2 Hz)."""
+        self._wifi_poll_running = True
+        self._do_wifi_poll()
+
+    def _do_wifi_poll(self):
+        """Einen WiFi-Poll-Zyklus starten (Background-Thread)."""
+        if not self._wifi_poll_running:
+            return
+
+        def poll_thread():
+            ping_ms = self._ping_esp32()
+            status = {}
+            if ping_ms >= 0:
+                status = self._fetch_esp32_status()
+            # Ergebnis an Tkinter Main-Thread uebergeben
+            try:
+                self.win.after(0, self._update_wifi_ui, ping_ms, status)
+            except Exception:
+                pass  # Fenster schon geschlossen
+
+        threading.Thread(target=poll_thread, daemon=True).start()
+
+    def _ping_esp32(self) -> float:
+        """Ping an ESP32, gibt Latenz in ms zurueck (-1 bei Timeout)."""
+        try:
+            result = subprocess.run(
+                ["ping", "-c1", "-W1", ESP32_IP],
+                capture_output=True, text=True, timeout=2)
+            if result.returncode == 0:
+                # "time=1.23 ms" aus der Ausgabe parsen
+                for part in result.stdout.split():
+                    if part.startswith("time="):
+                        return float(part.split("=")[1])
+        except Exception:
+            pass
+        return -1.0
+
+    def _fetch_esp32_status(self) -> dict:
+        """HTTP GET /audio/status vom ESP32 holen."""
+        try:
+            req = Request(f"{ESP32_BASE_URL}/audio/status")
+            with urlopen(req, timeout=1.5) as resp:
+                return json.loads(resp.read().decode())
+        except Exception:
+            return {}
+
+    def _update_wifi_ui(self, ping_ms: float, status: dict):
+        """WiFi-Mic UI-Elemente updaten (wird im Main-Thread aufgerufen)."""
+        self._wifi_ping_ms = ping_ms
+        if status:
+            self._wifi_status = status
+        self._wifi_connected = ping_ms >= 0 and bool(status)
+
+        # Verbindungsstatus
+        if self._wifi_connected:
+            self._wifi_conn_dot.config(fg=STATUS_GREEN)
+            self._wifi_conn_label.config(
+                text=f"  {ESP32_IP}  --  Verbunden",
+                fg=STATUS_GREEN,
+            )
+            self._wifi_ping_label.config(
+                text=f"{ping_ms:.1f} ms", fg=STATUS_GREEN,
+            )
+        elif ping_ms >= 0:
+            # Ping OK, HTTP fehlgeschlagen
+            self._wifi_conn_dot.config(fg=STATUS_YELLOW)
+            self._wifi_conn_label.config(
+                text=f"  {ESP32_IP}  --  HTTP Fehler",
+                fg=STATUS_YELLOW,
+            )
+            self._wifi_ping_label.config(
+                text=f"{ping_ms:.1f} ms", fg=STATUS_YELLOW,
+            )
+        else:
+            self._wifi_conn_dot.config(fg=STATUS_RED)
+            self._wifi_conn_label.config(
+                text=f"  {ESP32_IP}  --  Offline",
+                fg=STATUS_RED,
+            )
+            self._wifi_ping_label.config(text="-- ms", fg=FG_DIM)
+
+        # Audio-Source Anzeige
+        if self._wifi_connected:
+            streaming = status.get("streaming", False)
+            if streaming:
+                self._wifi_source_label.config(
+                    text="ESP32 WiFi", fg=STATUS_GREEN,
+                )
+            else:
+                self._wifi_source_label.config(
+                    text="ESP32 (gestoppt)", fg=STATUS_YELLOW,
+                )
+        else:
+            self._wifi_source_label.config(
+                text="USB ReSpeaker (Fallback)", fg=STATUS_YELLOW,
+            )
+
+        # Samplerate Button aktualisieren
+        if status:
+            rate = status.get("rate", 16000)
+            self._current_samplerate = rate
+            rate_text = f"{rate // 1000} kHz"
+            mode = status.get("mode", "")
+            self._btn_samplerate.config(text=rate_text)
+
+        # Streaming + RSSI
+        if status:
+            streaming = status.get("streaming", False)
+            mode = status.get("mode", "--")
+            self._wifi_stream_label.config(
+                text=f"Stream: {'AN' if streaming else 'AUS'} ({mode})",
+                fg=STATUS_GREEN if streaming else STATUS_YELLOW,
+            )
+            rssi = status.get("wifi_rssi", 0)
+            rssi_color = STATUS_GREEN if rssi > -60 else (
+                STATUS_YELLOW if rssi > -75 else STATUS_RED)
+            self._wifi_rssi_label.config(
+                text=f"RSSI: {rssi} dBm", fg=rssi_color,
+            )
+        else:
+            self._wifi_stream_label.config(text="Stream: --", fg=FG_DIM)
+            self._wifi_rssi_label.config(text="RSSI: --", fg=FG_DIM)
+
+        # Health + FW
+        if status:
+            uptime = status.get("uptime_s", 0)
+            heap = status.get("free_heap", 0)
+            # Uptime formatieren
+            if uptime >= 3600:
+                up_str = f"{uptime // 3600}h{(uptime % 3600) // 60}m"
+            elif uptime >= 60:
+                up_str = f"{uptime // 60}m{uptime % 60}s"
+            else:
+                up_str = f"{uptime}s"
+            self._wifi_health_label.config(
+                text=f"Up: {up_str}  Heap: {heap // 1024}kB",
+                fg=STATUS_GREEN if heap > 50000 else STATUS_YELLOW,
+            )
+            fw = status.get("fw_version", "--")
+            self._wifi_fw_label.config(text=f"FW: v{fw}", fg=FG_LABEL)
+        else:
+            self._wifi_health_label.config(text="Health: --", fg=FG_DIM)
+            self._wifi_fw_label.config(text="FW: --", fg=FG_DIM)
+
+        # Naechster Poll
+        if self._wifi_poll_running:
+            self._wifi_after_id = self.win.after(WIFI_UPDATE_MS, self._do_wifi_poll)
+
+    # =========================================================================
+    # Samplerate umschalten (16kHz / 48kHz)
+    # =========================================================================
+
+    def _on_toggle_samplerate(self):
+        """Samplerate zwischen 16kHz und 48kHz umschalten via HTTP POST."""
+        new_rate = 48000 if self._current_samplerate == 16000 else 16000
+        self._btn_samplerate.config(text="...", state=tk.DISABLED)
+
+        def switch_thread():
+            success = False
+            try:
+                req = Request(
+                    f"{ESP32_BASE_URL}/audio/mode?rate={new_rate}",
+                    method="POST",
+                )
+                with urlopen(req, timeout=2) as resp:
+                    if resp.status == 200:
+                        success = True
+            except Exception as e:
+                logger.error(f"[AUDIO] Samplerate switch failed: {e}")
+
+            def update_ui():
+                if success:
+                    self._current_samplerate = new_rate
+                    self._btn_samplerate.config(
+                        text=f"{new_rate // 1000} kHz",
+                        state=tk.NORMAL,
+                    )
+                    # In settings.json persistieren
+                    self._save_audio_settings()
+                else:
+                    self._btn_samplerate.config(
+                        text=f"{self._current_samplerate // 1000} kHz",
+                        state=tk.NORMAL,
+                    )
+
+            try:
+                self.win.after(0, update_ui)
+            except Exception:
+                pass
+
+        threading.Thread(target=switch_thread, daemon=True).start()
 
     # =========================================================================
     # ReSpeaker Source ID finden
@@ -146,8 +468,8 @@ class AudioPopup:
                 # Tree-Zeichen entfernen fuer sauberes Parsen
                 clean = line.replace("\u2502", "").replace("\u251c", "") \
                             .replace("\u2500", "").replace("\u2514", "") \
-                            .replace("│", "").replace("├", "") \
-                            .replace("─", "").replace("└", "")
+                            .replace("\u2502", "").replace("\u251c", "") \
+                            .replace("\u2500", "").replace("\u2514", "")
 
                 stripped = clean.strip()
 
@@ -195,16 +517,16 @@ class AudioPopup:
         return None
 
     # =========================================================================
-    # Status-Label
+    # Status-Label (USB ReSpeaker)
     # =========================================================================
 
     def _build_status_label(self):
-        """Status-Label oben: zeigt ReSpeaker Node oder Fehler."""
+        """Status-Label: zeigt ReSpeaker Node oder Fehler."""
         self._status_label = tk.Label(
             self.win, text="Suche ReSpeaker...",
-            bg=BG_DARK, fg=FG_DIM, font=FONT_TITLE,
+            bg=BG_DARK, fg=FG_DIM, font=FONT_LABEL,
         )
-        self._status_label.pack(pady=(10, 5))
+        self._status_label.pack(pady=(3, 3))
 
     def _update_status_label(self):
         """Status-Label nach Erkennung updaten."""
@@ -215,7 +537,7 @@ class AudioPopup:
             )
         else:
             self._status_label.config(
-                text="Kein Mikrofon",
+                text="Kein USB-Mikrofon",
                 fg=STATUS_RED,
             )
 
@@ -226,7 +548,7 @@ class AudioPopup:
     def _build_gain_slider(self):
         """Horizontaler Slider fuer Mic Gain (0.0 - 3.0)."""
         frame = tk.Frame(self.win, bg=BG_DARK)
-        frame.pack(fill=tk.X, padx=15, pady=5)
+        frame.pack(fill=tk.X, padx=15, pady=3)
 
         row = tk.Frame(frame, bg=BG_DARK)
         row.pack(fill=tk.X)
@@ -284,7 +606,7 @@ class AudioPopup:
     def _build_agc_checkbox(self):
         """Checkbox fuer Automatic Gain Control."""
         frame = tk.Frame(self.win, bg=BG_DARK)
-        frame.pack(fill=tk.X, padx=15, pady=5)
+        frame.pack(fill=tk.X, padx=15, pady=3)
 
         self._agc_cb = tk.Checkbutton(
             frame, text="AGC (Automatic Gain Control)",
@@ -313,7 +635,7 @@ class AudioPopup:
     def _build_noise_gate_slider(self):
         """Horizontaler Slider fuer Noise Gate (-80 bis -20 dB)."""
         frame = tk.Frame(self.win, bg=BG_DARK)
-        frame.pack(fill=tk.X, padx=15, pady=5)
+        frame.pack(fill=tk.X, padx=15, pady=3)
 
         row = tk.Frame(frame, bg=BG_DARK)
         row.pack(fill=tk.X)
@@ -355,7 +677,7 @@ class AudioPopup:
     def _build_vu_meter(self):
         """Canvas-Balken fuer Audio-Pegel (gruen/gelb/rot) + dB Label."""
         frame = tk.Frame(self.win, bg=BG_DARK)
-        frame.pack(fill=tk.X, padx=15, pady=(10, 5))
+        frame.pack(fill=tk.X, padx=15, pady=(5, 3))
 
         row = tk.Frame(frame, bg=BG_DARK)
         row.pack(fill=tk.X)
@@ -478,7 +800,7 @@ class AudioPopup:
     def _build_mic_test(self):
         """MIC TEST Button mit Status-Label."""
         frame = tk.Frame(self.win, bg=BG_DARK)
-        frame.pack(fill=tk.X, padx=15, pady=(10, 15))
+        frame.pack(fill=tk.X, padx=15, pady=(5, 10))
 
         self._btn_mic_test = tk.Button(
             frame, text="MIC TEST", width=14,
@@ -636,6 +958,12 @@ class AudioPopup:
             except (TypeError, ValueError):
                 pass
 
+        # Gespeicherte Samplerate laden
+        raw_rate = audio.get("wifi_samplerate")
+        if raw_rate in (16000, 48000):
+            self._current_samplerate = raw_rate
+            self._btn_samplerate.config(text=f"{raw_rate // 1000} kHz")
+
         # wpctl-Gain lesen und vergleichen
         wpctl_gain = self._read_wpctl_gain()
         if wpctl_gain is not None and saved_gain is not None:
@@ -699,6 +1027,7 @@ class AudioPopup:
                 "mic_gain": round(self._gain_var.get(), 2),
                 "noise_gate_db": round(self._noise_gate_var.get(), 1),
                 "agc_enabled": self._agc_var.get(),
+                "wifi_samplerate": self._current_samplerate,
             }
 
             # Atomar schreiben: tmp + rename
@@ -725,7 +1054,13 @@ class AudioPopup:
     # =========================================================================
 
     def _on_close(self):
-        """Fenster sauber schliessen — Timer und VU Monitor stoppen."""
+        """Fenster sauber schliessen — alle Timer und Prozesse stoppen."""
+        # WiFi-Poll stoppen
+        self._wifi_poll_running = False
+        if self._wifi_after_id is not None:
+            self.win.after_cancel(self._wifi_after_id)
+            self._wifi_after_id = None
+
         # Ausstehende Settings sofort speichern
         if self._save_after_id is not None:
             self.win.after_cancel(self._save_after_id)
