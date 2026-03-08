@@ -69,6 +69,12 @@ try:
 except ImportError:
     WhisperPopup = None
 
+# Supervisor Popup importieren (optional)
+try:
+    from core.gui.popups.popup_supervisor import SupervisorPopup
+except ImportError:
+    SupervisorPopup = None
+
 
 class ModelsModule:
     """Model Controls und Popup-Buttons im uebergebenen LabelFrame."""
@@ -115,6 +121,7 @@ class ModelsModule:
         self.on_popup_settings = self._open_settings_popup
         self.on_popup_dashboard = self._open_dashboard_popup
         self.on_popup_whisper = self._open_whisper_popup
+        self.on_popup_supervisor = self._open_supervisor_popup
 
         # GUI aufbauen
         self._build_pipeline_status()
@@ -190,6 +197,13 @@ class ModelsModule:
             WhisperPopup(self._parent, self._service)
         else:
             print("FEHLER: popup_whisper.py konnte nicht importiert werden")
+
+    def _open_supervisor_popup(self):
+        """Supervisor Dashboard Popup oeffnen."""
+        if SupervisorPopup is not None:
+            SupervisorPopup(self._parent, self._service)
+        else:
+            print("FEHLER: popup_supervisor.py konnte nicht importiert werden")
 
     # =========================================================================
     # Pipeline Status (TAPPAS/Legacy Anzeige)
@@ -381,6 +395,7 @@ class ModelsModule:
             ("TRACKER", lambda: self.on_popup_tracker()),
             ("WHISPER", lambda: self.on_popup_whisper()),
             ("DASHBOARD", lambda: self.on_popup_dashboard()),
+            ("SUPERVISOR", lambda: self.on_popup_supervisor()),
             ("SETTINGS", lambda: self.on_popup_settings()),
         ]
 
