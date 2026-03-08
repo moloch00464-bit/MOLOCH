@@ -68,9 +68,9 @@ BEAT_THRESHOLD = 1.5        # Bass > 1.5x Durchschnitt = Beat
 # Zone-abhaengige Smoothing-Alphas (hoeher = weniger Latenz, mehr Jitter)
 # Panel uebernimmt Werte DIREKT (kein zweites Smoothing), also hier moderat halten
 ZONE_ALPHAS = {
-    "guardian": 0.6,     # ~27ms Lag, kein Jitter weil einziges Smoothing
-    "shadow": 0.75,      # ~18ms Lag
-    "berserker": 0.9,    # ~8ms, fast roh
+    "guardian": 0.8,     # ~12ms Lag, schnellere Reaktion auf Energy-Wechsel
+    "shadow": 0.85,      # ~10ms Lag
+    "berserker": 0.95,   # ~5ms, fast roh
 }
 
 # Frequenz-Baender (Hz)
@@ -78,20 +78,19 @@ BASS_LO, BASS_HI = 20, 120
 MID_LO, MID_HI = 120, 2000
 HIGH_LO, HIGH_HI = 4000, 12000
 
-# Normalisierungs-Faktoren (kalibriert mit Skinny Puppy - Smothered Hope, 2026-02-24)
-# FFT unnormalisiert, Monitor-Capture via stream.capture.sink=true
-# Gemessene Roh-Werte: bass=1.5-30, mid=1.2-6.3, high=0.1-1.2
-NORM_RMS = 5.0
-NORM_BASS = 0.06
-NORM_MID = 0.2
-NORM_HIGH = 2.0
+# Normalisierungs-Faktoren (rekalibriert 2026-03-08, Daniel Deluxe - Star Eater)
+# Monitor-Capture RMS: 0.01-0.07, Bass: 0.3-5.5, Mid: 0.2-3.0, High: 0.05-0.8
+NORM_RMS = 15.0
+NORM_BASS = 0.18
+NORM_MID = 0.5
+NORM_HIGH = 3.5
 
 # Noise Floor (subtrahiert von Band-Energien, Feintuning)
 NOISE_FLOOR = 0.0
 
 # Silence Gate: Roh-RMS unter diesem Wert = kein echtes Signal
-# spotifyd haelt Kanal offen → Idle-Rauschen bis RMS 0.13, echte Musik > 0.5
-SILENCE_RAW_THRESHOLD = 0.20
+# Monitor-Capture RMS: Stille ~0.001, Musik ~0.01-0.07 (Volume-abhaengig)
+SILENCE_RAW_THRESHOLD = 0.005
 
 # Silence Threshold (normalisierter RMS unter diesem Wert = keine Musik)
 SILENCE_THRESHOLD = 0.05

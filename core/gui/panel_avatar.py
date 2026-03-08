@@ -245,6 +245,15 @@ class AvatarModule:
         self._shockwave_r = 0.0
         self._shockwave_alpha = 0.0
 
+        # --- FFT-basierter Beat-Pulse (aus music_visualizer) ---
+        self._beat_pulse_anim = 0.0        # 0-1, decay fuer Radius-Boost bei Beat
+
+        # --- Energy-Farbverlauf (smooth interpoliert, ~200ms) ---
+        self._sp_target_main = None        # Zielfarbe aus Energy-Gradient
+        self._sp_target_iris = None
+        self._sp_current_main = [0, 102, 255]  # Startwert Guardian-Blau
+        self._sp_current_iris = [68, 170, 255]
+
         # --- Glow Cache ---
         self._glow_surface = None
         self._glow_key = None
@@ -324,6 +333,12 @@ class AvatarModule:
         rms_f = min(1.0, self._s_music_rms / MAX_VISUAL_AMP) * music_dim
         beat = self._beat_detected
 
+        # === FFT Energy Werte (rms_f als Energy-Proxy, 0-1) ===
+        music_on = self._music_active and mb > 0.1
+        sp_pulse = self._beat_pulse_anim if music_on else 0.0
+        # RMS als Energy: 0-1 normalisiert (MAX_VISUAL_AMP = volle Skala)
+        sp_energy = rms_f if music_on else 0.0
+
         # === Farben ===
         if flash:
             main_c = (255, 68, 68)
@@ -338,6 +353,44 @@ class AvatarModule:
             main_c = tuple(int(c) for c in self._current_main_color)
             iris_c = tuple(int(c) for c in self._current_iris_color)
             bri = 0.55 + self._s_tension * 0.45
+
+        # Energy-basierter Farbverlauf (nur bei aktiver Musik)
+        if music_on and not flash and self._zone != "berserker":
+            e = sp_energy
+            if self._zone == "guardian":
+                # Guardian: Blau → Violett → Rot je nach Energy (FFT RMS)
+                if e < 0.4:
+                    # Ruhig → Blau (#0088FF)
+                    tgt_main = (0, 136, 255)
+                    tgt_iris = (68, 170, 255)
+                elif e < 0.65:
+                    # Mittel → Blau-Violett Gradient
+                    t = (e - 0.4) / 0.25
+                    tgt_main = _lerp((68, 0, 255), (136, 0, 255), t)
+                    tgt_iris = _lerp((100, 68, 255), (170, 68, 255), t)
+                elif e < 0.8:
+                    # Hoch → Violett (#AA00FF)
+                    tgt_main = (170, 0, 255)
+                    tgt_iris = (200, 68, 255)
+                else:
+                    # Sehr hoch → Violett-Rot Gradient
+                    t = min(1.0, (e - 0.8) / 0.2)
+                    tgt_main = _lerp((204, 0, 136), (255, 0, 51), t)
+                    tgt_iris = _lerp((230, 68, 170), (255, 68, 100), t)
+                self._sp_target_main = list(tgt_main)
+                self._sp_target_iris = list(tgt_iris)
+            else:
+                # Shadow: Rot-Toene bleiben, keine Energy-Farbverschiebung
+                self._sp_target_main = list(COL_SHADOW)
+                self._sp_target_iris = list(COL_SHADOW_IRIS)
+
+            # Smooth interpolierte Farbe verwenden
+            main_c = tuple(int(c) for c in self._sp_current_main)
+            iris_c = tuple(int(c) for c in self._sp_current_iris)
+        elif not music_on:
+            # Keine Musik: Zielfarben auf Zone zuruecksetzen
+            self._sp_target_main = list(_zone_color(self._zone))
+            self._sp_target_iris = list(_zone_iris(self._zone))
 
         # MUSIC: Helligkeit pulsiert mit RMS (nur bei Music-Blend)
         bri = min(1.0, bri + rms_f * 0.4 * mb)
@@ -468,9 +521,14 @@ class AvatarModule:
                     s.set_at((px, py), seg_c)
 
         # === AEUSSERER RING (Idle: 3px, Music: 3-8px pumpt) ===
-        ro = int(90 * (pulse + bass_pump))
+        # Spotify Beat-Pulse: Radius +15-30% je nach energy, dann zurueckfedern
+        sp_radius_boost = 0.0
+        if sp_pulse > 0.01:
+            # 15% Basis + 15% * energy = 15-30% bei vollem Puls
+            sp_radius_boost = sp_pulse * (0.15 + sp_energy * 0.15)
+        ro = int(90 * (pulse + bass_pump) * (1.0 + sp_radius_boost))
         ro += int(self._s_voice_speak * 3.0 * math.sin(self._speech_phase * 3.1))
-        ro = max(12, min(ro, 140))
+        ro = max(12, min(ro, 148))
         ring_thick = 3 + int(bass_f * 5 * mb)
         half_t = ring_thick // 2
         ring_bri_boost = 1.0 + bass_f * 0.5 * mb
@@ -482,6 +540,39 @@ class AvatarModule:
                 ring_fade = 1.0 - dist * 0.6
                 pygame.gfxdraw.aacircle(s, CX, CY, r,
                                         _scale(rc_bright, ring_fade))
+
+        # === SPOTIFY: Aussenring-Flackern bei hoher Energy (>0.8, Guardian) ===
+        if music_on and sp_energy > 0.8 and ro > 10 and self._zone == "guardian":
+            flicker_intensity = (sp_energy - 0.8) / 0.2  # 0-1
+            flicker_phase = pp * 11.0 + tick * 0.3
+            for fi in range(3):
+                fl_angle = flicker_phase + fi * 2.094  # 120 Grad versetzt
+                fl_alpha = int(flicker_intensity * 80 * abs(math.sin(fl_angle)))
+                if fl_alpha > 5:
+                    fl_surf = pygame.Surface((AVATAR_SIZE, AVATAR_SIZE), pygame.SRCALPHA)
+                    fl_r = ro + 4 + fi * 3
+                    if 5 < fl_r < AVATAR_SIZE // 2:
+                        pygame.gfxdraw.aacircle(fl_surf, CX, CY, fl_r,
+                                                (*main_c, fl_alpha))
+                    s.blit(fl_surf, (0, 0))
+
+        # === SPOTIFY: Shadow-Modus weisse Blitze bei Energy > 0.7 ===
+        if music_on and sp_energy > 0.7 and self._zone == "shadow" and ro > 10:
+            flash_intensity = (sp_energy - 0.7) / 0.3  # 0-1
+            flash_phase = pp * 13.0 + tick * 0.5
+            # Kurze weisse Arcs auf dem Aussenring (zufaellig verteilt)
+            for wi in range(4):
+                w_angle = flash_phase + wi * 1.571  # 90 Grad versetzt
+                w_alpha = int(flash_intensity * 120 * max(0.0, math.sin(w_angle)))
+                if w_alpha > 8:
+                    w_surf = pygame.Surface((AVATAR_SIZE, AVATAR_SIZE), pygame.SRCALPHA)
+                    w_r = ro + 2
+                    if 5 < w_r < AVATAR_SIZE // 2:
+                        pygame.gfxdraw.aacircle(w_surf, CX, CY, w_r,
+                                                (255, 255, 255, w_alpha))
+                        pygame.gfxdraw.aacircle(w_surf, CX, CY, w_r + 1,
+                                                (255, 255, 255, w_alpha // 2))
+                    s.blit(w_surf, (0, 0))
 
         # === TICKMARKS (Idle: statisch, Music: ±40% Flicker) ===
         for i in range(40):
@@ -512,8 +603,9 @@ class AvatarModule:
 
         # === Mittlerer Ring (Idle: stabil, Music: Mid-Pump) ===
         mid_mod = mid_f * 8.0 * math.sin(pp * 1.3) * mb
-        mid_r1 = int(78 * pulse + mid_mod)
-        mid_r2 = int(75 * pulse + mid_f * 5.0 * math.sin(pp * 1.7) * mb)
+        mid_r1 = int(78 * pulse * (1.0 + sp_radius_boost * 0.7) + mid_mod)
+        mid_r2 = int(75 * pulse * (1.0 + sp_radius_boost * 0.7)
+                     + mid_f * 5.0 * math.sin(pp * 1.7) * mb)
         mid_r1 = max(5, min(mid_r1, 130))
         mid_r2 = max(5, min(mid_r2, 130))
         mid_ring_bri = bri * (0.35 + 0.1 * mb + mid_f * 0.35 * mb)
@@ -525,7 +617,7 @@ class AvatarModule:
         inner_amp = 0.03 * (1 + self._s_tension * 2.5)
         inner_amp *= 1.0 - self._s_voice_listen * 0.6
         ip = 1.0 + math.sin(pp * 1.5) * inner_amp
-        ri = int(68 * ip)
+        ri = int(68 * ip * (1.0 + sp_radius_boost * 0.5))
         ri += int(self._s_voice_speak * 2.5 * math.sin(self._speech_phase * 2.7))
         ri = max(5, ri)
         inner_bri = bri * (0.55 + 0.1 * mb + mid_f * 0.25 * mb)
@@ -543,10 +635,10 @@ class AvatarModule:
             pygame.draw.line(s, _scale(main_c, bri * 0.5),
                              (int(x1), int(y1)), (int(x2), int(y2)), 1)
 
-        # === IRIS (Idle: stabil, Music: ±20% Mid-Reaktion) ===
+        # === IRIS (Idle: stabil, Music: ±20% Mid-Reaktion + Beat-Pulse) ===
         mid_iris = mid_f * 0.20 * math.sin(pp * 1.7) * mb
-        ir = int(50 * (0.82 + bri * 0.18 + mid_iris))
-        ir = max(10, min(ir, 65))
+        ir = int(50 * (0.82 + bri * 0.18 + mid_iris) * (1.0 + sp_radius_boost * 0.4))
+        ir = max(10, min(ir, 70))
         ix = int(CX + self._pupil_dx)
         iy = int(CY + self._pupil_dy)
 
@@ -738,10 +830,24 @@ class AvatarModule:
                 self._s_music_high *= 0.92
                 self._s_music_rms *= 0.92
 
-            # Dual-Modus Crossfade: 0→1 bei Musik, 1→0 bei Stille (~1s)
+            # Dual-Modus Crossfade: 0→1 bei Musik, 1→0 bei Stille (~200ms)
             blend_target = 1.0 if self._music_active else 0.0
-            blend_rate = min(1.0, dt * 2.0)  # ~500ms Uebergang
+            blend_rate = min(1.0, dt * 5.0)  # ~200ms Uebergang
             self._music_blend += (blend_target - self._music_blend) * blend_rate
+
+            # FFT Beat-Pulse: bei beat_detected Puls triggern, 150ms Decay
+            if self._beat_detected and self._music_active:
+                self._beat_pulse_anim = 1.0
+            if self._beat_pulse_anim > 0.01:
+                decay_rate = min(1.0, dt / 0.15 * 3.0)
+                self._beat_pulse_anim *= max(0.0, 1.0 - decay_rate)
+
+            # Energy-Farbverlauf: schnelle Interpolation (~80ms)
+            if self._sp_target_main is not None:
+                sp_color_rate = min(1.0, dt / 0.08 * 3.0)  # ~80ms Settling
+                for i in range(3):
+                    self._sp_current_main[i] += (self._sp_target_main[i] - self._sp_current_main[i]) * sp_color_rate
+                    self._sp_current_iris[i] += (self._sp_target_iris[i] - self._sp_current_iris[i]) * sp_color_rate
 
             # Voice State Interpolation (smooth fuer weiche Uebergaenge)
             speak_target = 1.0 if self._tts_active else 0.0
@@ -981,6 +1087,7 @@ class AvatarModule:
                     self._beat_detected = False
         except Exception:
             pass
+
 
     def _read_core_state(self):
         """Core State via ServiceProxy lesen (Fallback)."""

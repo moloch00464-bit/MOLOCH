@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-03-08T15:50:53",
-  "generation_ms": 1974.4,
+  "generated": "2026-03-08T16:48:33",
+  "generation_ms": 2068.8,
   "summary": {
     "core_modules": "38/38",
     "external_deps": "11/11",
@@ -54,7 +54,7 @@
     "hailo_device": true,
     "ssd1_code": {
       "total_gb": 457.9,
-      "free_gb": 409.8
+      "free_gb": 409.7
     },
     "ssd2_data": {
       "total_gb": 476.9,
