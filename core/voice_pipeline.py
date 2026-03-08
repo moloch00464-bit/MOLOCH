@@ -458,6 +458,92 @@ class VoicePipeline:
             self._on_message(sender, text)
 
     # =========================================================================
+    # Whisper-Test (Diagnose — kein Claude, kein TTS, kein Chat)
+    # =========================================================================
+
+    def test_whisper(self, duration_s: float = 8.0):
+        """Isolierter Whisper-Test: Aufnehmen → Transkribieren → Ergebnis im Popup.
+
+        KEIN Claude API Call, KEIN TTS, KEIN Chat, KEIN Memory.
+        Nur Audio aufnehmen und durch Whisper jagen. Ergebnis wird als
+        whisper_result gespeichert und im Popup-Log angezeigt.
+        """
+        def _run():
+            try:
+                self._whisper_status = "Aufnahme..."
+                wav_path = os.path.join(TEMP_DIR, "moloch_ptt_recording.wav")
+
+                # Alte Datei loeschen
+                try:
+                    os.unlink(wav_path)
+                except FileNotFoundError:
+                    pass
+
+                # Audio aufnehmen (WiFi-Mic oder USB Fallback)
+                if self._wifi_mic and self._wifi_mic.connected:
+                    # WiFi-Mic: Ringpuffer leeren und frisch sammeln
+                    self._wifi_mic.get_audio_chunk(rate=16000, duration_ms=2000)
+                    rec_buf = bytearray()
+                    t_end = time.time() + duration_s
+                    while time.time() < t_end:
+                        chunk = self._wifi_mic.get_audio_chunk(rate=16000, duration_ms=50)
+                        if chunk:
+                            rec_buf.extend(chunk)
+                        time.sleep(0.04)
+                    pcm_data = bytes(rec_buf)
+                    duration_actual = len(pcm_data) / (16000 * 2)
+                    logger.info(f"[WHISPER-TEST] WiFi-Mic: {len(pcm_data)} Bytes, "
+                                f"{duration_actual:.1f}s")
+                    if len(pcm_data) < 3200:  # Min 100ms
+                        self._store_whisper_info("[Test: Zu wenig Audio vom WiFi-Mic]")
+                        self._whisper_status = "Idle"
+                        return
+                    self._write_pcm_as_wav(pcm_data, wav_path)
+                else:
+                    # USB Fallback: arecord
+                    try:
+                        proc = subprocess.Popen(
+                            ["arecord", "-D", MIC_DEVICE, "-f", "S16_LE",
+                             "-r", "16000", "-c", "1", "-d", str(int(duration_s)),
+                             wav_path],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                        proc.wait(timeout=duration_s + 5)
+                    except Exception as e:
+                        self._store_whisper_info(f"[Test: arecord Fehler: {e}]")
+                        self._whisper_status = "Idle"
+                        return
+
+                # WAV pruefen
+                if not os.path.exists(wav_path) or os.path.getsize(wav_path) < 1000:
+                    self._store_whisper_info("[Test: Aufnahme leer]")
+                    self._whisper_status = "Idle"
+                    return
+
+                # Whisper transkribieren
+                self._whisper_status = "Transkribiere..."
+                t0 = time.time()
+                text = self._transcribe(wav_path)
+                dt_ms = (time.time() - t0) * 1000
+
+                if not text or not text.strip():
+                    self._store_whisper_info(
+                        f"[Test: Keine Sprache erkannt ({dt_ms:.0f}ms)]")
+                    logger.info(f"[WHISPER-TEST] Leer nach {dt_ms:.0f}ms")
+                else:
+                    text = _sanitize_text(text)
+                    self._store_whisper_result(text, dt_ms)
+                    logger.info(f"[WHISPER-TEST] OK ({dt_ms:.0f}ms): {text}")
+
+                self._whisper_status = "Idle"
+
+            except Exception as e:
+                logger.error(f"[WHISPER-TEST] Fehler: {e}")
+                self._store_whisper_info(f"[Test-Fehler: {e}]")
+                self._whisper_status = "Idle"
+
+        threading.Thread(target=_run, daemon=True, name="WhisperTest").start()
+
+    # =========================================================================
     # PTT Recording
     # =========================================================================
 
@@ -483,7 +569,8 @@ class VoicePipeline:
             self._wifi_rec_buf = bytearray()
             self._wifi_rec_active = True
             # Ringpuffer vorher leeren (alte Daten vor PTT-Press)
-            self._wifi_mic.get_audio_chunk(rate=16000, duration_ms=2000)
+            old_data = self._wifi_mic.get_audio_chunk(rate=16000, duration_ms=2000)
+            logger.info(f"[VOICE] WiFi-Mic Ringpuffer geleert: {len(old_data)} Bytes verworfen")
             self._wifi_rec_thread = threading.Thread(
                 target=self._wifi_drain_loop, daemon=True,
                 name="PTT-WiFi-Drain")
@@ -492,6 +579,12 @@ class VoicePipeline:
             return
 
         # Fallback: arecord vom USB-ReSpeaker
+        wifi_status = "nicht vorhanden" if not self._wifi_mic else (
+            f"connected={self._wifi_mic.connected}, "
+            f"connected_16k={self._wifi_mic._connected_16k}, "
+            f"force={self._wifi_mic._force_source}, "
+            f"buf={len(self._wifi_mic._buf_16k)}B")
+        logger.warning(f"[VOICE] WiFi-Mic nicht nutzbar ({wifi_status}), USB-Fallback")
         self._use_wifi_mic = False
         try:
             self._record_proc = subprocess.Popen(
@@ -637,7 +730,7 @@ class VoicePipeline:
                 logger.warning(f"[VAD] Unerwartetes Format: {rate}Hz {channels}ch {sample_width}B — ueberspringe VAD")
                 return True
 
-            vad = webrtcvad.Vad(2)  # Aggressiveness 2 (0-3)
+            vad = webrtcvad.Vad(1)  # Aggressiveness 1 (weniger aggressiv, toleriert Pausen)
             frame_ms = 30
             frame_bytes = int(rate * frame_ms / 1000) * sample_width  # 960 Bytes
 
@@ -658,14 +751,24 @@ class VoicePipeline:
                 logger.info("[VAD] Keine Sprache erkannt — nur Stille")
                 return False
 
-            # 3 Frames (~90ms) Padding vor/nach Sprache behalten
-            pad = frame_bytes * 3
+            # 10 Frames (~300ms) Padding vor/nach Sprache behalten
+            # (grosszuegiger als vorher 3 Frames, damit Wortanfaenge/-enden erhalten bleiben)
+            pad = frame_bytes * 10
             trim_start = max(0, first_voice - pad)
             trim_end = min(len(raw), last_voice + pad)
             trimmed = raw[trim_start:trim_end]
 
             orig_ms = len(raw) / (rate * sample_width) * 1000
             trim_ms = len(trimmed) / (rate * sample_width) * 1000
+
+            # Minimum 2 Sekunden fuer Whisper — zu kurze Chunks ergeben Fragmente
+            min_bytes = rate * sample_width * 2  # 2s = 64000 Bytes bei 16kHz
+            if len(trimmed) < min_bytes:
+                logger.info(f"[VAD] Chunk zu kurz ({trim_ms:.0f}ms < 2000ms), "
+                            f"behalte Original ({orig_ms:.0f}ms)")
+                # Nicht trimmen — ganzes Audio an Whisper geben
+                return True
+
             logger.info(f"[VAD] Getrimmt: {orig_ms:.0f}ms → {trim_ms:.0f}ms "
                         f"(Start +{trim_start / (rate * sample_width) * 1000:.0f}ms)")
 
@@ -686,12 +789,14 @@ class VoicePipeline:
 
         if not os.path.exists(wav_path) or os.path.getsize(wav_path) < 1000:
             logger.warning("[VOICE] Aufnahme zu kurz oder nicht vorhanden")
+            self._store_whisper_info("[Aufnahme zu kurz]")
             self._whisper_status = "Idle"
             return
 
         # 0. VAD-Filter: Stille vor/nach Sprache abschneiden
         if self._vad_enabled and not self._vad_trim_wav(wav_path):
             logger.info("[VOICE] VAD: Nur Stille erkannt, ueberspringe Whisper")
+            self._store_whisper_info("[Nur Stille — keine Sprache erkannt]")
             self._whisper_status = "Idle"
             return
 
@@ -703,6 +808,7 @@ class VoicePipeline:
 
         if not text or not text.strip():
             logger.info("[VOICE] Keine Sprache erkannt")
+            self._store_whisper_info(f"[Keine Sprache erkannt ({whisper_duration_ms:.0f}ms)]")
             self._whisper_status = "Idle"
             return
 
@@ -759,6 +865,21 @@ class VoicePipeline:
     # Whisper STT
     # =========================================================================
 
+    def _store_whisper_info(self, info_text: str):
+        """Info/Fehler-Meldung als Whisper-Ergebnis speichern (fuer Popup-Log)."""
+        with self._whisper_results_lock:
+            self._whisper_result_counter += 1
+            result = {
+                "id": self._whisper_result_counter,
+                "text": info_text,
+                "duration_ms": 0,
+                "model": self._whisper.backend if self._whisper else "on-demand",
+                "ts": time.time(),
+            }
+            self._whisper_results.append(result)
+            if len(self._whisper_results) > 10:
+                self._whisper_results = self._whisper_results[-10:]
+
     def _store_whisper_result(self, text: str, duration_ms: float):
         """Whisper-Ergebnis speichern fuer Popup + Event Bus publishen."""
         with self._whisper_results_lock:
@@ -790,6 +911,7 @@ class VoicePipeline:
     def _transcribe(self, wav_path: str) -> Optional[str]:
         """WAV-Datei mit MolochWhisper transkribieren (NPU-only)."""
         if not self._init_whisper():
+            self._store_whisper_info("[Fehler: Whisper nicht verfuegbar]")
             return None
 
         try:
@@ -800,6 +922,7 @@ class VoicePipeline:
             return text.strip() if text and text.strip() else None
         except Exception as e:
             logger.error(f"[VOICE] Whisper Fehler: {e}")
+            self._store_whisper_info(f"[Fehler: {e}]")
             return None
 
     # =========================================================================

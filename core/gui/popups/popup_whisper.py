@@ -270,7 +270,7 @@ class WhisperPopup:
         ).pack(side=tk.LEFT)
 
         self._lbl_vad_info = tk.Label(
-            row2, text="webrtcvad, Aggressivitaet 2",
+            row2, text="webrtcvad, Aggressivitaet 1",
             bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
         )
         self._lbl_vad_info.pack(side=tk.LEFT, padx=10)
@@ -299,7 +299,7 @@ class WhisperPopup:
         frame.pack(fill=tk.X, padx=8, pady=(0, 8))
 
         tk.Button(
-            frame, text="Manuell testen (3s)",
+            frame, text="Manuell testen (8s)",
             bg=BG_BUTTON, fg=FG_LABEL, font=FONT_BUTTON,
             activebackground=BG_FRAME,
             command=self._manual_test,
@@ -384,12 +384,12 @@ class WhisperPopup:
     # =========================================================================
 
     def _manual_test(self):
-        """3s Aufnahme ohne PTT starten — via IPC Command."""
+        """8s Aufnahme ohne PTT starten — via IPC Command."""
         self.service._write_command("action", {
             "action": "whisper_test",
-            "duration_s": 3,
+            "duration_s": 8,
         })
-        self._lbl_status.config(text="Manueller Test (3s)...", fg=STATUS_YELLOW)
+        self._lbl_status.config(text="Manueller Test (8s)...", fg=STATUS_YELLOW)
 
     def _on_vad_toggle(self):
         """VAD an/aus toggle — via IPC Command."""

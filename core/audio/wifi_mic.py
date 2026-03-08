@@ -176,9 +176,16 @@ class WiFiMic:
 
     @property
     def connected(self) -> bool:
-        """True wenn 16kHz Stream verbunden UND nicht auf USB erzwungen."""
+        """True wenn 16kHz Stream verbunden UND nicht auf USB erzwungen.
+
+        force_source='wifi' → immer True (WiFi erzwungen, health-check ignoriert).
+        force_source='usb'  → immer False (USB erzwungen).
+        force_source='auto' → basiert auf health-check (_connected_16k).
+        """
         if self._force_source == "usb":
             return False
+        if self._force_source == "wifi":
+            return True  # WiFi erzwungen → immer connected
         return self._connected_16k
 
     @property
