@@ -595,6 +595,8 @@ class AudioPopup:
                     )
                     # In settings.json persistieren
                     self._save_audio_settings()
+                    # Auto-Mic-Test nach Umschaltung (Markus hoert Unterschied)
+                    self.win.after(500, self._on_mic_test)
                 else:
                     self._btn_samplerate.config(
                         text=f"{self._current_samplerate // 1000} kHz",
@@ -1098,13 +1100,17 @@ class AudioPopup:
         if self._mic_test_running:
             return
 
-        # Mic-Test: Immer USB/pw-record (WiFi-Mic laeuft im Service-Prozess,
-        # Panel hat keinen Zugriff auf den UDP-Ringpuffer)
-        use_wifi = False
-        node_id = self._find_respeaker_source_id()
-        if not node_id:
-            self._lbl_mic_status.config(text="Kein USB-Mikrofon!", fg=STATUS_RED)
-            return
+        # WiFi-Mic verbunden? → IPC-basierter Test (Service hat Ringpuffer)
+        use_wifi = self._wifi_connected
+        node_id = None
+
+        if not use_wifi:
+            # Fallback: USB/pw-record
+            node_id = self._find_respeaker_source_id()
+            if not node_id:
+                self._lbl_mic_status.config(
+                    text="Kein Mikrofon!", fg=STATUS_RED)
+                return
 
         self._mic_test_running = True
         self._btn_mic_test.config(state=tk.DISABLED)
@@ -1113,6 +1119,13 @@ class AudioPopup:
         vu_was_running = self._vu_monitor_running
         if vu_was_running:
             self._stop_vu_monitor()
+
+        if use_wifi:
+            # Service auffordern: 3s WiFi-Audio aufnehmen → WAV
+            self.service._write_command("action", {
+                "action": "mic_test",
+                "duration": 3.0,
+            })
 
         # Countdown starten: 3s Aufnahme
         self._mic_test_countdown(3, node_id, vu_was_running, use_wifi)
@@ -1143,17 +1156,22 @@ class AudioPopup:
         """Aufnahme + Wiedergabe im Hintergrund-Thread. WiFi oder USB."""
         test_path = "/tmp/moloch_mic_test.wav"
 
-        # USB: pw-record (WiFi-Mic laeuft im Service-Prozess)
-        time.sleep(0.3)
-        try:
-            proc = subprocess.Popen(
-                ["pw-record", "--target", node_id,
-                 "--channels", "1", "--rate", "16000", test_path],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            time.sleep(3)
-            proc.send_signal(signal.SIGINT)
-            proc.wait(timeout=3)
-        except Exception as e:
+        if use_wifi:
+            # WiFi: Service nimmt auf via IPC (bereits gesendet in _on_mic_test)
+            # Warten bis WAV geschrieben ist (3s Aufnahme + Puffer)
+            time.sleep(3.5)
+        else:
+            # USB: pw-record
+            time.sleep(0.3)
+            try:
+                proc = subprocess.Popen(
+                    ["pw-record", "--target", node_id,
+                     "--channels", "1", "--rate", "16000", test_path],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                time.sleep(3)
+                proc.send_signal(signal.SIGINT)
+                proc.wait(timeout=3)
+            except Exception as e:
                 logger.error(f"[AUDIO] USB Mic Test failed: {e}")
                 self.win.after(0, self._mic_test_error,
                                f"USB-Aufnahme: {e}")
@@ -1161,10 +1179,12 @@ class AudioPopup:
 
         # Pruefen ob Aufnahme existiert
         if not os.path.exists(test_path) or os.path.getsize(test_path) < 1000:
-            self.win.after(0, self._mic_test_error, "Keine Aufnahme erstellt")
+            src = "WiFi" if use_wifi else "USB"
+            self.win.after(0, self._mic_test_error,
+                           f"Keine {src}-Aufnahme erstellt")
             return
 
-        # Wiedergabe
+        # Wiedergabe ueber Pi-Lautsprecher
         try:
             subprocess.run(["pw-play", test_path], timeout=10,
                            capture_output=True)

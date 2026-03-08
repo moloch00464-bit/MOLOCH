@@ -1637,7 +1637,47 @@ class MolochService:
             logger.info(f"[IPC] Audio: gain={self._saved_mic_gain:.2f}, "
                         f"gate={self._saved_noise_gate:.0f}dB, agc={self._saved_agc}")
         elif action == 'mic_test':
-            logger.info("[IPC] Mic Test angefordert (noch nicht implementiert)")
+            # WiFi-Mic: 3s Audio aus Ringpuffer aufnehmen, als WAV speichern
+            duration_s = float(cmd.get('duration', 3.0))
+            test_path = "/tmp/moloch_mic_test.wav"
+            def _do_mic_test_wifi():
+                try:
+                    from core.audio.wifi_mic import get_wifi_mic
+                    wm = get_wifi_mic()
+                    if not wm.connected:
+                        logger.warning("[IPC] Mic-Test: WiFi-Mic nicht verbunden")
+                        return
+                    # Ringpuffer leeren (alte Daten vor Test)
+                    wm.get_audio_chunk(rate=16000, duration_ms=2000)
+                    # Audio sammeln fuer duration_s Sekunden
+                    buf = bytearray()
+                    end_time = time.time() + duration_s
+                    while time.time() < end_time:
+                        chunk = wm.get_audio_chunk(rate=16000, duration_ms=50)
+                        if chunk:
+                            buf.extend(chunk)
+                        time.sleep(0.04)
+                    # Als WAV schreiben (16kHz Mono 16-bit)
+                    import struct as _st
+                    data_size = len(buf)
+                    header = bytearray()
+                    header.extend(b'RIFF')
+                    header.extend(_st.pack('<I', 36 + data_size))
+                    header.extend(b'WAVEfmt ')
+                    header.extend(_st.pack('<IHHIIHH', 16, 1, 1, 16000,
+                                           32000, 2, 16))
+                    header.extend(b'data')
+                    header.extend(_st.pack('<I', data_size))
+                    with open(test_path, 'wb') as f:
+                        f.write(header)
+                        f.write(buf)
+                    logger.info(f"[IPC] Mic-Test: {len(buf)} Bytes, "
+                                f"{len(buf) / 32000:.1f}s gespeichert")
+                except Exception as e:
+                    logger.error(f"[IPC] Mic-Test Fehler: {e}")
+            threading.Thread(target=_do_mic_test_wifi, daemon=True,
+                             name="MicTest-WiFi").start()
+            logger.info(f"[IPC] Mic-Test WiFi gestartet ({duration_s}s)")
         elif action == 'save_settings':
             # Audio + Camera Werte aus Panel uebernehmen
             _au = cmd.get('audio')
