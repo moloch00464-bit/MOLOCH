@@ -17,13 +17,12 @@ Funktionen:
 - LED-Kommandos: "LED:farbe [modus] [geschwindigkeit]" per UDP vom Pi
 
 I2S Pin-Belegung ReSpeaker Lite (ESP32-S3 ↔ XMOS):
-- SCK (BCLK):  GPIO 5
-- WS  (LRCK):  GPIO 6
-- SDI (Daten rein von XMOS): GPIO 4
-- SDO (Daten raus zu XMOS):  GPIO 7
+- SCK (BCLK):  GPIO 8
+- WS  (LRCK):  GPIO 7
+- SDI (DIN, Daten rein von XMOS): GPIO 44
+- SDO (DOUT, Daten raus zu XMOS): GPIO 43
 
-WICHTIG: Pin-Belegung aus Seeed-Schaltplan — Markus, bitte gegen
-         Board-Labeling pruefen!
+Quelle: Seeed Studio Wiki + GitHub respeaker/ReSpeaker_Lite
 
 Deployment:
   1. esptool.py --port /dev/ttyACM0 erase_flash
@@ -58,10 +57,11 @@ GATEWAY = "10.42.0.1"
 DNS = "10.42.0.1"
 
 # I2S Pins (ReSpeaker Lite ESP32-S3 → XMOS XU316)
-I2S_SCK_PIN = 5    # BCLK
-I2S_WS_PIN = 6     # LRCK (Word Select)
-I2S_SDI_PIN = 4    # Serial Data In (von XMOS, Mikrofon-Daten)
-I2S_SDO_PIN = 7    # Serial Data Out (zu XMOS, Lautsprecher-Daten)
+# Quelle: Seeed Studio Wiki + GitHub respeaker/ReSpeaker_Lite
+I2S_SCK_PIN = 8    # BCLK
+I2S_WS_PIN = 7     # LRCK (Word Select)
+I2S_SDI_PIN = 44   # DIN — Serial Data In (von XMOS, Mikrofon-Daten)
+I2S_SDO_PIN = 43   # DOUT — Serial Data Out (zu XMOS, Lautsprecher-Daten)
 
 # Audio-Parameter
 SAMPLE_RATE_48K = 48000

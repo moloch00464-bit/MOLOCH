@@ -4,7 +4,7 @@ Audio Source Pipeline — WiFi-Mic primaer, USB-Soundkarte Fallback
 =================================================================
 
 Routing-Layer fuer Audio-Quellen. Entscheidet woher Audio kommt:
-1. WiFi-Mic (ESP32-S3 TCP) — primaer, wenn verbunden
+1. WiFi-Mic (ESP32-S3 UDP) — primaer, wenn Pakete empfangen
 2. USB-Soundkarte (ReSpeaker Lite XMOS) — Fallback
 
 Andere Module (push_to_talk, Whisper, Stimmbiometrie) holen Audio
@@ -31,7 +31,7 @@ class AudioSourcePipeline:
     """
     Verwaltet Audio-Quellen und liefert Audio-Chunks.
 
-    Primaer: WiFi-Mic (ESP32 TCP auf Port 12345/12346)
+    Primaer: WiFi-Mic (ESP32 UDP auf Port 12345/12346)
     Fallback: USB-Soundkarte (ReSpeaker Lite direkt via PipeWire)
     """
 

@@ -1,17 +1,17 @@
 """
-WiFiMic — TCP-Client fuer ReSpeaker ESP32-S3 WiFi-Mikrofon
+WiFiMic — UDP-Client fuer ReSpeaker ESP32-S3 WiFi-Mikrofon
 ============================================================
 
-Verbindet sich per TCP zum ESP32-S3, empfaengt Audio-Streams
+Empfaengt Audio-Streams per UDP vom ESP32-S3
 in 16kHz (Whisper) und 48kHz (Stimmbiometrie).
 
 Features:
-- Dual-Stream: Port 12345 (16kHz) + Port 12346 (48kHz)
+- Dual-Stream: Port 12345 (16kHz, 320B/Paket) + Port 12346 (48kHz, 960B/Paket)
 - Ringpuffer 2s je Stream
 - get_audio_chunk(rate) → bytes fuer Whisper/Biometrie
-- Reconnect-Loop alle 5s bei Verbindungsverlust
+- Health-Monitor: connected=True wenn Pakete innerhalb 2s empfangen
 - Event audio.mic_source_changed bei Verbindungsaufbau
-- Fallback auf USB-Soundkarte nach 10s ohne TCP
+- Fallback auf USB-Soundkarte nach 10s ohne UDP-Daten
 
 Author: M.O.L.O.C.H. System
 """
@@ -27,16 +27,23 @@ logger = logging.getLogger("WiFiMic")
 
 
 class WiFiMic:
-    """TCP-Client fuer ESP32-S3 WiFi-Mikrofon."""
+    """UDP-Client fuer ESP32-S3 WiFi-Mikrofon."""
+
+    # UDP Paketgroessen (ESP32 sendet genau diese Chunks)
+    CHUNK_16K = 320   # 16kHz Mono 16-bit: 10ms = 320 Bytes
+    CHUNK_48K = 960   # 48kHz Stereo 16-bit: 5ms = 960 Bytes
+
+    # Timeout: Kein Paket seit X Sekunden → disconnected
+    HEALTH_TIMEOUT = 2.0
 
     def __init__(self, esp_ip: str = "10.42.0.2",
                  port_16k: int = 12345, port_48k: int = 12346,
                  event_bus=None):
         """
         Args:
-            esp_ip: IP-Adresse des ESP32-S3
-            port_16k: TCP-Port fuer 16kHz Stream
-            port_48k: TCP-Port fuer 48kHz Stream
+            esp_ip: IP-Adresse des ESP32-S3 (fuer Status-Anzeige)
+            port_16k: UDP-Port fuer 16kHz Stream (bind lokal)
+            port_48k: UDP-Port fuer 48kHz Stream (bind lokal)
             event_bus: Optionaler Event-Bus fuer mic_source_changed
         """
         self.esp_ip = esp_ip
@@ -59,6 +66,8 @@ class WiFiMic:
         self._connected_48k = False
         self._running = False
         self._source = "none"  # "wifi", "usb", "none"
+        self._last_recv_16k = 0.0
+        self._last_recv_48k = 0.0
 
         # Locks
         self._lock_16k = threading.Lock()
@@ -67,17 +76,21 @@ class WiFiMic:
         # Threads
         self._thread_16k: Optional[threading.Thread] = None
         self._thread_48k: Optional[threading.Thread] = None
-        self._thread_reconnect: Optional[threading.Thread] = None
+        self._thread_health: Optional[threading.Thread] = None
 
     # =========================================================================
     # Public API
     # =========================================================================
 
     def start(self):
-        """Startet Empfangs-Threads und Reconnect-Loop."""
+        """Startet UDP-Sockets und Empfangs-Threads."""
         if self._running:
             return
         self._running = True
+
+        # UDP-Sockets erstellen und binden
+        self._sock_16k = self._create_udp_socket(self.port_16k)
+        self._sock_48k = self._create_udp_socket(self.port_48k)
 
         self._thread_16k = threading.Thread(target=self._recv_loop,
                                             args=(16000,), daemon=True,
@@ -85,21 +98,20 @@ class WiFiMic:
         self._thread_48k = threading.Thread(target=self._recv_loop,
                                             args=(48000,), daemon=True,
                                             name="WiFiMic-48k")
-        self._thread_reconnect = threading.Thread(target=self._reconnect_loop,
-                                                  daemon=True,
-                                                  name="WiFiMic-Reconnect")
+        self._thread_health = threading.Thread(target=self._health_loop,
+                                               daemon=True,
+                                               name="WiFiMic-Health")
 
-        self._thread_reconnect.start()
         self._thread_16k.start()
         self._thread_48k.start()
+        self._thread_health.start()
 
-        logger.info(f"WiFiMic gestartet, ESP32 Ziel: {self.esp_ip}")
+        logger.info(f"WiFiMic gestartet, UDP Ports {self.port_16k}/{self.port_48k}")
 
     def stop(self):
         """Stoppt alle Threads und schliesst Sockets."""
         self._running = False
-        self._close_socket(16000)
-        self._close_socket(48000)
+        self._close_sockets()
         logger.info("WiFiMic gestoppt")
 
     def get_audio_chunk(self, rate: int = 16000, duration_ms: int = 100) -> bytes:
@@ -161,117 +173,102 @@ class WiFiMic:
         }
 
     # =========================================================================
-    # Interne Empfangs-Loops
+    # Interne Methoden
     # =========================================================================
 
+    def _create_udp_socket(self, port: int) -> socket.socket:
+        """Erstellt und bindet einen UDP-Socket."""
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.settimeout(1.0)
+        sock.bind(("0.0.0.0", port))
+        logger.info(f"UDP-Socket gebunden auf Port {port}")
+        return sock
+
     def _recv_loop(self, rate: int):
-        """Empfaengt Audio-Daten von einem TCP-Stream."""
-        port = self.port_16k if rate == 16000 else self.port_48k
+        """Empfaengt Audio-Daten per UDP."""
+        sock = self._sock_16k if rate == 16000 else self._sock_48k
+        chunk_size = self.CHUNK_16K if rate == 16000 else self.CHUNK_48K
         label = f"{rate // 1000}kHz"
 
         while self._running:
-            sock = self._sock_16k if rate == 16000 else self._sock_48k
-            if sock is None:
-                time.sleep(0.5)
-                continue
-
             try:
-                data = sock.recv(4096)
+                data, addr = sock.recvfrom(chunk_size * 4)  # Puffer grosszuegig
                 if not data:
-                    # Verbindung geschlossen
-                    logger.warning(f"[{label}] Verbindung geschlossen")
-                    self._mark_disconnected(rate)
                     continue
 
-                # In Ringpuffer schreiben
+                # Zeitstempel fuer Health-Monitor
+                now = time.monotonic()
                 if rate == 16000:
+                    self._last_recv_16k = now
                     with self._lock_16k:
                         self._buf_16k.extend(data)
                 else:
+                    self._last_recv_48k = now
                     with self._lock_48k:
                         self._buf_48k.extend(data)
+
+                # Erster Empfang → connected melden
+                if rate == 16000 and not self._connected_16k:
+                    self._connected_16k = True
+                    self._source = "wifi"
+                    logger.info(f"[{label}] UDP empfange von {addr[0]}:{addr[1]}")
+                    self._fire_source_event("wifi", rate)
+                elif rate == 48000 and not self._connected_48k:
+                    self._connected_48k = True
+                    logger.info(f"[{label}] UDP empfange von {addr[0]}:{addr[1]}")
 
             except socket.timeout:
                 continue
             except OSError as e:
                 if self._running:
-                    logger.warning(f"[{label}] Recv-Fehler: {e}")
-                    self._mark_disconnected(rate)
+                    logger.warning(f"[{label}] UDP Recv-Fehler: {e}")
                     time.sleep(1)
 
-    def _reconnect_loop(self):
-        """Versucht alle 5s, getrennte Verbindungen wiederherzustellen."""
-        # Erster Versuch sofort
+    def _health_loop(self):
+        """Prueft ob UDP-Pakete noch ankommen, meldet Fallback auf USB."""
         initial_deadline = time.time() + 10  # 10s Timeout fuer Fallback
 
         while self._running:
-            if not self._connected_16k:
-                self._try_connect(16000)
-            if not self._connected_48k:
-                self._try_connect(48000)
+            time.sleep(2)
+            now = time.monotonic()
 
-            # Fallback-Check: Nach 10s ohne 16kHz-Verbindung → USB melden
+            # 16kHz Health-Check
+            if self._connected_16k:
+                if now - self._last_recv_16k > self.HEALTH_TIMEOUT:
+                    self._connected_16k = False
+                    logger.warning("[16kHz] Keine UDP-Pakete seit 2s")
+
+            if self._connected_48k:
+                if now - self._last_recv_48k > self.HEALTH_TIMEOUT:
+                    self._connected_48k = False
+                    logger.warning("[48kHz] Keine UDP-Pakete seit 2s")
+
+            # Fallback auf USB wenn 16kHz weg
             if not self._connected_16k and time.time() > initial_deadline:
                 if self._source != "usb":
                     self._source = "usb"
-                    logger.info("WiFi-Mic nicht erreichbar, Fallback auf USB")
+                    logger.info("WiFi-Mic keine Daten, Fallback auf USB")
                     self._fire_source_event("usb", 16000)
 
-            time.sleep(5)
-
-    def _try_connect(self, rate: int):
-        """Versucht eine TCP-Verbindung aufzubauen."""
-        port = self.port_16k if rate == 16000 else self.port_48k
-        label = f"{rate // 1000}kHz"
-
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(3)
-            sock.connect((self.esp_ip, port))
-            sock.settimeout(2)  # Recv-Timeout
-
-            if rate == 16000:
-                self._sock_16k = sock
-                self._connected_16k = True
-            else:
-                self._sock_48k = sock
-                self._connected_48k = True
-
-            logger.info(f"[{label}] TCP verbunden: {self.esp_ip}:{port}")
-
-            # Bei 16kHz-Verbindung: Source auf WiFi setzen
-            if rate == 16000:
+            # Wieder connected → zurueck auf WiFi
+            if self._connected_16k and self._source != "wifi":
                 self._source = "wifi"
-                self._fire_source_event("wifi", rate)
+                logger.info("WiFi-Mic wieder aktiv")
+                self._fire_source_event("wifi", 16000)
 
-        except (OSError, socket.timeout) as e:
-            logger.debug(f"[{label}] Connect fehlgeschlagen: {e}")
-
-    def _mark_disconnected(self, rate: int):
-        """Markiert einen Stream als getrennt."""
-        if rate == 16000:
-            self._connected_16k = False
-            self._close_socket(16000)
-        else:
-            self._connected_48k = False
-            self._close_socket(48000)
-
-    def _close_socket(self, rate: int):
-        """Schliesst einen Socket sauber."""
-        if rate == 16000 and self._sock_16k:
-            try:
-                self._sock_16k.close()
-            except:
-                pass
-            self._sock_16k = None
-            self._connected_16k = False
-        elif rate == 48000 and self._sock_48k:
-            try:
-                self._sock_48k.close()
-            except:
-                pass
-            self._sock_48k = None
-            self._connected_48k = False
+    def _close_sockets(self):
+        """Schliesst beide UDP-Sockets."""
+        for sock in (self._sock_16k, self._sock_48k):
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+        self._sock_16k = None
+        self._sock_48k = None
+        self._connected_16k = False
+        self._connected_48k = False
 
     def _fire_source_event(self, source: str, rate: int):
         """Event auf Event-Bus feuern wenn vorhanden."""
