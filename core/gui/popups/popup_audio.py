@@ -1121,14 +1121,17 @@ class AudioPopup:
             self._stop_vu_monitor()
 
         if use_wifi:
-            # Service auffordern: 3s WiFi-Audio aufnehmen → WAV
+            # Aktuelle Samplerate fuer Aufnahme verwenden
+            rec_rate = self._current_samplerate
             self.service._write_command("action", {
                 "action": "mic_test",
                 "duration": 3.0,
+                "rate": rec_rate,
             })
 
-        # Countdown starten: 3s Aufnahme
-        self._mic_test_countdown(3, node_id, vu_was_running, use_wifi)
+        # Countdown starten: 5s bei 48kHz (2s Warten + 3s Aufnahme), 3s bei 16kHz
+        countdown = 5 if (use_wifi and self._current_samplerate == 48000) else 3
+        self._mic_test_countdown(countdown, node_id, vu_was_running, use_wifi)
 
     def _mic_test_countdown(self, remaining, node_id, restart_vu, use_wifi):
         """Countdown auf dem Button waehrend Aufnahme."""
@@ -1155,11 +1158,14 @@ class AudioPopup:
     def _do_mic_test(self, node_id, restart_vu, use_wifi):
         """Aufnahme + Wiedergabe im Hintergrund-Thread. WiFi oder USB."""
         test_path = "/tmp/moloch_mic_test.wav"
+        was_48k = use_wifi and self._current_samplerate == 48000
 
         if use_wifi:
             # WiFi: Service nimmt auf via IPC (bereits gesendet in _on_mic_test)
-            # Warten bis WAV geschrieben ist (3s Aufnahme + Puffer)
-            time.sleep(3.5)
+            # Service wartet bis Daten fliessen (bis 2s bei Rate-Switch)
+            # + 3s Aufnahme + Puffer
+            wait_s = 5.5 if was_48k else 3.5
+            time.sleep(wait_s)
         else:
             # USB: pw-record
             time.sleep(0.3)
@@ -1182,21 +1188,46 @@ class AudioPopup:
             src = "WiFi" if use_wifi else "USB"
             self.win.after(0, self._mic_test_error,
                            f"Keine {src}-Aufnahme erstellt")
+            # Bei 48kHz trotzdem zurueckschalten
+            if was_48k:
+                self._switch_rate_back_to_16k()
             return
 
-        # Wiedergabe ueber Pi-Lautsprecher
+        # Wiedergabe ueber Pi-Lautsprecher (pw-play resampled nativ)
         try:
             subprocess.run(["pw-play", test_path], timeout=10,
                            capture_output=True)
-        except Exception:
-            try:
-                subprocess.run(["aplay", test_path], timeout=10,
-                               capture_output=True)
-            except Exception as e:
-                logger.error(f"[AUDIO] Mic Test Wiedergabe failed: {e}")
+        except Exception as e:
+            logger.error(f"[AUDIO] Mic Test Wiedergabe failed: {e}")
+
+        # Nach 48kHz-Test: automatisch auf 16kHz zurueckschalten
+        # (Whisper braucht 16kHz)
+        if was_48k:
+            self._switch_rate_back_to_16k()
 
         # Fertig — UI updaten
         self.win.after(0, self._mic_test_done, restart_vu)
+
+    def _switch_rate_back_to_16k(self):
+        """ESP32 auf 16kHz zurueckschalten (Whisper braucht 16kHz)."""
+        try:
+            req = Request(
+                f"{ESP32_BASE_URL}/audio/mode?rate=16000",
+                method="POST",
+            )
+            with urlopen(req, timeout=2) as resp:
+                if resp.status == 200:
+                    self._current_samplerate = 16000
+                    logger.info("[AUDIO] Rate nach Test auf 16kHz zurueck")
+            # UI-Update im Main-Thread
+            try:
+                self.win.after(0, lambda: self._btn_samplerate.config(
+                    text="16 kHz"))
+                self.win.after(0, self._save_audio_settings)
+            except Exception:
+                pass
+        except Exception as e:
+            logger.error(f"[AUDIO] Rate-Rueckschaltung failed: {e}")
 
     def _write_pcm_wav(self, pcm_data: bytes, wav_path: str,
                        rate: int = 16000, channels: int = 1,

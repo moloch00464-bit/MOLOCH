@@ -1639,45 +1639,68 @@ class MolochService:
         elif action == 'mic_test':
             # WiFi-Mic: 3s Audio aus Ringpuffer aufnehmen, als WAV speichern
             duration_s = float(cmd.get('duration', 3.0))
+            rec_rate = int(cmd.get('rate', 16000))
             test_path = "/tmp/moloch_mic_test.wav"
+            # 16kHz=Mono(1ch), 48kHz=Stereo(2ch)
+            channels = 1 if rec_rate == 16000 else 2
             def _do_mic_test_wifi():
                 try:
                     from core.audio.wifi_mic import get_wifi_mic
                     wm = get_wifi_mic()
-                    if not wm.connected:
-                        logger.warning("[IPC] Mic-Test: WiFi-Mic nicht verbunden")
-                        return
                     # Ringpuffer leeren (alte Daten vor Test)
-                    wm.get_audio_chunk(rate=16000, duration_ms=2000)
-                    # Audio sammeln fuer duration_s Sekunden
+                    wm.get_audio_chunk(rate=rec_rate, duration_ms=2000)
+                    # Warten bis neue Pakete fliessen (ESP32 braucht
+                    # nach Rate-Switch bis zu 1s fuer ersten 48kHz-Chunk)
+                    wait_deadline = time.time() + 2.0
+                    while time.time() < wait_deadline:
+                        probe = wm.get_audio_chunk(
+                            rate=rec_rate, duration_ms=50)
+                        if probe and len(probe) > 10:
+                            logger.info(f"[IPC] Mic-Test: Erste Daten "
+                                        f"bei {rec_rate}Hz empfangen")
+                            break
+                        time.sleep(0.1)
+                    else:
+                        logger.warning(f"[IPC] Mic-Test: Timeout, keine "
+                                       f"Daten bei {rec_rate}Hz nach 2s")
+                    # Audio sammeln
                     buf = bytearray()
                     end_time = time.time() + duration_s
                     while time.time() < end_time:
-                        chunk = wm.get_audio_chunk(rate=16000, duration_ms=50)
+                        chunk = wm.get_audio_chunk(
+                            rate=rec_rate, duration_ms=50)
                         if chunk:
                             buf.extend(chunk)
                         time.sleep(0.04)
-                    # Als WAV schreiben (16kHz Mono 16-bit)
+                    if len(buf) < 100:
+                        logger.warning(f"[IPC] Mic-Test: Keine Daten "
+                                       f"bei {rec_rate}Hz")
+                        return
+                    # WAV schreiben (Rate + Channels dynamisch)
                     import struct as _st
+                    bps = rec_rate * channels * 2  # bytes/sec
+                    block_align = channels * 2
                     data_size = len(buf)
                     header = bytearray()
                     header.extend(b'RIFF')
                     header.extend(_st.pack('<I', 36 + data_size))
                     header.extend(b'WAVEfmt ')
-                    header.extend(_st.pack('<IHHIIHH', 16, 1, 1, 16000,
-                                           32000, 2, 16))
+                    header.extend(_st.pack('<IHHIIHH', 16, 1, channels,
+                                           rec_rate, bps, block_align, 16))
                     header.extend(b'data')
                     header.extend(_st.pack('<I', data_size))
                     with open(test_path, 'wb') as f:
                         f.write(header)
                         f.write(buf)
-                    logger.info(f"[IPC] Mic-Test: {len(buf)} Bytes, "
-                                f"{len(buf) / 32000:.1f}s gespeichert")
+                    logger.info(f"[IPC] Mic-Test: {len(buf)}B, "
+                                f"{rec_rate}Hz {channels}ch, "
+                                f"{data_size / bps:.1f}s")
                 except Exception as e:
                     logger.error(f"[IPC] Mic-Test Fehler: {e}")
             threading.Thread(target=_do_mic_test_wifi, daemon=True,
                              name="MicTest-WiFi").start()
-            logger.info(f"[IPC] Mic-Test WiFi gestartet ({duration_s}s)")
+            logger.info(f"[IPC] Mic-Test WiFi gestartet "
+                        f"({duration_s}s, {rec_rate}Hz)")
         elif action == 'save_settings':
             # Audio + Camera Werte aus Panel uebernehmen
             _au = cmd.get('audio')
