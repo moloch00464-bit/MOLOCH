@@ -95,16 +95,13 @@ class AudioPopup:
         self._wifi_connected = False
         self._wifi_poll_running = False
         self._current_samplerate = 16000
-        self._wifi_mic_ref = None  # WiFiMic Singleton fuer Buffer/Amplitude
-        try:
-            from core.audio.wifi_mic import get_wifi_mic
-            self._wifi_mic_ref = get_wifi_mic()
-            # WiFi-Mic starten falls noch nicht laufend
-            if not self._wifi_mic_ref._running:
-                self._wifi_mic_ref.start()
-                logger.info("[AUDIO] WiFi-Mic vom Popup gestartet")
-        except Exception:
-            pass
+        # WICHTIG: WiFiMic im Panel-Prozess NICHT instanziieren!
+        # Panel und Service sind SEPARATE Prozesse. get_wifi_mic() wuerde
+        # einen NEUEN Singleton erstellen, der Port 12345 doppelt bindet
+        # und dem Service die UDP-Pakete klaut.
+        # Stattdessen: Alle WiFi-Mic Daten aus Service-Status lesen,
+        # alle Befehle (force_source, gain) via IPC-Commands senden.
+        self._wifi_software_gain = 1.0  # Lokaler Cache fuer Gain-Slider
 
         # Toplevel erstellen
         self.win = tk.Toplevel(parent)
@@ -477,8 +474,19 @@ class AudioPopup:
             self._wifi_after_id = self.win.after(WIFI_UPDATE_MS, self._do_wifi_poll)
 
     def _update_wifi_buffer_and_level(self):
-        """Buffer-Fuellstand, Paket-Stats und Live-Amplitude aktualisieren."""
-        if not self._wifi_mic_ref:
+        """Buffer-Fuellstand, Paket-Stats und Live-Amplitude aktualisieren.
+
+        Liest WiFi-Mic Daten aus Service-Status (voice.wifi_mic),
+        NICHT direkt vom WiFiMic-Singleton (separater Prozess!).
+        """
+        try:
+            svc_status = self.service.read_status()
+            voice = svc_status.get("voice", {}) if svc_status else {}
+            mic_status = voice.get("wifi_mic", {})
+        except Exception:
+            mic_status = {}
+
+        if not mic_status:
             self._wifi_buf_label.config(text="Buf: n/a", fg=FG_DIM)
             self._wifi_pegel_label.config(text="-- dB", fg=FG_DIM)
             self._wifi_pkt_recv_label.config(text="Pkts: n/a", fg=FG_DIM)
@@ -487,7 +495,6 @@ class AudioPopup:
             return
 
         try:
-            mic_status = self._wifi_mic_ref.get_status()
             buf_bytes = mic_status.get("buf_16k_bytes", 0)
             buf_pct = min(100, int(buf_bytes / 640))  # 64000 max = 100%
             connected = mic_status.get("connected_16k", False)
@@ -522,8 +529,8 @@ class AudioPopup:
                 self._wifi_vu_canvas.delete("all")
                 return
 
-            # Amplitude: peek_rms() liest Buffer OHNE ihn zu leeren
-            rms_db = self._wifi_mic_ref.peek_rms(num_samples=160)
+            # Amplitude aus Service-Status (peek_rms im Service berechnet)
+            rms_db = mic_status.get("rms_db", -80.0)
 
             # Pegel-Label
             if rms_db > -79:
@@ -622,23 +629,24 @@ class AudioPopup:
             else:
                 btn.config(bg=BG_BUTTON, fg=FG_WHITE)
 
-        # WiFiMic Singleton informieren
-        if self._wifi_mic_ref:
-            self._wifi_mic_ref.set_force_source(mode)
+        # WiFiMic im Service ueber IPC informieren
+        self.service._write_command("action", {
+            "action": "set_audio",
+            "force_source": mode,
+        })
 
         # Gain-Slider Wert umschalten: WiFi-Gain ↔ USB-Gain
-        if self._wifi_mic_ref:
-            if mode == "usb" and old_mode != "usb":
-                # Wechsel zu USB: wpctl-Gain laden
-                wpctl_gain = self._read_wpctl_gain()
-                if wpctl_gain is not None:
-                    self._gain_var.set(wpctl_gain)
-                    self._gain_label.config(text=f"{wpctl_gain:.2f}")
-            elif mode != "usb" and old_mode == "usb":
-                # Wechsel zu WiFi: Software-Gain laden
-                sw_gain = self._wifi_mic_ref.software_gain
-                self._gain_var.set(sw_gain)
-                self._gain_label.config(text=f"{sw_gain:.2f}")
+        if mode == "usb" and old_mode != "usb":
+            # Wechsel zu USB: wpctl-Gain laden
+            wpctl_gain = self._read_wpctl_gain()
+            if wpctl_gain is not None:
+                self._gain_var.set(wpctl_gain)
+                self._gain_label.config(text=f"{wpctl_gain:.2f}")
+        elif mode != "usb" and old_mode == "usb":
+            # Wechsel zu WiFi: Software-Gain laden
+            sw_gain = self._wifi_software_gain
+            self._gain_var.set(sw_gain)
+            self._gain_label.config(text=f"{sw_gain:.2f}")
 
         # USB-Controls ein/ausgrauen
         self._update_usb_controls_state()
@@ -655,8 +663,7 @@ class AudioPopup:
         Gain-Slider steuert dann Software-Gain statt wpctl.
         """
         wifi_active = self._source_mode != "usb" and (
-            self._source_mode == "wifi" or
-            (self._wifi_mic_ref and self._wifi_mic_ref.connected)
+            self._source_mode == "wifi" or self._wifi_connected
         )
 
         if wifi_active:
@@ -762,20 +769,25 @@ class AudioPopup:
         self._status_label.pack(pady=(3, 3))
 
     def _update_status_label(self):
-        """Status-Label: zeigt aktive Verbindung an."""
-        # WiFi-Mic aktiv?
+        """Status-Label: zeigt aktive Verbindung an.
+
+        Liest audio_source aus Service-Status (voice.audio_source).
+        """
+        # WiFi-Mic Status aus Service-Status lesen (NICHT aus WiFiMic-Singleton)
         wifi_connected = False
-        if self._wifi_mic:
-            try:
-                wifi_connected = self._wifi_mic._connected_16k
-            except Exception:
-                pass
+        try:
+            svc_status = self.service.read_status()
+            voice = svc_status.get("voice", {}) if svc_status else {}
+            audio_src = voice.get("audio_source", "")
+            wifi_mic = voice.get("wifi_mic", {})
+            wifi_connected = wifi_mic.get("connected_16k", False)
+        except Exception:
+            audio_src = ""
 
         if self._source_mode == "wifi" or (self._source_mode == "auto" and wifi_connected):
-            # WiFi-Mic ist aktive Quelle
             if wifi_connected:
                 self._status_label.config(
-                    text=f"WiFi-Mic aktiv ({self._wifi_mic.esp_ip})",
+                    text=f"WiFi-Mic aktiv ({ESP32_IP})",
                     fg=STATUS_GREEN,
                 )
             else:
@@ -839,14 +851,17 @@ class AudioPopup:
         self._gain_label.config(text=f"{val:.2f}")
         self._wpctl_hint.config(text="")
 
-        # WiFi-Modus? → Software-Gain setzen
+        # WiFi-Modus? → Software-Gain via IPC setzen
         wifi_active = self._source_mode != "usb" and (
-            self._source_mode == "wifi" or
-            (self._wifi_mic_ref and self._wifi_mic_ref.connected)
+            self._source_mode == "wifi" or self._wifi_connected
         )
 
-        if wifi_active and self._wifi_mic_ref:
-            self._wifi_mic_ref.software_gain = val
+        if wifi_active:
+            self._wifi_software_gain = val
+            self.service._write_command("action", {
+                "action": "set_audio",
+                "wifi_software_gain": val,
+            })
         else:
             # USB-Modus → wpctl
             def apply():
@@ -1083,21 +1098,13 @@ class AudioPopup:
         if self._mic_test_running:
             return
 
-        # WiFi-Modus pruefen
-        wifi_active = self._source_mode != "usb" and (
-            self._source_mode == "wifi" or
-            (self._wifi_mic_ref and self._wifi_mic_ref.connected)
-        )
-        use_wifi = wifi_active and self._wifi_mic_ref and self._wifi_mic_ref._connected_16k
-
-        if not use_wifi:
-            # USB-Modus: ReSpeaker Node brauchen
-            node_id = self._find_respeaker_source_id()
-            if not node_id:
-                self._lbl_mic_status.config(text="Kein Mikrofon!", fg=STATUS_RED)
-                return
-        else:
-            node_id = None
+        # Mic-Test: Immer USB/pw-record (WiFi-Mic laeuft im Service-Prozess,
+        # Panel hat keinen Zugriff auf den UDP-Ringpuffer)
+        use_wifi = False
+        node_id = self._find_respeaker_source_id()
+        if not node_id:
+            self._lbl_mic_status.config(text="Kein USB-Mikrofon!", fg=STATUS_RED)
+            return
 
         self._mic_test_running = True
         self._btn_mic_test.config(state=tk.DISABLED)
@@ -1136,44 +1143,17 @@ class AudioPopup:
         """Aufnahme + Wiedergabe im Hintergrund-Thread. WiFi oder USB."""
         test_path = "/tmp/moloch_mic_test.wav"
 
-        if use_wifi:
-            # WiFi-Mic: 3s aus Ringpuffer sammeln
-            try:
-                # Alten Buffer leeren
-                self._wifi_mic_ref.get_audio_chunk(rate=16000, duration_ms=2000)
-                pcm_buf = bytearray()
-                for _ in range(60):  # 60 x 50ms = 3s
-                    chunk = self._wifi_mic_ref.get_audio_chunk(
-                        rate=16000, duration_ms=50)
-                    if chunk:
-                        pcm_buf.extend(chunk)
-                    time.sleep(0.05)
-
-                if len(pcm_buf) < 1600:
-                    self.win.after(0, self._mic_test_error,
-                                  "WiFi-Mic: zu wenig Audio")
-                    return
-
-                # PCM als WAV schreiben
-                self._write_pcm_wav(bytes(pcm_buf), test_path)
-
-            except Exception as e:
-                logger.error(f"[AUDIO] WiFi Mic Test failed: {e}")
-                self.win.after(0, self._mic_test_error,
-                               f"WiFi-Aufnahme: {e}")
-                return
-        else:
-            # USB: pw-record wie bisher
-            time.sleep(0.3)
-            try:
-                proc = subprocess.Popen(
-                    ["pw-record", "--target", node_id,
-                     "--channels", "1", "--rate", "16000", test_path],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                time.sleep(3)
-                proc.send_signal(signal.SIGINT)
-                proc.wait(timeout=3)
-            except Exception as e:
+        # USB: pw-record (WiFi-Mic laeuft im Service-Prozess)
+        time.sleep(0.3)
+        try:
+            proc = subprocess.Popen(
+                ["pw-record", "--target", node_id,
+                 "--channels", "1", "--rate", "16000", test_path],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(3)
+            proc.send_signal(signal.SIGINT)
+            proc.wait(timeout=3)
+        except Exception as e:
                 logger.error(f"[AUDIO] USB Mic Test failed: {e}")
                 self.win.after(0, self._mic_test_error,
                                f"USB-Aufnahme: {e}")
@@ -1300,10 +1280,15 @@ class AudioPopup:
 
         # WiFi Software-Gain laden und bei WiFi-Modus im Slider anzeigen
         raw_sw_gain = audio.get("wifi_software_gain")
-        if raw_sw_gain is not None and self._wifi_mic_ref:
+        if raw_sw_gain is not None:
             try:
                 sw_gain = max(0.0, min(3.0, float(raw_sw_gain)))
-                self._wifi_mic_ref.software_gain = sw_gain
+                self._wifi_software_gain = sw_gain
+                # Via IPC an Service senden
+                self.service._write_command("action", {
+                    "action": "set_audio",
+                    "wifi_software_gain": sw_gain,
+                })
                 # Im WiFi-Modus: Slider auf WiFi-Gain setzen
                 if self._source_mode in ("wifi", "auto"):
                     self._gain_var.set(sw_gain)
@@ -1377,8 +1362,7 @@ class AudioPopup:
                 "wifi_samplerate": self._current_samplerate,
                 "audio_source": self._source_mode,
                 "wifi_software_gain": round(
-                    self._wifi_mic_ref.software_gain, 2
-                ) if self._wifi_mic_ref else 1.0,
+                    self._wifi_software_gain, 2),
             }
 
             # Atomar schreiben: tmp + rename

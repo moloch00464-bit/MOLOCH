@@ -1616,6 +1616,24 @@ class MolochService:
             self._saved_mic_gain = float(cmd.get('mic_gain', self._saved_mic_gain))
             self._saved_agc = bool(cmd.get('agc_enabled', self._saved_agc))
             self._saved_noise_gate = float(cmd.get('noise_gate_db', self._saved_noise_gate))
+            # WiFi-Mic force_source
+            force_src = cmd.get('force_source')
+            if force_src in ('auto', 'wifi', 'usb'):
+                try:
+                    from core.audio.wifi_mic import get_wifi_mic
+                    get_wifi_mic().set_force_source(force_src)
+                    logger.info(f"[IPC] Audio force_source={force_src}")
+                except Exception as e:
+                    logger.warning(f"[IPC] force_source Fehler: {e}")
+            # WiFi Software-Gain
+            wifi_sw_gain = cmd.get('wifi_software_gain')
+            if wifi_sw_gain is not None:
+                try:
+                    from core.audio.wifi_mic import get_wifi_mic
+                    get_wifi_mic().software_gain = float(wifi_sw_gain)
+                    logger.info(f"[IPC] WiFi software_gain={wifi_sw_gain}")
+                except Exception as e:
+                    logger.warning(f"[IPC] wifi_software_gain Fehler: {e}")
             logger.info(f"[IPC] Audio: gain={self._saved_mic_gain:.2f}, "
                         f"gate={self._saved_noise_gate:.0f}dB, agc={self._saved_agc}")
         elif action == 'mic_test':

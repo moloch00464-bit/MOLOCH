@@ -6,7 +6,7 @@
 |---|-------|-------|--------|-----|
 | 1 | Vision | AGENT_VISION.md | TAPPAS, GStreamer, Hailo NPU, HEFs, Perception | ~3000 |
 | 2 | Hardware | AGENT_HARDWARE.md | ONVIF, RTSP, PTZ-Mechanik, eWeLink, Thermal | ~4300 |
-| 3 | GUI | AGENT_GUI.md | Tkinter Panel, Module, Popups | ~7500 |
+| 3 | GUI | AGENT_GUI.md | Tkinter Panel, Module, Popups, Konsistenz-Audit | ~7500 |
 | 4 | Tracking | AGENT_TRACKING.md | PTZ-Tracker, Such-FSM, Arbiter, Autonomie | ~2600 |
 | 5 | Voice | AGENT_VOICE.md | Whisper, TTS, Personality, Claude API, Spotify | ~4750 |
 | 6 | Service | AGENT_SERVICE.md | moloch_service, IPC, Memory, Integration | ~3400 |

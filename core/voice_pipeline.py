@@ -1322,6 +1322,16 @@ class VoicePipeline:
         elif self._wifi_mic is None:
             audio_source = "usb"
 
+        # WiFi-Mic Detail-Status fuer Panel (Buffer, Pakete, RMS)
+        wifi_mic_status = {}
+        if self._wifi_mic:
+            try:
+                wifi_mic_status = self._wifi_mic.get_status()
+                wifi_mic_status["rms_db"] = round(
+                    self._wifi_mic.peek_rms(num_samples=160), 1)
+            except Exception:
+                pass
+
         return {
             "whisper_status": self._whisper_status,
             "whisper_backend": self._whisper.backend if self._whisper else "nicht geladen",
@@ -1334,6 +1344,7 @@ class VoicePipeline:
             "voices": self.list_voices(),
             "messages": messages,
             "audio_source": audio_source,
+            "wifi_mic": wifi_mic_status,
         }
 
     def reset_conversation(self):

@@ -191,6 +191,13 @@ class TalkChatModule:
         self._btn_ptt.bind("<ButtonPress-1>", self._ptt_press)
         self._btn_ptt.bind("<ButtonRelease-1>", self._ptt_release)
 
+        # Mic-Source Status Label (WiFi/USB)
+        self._lbl_mic_source = tk.Label(
+            row, text="Mic: --",
+            bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
+        )
+        self._lbl_mic_source.pack(side=tk.LEFT, padx=(0, 8))
+
         # Whisper Status Label
         self._lbl_whisper = tk.Label(
             row, text="Idle",
@@ -247,8 +254,20 @@ class TalkChatModule:
             status = self._service.read_status()
 
             if status:
-                # Whisper STT Status
+                # Mic-Source Status (WiFi/USB)
                 voice = status.get("voice", {})
+                audio_src = voice.get("audio_source", "")
+                if audio_src == "wifi":
+                    self._lbl_mic_source.config(
+                        text="WiFi-Mic", fg=ACCENT_GREEN)
+                elif audio_src == "usb":
+                    self._lbl_mic_source.config(
+                        text="USB Mic", fg=STATUS_YELLOW)
+                else:
+                    self._lbl_mic_source.config(
+                        text="Mic: --", fg=FG_DIM)
+
+                # Whisper STT Status
                 whisper_state = voice.get("whisper_status", "Idle")
                 if whisper_state != self._last_whisper_status:
                     self._last_whisper_status = whisper_state
