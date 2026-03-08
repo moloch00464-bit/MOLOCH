@@ -10,9 +10,16 @@ Sektionen:
   90-100=GRUEN, 75-89=GELB, 50-74=ORANGE, unter 50=ROT
 - System-Zeile: FPS, CPU-Temp, RAM%, Luefterstufe, Uptime
 - Core-Zeile: Bridge-State, Face-ID, Tension, Mood
-- Nervensystem: 5 Pipeline-Verbindungen mit Farb-Status
-- Warnungen-Liste (aus "warnungen" Array + Pipeline-Alerts)
+- Nervensystem: 5 Pipeline-Checks direkt aus API-Daten
+- Warnungen-Liste (aus "warnungen" Array der API)
 - Letzte 5 Events vom Event-Bus
+
+Nervensystem-Checks (alle client-side, kein Backend noetig):
+  1. Vision→Core:   event_bus_subscribers hat perception.* > 0
+  2. Core→Bridge:   bridge_state ist gueltig (nicht unknown)
+  3. Bridge→Tracker: Person da + Bridge trackt = OK
+  4. ESP→Audio:      HTTP GET 10.42.0.2/audio/status in Thread
+  5. Feedback Loop:  Person da + face_id gesetzt = OK
 
 Pollt NUR wenn offen, stoppt beim Schliessen.
 Importiert NUR panel_styles und tkinter + urllib.
@@ -20,9 +27,10 @@ Importiert NUR panel_styles und tkinter + urllib.
 
 import json
 import logging
+import threading
 import tkinter as tk
 import urllib.request
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Tuple
 
 from core.gui.panel_styles import (
     BG_DARK, BG_FRAME, BG_INPUT,
@@ -39,6 +47,9 @@ POLL_MS = 2000
 # Diagnostics API URL
 DIAG_URL = "http://localhost:5000/moloch/diagnostics"
 
+# ESP32 Audio-Status URL
+ESP_URL = "http://10.42.0.2/audio/status"
+
 # Ampel-Groesse
 AMPEL_RADIUS = 20
 
@@ -54,12 +65,16 @@ PIPELINE_LABELS = {
     "feedback_loop": "Feedback Loop",
 }
 
+# Status-Konstanten
+_OK = "OK"
+_DEGRADED = "DEGRADED"
+_BROKEN = "BROKEN"
+
 # Farben pro Status
 _STATUS_COLORS = {
-    "OK": STATUS_GREEN,
-    "DEGRADED": STATUS_YELLOW,
-    "BROKEN": STATUS_RED,
-    "MISSING": STATUS_RED,
+    _OK: STATUS_GREEN,
+    _DEGRADED: STATUS_YELLOW,
+    _BROKEN: STATUS_RED,
 }
 
 
@@ -71,6 +86,11 @@ class SupervisorPopup:
         self.service = service_proxy
         self._after_id = None
         self._event_history: List[str] = []
+
+        # ESP-Check Cache (wird in Background-Thread aktualisiert)
+        self._esp_status: str = _BROKEN
+        self._esp_detail: str = "Pruefe..."
+        self._esp_lock = threading.Lock()
 
         # Toplevel
         self.win = tk.Toplevel(parent)
@@ -90,11 +110,14 @@ class SupervisorPopup:
         self._build_warnungen()
         self._build_events()
 
+        # ESP-Check sofort starten
+        self._check_esp_async()
+
         # Erster Poll
         self._poll()
 
     # =========================================================================
-    # Ampel (oben) — jetzt Score-basiert
+    # Ampel (oben) — Score-basiert
     # =========================================================================
 
     def _build_ampel(self):
@@ -121,7 +144,6 @@ class SupervisorPopup:
         )
         self._lbl_score.pack(side=tk.RIGHT, padx=10)
 
-        # Initial grau
         self._draw_ampel(FG_DIM)
 
     def _draw_ampel(self, color: str):
@@ -187,14 +209,12 @@ class SupervisorPopup:
             row = tk.Frame(section, bg=BG_FRAME)
             row.pack(fill=tk.X, padx=8, pady=1)
 
-            # Pipeline-Name links
             tk.Label(
                 row, text=f"  {display_name}:",
                 bg=BG_FRAME, fg=FG_LABEL, font=FONT_MONO,
                 anchor=tk.W, width=22,
             ).pack(side=tk.LEFT)
 
-            # Status rechts (wird live aktualisiert)
             lbl = tk.Label(
                 row, text="---",
                 bg=BG_FRAME, fg=FG_DIM, font=FONT_MONO,
@@ -208,7 +228,7 @@ class SupervisorPopup:
     # =========================================================================
 
     def _build_warnungen(self):
-        """Warnungen aus dem diagnostics-Array + Pipeline-Alerts."""
+        """Warnungen direkt aus der API."""
         section = tk.LabelFrame(
             self.win, text="Warnungen",
             bg=BG_FRAME, fg=FG_LABEL, font=FONT_LABEL,
@@ -257,6 +277,103 @@ class SupervisorPopup:
             return {}
 
     # =========================================================================
+    # ESP-Check in Background-Thread (blockiert nicht Tkinter)
+    # =========================================================================
+
+    def _check_esp_async(self):
+        """ESP32 HTTP-Check in separatem Thread starten."""
+        t = threading.Thread(target=self._esp_worker, daemon=True)
+        t.start()
+
+    def _esp_worker(self):
+        """HTTP GET auf ESP32 — Ergebnis in Cache schreiben."""
+        try:
+            req = urllib.request.Request(ESP_URL)
+            with urllib.request.urlopen(req, timeout=2) as resp:
+                body = resp.read().decode("utf-8", errors="replace")
+                with self._esp_lock:
+                    self._esp_status = _OK
+                    self._esp_detail = f"Verbunden ({body[:30].strip()})"
+        except Exception:
+            with self._esp_lock:
+                self._esp_status = _BROKEN
+                self._esp_detail = "Nicht erreichbar (10.42.0.2)"
+
+    # =========================================================================
+    # 5 Nervensystem-Checks (client-side aus API-Daten)
+    # =========================================================================
+
+    def _run_checks(self, data: Dict[str, Any]) -> Dict[str, Tuple[str, str]]:
+        """Alle 5 Pipeline-Checks ausfuehren. Gibt Dict {key: (status, detail)} zurueck."""
+        checks = {}
+
+        # --- 1. Vision → Core ---
+        # event_bus_subscribers ist dict: topic -> count
+        subs = data.get("event_bus_subscribers", {})
+        if isinstance(subs, dict):
+            has_perception = subs.get("perception.person_detected", 0) > 0
+        else:
+            has_perception = False
+
+        pipeline_alive = data.get("pipeline_alive", False)
+
+        if pipeline_alive and has_perception:
+            checks["vision_core"] = (_OK, "Pipeline + Subscriber aktiv")
+        elif pipeline_alive:
+            checks["vision_core"] = (_DEGRADED, "Pipeline aktiv, keine Perception-Subs")
+        else:
+            checks["vision_core"] = (_BROKEN, "Vision-Pipeline nicht aktiv")
+
+        # --- 2. Core → Bridge ---
+        bridge_state = data.get("bridge_state", "unknown")
+        gueltige_states = ("idle", "searching", "tracking", "interaction", "manual_override")
+
+        if bridge_state in gueltige_states:
+            checks["core_bridge"] = (_OK, f"Bridge: {bridge_state}")
+        else:
+            checks["core_bridge"] = (_BROKEN, f"Bridge: {bridge_state}")
+
+        # --- 3. Bridge → Tracker ---
+        person_detected = data.get("person_detected", False)
+
+        if not person_detected:
+            checks["bridge_tracker"] = (_OK, f"Kein Target ({bridge_state})")
+        elif bridge_state in ("tracking", "interaction"):
+            checks["bridge_tracker"] = (_OK, f"Aktiv: {bridge_state}")
+        elif bridge_state == "searching":
+            checks["bridge_tracker"] = (_DEGRADED, "Person da, suche Gesicht...")
+        else:
+            checks["bridge_tracker"] = (_DEGRADED, f"Person da, Bridge: {bridge_state}")
+
+        # --- 4. ESP → Audio (aus Thread-Cache) ---
+        with self._esp_lock:
+            checks["esp_audio"] = (self._esp_status, self._esp_detail)
+
+        # --- 5. Feedback Loop ---
+        face_id = data.get("face_id", None)
+
+        if not person_detected:
+            checks["feedback_loop"] = (_OK, "Kein Target (idle)")
+        elif face_id:
+            sim = data.get("face_similarity", 0.0)
+            checks["feedback_loop"] = (_OK, f"Erkannt: {face_id} ({sim:.0%})")
+        else:
+            checks["feedback_loop"] = (_DEGRADED, "Person da, kein Gesicht")
+
+        return checks
+
+    @staticmethod
+    def _calc_score(checks: Dict[str, Tuple[str, str]]) -> int:
+        """Health Score berechnen: OK=20, DEGRADED=10, BROKEN=0."""
+        score = 0
+        for status, _detail in checks.values():
+            if status == _OK:
+                score += 20
+            elif status == _DEGRADED:
+                score += 10
+        return score
+
+    # =========================================================================
     # Update-Loop
     # =========================================================================
 
@@ -271,62 +388,46 @@ class SupervisorPopup:
             self._lbl_ampel.config(text="Keine Verbindung", fg=FG_DIM)
             self._lbl_score.config(text="", fg=FG_DIM)
 
+        # ESP-Check alle 4 Sekunden (jeden 2. Poll)
+        if not hasattr(self, "_esp_tick"):
+            self._esp_tick = 0
+        self._esp_tick += 1
+        if self._esp_tick % 2 == 0:
+            self._check_esp_async()
+
         # Naechster Poll
         self._after_id = self.win.after(POLL_MS, self._poll)
 
     def _update_gui(self, data: Dict[str, Any]):
         """GUI mit neuen Daten aktualisieren."""
-        warnungen = list(data.get("warnungen", []))
 
-        # --- Nervensystem auswerten ---
-        nervensystem = data.get("nervensystem", {})
-        pipelines = nervensystem.get("pipelines", {})
-        health_score = nervensystem.get("health_score", -1)
-        pipeline_alerts = []
+        # --- Nervensystem-Checks ausfuehren ---
+        checks = self._run_checks(data)
+        health_score = self._calc_score(checks)
 
         # Pipeline-Zeilen aktualisieren
         for key, lbl in self._pipe_labels.items():
-            info = pipelines.get(key, {})
-            status = info.get("status", "BROKEN")
-            detail = info.get("detail", "Unbekannt")
+            status, detail = checks.get(key, (_BROKEN, "Unbekannt"))
             color = _STATUS_COLORS.get(status, FG_DIM)
-            lbl.config(text=f"{status}  ({detail})", fg=color)
-
-            # Alerts fuer BROKEN/MISSING Pipelines
-            display_name = PIPELINE_LABELS.get(key, key)
-            if status == "BROKEN":
-                pipeline_alerts.append(f"{display_name}: {detail}")
-            elif status == "MISSING":
-                pipeline_alerts.append(f"{display_name}: FEHLT — {detail}")
+            lbl.config(text=f"{status}  {detail}", fg=color)
 
         # --- Ampel basierend auf Health Score ---
         if health_score >= 90:
             ampel_color = STATUS_GREEN
             ampel_text = f"Alles OK (Score: {health_score})"
-            ampel_fg = STATUS_GREEN
         elif health_score >= 75:
             ampel_color = STATUS_YELLOW
             ampel_text = f"Warnung (Score: {health_score})"
-            ampel_fg = STATUS_YELLOW
         elif health_score >= 50:
             ampel_color = STATUS_ORANGE
             ampel_text = f"Degradiert (Score: {health_score})"
-            ampel_fg = STATUS_ORANGE
-        elif health_score >= 0:
+        else:
             ampel_color = STATUS_RED
             ampel_text = f"KRITISCH (Score: {health_score})"
-            ampel_fg = STATUS_RED
-        else:
-            # Kein Nervensystem-Daten (alte API ohne nervensystem-Feld)
-            # Fallback auf Warnungen-basierte Ampel
-            ampel_color, ampel_text, ampel_fg = self._fallback_ampel(warnungen)
 
         self._draw_ampel(ampel_color)
-        self._lbl_ampel.config(text=ampel_text, fg=ampel_fg)
-        self._lbl_score.config(
-            text=f"Health: {health_score}/100" if health_score >= 0 else "",
-            fg=ampel_fg,
-        )
+        self._lbl_ampel.config(text=ampel_text, fg=ampel_color)
+        self._lbl_score.config(text=f"Health: {health_score}/100", fg=ampel_color)
 
         # --- System-Zeile ---
         fps = data.get("fps", 0.0)
@@ -353,19 +454,21 @@ class SupervisorPopup:
                  f"Tension: {tension:.2f}  |  Mood: {mood}"
         )
 
-        # --- Warnungen (System + Pipeline-Alerts) ---
-        alle_warnungen = warnungen + pipeline_alerts
-        if alle_warnungen:
-            warn_text = "\n".join(f"\u26a0 {w}" for w in alle_warnungen)
-            kritisch_keywords = ["offline", "Pipeline nicht", "kritisch", "heiss", "BROKEN", "FEHLT"]
+        # --- Warnungen (direkt aus API) ---
+        warnungen = data.get("warnungen", [])
+        if warnungen:
+            warn_text = "\n".join(f"\u26a0 {w}" for w in warnungen)
+            kritisch_keywords = ["offline", "Pipeline nicht", "kritisch", "heiss"]
             ist_kritisch = any(
                 any(kw in w for kw in kritisch_keywords)
-                for w in alle_warnungen
+                for w in warnungen
             )
-            warn_color = STATUS_RED if ist_kritisch else STATUS_YELLOW
-            self._lbl_warnungen.config(text=warn_text, fg=warn_color)
+            self._lbl_warnungen.config(
+                text=warn_text,
+                fg=STATUS_RED if ist_kritisch else STATUS_YELLOW,
+            )
         else:
-            self._lbl_warnungen.config(text="Keine Warnungen", fg=STATUS_GREEN)
+            self._lbl_warnungen.config(text="(keine Warnungen)", fg=STATUS_GREEN)
 
         # --- Events ---
         events = data.get("recent_events", [])
@@ -384,19 +487,6 @@ class SupervisorPopup:
         else:
             self._txt_events.insert(tk.END, "(keine Events)")
         self._txt_events.config(state=tk.DISABLED)
-
-    @staticmethod
-    def _fallback_ampel(warnungen: List[str]):
-        """Fallback-Ampel wenn kein Nervensystem-Score vorhanden."""
-        if not warnungen:
-            return STATUS_GREEN, "Alles OK", STATUS_GREEN
-        kritisch_keywords = ["offline", "Pipeline nicht", "kritisch", "heiss"]
-        ist_kritisch = any(
-            any(kw in w for kw in kritisch_keywords) for w in warnungen
-        )
-        if ist_kritisch:
-            return STATUS_RED, f"KRITISCH ({len(warnungen)})", STATUS_RED
-        return STATUS_YELLOW, f"Warnung ({len(warnungen)})", STATUS_YELLOW
 
     # =========================================================================
     # Schliessen

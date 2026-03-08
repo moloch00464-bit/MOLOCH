@@ -15,12 +15,12 @@
     "recency": 4.0
   },
   "audio": {
-    "mic_gain": 0.72,
+    "mic_gain": 1.89,
     "noise_gate_db": -30.0,
     "agc_enabled": false,
     "wifi_samplerate": 16000,
     "audio_source": "wifi",
-    "wifi_software_gain": 0.72
+    "wifi_software_gain": 1.89
   },
   "camera": {
     "ptz_speed": 15.0,
