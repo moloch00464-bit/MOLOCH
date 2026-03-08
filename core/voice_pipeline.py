@@ -608,12 +608,84 @@ class VoicePipeline:
             with self._lock:
                 self._processing = False
 
+    def _vad_trim_wav(self, wav_path: str) -> bool:
+        """VAD-Filter: Fuehrende und nachfolgende Stille abschneiden.
+
+        Nutzt webrtcvad (aggressiveness=2, 30ms Frames).
+        Ueberschreibt die WAV-Datei mit dem getrimmten Audio.
+        Returns True wenn Sprache gefunden, False wenn nur Stille.
+        """
+        try:
+            import webrtcvad
+            import wave as _wave
+            import struct as _struct
+
+            # WAV lesen (muss 16kHz Mono 16-bit sein)
+            with _wave.open(wav_path, 'rb') as wf:
+                rate = wf.getframerate()
+                channels = wf.getnchannels()
+                sample_width = wf.getsampwidth()
+                raw = wf.readframes(wf.getnframes())
+
+            if rate != 16000 or channels != 1 or sample_width != 2:
+                logger.warning(f"[VAD] Unerwartetes Format: {rate}Hz {channels}ch {sample_width}B — ueberspringe VAD")
+                return True
+
+            vad = webrtcvad.Vad(2)  # Aggressiveness 2 (0-3)
+            frame_ms = 30
+            frame_bytes = int(rate * frame_ms / 1000) * sample_width  # 960 Bytes
+
+            # In Frames aufteilen und VAD pruefen
+            voiced_frames = []
+            first_voice = -1
+            last_voice = -1
+            for i in range(0, len(raw) - frame_bytes + 1, frame_bytes):
+                frame = raw[i:i + frame_bytes]
+                is_speech = vad.is_speech(frame, rate)
+                voiced_frames.append((i, is_speech))
+                if is_speech:
+                    if first_voice == -1:
+                        first_voice = i
+                    last_voice = i + frame_bytes
+
+            if first_voice == -1:
+                logger.info("[VAD] Keine Sprache erkannt — nur Stille")
+                return False
+
+            # 3 Frames (~90ms) Padding vor/nach Sprache behalten
+            pad = frame_bytes * 3
+            trim_start = max(0, first_voice - pad)
+            trim_end = min(len(raw), last_voice + pad)
+            trimmed = raw[trim_start:trim_end]
+
+            orig_ms = len(raw) / (rate * sample_width) * 1000
+            trim_ms = len(trimmed) / (rate * sample_width) * 1000
+            logger.info(f"[VAD] Getrimmt: {orig_ms:.0f}ms → {trim_ms:.0f}ms "
+                        f"(Start +{trim_start / (rate * sample_width) * 1000:.0f}ms)")
+
+            # Zurueckschreiben
+            self._write_pcm_as_wav(trimmed, wav_path, rate=rate)
+            return True
+
+        except ImportError:
+            logger.warning("[VAD] webrtcvad nicht installiert — ueberspringe VAD")
+            return True
+        except Exception as e:
+            logger.warning(f"[VAD] Fehler: {e} — ueberspringe VAD")
+            return True
+
     def _process_recording_inner(self):
         """Eigentliche Recording-Verarbeitung."""
         wav_path = os.path.join(TEMP_DIR, "moloch_ptt_recording.wav")
 
         if not os.path.exists(wav_path) or os.path.getsize(wav_path) < 1000:
             logger.warning("[VOICE] Aufnahme zu kurz oder nicht vorhanden")
+            self._whisper_status = "Idle"
+            return
+
+        # 0. VAD-Filter: Stille vor/nach Sprache abschneiden
+        if not self._vad_trim_wav(wav_path):
+            logger.info("[VOICE] VAD: Nur Stille erkannt, ueberspringe Whisper")
             self._whisper_status = "Idle"
             return
 

@@ -168,6 +168,23 @@ class MolochWhisper:
                 import scipy.signal
                 audio = scipy.signal.resample(audio, int(len(audio) * 16000 / sample_rate))
 
+            # Audio-Preprocessing: DC-Offset entfernen + Normalisierung auf -3dBFS
+            dc_offset = np.mean(audio)
+            if abs(dc_offset) > 0.001:
+                audio = audio - dc_offset
+                logger.debug(f"DC-Offset entfernt: {dc_offset:.4f}")
+
+            peak = np.max(np.abs(audio))
+            if peak > 0.001:
+                # -3dBFS = 10^(-3/20) ≈ 0.7079
+                target = 0.7079
+                gain = target / peak
+                if gain > 10.0:
+                    gain = 10.0  # Max 20dB Verstaerkung
+                audio = audio * gain
+                logger.debug(f"Normalisiert: Peak {peak:.4f} → {peak * gain:.4f} "
+                             f"(Gain {20 * np.log10(gain):.1f}dB)")
+
             logger.debug(f"Loaded audio: {len(audio)} samples, {len(audio)/16000:.2f}s")
             return audio
 
