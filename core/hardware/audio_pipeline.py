@@ -60,15 +60,16 @@ class AudioSourcePipeline:
             return
         self._running = True
 
-        # WiFi-Mic importieren und starten
+        # WiFi-Mic Singleton holen und starten
         try:
-            from core.audio.wifi_mic import WiFiMic
-            self._wifi_mic = WiFiMic(
+            from core.audio.wifi_mic import get_wifi_mic
+            self._wifi_mic = get_wifi_mic(
                 esp_ip=self._esp_ip,
                 event_bus=self._event_bus
             )
-            self._wifi_mic.start()
-            logger.info(f"WiFi-Mic gestartet, Ziel: {self._esp_ip}")
+            if not self._wifi_mic._running:
+                self._wifi_mic.start()
+            logger.info(f"WiFi-Mic Singleton gestartet, Ziel: {self._esp_ip}")
         except ImportError:
             logger.warning("WiFi-Mic Modul nicht gefunden, nur USB verfuegbar")
             self._wifi_mic = None

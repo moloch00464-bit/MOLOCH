@@ -373,11 +373,13 @@ class VoicePipeline:
         self._wifi_rec_active = False  # Drain-Loop laeuft
         self._use_wifi_mic = False  # True wenn aktuelle Aufnahme via WiFi-Mic
 
-        # WiFi-Mic lazy importieren
+        # WiFi-Mic lazy importieren UND starten
         try:
             from core.audio.wifi_mic import get_wifi_mic
             self._wifi_mic = get_wifi_mic()
-            logger.info("[VOICE] WiFi-Mic Singleton verfuegbar")
+            if not self._wifi_mic._running:
+                self._wifi_mic.start()
+            logger.info("[VOICE] WiFi-Mic Singleton gestartet")
         except ImportError:
             logger.info("[VOICE] WiFi-Mic Modul nicht verfuegbar, nur USB/ALSA")
         except Exception as e:

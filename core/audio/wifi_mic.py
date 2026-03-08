@@ -69,6 +69,17 @@ class WiFiMic:
         self._last_recv_16k = 0.0
         self._last_recv_48k = 0.0
 
+        # Paket-Statistiken
+        self._packets_recv_16k = 0
+        self._packets_recv_48k = 0
+        self._recv_start_16k = 0.0  # Zeitpunkt erster Empfang
+
+        # Software Gain (Multiplikator fuer WiFi-Audio, 0.0 - 3.0)
+        self._software_gain = 1.0
+
+        # Quellen-Erzwingung: "auto" (Default), "wifi", "usb"
+        self._force_source = "auto"
+
         # Locks
         self._lock_16k = threading.Lock()
         self._lock_48k = threading.Lock()
@@ -149,11 +160,25 @@ class WiFiMic:
 
             # Aelteste Daten aus dem Ringpuffer holen
             chunk = bytes(buf.popleft() for _ in range(num_bytes))
+
+            # Software Gain anwenden (nur wenn != 1.0)
+            if self._software_gain != 1.0 and len(chunk) >= 2:
+                import struct as _struct
+                n = len(chunk) // 2
+                samples = _struct.unpack(f"<{n}h", chunk[:n * 2])
+                gained = _struct.pack(f"<{n}h", *(
+                    max(-32768, min(32767, int(s * self._software_gain)))
+                    for s in samples
+                ))
+                return gained
+
             return chunk
 
     @property
     def connected(self) -> bool:
-        """True wenn mindestens der 16kHz Stream verbunden ist."""
+        """True wenn 16kHz Stream verbunden UND nicht auf USB erzwungen."""
+        if self._force_source == "usb":
+            return False
         return self._connected_16k
 
     @property
@@ -163,6 +188,11 @@ class WiFiMic:
 
     def get_status(self) -> dict:
         """Status-Dict fuer IPC/Panel."""
+        # Paket-Verlust schaetzen (16kHz: 100 Pakete/s erwartet)
+        elapsed = time.monotonic() - self._recv_start_16k if self._recv_start_16k else 0
+        expected = int(elapsed * 100) if elapsed > 1 else self._packets_recv_16k
+        lost = max(0, expected - self._packets_recv_16k)
+
         return {
             "source": self._source,
             "connected_16k": self._connected_16k,
@@ -170,7 +200,59 @@ class WiFiMic:
             "esp_ip": self.esp_ip,
             "buf_16k_bytes": len(self._buf_16k),
             "buf_48k_bytes": len(self._buf_48k),
+            "packets_recv_16k": self._packets_recv_16k,
+            "packets_recv_48k": self._packets_recv_48k,
+            "packets_lost_16k": lost,
+            "software_gain": self._software_gain,
+            "force_source": self._force_source,
         }
+
+    def peek_rms(self, num_samples: int = 160) -> float:
+        """RMS-Pegel aus den neuesten Samples OHNE Buffer zu leeren.
+
+        Args:
+            num_samples: Anzahl 16-bit Samples (160 = 10ms bei 16kHz)
+
+        Returns:
+            RMS in dB (0 = Vollaussteuerung, -80 = Stille)
+        """
+        import math
+        with self._lock_16k:
+            buf_len = len(self._buf_16k)
+            if buf_len < 4:
+                return -80.0
+            # Letzte N Bytes lesen (2 Bytes pro Sample)
+            num_bytes = min(num_samples * 2, buf_len)
+            # Aus deque hinten lesen ohne zu entfernen
+            start = buf_len - num_bytes
+            raw = bytes(self._buf_16k[i] for i in range(start, buf_len))
+
+        import struct as _struct
+        n = len(raw) // 2
+        if n < 2:
+            return -80.0
+        samples = _struct.unpack(f"<{n}h", raw[:n * 2])
+        rms = math.sqrt(sum(s * s for s in samples) / n)
+        return 20 * math.log10(max(rms, 1) / 32768.0)
+
+    @property
+    def software_gain(self) -> float:
+        """Aktueller Software-Gain Multiplikator."""
+        return self._software_gain
+
+    @software_gain.setter
+    def software_gain(self, value: float):
+        """Software-Gain setzen (0.0 - 3.0)."""
+        self._software_gain = max(0.0, min(3.0, float(value)))
+
+    def set_force_source(self, mode: str):
+        """Audio-Quelle erzwingen: 'auto', 'wifi', oder 'usb'.
+
+        'usb' macht connected=False → VoicePipeline nutzt arecord Fallback.
+        """
+        if mode in ("auto", "wifi", "usb"):
+            self._force_source = mode
+            logger.info(f"Audio-Quelle erzwungen: {mode}")
 
     # =========================================================================
     # Interne Methoden
@@ -201,10 +283,14 @@ class WiFiMic:
                 now = time.monotonic()
                 if rate == 16000:
                     self._last_recv_16k = now
+                    self._packets_recv_16k += 1
+                    if self._recv_start_16k == 0.0:
+                        self._recv_start_16k = now
                     with self._lock_16k:
                         self._buf_16k.extend(data)
                 else:
                     self._last_recv_48k = now
+                    self._packets_recv_48k += 1
                     with self._lock_48k:
                         self._buf_48k.extend(data)
 
