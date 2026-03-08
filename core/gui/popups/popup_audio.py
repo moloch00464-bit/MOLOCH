@@ -95,6 +95,12 @@ class AudioPopup:
         self._wifi_connected = False
         self._wifi_poll_running = False
         self._current_samplerate = 16000
+        self._wifi_mic_ref = None  # WiFiMic Singleton fuer Buffer/Amplitude
+        try:
+            from core.audio.wifi_mic import get_wifi_mic
+            self._wifi_mic_ref = get_wifi_mic()
+        except Exception:
+            pass
 
         # Toplevel erstellen
         self.win = tk.Toplevel(parent)
@@ -102,7 +108,7 @@ class AudioPopup:
         self.win.transient(parent)
         self.win.title("Audio \u2014 WiFi-Mic + ReSpeaker")
         self.win.configure(bg=BG_DARK)
-        self.win.geometry("420x700")
+        self.win.geometry("420x740")
         self.win.resizable(False, False)
         self.win.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -227,6 +233,29 @@ class AudioPopup:
             bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
         )
         self._wifi_fw_label.pack(side=tk.RIGHT)
+
+        # Zeile 5: Buffer-Fuellstand + Pegel-Balken
+        row5 = tk.Frame(container, bg=BG_FRAME)
+        row5.pack(fill=tk.X, padx=8, pady=(2, 2))
+
+        self._wifi_buf_label = tk.Label(
+            row5, text="Buf: --",
+            bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
+        )
+        self._wifi_buf_label.pack(side=tk.LEFT)
+
+        self._wifi_pegel_label = tk.Label(
+            row5, text="-- dB",
+            bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
+        )
+        self._wifi_pegel_label.pack(side=tk.RIGHT)
+
+        # Zeile 6: Amplitude-Balken (Canvas)
+        self._wifi_vu_canvas = tk.Canvas(
+            container, width=180, height=12,
+            bg=BG_INPUT, highlightthickness=0,
+        )
+        self._wifi_vu_canvas.pack(padx=8, pady=(0, 6))
 
     def _build_separator(self):
         """Trennlinie zwischen WiFi und USB Sektion."""
@@ -387,9 +416,80 @@ class AudioPopup:
             self._wifi_health_label.config(text="Health: --", fg=FG_DIM)
             self._wifi_fw_label.config(text="FW: --", fg=FG_DIM)
 
+        # Buffer-Fuellstand + Amplitude aus WiFi-Mic Singleton
+        self._update_wifi_buffer_and_level()
+
         # Naechster Poll
         if self._wifi_poll_running:
             self._wifi_after_id = self.win.after(WIFI_UPDATE_MS, self._do_wifi_poll)
+
+    def _update_wifi_buffer_and_level(self):
+        """Buffer-Fuellstand und Live-Amplitude aus WiFi-Mic aktualisieren."""
+        if not self._wifi_mic_ref:
+            self._wifi_buf_label.config(text="Buf: n/a", fg=FG_DIM)
+            self._wifi_pegel_label.config(text="-- dB", fg=FG_DIM)
+            self._wifi_vu_canvas.delete("all")
+            return
+
+        try:
+            mic_status = self._wifi_mic_ref.get_status()
+            buf_bytes = mic_status.get("buf_16k_bytes", 0)
+            buf_pct = min(100, int(buf_bytes / 640))  # 64000 max = 100%
+            connected = mic_status.get("connected_16k", False)
+
+            if connected:
+                self._wifi_buf_label.config(
+                    text=f"Buf: {buf_bytes}B ({buf_pct}%)",
+                    fg=STATUS_GREEN if buf_pct < 80 else STATUS_YELLOW,
+                )
+            else:
+                self._wifi_buf_label.config(text="Buf: --", fg=FG_DIM)
+                self._wifi_pegel_label.config(text="-- dB", fg=FG_DIM)
+                self._wifi_vu_canvas.delete("all")
+                return
+
+            # Amplitude: kurzen Chunk lesen (nicht-destruktiv via peek)
+            # Wir lesen 10ms (320 Bytes) fuer RMS-Berechnung
+            chunk = self._wifi_mic_ref.get_audio_chunk(rate=16000, duration_ms=10)
+            if len(chunk) >= 4:
+                n_samples = len(chunk) // 2
+                samples = struct.unpack(f"<{n_samples}h", chunk[:n_samples * 2])
+                rms = math.sqrt(sum(s * s for s in samples) / n_samples)
+                rms_db = 20 * math.log10(max(rms, 1) / 32768.0)
+            else:
+                rms_db = -80.0
+
+            # Pegel-Label
+            if rms_db > -79:
+                if rms_db < -20:
+                    lbl_color = STATUS_GREEN
+                elif rms_db < -6:
+                    lbl_color = STATUS_YELLOW
+                else:
+                    lbl_color = STATUS_RED
+                self._wifi_pegel_label.config(
+                    text=f"{rms_db:.0f} dB", fg=lbl_color)
+            else:
+                self._wifi_pegel_label.config(text="-- dB", fg=FG_DIM)
+
+            # Amplitude-Balken zeichnen
+            canvas_w = self._wifi_vu_canvas.winfo_width()
+            if canvas_w < 10:
+                canvas_w = 180
+            px = max(0, min(canvas_w, int((rms_db + 80) * canvas_w / 80)))
+            self._wifi_vu_canvas.delete("all")
+            if px > 0:
+                if rms_db < -20:
+                    color = STATUS_GREEN
+                elif rms_db < -6:
+                    color = STATUS_YELLOW
+                else:
+                    color = STATUS_RED
+                self._wifi_vu_canvas.create_rectangle(
+                    0, 0, px, 12, fill=color, outline="")
+
+        except Exception:
+            pass  # Polling darf nicht sterben
 
     # =========================================================================
     # Samplerate umschalten (16kHz / 48kHz)

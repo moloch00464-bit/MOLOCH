@@ -366,6 +366,23 @@ class VoicePipeline:
         self._api_in_flight = False
         self._api_lock = threading.Lock()
 
+        # WiFi-Mic PTT State
+        self._wifi_mic = None  # WiFiMic Singleton (lazy)
+        self._wifi_rec_buf = bytearray()  # Sammel-Buffer waehrend PTT
+        self._wifi_rec_thread: Optional[threading.Thread] = None
+        self._wifi_rec_active = False  # Drain-Loop laeuft
+        self._use_wifi_mic = False  # True wenn aktuelle Aufnahme via WiFi-Mic
+
+        # WiFi-Mic lazy importieren
+        try:
+            from core.audio.wifi_mic import get_wifi_mic
+            self._wifi_mic = get_wifi_mic()
+            logger.info("[VOICE] WiFi-Mic Singleton verfuegbar")
+        except ImportError:
+            logger.info("[VOICE] WiFi-Mic Modul nicht verfuegbar, nur USB/ALSA")
+        except Exception as e:
+            logger.warning(f"[VOICE] WiFi-Mic init fehlgeschlagen: {e}")
+
         # Spontane Kommentare State
         self._spontaneous_cooldown = 600  # 10 Minuten
         self._last_spontaneous = 0.0
@@ -425,7 +442,7 @@ class VoicePipeline:
     # =========================================================================
 
     def start_recording(self):
-        """Aufnahme vom ReSpeaker Lite starten."""
+        """Aufnahme starten — WiFi-Mic bevorzugt, Fallback auf arecord."""
         with self._lock:
             if self._recording:
                 return
@@ -440,6 +457,22 @@ class VoicePipeline:
         except FileNotFoundError:
             pass
 
+        # WiFi-Mic verfuegbar und connected? → Ringpuffer drainen
+        if self._wifi_mic and self._wifi_mic.connected:
+            self._use_wifi_mic = True
+            self._wifi_rec_buf = bytearray()
+            self._wifi_rec_active = True
+            # Ringpuffer vorher leeren (alte Daten vor PTT-Press)
+            self._wifi_mic.get_audio_chunk(rate=16000, duration_ms=2000)
+            self._wifi_rec_thread = threading.Thread(
+                target=self._wifi_drain_loop, daemon=True,
+                name="PTT-WiFi-Drain")
+            self._wifi_rec_thread.start()
+            logger.info("[VOICE] Aufnahme gestartet (WiFi-Mic)")
+            return
+
+        # Fallback: arecord vom USB-ReSpeaker
+        self._use_wifi_mic = False
         try:
             self._record_proc = subprocess.Popen(
                 [
@@ -453,12 +486,49 @@ class VoicePipeline:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-            logger.info("[VOICE] Aufnahme gestartet")
+            logger.info("[VOICE] Aufnahme gestartet (USB/ALSA Fallback)")
         except Exception as e:
             logger.error(f"[VOICE] Aufnahme starten fehlgeschlagen: {e}")
             with self._lock:
                 self._recording = False
                 self._whisper_status = "Fehler"
+
+    def _wifi_drain_loop(self):
+        """Drainct WiFi-Mic Ringpuffer waehrend PTT in Sammel-Buffer."""
+        while self._wifi_rec_active:
+            try:
+                chunk = self._wifi_mic.get_audio_chunk(rate=16000, duration_ms=50)
+                if chunk:
+                    self._wifi_rec_buf.extend(chunk)
+            except Exception as e:
+                logger.warning(f"[VOICE] WiFi-Mic drain error: {e}")
+            time.sleep(0.04)  # ~25 Hz Drain-Rate, schneller als Buffer-Fuellrate
+
+    def _write_pcm_as_wav(self, pcm_data: bytes, wav_path: str,
+                          rate: int = 16000, channels: int = 1,
+                          sample_width: int = 2):
+        """Rohes PCM als WAV-Datei schreiben (16-bit LE)."""
+        import struct as _struct
+        data_size = len(pcm_data)
+        # WAV Header: 44 Bytes
+        header = bytearray()
+        header.extend(b'RIFF')
+        header.extend(_struct.pack('<I', 36 + data_size))
+        header.extend(b'WAVE')
+        header.extend(b'fmt ')
+        header.extend(_struct.pack('<I', 16))  # Chunk size
+        header.extend(_struct.pack('<H', 1))   # PCM format
+        header.extend(_struct.pack('<H', channels))
+        header.extend(_struct.pack('<I', rate))
+        header.extend(_struct.pack('<I', rate * channels * sample_width))
+        header.extend(_struct.pack('<H', channels * sample_width))
+        header.extend(_struct.pack('<H', sample_width * 8))
+        header.extend(b'data')
+        header.extend(_struct.pack('<I', data_size))
+
+        with open(wav_path, 'wb') as f:
+            f.write(header)
+            f.write(pcm_data)
 
     def stop_recording(self):
         """Aufnahme stoppen und Pipeline in Background-Thread weiterfuehren."""
@@ -467,17 +537,48 @@ class VoicePipeline:
                 return
             self._recording = False
 
-        # arecord stoppen
-        if self._record_proc:
+        wav_path = os.path.join(TEMP_DIR, "moloch_ptt_recording.wav")
+
+        if self._use_wifi_mic:
+            # WiFi-Mic Drain stoppen
+            self._wifi_rec_active = False
+            if self._wifi_rec_thread:
+                self._wifi_rec_thread.join(timeout=1)
+                self._wifi_rec_thread = None
+
+            # Letzte Daten noch drainen
             try:
-                self._record_proc.terminate()
-                self._record_proc.wait(timeout=3)
+                final_chunk = self._wifi_mic.get_audio_chunk(rate=16000, duration_ms=200)
+                if final_chunk:
+                    self._wifi_rec_buf.extend(final_chunk)
             except Exception:
+                pass
+
+            # PCM als WAV schreiben
+            pcm_data = bytes(self._wifi_rec_buf)
+            self._wifi_rec_buf = bytearray()
+            duration_s = len(pcm_data) / (16000 * 2)
+            logger.info(f"[VOICE] WiFi-Mic Aufnahme: {len(pcm_data)} Bytes, "
+                        f"{duration_s:.1f}s")
+
+            if len(pcm_data) > 1600:  # Min 50ms Audio
+                self._write_pcm_as_wav(pcm_data, wav_path)
+            else:
+                logger.warning("[VOICE] WiFi-Mic Aufnahme zu kurz")
+                self._whisper_status = "Idle"
+                return
+        else:
+            # arecord stoppen (Fallback)
+            if self._record_proc:
                 try:
-                    self._record_proc.kill()
+                    self._record_proc.terminate()
+                    self._record_proc.wait(timeout=3)
                 except Exception:
-                    pass
-            self._record_proc = None
+                    try:
+                        self._record_proc.kill()
+                    except Exception:
+                        pass
+                self._record_proc = None
 
         # Pipeline in Background-Thread
         thread = threading.Thread(target=self._process_recording, daemon=True)
@@ -1212,6 +1313,13 @@ class VoicePipeline:
                 m for m in self._pending_messages if m.get("ts", 0) > cutoff
             ]
             messages = list(self._pending_messages)
+        # Audio-Source Info
+        audio_source = "usb"
+        if self._wifi_mic and self._wifi_mic.connected:
+            audio_source = "wifi"
+        elif self._wifi_mic is None:
+            audio_source = "usb"
+
         return {
             "whisper_status": self._whisper_status,
             "whisper_backend": self._whisper.backend if self._whisper else "nicht geladen",
@@ -1223,6 +1331,7 @@ class VoicePipeline:
             "piper_available": self._piper_available,
             "voices": self.list_voices(),
             "messages": messages,
+            "audio_source": audio_source,
         }
 
     def reset_conversation(self):
