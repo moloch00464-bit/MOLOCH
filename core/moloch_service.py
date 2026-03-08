@@ -1701,6 +1701,27 @@ class MolochService:
                              name="MicTest-WiFi").start()
             logger.info(f"[IPC] Mic-Test WiFi gestartet "
                         f"({duration_s}s, {rec_rate}Hz)")
+        elif action == 'whisper_vad':
+            # VAD an/aus toggle vom Whisper-Popup
+            enabled = bool(cmd.get('enabled', True))
+            if self._voice:
+                self._voice._vad_enabled = enabled
+                logger.info(f"[IPC] Whisper VAD {'an' if enabled else 'aus'}")
+        elif action == 'whisper_test':
+            # Manueller Whisper-Test: 3s aufnehmen ohne PTT
+            duration_s = float(cmd.get('duration_s', 3.0))
+            def _do_whisper_test():
+                try:
+                    if self._voice:
+                        self._voice.start_recording()
+                        time.sleep(duration_s)
+                        self._voice.stop_recording()
+                        logger.info(f"[IPC] Whisper-Test: {duration_s}s Aufnahme fertig")
+                except Exception as e:
+                    logger.error(f"[IPC] Whisper-Test Fehler: {e}")
+            threading.Thread(target=_do_whisper_test, daemon=True,
+                             name="WhisperTest").start()
+            logger.info(f"[IPC] Whisper-Test gestartet ({duration_s}s)")
         elif action == 'save_settings':
             # Audio + Camera Werte aus Panel uebernehmen
             _au = cmd.get('audio')

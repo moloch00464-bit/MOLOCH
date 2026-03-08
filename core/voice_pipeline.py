@@ -397,6 +397,12 @@ class VoicePipeline:
         except Exception as e:
             logger.warning(f"[VOICE] WiFi-Mic init fehlgeschlagen: {e}")
 
+        # Whisper-Ergebnisse fuer Popup (Ringpuffer, max 10)
+        self._whisper_results: List[Dict] = []
+        self._whisper_result_counter = 0
+        self._whisper_results_lock = threading.Lock()
+        self._vad_enabled = True  # VAD an/aus (steuerbar via Popup)
+
         # Spontane Kommentare State
         self._spontaneous_cooldown = 600  # 10 Minuten
         self._last_spontaneous = 0.0
@@ -684,14 +690,16 @@ class VoicePipeline:
             return
 
         # 0. VAD-Filter: Stille vor/nach Sprache abschneiden
-        if not self._vad_trim_wav(wav_path):
+        if self._vad_enabled and not self._vad_trim_wav(wav_path):
             logger.info("[VOICE] VAD: Nur Stille erkannt, ueberspringe Whisper")
             self._whisper_status = "Idle"
             return
 
         # 1. Whisper STT
         self._whisper_status = "Transkribiere..."
+        t_whisper = time.time()
         text = self._transcribe(wav_path)
+        whisper_duration_ms = (time.time() - t_whisper) * 1000
 
         if not text or not text.strip():
             logger.info("[VOICE] Keine Sprache erkannt")
@@ -699,8 +707,11 @@ class VoicePipeline:
             return
 
         text = _sanitize_text(text)
-        logger.info(f"[VOICE] Transkription: {text}")
+        logger.info(f"[VOICE] Transkription ({whisper_duration_ms:.0f}ms): {text}")
         self._emit_message("Du", text)
+
+        # Whisper-Ergebnis fuer Popup speichern + Event Bus
+        self._store_whisper_result(text, whisper_duration_ms)
 
         # Langzeitgedaechtnis: User-Nachricht SOFORT speichern
         try:
@@ -747,6 +758,34 @@ class VoicePipeline:
     # =========================================================================
     # Whisper STT
     # =========================================================================
+
+    def _store_whisper_result(self, text: str, duration_ms: float):
+        """Whisper-Ergebnis speichern fuer Popup + Event Bus publishen."""
+        with self._whisper_results_lock:
+            self._whisper_result_counter += 1
+            result = {
+                "id": self._whisper_result_counter,
+                "text": text,
+                "duration_ms": round(duration_ms),
+                "model": self._whisper.backend if self._whisper else "unknown",
+                "ts": time.time(),
+            }
+            self._whisper_results.append(result)
+            # Max 10 behalten
+            if len(self._whisper_results) > 10:
+                self._whisper_results = self._whisper_results[-10:]
+
+        # Event Bus publishen (Priority 9 = Logging)
+        try:
+            from core.moloch_event_bus import get_event_bus
+            get_event_bus().publish(
+                event_type="whisper.result",
+                payload=result,
+                source="voice_pipeline",
+                priority=9,
+            )
+        except Exception:
+            pass  # Event Bus optional
 
     def _transcribe(self, wav_path: str) -> Optional[str]:
         """WAV-Datei mit MolochWhisper transkribieren (NPU-only)."""
@@ -1416,6 +1455,10 @@ class VoicePipeline:
             except Exception:
                 pass
 
+        # Whisper-Ergebnisse fuer Popup
+        with self._whisper_results_lock:
+            whisper_results = list(self._whisper_results)
+
         return {
             "whisper_status": self._whisper_status,
             "whisper_backend": self._whisper.backend if self._whisper else "nicht geladen",
@@ -1428,6 +1471,8 @@ class VoicePipeline:
             "voices": self.list_voices(),
             "messages": messages,
             "audio_source": audio_source,
+            "vad_enabled": self._vad_enabled,
+            "whisper_results": whisper_results,
             "wifi_mic": wifi_mic_status,
         }
 

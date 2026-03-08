@@ -63,6 +63,12 @@ try:
 except ImportError:
     DashboardPopup = None
 
+# Whisper Popup importieren (optional)
+try:
+    from core.gui.popups.popup_whisper import WhisperPopup
+except ImportError:
+    WhisperPopup = None
+
 
 class ModelsModule:
     """Model Controls und Popup-Buttons im uebergebenen LabelFrame."""
@@ -108,6 +114,7 @@ class ModelsModule:
         self.on_popup_tracker = self._open_tracker_popup
         self.on_popup_settings = self._open_settings_popup
         self.on_popup_dashboard = self._open_dashboard_popup
+        self.on_popup_whisper = self._open_whisper_popup
 
         # GUI aufbauen
         self._build_pipeline_status()
@@ -176,6 +183,13 @@ class ModelsModule:
             DashboardPopup(self._parent, self._service)
         else:
             print("FEHLER: popup_dashboard.py konnte nicht importiert werden")
+
+    def _open_whisper_popup(self):
+        """Whisper STT Monitor Popup oeffnen."""
+        if WhisperPopup is not None:
+            WhisperPopup(self._parent, self._service)
+        else:
+            print("FEHLER: popup_whisper.py konnte nicht importiert werden")
 
     # =========================================================================
     # Pipeline Status (TAPPAS/Legacy Anzeige)
@@ -365,6 +379,7 @@ class ModelsModule:
             ("HARDWARE", lambda: self.on_popup_hardware()),
             ("NPU/MPO", lambda: self.on_popup_npu()),
             ("TRACKER", lambda: self.on_popup_tracker()),
+            ("WHISPER", lambda: self.on_popup_whisper()),
             ("DASHBOARD", lambda: self.on_popup_dashboard()),
             ("SETTINGS", lambda: self.on_popup_settings()),
         ]
@@ -375,7 +390,7 @@ class ModelsModule:
                 bg=BG_BUTTON, fg=FG_LABEL, font=FONT_BUTTON,
                 activebackground=BG_FRAME,
                 command=cmd,
-            ).grid(row=0, column=i, padx=2, pady=2)
+            ).grid(row=i // 4, column=i % 4, padx=2, pady=2)
 
     # =========================================================================
     # Status-Polling

@@ -1,9 +1,9 @@
 {
   "version": 1,
   "thresholds": {
-    "scrfd_conf": 0.5,
-    "scrfd_nms": 0.65,
-    "arcface_thresh": 0.65,
+    "scrfd_conf": 0.4,
+    "scrfd_nms": 0.45,
+    "arcface_thresh": 0.5,
     "yolo_conf": 0.5,
     "pose_conf": 0.6,
     "hand_conf": 0.65
@@ -15,12 +15,12 @@
     "recency": 4.0
   },
   "audio": {
-    "mic_gain": 1.54,
-    "noise_gate_db": -51.0,
+    "mic_gain": 0.72,
+    "noise_gate_db": -30.0,
     "agc_enabled": false,
     "wifi_samplerate": 16000,
     "audio_source": "wifi",
-    "wifi_software_gain": 1.54
+    "wifi_software_gain": 0.72
   },
   "camera": {
     "ptz_speed": 15.0,
@@ -41,9 +41,9 @@
   "mpo": {
     "tension_tau": 100.0,
     "dominance_drift": 0.05,
-    "zone_hysteresis": 0.3,
+    "zone_hysteresis": 0.2,
     "berserker_threshold": 0.85,
-    "thermal_damping_start": 61.0
+    "thermal_damping_start": 71.0
   },
   "gestures": {
     "wave_enabled": true,
