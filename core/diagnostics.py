@@ -257,35 +257,34 @@ def collect_pipeline_status(status: Dict[str, Any] = None) -> Dict[str, Any]:
     return {"pipelines": pipelines, "health_score": score}
 
 
-def _get_bus_subscribers() -> Dict[str, int]:
-    """Event-Bus Subscriber-Counts direkt aus Singleton lesen (falls geladen)."""
-    try:
-        from core.moloch_event_bus import get_event_bus
-        bus = get_event_bus()
-        stats = bus.get_stats()
-        subs = stats.get("subscribers", {})
-        # Sync + Async zusammenfuehren
-        async_subs = stats.get("async_subscribers", {})
-        merged = dict(subs)
-        for topic, cnt in async_subs.items():
-            merged[topic] = merged.get(topic, 0) + cnt
-        return merged
-    except Exception:
-        return {}
-
-
 def _check_vision_core(status: Dict[str, Any]) -> Dict[str, str]:
-    """Vision → Core: perception.* Events haben Subscriber?"""
-    subs = _get_bus_subscribers()
-    perception_topics = [t for t in subs if t.startswith("perception.")]
-    perception_count = sum(subs[t] for t in perception_topics)
+    """Vision → Core: Pipeline aktiv + Event-Bus hat Subscriber?
 
+    Prueft: pipeline_alive + bus_stats.subscribers > 0
+    Datenquelle: moloch_status.json (keine Singleton-Imports noetig)
+    """
     pipeline_alive = status.get("pipeline_alive", False)
+    # bus_stats kann int (Gesamtzahl) oder dict (pro Topic) sein
+    bus_stats = status.get("bus_stats", {})
+    if isinstance(bus_stats, dict):
+        subs = bus_stats.get("subscribers", {})
+        if isinstance(subs, dict):
+            # Subscriber-Dict: perception.* Topics zaehlen
+            perception_count = sum(
+                v for k, v in subs.items()
+                if isinstance(k, str) and k.startswith("perception.")
+            )
+        elif isinstance(subs, (int, float)):
+            perception_count = int(subs)
+        else:
+            perception_count = 0
+    elif isinstance(bus_stats, (int, float)):
+        perception_count = int(bus_stats)
+    else:
+        perception_count = 0
 
-    if pipeline_alive and perception_count >= 2:
-        return {"status": _PIPE_OK, "detail": f"Pipeline aktiv, {perception_count} Subscriber"}
-    elif pipeline_alive and perception_count > 0:
-        return {"status": _PIPE_DEGRADED, "detail": f"Pipeline aktiv, nur {perception_count} Subscriber"}
+    if pipeline_alive and perception_count > 0:
+        return {"status": _PIPE_OK, "detail": f"Pipeline aktiv, {perception_count} Perception-Subs"}
     elif pipeline_alive:
         return {"status": _PIPE_DEGRADED, "detail": "Pipeline aktiv, keine Subscriber"}
     else:
@@ -293,83 +292,90 @@ def _check_vision_core(status: Dict[str, Any]) -> Dict[str, str]:
 
 
 def _check_core_bridge(status: Dict[str, Any]) -> Dict[str, str]:
-    """Core → Bridge: Action Bridge empfaengt Perception-Events?"""
+    """Core → Bridge: Action Bridge hat einen gueltige State?
+
+    Prueft: bridge.state != 'unknown'
+    Datenquelle: moloch_status.json
+    """
     bridge = status.get("bridge", {})
     bridge_state = bridge.get("state", "unknown")
 
-    # Bridge aktiv wenn State != unknown und decisions > 0
-    decisions = bridge.get("decisions", 0)
-
-    if bridge_state != "unknown" and decisions > 0:
-        return {"status": _PIPE_OK, "detail": f"Bridge {bridge_state}, {decisions} Decisions"}
-    elif bridge_state != "unknown":
-        return {"status": _PIPE_DEGRADED, "detail": f"Bridge {bridge_state}, noch keine Decisions"}
+    if bridge_state not in ("unknown", "", None):
+        return {"status": _PIPE_OK, "detail": f"Bridge State: {bridge_state}"}
     else:
         return {"status": _PIPE_BROKEN, "detail": "Action Bridge nicht initialisiert"}
 
 
 def _check_bridge_tracker(status: Dict[str, Any]) -> Dict[str, str]:
-    """Bridge → Tracker: PTZ reagiert auf action.* Events?"""
-    subs = _get_bus_subscribers()
-    action_topics = [t for t in subs if t.startswith("action.")]
-    action_count = sum(subs[t] for t in action_topics)
+    """Bridge → Tracker: PTZ trackt wenn Person da ist?
 
-    # Mindestens action.ptz_track sollte einen Subscriber haben
-    ptz_subs = subs.get("action.ptz_track", 0)
+    Prueft: person_detected=true + bridge_state in (tracking, interaction) = OK
+            person_detected=true + bridge_state != tracking = DEGRADED
+            keine Person = OK (idle ist normal)
+    Datenquelle: moloch_status.json
+    """
+    person_detected = status.get("person_detected", False)
+    bridge = status.get("bridge", {})
+    bridge_state = bridge.get("state", "unknown")
 
-    if ptz_subs > 0:
-        return {"status": _PIPE_OK, "detail": f"PTZ-Tracking verbunden ({action_count} Action-Subs)"}
-    elif action_count > 0:
-        return {"status": _PIPE_DEGRADED, "detail": f"{action_count} Action-Subs, aber kein PTZ-Track"}
+    if not person_detected:
+        # Keine Person da — Tracker muss nicht arbeiten, alles normal
+        return {"status": _PIPE_OK, "detail": f"Kein Target (Bridge: {bridge_state})"}
+
+    # Person da — Bridge sollte tracken
+    if bridge_state in ("tracking", "interaction"):
+        return {"status": _PIPE_OK, "detail": f"Aktiv: {bridge_state}"}
+    elif bridge_state == "searching":
+        return {"status": _PIPE_DEGRADED, "detail": "Person da, noch suchen..."}
+    elif bridge_state == "manual_override":
+        return {"status": _PIPE_DEGRADED, "detail": "Manueller Modus (PTZ pausiert)"}
     else:
-        return {"status": _PIPE_BROKEN, "detail": "Keine Action-Subscriber registriert"}
+        return {"status": _PIPE_BROKEN, "detail": f"Person da, Bridge: {bridge_state}"}
 
 
 def _check_esp_audio(status: Dict[str, Any]) -> Dict[str, str]:
-    """ESP → Audio: WiFi-Mic verbunden und UDP-Pakete kommen?"""
-    # Versuche wifi_mic Singleton direkt
-    try:
-        from core.audio.wifi_mic import get_wifi_mic
-        mic = get_wifi_mic()
-        mic_status = mic.get_status()
-        connected = mic_status.get("connected_16k", False)
-        packets = mic_status.get("packets_recv_16k", 0)
-        source = mic_status.get("source", "none")
+    """ESP → Audio: WiFi-Mic erreichbar per HTTP?
 
-        if connected and packets > 0:
-            return {"status": _PIPE_OK, "detail": f"WiFi-Mic verbunden ({packets} Pakete, {source})"}
-        elif source == "usb":
-            return {"status": _PIPE_DEGRADED, "detail": "Fallback auf USB-Mic (WiFi offline)"}
-        else:
-            return {"status": _PIPE_BROKEN, "detail": "Kein Audio-Input (WiFi + USB offline)"}
+    Prueft: HTTP GET http://10.42.0.2/audio/status (Timeout 0.5s)
+    Antwort = OK, Timeout/Fehler = BROKEN
+    """
+    import urllib.request
+    try:
+        req = urllib.request.Request("http://10.42.0.2/audio/status")
+        with urllib.request.urlopen(req, timeout=0.5) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            return {"status": _PIPE_OK, "detail": f"ESP32 erreichbar ({body[:40]})"}
     except Exception:
-        # wifi_mic nicht geladen — aus Status-JSON pruefen
-        audio = status.get("audio", {})
-        if audio.get("connected", False):
-            return {"status": _PIPE_OK, "detail": "Audio verbunden (Status-JSON)"}
-        return {"status": _PIPE_BROKEN, "detail": "Audio-Status nicht verfuegbar"}
+        pass
+
+    # Fallback: Status-JSON Audio-Feld pruefen
+    audio = status.get("audio", {})
+    if audio.get("source") == "usb" or audio.get("connected", False):
+        return {"status": _PIPE_DEGRADED, "detail": "USB-Fallback (WiFi offline)"}
+
+    return {"status": _PIPE_BROKEN, "detail": "ESP32 nicht erreichbar (10.42.0.2 Timeout)"}
 
 
 def _check_feedback_loop(status: Dict[str, Any]) -> Dict[str, str]:
-    """Feedback Loop: Bridge-Decisions kommen zurueck (Action → Result)?"""
-    bridge = status.get("bridge", {})
-    decisions = bridge.get("decisions", 0)
+    """Feedback Loop: Gesichtserkennung liefert Ergebnisse wenn Person da?
 
-    # Pruefe ob Bridge-Decisions vorhanden UND ob letzte Decision aktuell ist
-    bridge_decisions = status.get("bridge_decisions", [])
-    if bridge_decisions:
-        # Letzte Decision Timestamp pruefen
-        last_ts = bridge_decisions[-1].get("timestamp", 0)
-        age_s = time.time() - last_ts if last_ts > 0 else 999
+    Prueft: person_detected=true + face_id != null = OK
+            person_detected=true + face_id = null = DEGRADED
+            person_detected=false = OK (nichts zu tun)
+    Datenquelle: moloch_status.json
+    """
+    person_detected = status.get("person_detected", False)
+    face_id = status.get("face_id", None)
+    face_sim = status.get("face_similarity", 0.0)
 
-        if age_s < 60:
-            return {"status": _PIPE_OK, "detail": f"Letzte Decision vor {age_s:.0f}s"}
-        elif decisions > 0:
-            return {"status": _PIPE_DEGRADED, "detail": f"Letzte Decision vor {age_s:.0f}s (veraltet)"}
-    elif decisions > 0:
-        return {"status": _PIPE_DEGRADED, "detail": f"{decisions} Decisions, aber keine Details"}
+    if not person_detected:
+        # Kein Target — Loop hat nichts zu verarbeiten
+        return {"status": _PIPE_OK, "detail": "Kein Target (idle)"}
 
-    return {"status": _PIPE_MISSING, "detail": "Kein Feedback — Action Bridge inaktiv oder keine Ereignisse"}
+    if face_id:
+        return {"status": _PIPE_OK, "detail": f"Erkannt: {face_id} ({face_sim:.0%})"}
+    else:
+        return {"status": _PIPE_DEGRADED, "detail": "Person da, kein Gesicht identifiziert"}
 
 
 # =========================================================================
