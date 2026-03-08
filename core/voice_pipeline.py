@@ -199,6 +199,18 @@ def _get_hardware_status() -> str:
     except Exception:
         pass
 
+    # Audio-Eingang (WiFi-Mic oder USB Fallback)
+    try:
+        from core.audio.wifi_mic import get_wifi_mic
+        wm = get_wifi_mic()
+        if wm.connected:
+            sr = getattr(wm, '_samplerate', 16000)
+            parts.append(f"Mikrofon: ESP32 WiFi ({sr // 1000}kHz, 5ms Latenz)")
+        else:
+            parts.append("Mikrofon: USB Fallback (8kHz)")
+    except Exception:
+        parts.append("Mikrofon: USB Fallback (8kHz)")
+
     if not parts:
         return ""
     result = "\n--- DEINE HARDWARE (live) ---\n" + ", ".join(parts)

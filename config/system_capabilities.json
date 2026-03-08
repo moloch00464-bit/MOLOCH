@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-03-08T03:07:52",
-  "generation_ms": 1832.5,
+  "generated": "2026-03-08T10:01:58",
+  "generation_ms": 1802.7,
   "summary": {
     "core_modules": "38/38",
     "external_deps": "11/11",
@@ -54,7 +54,7 @@
     "hailo_device": true,
     "ssd1_code": {
       "total_gb": 457.9,
-      "free_gb": 410.3
+      "free_gb": 410.2
     },
     "ssd2_data": {
       "total_gb": 476.9,
@@ -298,6 +298,17 @@
       "available": true,
       "description": "Rich TUI"
     }
+  },
+  "audio_input": {
+    "primary": "ESP32 WiFi ReSpeaker Lite",
+    "samplerates": [
+      16000,
+      48000
+    ],
+    "protokoll": "UDP",
+    "latenz_ms": 5,
+    "fallback": "USB ALSA",
+    "status": "bereit (nicht verbunden)"
   },
   "npu_models": [
     {

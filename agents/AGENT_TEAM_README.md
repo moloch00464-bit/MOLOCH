@@ -1,4 +1,4 @@
-# M.O.L.O.C.H. Agententeam — 6 Domain-Spezialisten + Stresstest
+# M.O.L.O.C.H. Agententeam — 7 Domain-Spezialisten + Stresstest
 
 ## Das Team
 
@@ -11,6 +11,7 @@
 | 5 | Voice | AGENT_VOICE.md | Whisper, TTS, Personality, Claude API, Spotify | ~4750 |
 | 6 | Service | AGENT_SERVICE.md | moloch_service, IPC, Memory, Integration | ~3400 |
 | + | Stresstest | AGENT_STRESSTEST.md | Chaos Engineering, 8 Szenarien | scripts/ |
+| 9 | Tentacle | AGENT_TENTACLE.md | Peripherie, WiFi-Devices, ESP32, Netzwerk-Bridges | firmware/ |
 | - | Team Lead | Markus | Boss, Priorisierung, Entscheidung | - |
 | - | DeepSeek | extern | Philosophie, Meta-QA, Chaos mit Methode | - |
 
@@ -26,6 +27,52 @@ Lies ~/moloch/CLAUDE.md und ~/moloch/agents/AGENT_VISION.md.
 
 JEDER Agent hat seine Dateien. Kein Agent fasst fremde Dateien an.
 Wenn ein Auftrag zwei Domains betrifft → zwei Agenten nacheinander.
+
+---
+
+## MINIMALE BESETZUNG — Token-Spar-Regel
+
+**NICHT alle 9 Agenten bei jedem Auftrag laden!**
+Nur die AGENT_*.md Dateien lesen die fuer die aktiven Agenten relevant sind.
+Weniger Agenten = weniger Tokens = mehr Auftraege pro Session.
+
+### Standard-Kombinationen
+
+| # | Kombination | Agenten | Wann |
+|---|-------------|---------|------|
+| 1 | Bug-Fix | DEBUGGER → BUILDER → TESTER | Einzelner Bug, Root Cause bekannt |
+| 2 | GUI-Fix | DEBUGGER → BUILDER → GUI → TESTER | Panel, Popup, Anzeigen |
+| 3 | Neues Feature | ARCHITECT → BUILDER → TESTER → REVIEWER | Neues Modul, neue Funktion |
+| 4 | Peripherie | TENTACLE → DEBUGGER → BUILDER → TESTER | ESP32, Kamera, WiFi, Sensoren |
+| 5 | Code-Review | REVIEWER → GUI | Nach groesserem Umbau, vor Gate |
+| 6 | Stress-Test | CHAOS → TESTER | Nach mehreren Builds, Stabilitaet |
+| 7 | Voll-Audit | Alle 9 | NUR auf Anweisung von Markus/Opus |
+
+### Voll-Audit Reihenfolge (alle 9)
+```
+DEBUGGER → ARCHITECT → BUILDER → TESTER → REVIEWER → GUI → TENTACLE → CHAOS → TEAM_LEAD
+```
+
+### Reihenfolge-Regel
+Agenten arbeiten IMMER in Pipeline-Reihenfolge, NICHT parallel:
+1. Erst analysieren (DEBUGGER/ARCHITECT)
+2. Dann bauen (BUILDER)
+3. Dann pruefen (TESTER/REVIEWER/GUI)
+4. Dann Peripherie (TENTACLE)
+5. Dann stressen (CHAOS)
+
+**CHAOS kommt NIE direkt nach dem Build** — erst TESTER, dann CHAOS.
+
+### Default-Regel
+Wenn im Auftrag KEINE Agenten genannt sind:
+**Default = DEBUGGER + BUILDER + TESTER (3 Agenten, minimal)**
+
+### Token-Spar-Regel
+Nur die AGENT_*.md Dateien lesen die fuer aktive Agenten relevant sind.
+Beispiel: Bei DEBUGGER + BUILDER + TESTER aktiv →
+NICHT AGENT_GUI.md, AGENT_TENTACLE.md, AGENT_STRESSTEST.md laden.
+
+---
 
 ## Kommunikation zwischen Agenten
 
@@ -58,3 +105,4 @@ Wenn ein Auftrag zwei Domains betrifft → zwei Agenten nacheinander.
 4. Bei 85% Token → Uebergabe schreiben
 5. Markus ist Boss — bei Konflikten entscheidet ER
 6. KEIN Weitermachen bei FAIL im Audit
+7. Minimale Besetzung — nur noetige Agenten laden (siehe oben)

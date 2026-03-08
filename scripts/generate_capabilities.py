@@ -220,6 +220,26 @@ def check_hardware() -> dict:
     return hw
 
 
+def check_audio_input() -> dict:
+    """Audio-Eingang pruefen (WiFi-Mic ESP32 oder USB Fallback)."""
+    audio = {
+        "primary": "ESP32 WiFi ReSpeaker Lite",
+        "samplerates": [16000, 48000],
+        "protokoll": "UDP",
+        "latenz_ms": 5,
+        "fallback": "USB ALSA",
+        "status": "unbekannt",
+    }
+    # Pruefen ob WiFi-Mic Modul importierbar
+    try:
+        from core.audio.wifi_mic import get_wifi_mic
+        wm = get_wifi_mic()
+        audio["status"] = "aktiv" if wm.connected else "bereit (nicht verbunden)"
+    except Exception:
+        audio["status"] = "modul_nicht_verfuegbar"
+    return audio
+
+
 def determine_gates(modules: dict) -> dict:
     """Gate-Status anhand der verfuegbaren Module bestimmen."""
     gate_modules = {}
@@ -262,6 +282,7 @@ def generate():
     voice_models = check_voice_models()
     flags = check_feature_flags()
     hardware = check_hardware()
+    audio_input = check_audio_input()
     gates = determine_gates(modules)
 
     # Zusammenfassung
@@ -287,6 +308,7 @@ def generate():
         "hardware": hardware,
         "core_modules": modules,
         "external_dependencies": externals,
+        "audio_input": audio_input,
         "npu_models": hef_models,
         "voice_models": voice_models,
     }

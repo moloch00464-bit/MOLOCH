@@ -1,1 +1,12 @@
-[]
+[
+  {
+    "timestamp": "2026-03-08T02:30:00",
+    "event_type": "capability_upgraded",
+    "description": "Audio-Eingang massiv verbessert: USB 8kHz → WiFi 16kHz/48kHz. Erster kabelloser Tentakel. ESP32-S3 mit Arduino-Firmware, I2S Slave, MCLK 12.288MHz, UDP-Streaming mit 5ms Latenz.",
+    "details": {
+      "vorher": {"typ": "USB ReSpeaker", "samplerate": 8000, "latenz_ms": 167},
+      "nachher": {"typ": "ESP32 WiFi", "samplerate": [16000, 48000], "latenz_ms": 5},
+      "verbesserung": "33x schneller, 2-6x höhere Audioqualität"
+    }
+  }
+]
