@@ -486,6 +486,29 @@ def _get_mood(status: Dict[str, Any]) -> str:
 
 
 # =========================================================================
+# Flow Trace (Nanobot Tracer)
+# =========================================================================
+
+_FLOW_TRACE_PATH = os.path.join(
+    os.path.expanduser("~"), "moloch", "logs", "flow_trace.json"
+)
+
+
+def _read_flow_trace() -> dict:
+    """Letzte Nanobot-Tracer-Messung aus logs/flow_trace.json lesen."""
+    try:
+        with open(_FLOW_TRACE_PATH, "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {
+            "fehler": "Noch kein Trace vorhanden — zuerst scripts/nanobot_trace.py ausfuehren",
+            "trace_id": None,
+        }
+    except Exception as e:
+        return {"fehler": str(e), "trace_id": None}
+
+
+# =========================================================================
 # HTTP-Server (leichtgewichtig, stdlib, kein Flask)
 # =========================================================================
 
@@ -499,6 +522,15 @@ class _DiagnosticsHandler(BaseHTTPRequestHandler):
             data["timestamp"] = time.time()
             body = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
             self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/moloch/flow_trace":
+            data = _read_flow_trace()
+            code = 200 if data.get("trace_id") else 404
+            body = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
+            self.send_response(code)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
