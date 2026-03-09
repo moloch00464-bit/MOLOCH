@@ -50,7 +50,7 @@ MAX_VISUAL_AMP = 0.15
 # Konstanten
 # =============================================================================
 
-AVATAR_SIZE = 300
+AVATAR_SIZE = 400
 CX = AVATAR_SIZE // 2
 CY = AVATAR_SIZE // 2
 ANIM_INTERVAL_MS = 110  # ~9 FPS, versetzt zu Preview-100ms (Gate0 Phase 9: CPU < 15%)
@@ -430,16 +430,16 @@ class AvatarModule:
         # === Grid (Idle: dunkel, Music: pulsiert) ===
         grid_bri = 20 + int(rms_f * 15 * mb)
         grid_c = (grid_bri, grid_bri, grid_bri + 15)
-        for x in range(0, AVATAR_SIZE, 30):
+        for x in range(0, AVATAR_SIZE, 40):
             pygame.draw.line(s, grid_c, (x, 0), (x, AVATAR_SIZE))
-        for y in range(0, AVATAR_SIZE, 30):
+        for y in range(0, AVATAR_SIZE, 40):
             pygame.draw.line(s, grid_c, (0, y), (AVATAR_SIZE, y))
 
         # === HUD Brackets (Idle: dezent, Music: leuchten bei Beat) ===
         bk_bri = bri * (0.25 + 0.1 * mb + bf * 0.65)
-        bk_len = 25
+        bk_len = 33
         bk_c = _scale(main_c, bk_bri)
-        m = 8
+        m = 11
         bk_w = 2 if bf > 0.3 else 1
         for (bx, by, dx, dy) in [
             (m, m, 1, 1), (AVATAR_SIZE-m, m, -1, 1),
@@ -467,7 +467,7 @@ class AvatarModule:
         glow_str *= 1.0 + self._s_voice_listen * 0.3
         glow_str *= 1.0 + rms_f * 2.5 * mb  # Music-Boost
         glow_str += bf * 1.5  # Beat-Explosion
-        glow_r = int((130 + int(bass_f * 30 * mb)) * pulse)
+        glow_r = int((173 + int(bass_f * 40 * mb)) * pulse)
         glow_key = (main_c, int(glow_str * 4), glow_r // 4)
         if glow_key != self._glow_key:
             self._glow_surface = _render_glow(glow_r, main_c, glow_str)
@@ -478,7 +478,7 @@ class AvatarModule:
 
         # === MUSIC: Shockwave-Ring bei Beat ===
         if beat and mb > 0.3:
-            self._shockwave_r = 90.0
+            self._shockwave_r = 120.0
             self._shockwave_alpha = 200.0
         if self._shockwave_alpha > 5:
             sw_r = int(self._shockwave_r)
@@ -494,19 +494,19 @@ class AvatarModule:
             self._shockwave_alpha *= 0.82
 
         # === Halo-Ringe (Idle: statisch, Music: pumpt mit Bass) ===
-        halo_r1 = int((110 + bass_pump * 15) * pulse)
-        halo_r2 = int((105 + bass_pump * 10) * pulse)
+        halo_r1 = int((147 + bass_pump * 20) * pulse)
+        halo_r2 = int((140 + bass_pump * 13) * pulse)
         halo_bri1 = bri * (0.2 + bass_f * 0.35 * mb)
         halo_bri2 = bri * (0.1 + bass_f * 0.18 * mb)
         if halo_r1 > 5:
-            pygame.gfxdraw.aacircle(s, CX, CY, min(halo_r1, 148),
+            pygame.gfxdraw.aacircle(s, CX, CY, min(halo_r1, 197),
                                     _scale(main_c, halo_bri1))
         if halo_r2 > 5:
-            pygame.gfxdraw.aacircle(s, CX, CY, min(halo_r2, 148),
+            pygame.gfxdraw.aacircle(s, CX, CY, min(halo_r2, 197),
                                     _scale(main_c, halo_bri2))
 
         # === Segmentierter Deko-Ring (Music: schneller) ===
-        seg_r = int((100 + bass_pump * 8) * pulse)
+        seg_r = int((133 + bass_pump * 11) * pulse)
         seg_speed = 0.15 + bass_f * 0.5 * mb
         seg_bri = bri * (0.15 + bass_f * 0.3 * mb)
         seg_c = _scale(main_c, seg_bri)
@@ -526,10 +526,10 @@ class AvatarModule:
         if sp_pulse > 0.01:
             # 15% Basis + 15% * energy = 15-30% bei vollem Puls
             sp_radius_boost = sp_pulse * (0.15 + sp_energy * 0.15)
-        ro = int(90 * (pulse + bass_pump) * (1.0 + sp_radius_boost))
-        ro += int(self._s_voice_speak * 3.0 * math.sin(self._speech_phase * 3.1))
-        ro = max(12, min(ro, 148))
-        ring_thick = 3 + int(bass_f * 5 * mb)
+        ro = int(120 * (pulse + bass_pump) * (1.0 + sp_radius_boost))
+        ro += int(self._s_voice_speak * 4.0 * math.sin(self._speech_phase * 3.1))
+        ro = max(16, min(ro, 197))
+        ring_thick = 4 + int(bass_f * 7 * mb)
         half_t = ring_thick // 2
         ring_bri_boost = 1.0 + bass_f * 0.5 * mb
         rc_bright = _scale(main_c, min(1.0, bri * ring_bri_boost))
@@ -603,11 +603,11 @@ class AvatarModule:
 
         # === Mittlerer Ring (Idle: stabil, Music: Mid-Pump) ===
         mid_mod = mid_f * 8.0 * math.sin(pp * 1.3) * mb
-        mid_r1 = int(78 * pulse * (1.0 + sp_radius_boost * 0.7) + mid_mod)
-        mid_r2 = int(75 * pulse * (1.0 + sp_radius_boost * 0.7)
-                     + mid_f * 5.0 * math.sin(pp * 1.7) * mb)
-        mid_r1 = max(5, min(mid_r1, 130))
-        mid_r2 = max(5, min(mid_r2, 130))
+        mid_r1 = int(104 * pulse * (1.0 + sp_radius_boost * 0.7) + mid_mod)
+        mid_r2 = int(100 * pulse * (1.0 + sp_radius_boost * 0.7)
+                     + mid_f * 7.0 * math.sin(pp * 1.7) * mb)
+        mid_r1 = max(5, min(mid_r1, 173))
+        mid_r2 = max(5, min(mid_r2, 173))
         mid_ring_bri = bri * (0.35 + 0.1 * mb + mid_f * 0.35 * mb)
         pygame.gfxdraw.aacircle(s, CX, CY, mid_r1, _scale(main_c, mid_ring_bri))
         pygame.gfxdraw.aacircle(s, CX, CY, mid_r2,
@@ -617,8 +617,8 @@ class AvatarModule:
         inner_amp = 0.03 * (1 + self._s_tension * 2.5)
         inner_amp *= 1.0 - self._s_voice_listen * 0.6
         ip = 1.0 + math.sin(pp * 1.5) * inner_amp
-        ri = int(68 * ip * (1.0 + sp_radius_boost * 0.5))
-        ri += int(self._s_voice_speak * 2.5 * math.sin(self._speech_phase * 2.7))
+        ri = int(91 * ip * (1.0 + sp_radius_boost * 0.5))
+        ri += int(self._s_voice_speak * 3.3 * math.sin(self._speech_phase * 2.7))
         ri = max(5, ri)
         inner_bri = bri * (0.55 + 0.1 * mb + mid_f * 0.25 * mb)
         pygame.gfxdraw.aacircle(s, CX, CY, ri, _scale(main_c, inner_bri))
@@ -637,8 +637,8 @@ class AvatarModule:
 
         # === IRIS (Idle: stabil, Music: ±20% Mid-Reaktion + Beat-Pulse) ===
         mid_iris = mid_f * 0.20 * math.sin(pp * 1.7) * mb
-        ir = int(50 * (0.82 + bri * 0.18 + mid_iris) * (1.0 + sp_radius_boost * 0.4))
-        ir = max(10, min(ir, 70))
+        ir = int(67 * (0.82 + bri * 0.18 + mid_iris) * (1.0 + sp_radius_boost * 0.4))
+        ir = max(13, min(ir, 93))
         ix = int(CX + self._pupil_dx)
         iy = int(CY + self._pupil_dy)
 
@@ -647,7 +647,7 @@ class AvatarModule:
 
         # Konzentrische Micro-Ringe
         for ring_i in range(8):
-            ring_r = ir - ring_i * 5
+            ring_r = ir - ring_i * 7
             if ring_r <= 4:
                 break
             ring_bri = bri * (0.55 - ring_i * 0.05 + rms_f * 0.15 * mb)
