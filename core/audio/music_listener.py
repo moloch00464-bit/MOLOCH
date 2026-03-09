@@ -47,7 +47,7 @@ UDP_PACKET_SIZE = 960  # Bytes — 48kHz Stereo, 240 Samples/Kanal @ int16
 # Audio Analyse
 SAMPLE_RATE = 48000
 FFT_SIZE = 2048        # Samples fuer FFT (21ms Fenster)
-UPDATE_RATE_HZ = 20    # Event-Rate
+UPDATE_RATE_HZ = 40    # Event-Rate (25ms, schnellere Reaktion)
 
 # Frequenz-Baender (Hz)
 BASS_LO, BASS_HI   = 20,   250
@@ -105,7 +105,7 @@ class MusicListener:
         self._s_mid  = 0.0
         self._s_high = 0.0
         self._s_rms  = 0.0
-        EMA_ALPHA = 0.3
+        EMA_ALPHA = 0.55  # Schnelle Reaktion auf Energie-Wechsel (~125ms bis 90%)
         self._alpha = EMA_ALPHA
 
         # Beat Detection State

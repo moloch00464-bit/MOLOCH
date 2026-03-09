@@ -66,8 +66,8 @@ GLOW_MAX_ALPHA        = 80     # Mid → Glow max 80/255
 RAY_JITTER_MAX        = 3.0    # High → ±3px Textur-Stoerung
 
 # Lerp-Alphas
-LERP_SLOW   = 0.12    # traege Uebergaenge (Iris, Helligkeit)
-LERP_FAST   = 0.35    # Beat-Reaktion (Pupille)
+LERP_SLOW   = 0.30    # Iris/Helligkeit (~300ms bis 90%)
+LERP_FAST   = 0.65    # Beat-Reaktion Pupille (~130ms bis 90%)
 
 # Atem-Modus (keine Musik)
 BREATHE_SPEED  = 0.5   # Radiant/Sek (ergibt ~3.5s Periode)
@@ -213,7 +213,7 @@ class EyeVisualizer:
         self._iris_radius = lerp(self._iris_radius, target_iris, LERP_SLOW)
 
         # 2. Pupillen-Kontraktion: Beat-Decay
-        self._beat_energy = max(0.0, self._beat_energy * 0.75)  # schneller Decay
+        self._beat_energy = max(0.0, self._beat_energy * 0.82)  # Decay ~200ms bei 30FPS
         pupil_target = PUPIL_CONTRACT_MIN + (1.0 - self._beat_energy) * (1.0 - PUPIL_CONTRACT_MIN)
         self._pupil_scale = lerp(self._pupil_scale, pupil_target, LERP_FAST)
 
