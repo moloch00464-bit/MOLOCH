@@ -172,11 +172,24 @@ class TrackingConfig:
     min_frames_before_move: int = 1     # SOFORT bewegen nach erstem Frame (war 3)
 
     # === DEAD ZONE + COAST MODE (Tracker-Beruhigung) ===
-    dead_zone_pct: float = 0.10        # ±10% Deadzone (war 15%, Aufgabe sagt ±10%)
+    dead_zone_pct: float = 0.10        # ±10% Deadzone (Fallback, wird nicht mehr fuer frozen genutzt)
     track_start_pct: float = 0.13      # 13% - Hysterese-Obergrenze (war 18%)
-    coast_stable_time: float = 1.5     # 1.5s stabil im Dead Zone -> Coast (war 2.0)
-    coast_resume_pct: float = 0.10     # 10% Abweichung zum Aufwachen aus Coast (war 12%)
+    coast_stable_time: float = 3.0     # 3s stabil fuer COAST (war 1.5s — zu schnell)
+    coast_resume_pct: float = 0.10     # Fallback (wird nicht mehr genutzt)
     min_move_speed: float = 0.15       # Minimale ONVIF-Speed bei kleinen Korrekturen
+
+    # === PIXEL-BASIERTE SCHWELLWERTE (Markus: hier anpassen!) ===
+    # Alle Schwellwerte in absoluten Pixeln (Frame 640x640)
+    # frozen_threshold_px: Kein Tracking unter diesem Error — kein Micro-Ruckeln
+    # coast_threshold_px:  COAST nur wenn AUCH tilt_error < diesem Wert (kein Einfrieren bei Tilt-Drift)
+    # coast_resume_px:     COAST verlassen wenn error wieder groesser
+    # tilt_boost_threshold_px: Tilt-Verstaerkung ab diesem Pixel-Error
+    # tilt_boost_factor:   Multiplikator fuer Tilt-Delta bei grossem Error
+    frozen_threshold_px: float = 30.0      # < 30px -> FROZEN
+    coast_threshold_px: float = 50.0       # COAST nur wenn tilt_error < 50px
+    coast_resume_px: float = 50.0          # COAST aufwachen bei > 50px
+    tilt_boost_threshold_px: float = 80.0  # Tilt-Boost ab 80px tilt-Error
+    tilt_boost_factor: float = 2.0         # Tilt-Delta verdoppeln bei grossem Error
 
 
 @dataclass
@@ -1063,9 +1076,12 @@ class AutonomousTracker:
         error_y = center_y_px - frame_center_y  # Positive = target BELOW center
         error_magnitude = math.sqrt(error_x**2 + error_y**2)
 
-        # Normalized error (-0.5 to +0.5) - geglaettet
+        # Normalized error - geglaettet
+        # WICHTIG: error_y_norm muss GLEICHE Referenz wie frame_center_y nutzen (0.33)!
+        # Sonst: Kamera auf Person bei y=0.5 zentriert, aber frame_center_y=0.33
+        # → error_y=120px sichtbar, aber error_y_norm=0 → tilt_p=0 → kein Tilt-Befehl!
         error_x_norm = self._smooth_x - 0.5
-        error_y_norm = self._smooth_y - 0.5
+        error_y_norm = self._smooth_y - 0.33  # BUG-FIX: war 0.5, muss 0.33 sein (Kopf oben)
 
         # PTZ Debug: raw + smooth Position + Error bei jedem Cycle
         ptz_debug.debug(
@@ -1090,30 +1106,41 @@ class AutonomousTracker:
 
         # === COAST MODE: Kamera komplett eingefroren wenn Ziel stabil ===
         if self.state == TrackerState.COAST:
-            if error_magnitude_pct > self.config.coast_resume_pct:
+            if error_magnitude > self.config.coast_resume_px:
                 # Ziel hat sich signifikant bewegt -> Tracking aufnehmen
                 self._set_state(TrackerState.TRACKING)
                 self._stable_start_time = None
-                logger.info(f"[COAST] Aufgewacht! error={error_magnitude_pct:.3f} > {self.config.coast_resume_pct}")
+                logger.info(f"[COAST] Aufgewacht! error={error_magnitude:.0f}px > {self.config.coast_resume_px:.0f}px")
             else:
                 # Stabil -> nichts tun
                 if debug_log:
-                    ptz_debug.debug(f"COAST still error={error_magnitude_pct:.3f} < {self.config.coast_resume_pct}")
+                    ptz_debug.debug(f"COAST still error={error_magnitude:.0f}px < {self.config.coast_resume_px:.0f}px")
                 return
 
-        # === DEAD ZONE: < 3% vom Bildzentrum -> keine Kamerabewegung ===
-        if error_magnitude_pct < self.config.dead_zone_pct:
+        # === DEAD ZONE: < frozen_threshold_px -> keine Kamerabewegung ===
+        if error_magnitude < self.config.frozen_threshold_px:
             if self.state not in (TrackerState.FROZEN, TrackerState.COAST):
                 self._set_state(TrackerState.FROZEN)
-                ptz_debug.debug(f"FROZEN dead_zone error={error_magnitude_pct:.3f} < {self.config.dead_zone_pct}")
+                ptz_debug.debug(
+                    f"FROZEN error={error_magnitude:.0f}px < {self.config.frozen_threshold_px:.0f}px"
+                )
 
-            # Coast-Timer: stabil seit wann?
-            if self._stable_start_time is None:
-                self._stable_start_time = now
-            elif (now - self._stable_start_time) >= self.config.coast_stable_time:
-                # 2+ Sekunden stabil im Dead Zone -> COAST Mode
-                self._set_state(TrackerState.COAST)
-                logger.info(f"[COAST] Aktiviert - Ziel stabil seit {self.config.coast_stable_time:.1f}s")
+            # Coast nur aktivieren wenn KEIN grosser Tilt-Error (kein Einfrieren bei Tilt-Drift)
+            if abs(error_y) < self.config.coast_threshold_px:
+                if self._stable_start_time is None:
+                    self._stable_start_time = now
+                elif (now - self._stable_start_time) >= self.config.coast_stable_time:
+                    self._set_state(TrackerState.COAST)
+                    logger.info(
+                        f"[COAST] Aktiviert - stabil {self.config.coast_stable_time:.0f}s, "
+                        f"tilt_err={abs(error_y):.0f}px < {self.config.coast_threshold_px:.0f}px"
+                    )
+            else:
+                # Grosser Tilt-Error -> kein Coast, Timer zurueck
+                self._stable_start_time = None
+                ptz_debug.debug(
+                    f"COAST_BLOCKED: tilt_err={abs(error_y):.0f}px > {self.config.coast_threshold_px:.0f}px"
+                )
             return
 
         # === HYSTERESE ZONE: 3-5% -> nur bewegen wenn bereits TRACKING ===
@@ -1193,6 +1220,16 @@ class AutonomousTracker:
         tilt_delta = tilt_p + tilt_d
         pan_delta = max(-self.config.max_step_pan, min(self.config.max_step_pan, pan_delta))
         tilt_delta = max(-self.config.max_step_tilt, min(self.config.max_step_tilt, tilt_delta))
+
+        # Tilt-Boost: Wenn Pixel-Tilt-Error dauerhaft gross -> Delta verstaerken
+        # Sicherheitsnetz: greift auch wenn error_y_norm zu klein skaliert
+        if abs(error_y) > self.config.tilt_boost_threshold_px:
+            tilt_delta *= self.config.tilt_boost_factor
+            tilt_delta = max(-self.config.max_step_tilt, min(self.config.max_step_tilt, tilt_delta))
+            ptz_debug.debug(
+                f"TILT_BOOST: error_y={error_y:+.0f}px > {self.config.tilt_boost_threshold_px:.0f}px "
+                f"→ tilt_delta={tilt_delta:+.2f}deg"
+            )
 
         if abs(pan_delta) < self.config.min_step_deg and abs(tilt_delta) < self.config.min_step_deg:
             if debug_log:
