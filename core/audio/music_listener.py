@@ -1,32 +1,30 @@
 #!/usr/bin/env python3
 """
-M.O.L.O.C.H. Music Listener — FFT-Analyse via WiFi-Mic 48kHz
+M.O.L.O.C.H. Music Listener — Echtzeit FFT via WiFi-Mic 48kHz
 =============================================================
 
 MOLOCH hoert Musik mit seinem eigenen Ohr (ReSpeaker 48kHz via ESP32 UDP).
 
-UDP Port 12346: 48kHz Stereo, 960 Bytes/Paket = 240 Samples pro Kanal (float32).
-Nur aktiv wenn mic.mode_changed → 48kHz (Musik-Modus).
+Zwei-Thread Echtzeit-Architektur:
+  [Receive-Thread]  UDP recv → decode → sample_queue.put_nowait()
+  [Analysis-Thread] sample_queue.get() → Ring-Buffer → Beat + FFT
 
-FFT-Analyse:
-  Bass (20-250 Hz)   — Iris-Puls
-  Mid  (250-4kHz)    — Glow
-  High (4-16kHz)     — Textur/Strahlen
-  Beat Detection     — Pupillen-Kontraktion
+Beat-Detection: RMS-Spike auf jedem Chunk (~5ms Latenz, kein FFT noetig)
+Band-Analyse:   FFT auf Ring-Buffer (2048 Samples, 40Hz, genaue Frequenzen)
 
-Events (20x/Sek):
-  music.beat             {'strength': float, 'bpm_estimate': float}
+Kein Throttle im Receive-Thread — Analyse blockiert auf Queue.
+Bei Queue-Ueberlauf: aeltestes Sample droppen → immer frischeste Daten.
+
+Events:
+  music.beat             {'strength': float, 'bpm_estimate': float}  ~5ms Latenz
   music.frequency_bands  {'bass': 0-1, 'mid': 0-1, 'high': 0-1, 'overall_energy': 0-1}
 
-Schreibt auch in /dev/shm/moloch_music.bin (Format: =5f2B)
-→ panel_avatar.py liest diese Datei direkt (kein Umweg noetig).
-
-Kein librosa! Nur numpy + scipy.
-
-Singleton: get_music_listener()
+Schreibt /dev/shm/moloch_music.bin (Format: =5f2B) fuer panel_avatar.py.
 """
 
+import collections
 import logging
+import queue
 import socket
 import struct
 import threading
@@ -39,24 +37,26 @@ from core.moloch_event_bus import get_event_bus, PRIO_INFO
 
 logger = logging.getLogger("MusicListener")
 
-# UDP Konfiguration
+# =========================================================================
+# Konfiguration
+# =========================================================================
+
 UDP_HOST = "0.0.0.0"
 UDP_PORT = 12346
-UDP_PACKET_SIZE = 960  # Bytes — 48kHz Stereo, 240 Samples/Kanal @ int16
 
-# Audio Analyse
-SAMPLE_RATE = 48000
-FFT_SIZE = 2048        # Samples fuer FFT (21ms Fenster)
-UPDATE_RATE_HZ = 40    # Event-Rate (25ms, schnellere Reaktion)
+SAMPLE_RATE  = 48000
+FFT_SIZE     = 2048   # Ring-Buffer Groesse fuer Band-FFT (42ms Fenster)
+BAND_HZ      = 40     # Band-Analyse Rate (25ms Intervall)
 
 # Frequenz-Baender (Hz)
-BASS_LO, BASS_HI   = 20,   250
-MID_LO,  MID_HI    = 250,  4000
-HIGH_LO, HIGH_HI   = 4000, 16000
+BASS_LO, BASS_HI = 20,   250
+MID_LO,  MID_HI  = 250,  4000
+HIGH_LO, HIGH_HI = 4000, 16000
 
-# Beat Detection
-BEAT_THRESHOLD = 1.3      # Bass > 1.3x Durchschnitt = Beat
-BEAT_COOLDOWN_MS = 200    # Mindestabstand zwischen Beats
+# Beat Detection (RMS-basiert, laeuft auf jedem Chunk ~5ms)
+BEAT_THRESHOLD    = 1.35   # Chunk-RMS > Durchschnitt * Faktor = Beat
+BEAT_COOLDOWN_MS  = 180    # Mindestabstand zwischen Beats (ms)
+BEAT_HISTORY_LEN  = 40     # Anzahl Chunks fuer rollierenden RMS-Durchschnitt
 
 # Normalisierung (empirisch fuer ReSpeaker 48kHz WiFi-Stream)
 NORM_BASS = 0.020
@@ -64,82 +64,106 @@ NORM_MID  = 0.060
 NORM_HIGH = 0.300
 NORM_RMS  = 20.0
 
-# Silence Gate
-SILENCE_RAW_THRESHOLD = 0.002
+# Silence Gate (unter diesem Roh-RMS: Stille)
+SILENCE_THRESHOLD = 0.002
 
-# IPC Binary Format (kompatibel mit music_visualizer.py und panel_avatar.py)
-SHM_PATH = "/dev/shm/moloch_music.bin"
-SHM_FORMAT = "=5f2B"  # rms, bass, mid, high, timestamp, active, beat
-SHM_SIZE = struct.calcsize(SHM_FORMAT)
-MAX_VISUAL_AMP = 0.15  # Maximale visuelle Amplitude (Skalierung fuer IPC)
+# EMA Smoothing fuer Band-Werte (0.55 = ~125ms bis 90%)
+EMA_ALPHA = 0.55
+
+# Queue-Groesse: max N Chunks Backlog (bei Ueberlauf droppen)
+QUEUE_MAXSIZE = 20
+
+# IPC Binary (kompatibel mit music_visualizer.py + panel_avatar.py)
+SHM_PATH      = "/dev/shm/moloch_music.bin"
+SHM_FORMAT    = "=5f2B"   # rms, bass, mid, high, ts, active, beat
+MAX_VISUAL_AMP = 0.15
 
 
 class MusicListener:
     """
-    Empfaengt UDP 48kHz Audio vom ESP32 WiFi-Mic,
-    berechnet FFT-Baender, Beat-Detection,
-    und publisht Events + schreibt IPC-Binary.
+    Echtzeit-Musikanalyse vom ESP32 WiFi-Mic (48kHz UDP).
+
+    Receive-Thread: maximal schnell, nur decode + queue.put
+    Analysis-Thread: blockiert auf queue, Beat sofort, Bands 40Hz
     """
 
     def __init__(self):
         self._bus = get_event_bus()
         self._lock = threading.Lock()
         self._running = False
-        self._active = False  # Wird True wenn mic.mode_changed → 48kHz
+        self._active = False
 
-        # Thread
-        self._thread: Optional[threading.Thread] = None
+        # Threads
+        self._recv_thread:     Optional[threading.Thread] = None
+        self._analysis_thread: Optional[threading.Thread] = None
         self._sock: Optional[socket.socket] = None
 
-        # Analyse-Buffer (rolling 2048 Samples, Mono-Mix aus Stereo)
-        self._sample_buffer: np.ndarray = np.zeros(FFT_SIZE, dtype=np.float32)
+        # Producer-Consumer Queue (Mono-Chunks als np.ndarray)
+        self._sample_queue: queue.Queue = queue.Queue(maxsize=QUEUE_MAXSIZE)
 
-        # Vorberechnete FFT-Masken
+        # Ring-Buffer fuer Band-FFT (Thread-sicher: nur vom Analysis-Thread geschrieben)
+        self._ring: collections.deque = collections.deque(maxlen=FFT_SIZE)
+
+        # Vorberechnete FFT-Masken (fuer FFT_SIZE)
         freqs = np.fft.rfftfreq(FFT_SIZE, 1.0 / SAMPLE_RATE)
         self._bass_mask = (freqs >= BASS_LO) & (freqs <= BASS_HI)
         self._mid_mask  = (freqs >= MID_LO)  & (freqs <= MID_HI)
         self._high_mask = (freqs >= HIGH_LO) & (freqs <= HIGH_HI)
 
-        # Smoothing State (EMA, alpha=0.3)
+        # Geglaettete Band-Werte (nur Analysis-Thread schreibt)
         self._s_bass = 0.0
         self._s_mid  = 0.0
         self._s_high = 0.0
         self._s_rms  = 0.0
-        EMA_ALPHA = 0.55  # Schnelle Reaktion auf Energie-Wechsel (~125ms bis 90%)
-        self._alpha = EMA_ALPHA
 
-        # Beat Detection State
-        self._bass_history: list = []
+        # Beat-State (RMS-basiert)
+        self._rms_history: collections.deque = collections.deque(maxlen=BEAT_HISTORY_LEN)
         self._beat_cooldown_until = 0.0
-        self._last_beat_time = 0.0
-        self._bpm_estimate = 0.0
+        self._last_beat_time      = 0.0
+        self._bpm_estimate        = 0.0
 
-        # Event-Rate Throttle
-        self._last_event_time = 0.0
-        self._event_interval = 1.0 / UPDATE_RATE_HZ
+        # Band-Analyse Throttle
+        self._last_band_time = 0.0
+        self._band_interval  = 1.0 / BAND_HZ
 
-        # IPC Binary Buffer
-        self._shm_buf = bytearray(SHM_SIZE)
+        # IPC Buffer
+        self._shm_buf = bytearray(struct.calcsize(SHM_FORMAT))
 
     # =========================================================================
     # Start / Stop
     # =========================================================================
 
     def start(self):
-        """Startet UDP-Socket und Analyse-Thread."""
         if self._running:
             return
         self._running = True
-        self._thread = threading.Thread(
-            target=self._run, daemon=True, name="MusicListener"
+
+        # Socket oeffnen
+        try:
+            self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536)
+            self._sock.settimeout(0.5)
+            self._sock.bind((UDP_HOST, UDP_PORT))
+        except Exception as e:
+            logger.error(f"[MUSIC-LISTENER] Socket-Fehler: {e}")
+            self._running = False
+            return
+
+        # Threads starten
+        self._recv_thread = threading.Thread(
+            target=self._run_receive, daemon=True, name="MusicRcv"
         )
-        self._thread.start()
-        # Event-Bus: auf mic.mode_changed hoeren
+        self._analysis_thread = threading.Thread(
+            target=self._run_analysis, daemon=True, name="MusicFFT"
+        )
+        self._recv_thread.start()
+        self._analysis_thread.start()
+
         self._bus.subscribe("mic.mode_changed", self._on_mic_mode_changed, priority=5)
-        logger.info("[MUSIC-LISTENER] Gestartet (wartet auf 48kHz-Modus)")
+        logger.info(f"[MUSIC-LISTENER] Gestartet (Port {UDP_PORT}, 2-Thread Echtzeit)")
 
     def stop(self):
-        """Stoppt den Listener."""
         self._running = False
         self._bus.unsubscribe("mic.mode_changed", self._on_mic_mode_changed)
         if self._sock:
@@ -147,9 +171,15 @@ class MusicListener:
                 self._sock.close()
             except Exception:
                 pass
-        if self._thread:
-            self._thread.join(timeout=3.0)
-            self._thread = None
+        # Queue aufwecken damit Analysis-Thread beendet
+        try:
+            self._sample_queue.put_nowait(None)
+        except Exception:
+            pass
+        if self._recv_thread:
+            self._recv_thread.join(timeout=2.0)
+        if self._analysis_thread:
+            self._analysis_thread.join(timeout=2.0)
         self._write_idle_to_shm()
         logger.info("[MUSIC-LISTENER] Gestoppt")
 
@@ -158,33 +188,23 @@ class MusicListener:
     # =========================================================================
 
     def _on_mic_mode_changed(self, event):
-        """Aktiviert/deaktiviert Analyse je nach Mic-Modus."""
         payload = event.get("payload", {}) if isinstance(event, dict) else {}
         rate = payload.get("rate", 16000)
         with self._lock:
             self._active = (rate == 48000)
         if self._active:
-            logger.info("[MUSIC-LISTENER] 48kHz aktiv — Musik-Analyse laeuft")
+            logger.info("[MUSIC-LISTENER] 48kHz aktiv — Echtzeit-Analyse laeuft")
         else:
-            logger.info("[MUSIC-LISTENER] 16kHz — Musik-Analyse pausiert")
+            logger.info("[MUSIC-LISTENER] 16kHz — Analyse pausiert")
             self._write_idle_to_shm()
 
     # =========================================================================
-    # Haupt-Thread
+    # Thread 1: Receive (so schnell wie moeglich)
     # =========================================================================
 
-    def _run(self):
-        """UDP empfangen und analysieren."""
-        try:
-            self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self._sock.settimeout(0.5)
-            self._sock.bind((UDP_HOST, UDP_PORT))
-            logger.info(f"[MUSIC-LISTENER] UDP Socket gebunden auf Port {UDP_PORT}")
-        except Exception as e:
-            logger.error(f"[MUSIC-LISTENER] Socket-Fehler: {e}")
-            self._running = False
-            return
+    def _run_receive(self):
+        """Empfaengt UDP-Pakete und schreibt dekodierte Mono-Chunks in Queue."""
+        logger.info(f"[MUSIC-LISTENER] Receive-Thread aktiv (Port {UDP_PORT})")
 
         while self._running:
             try:
@@ -193,126 +213,138 @@ class MusicListener:
                 continue
             except Exception as e:
                 if self._running:
-                    logger.error(f"[MUSIC-LISTENER] Empfangsfehler: {e}")
+                    logger.warning(f"[MUSIC-LISTENER] Recv-Fehler: {e}")
                 break
 
             with self._lock:
                 active = self._active
             if not active:
-                continue  # Paket ignorieren wenn nicht im Musik-Modus
+                continue
 
-            self._process_packet(raw)
-
-        try:
-            self._sock.close()
-        except Exception:
-            pass
-
-    def _process_packet(self, raw: bytes):
-        """Ein UDP-Paket verarbeiten: Decode → Buffer → FFT → Events."""
-        try:
-            # int16 Stereo → float32 Mono-Mix
-            # 960 Bytes = 480 int16 Samples = 240 Stereo-Paare
-            samples_raw = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
-            samples_raw /= 32768.0
-
-            if len(samples_raw) >= 2:
-                # Stereo → Mono (L+R / 2)
-                if len(samples_raw) % 2 == 0:
-                    mono = (samples_raw[::2] + samples_raw[1::2]) * 0.5
+            # Decode: int16 Stereo → float32 Mono
+            try:
+                s = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
+                s /= 32768.0
+                if len(s) >= 2 and len(s) % 2 == 0:
+                    mono = (s[::2] + s[1::2]) * 0.5
+                elif len(s) >= 1:
+                    mono = s[::2]
                 else:
-                    mono = samples_raw[::2]
-            else:
-                return
+                    continue
+                mono -= np.mean(mono)  # DC-Block
+            except Exception:
+                continue
 
-            # DC-Block
-            mono -= np.mean(mono)
+            # Queue: bei Ueberlauf aeltestes droppen → immer frischeste Daten
+            if self._sample_queue.full():
+                try:
+                    self._sample_queue.get_nowait()
+                except queue.Empty:
+                    pass
 
-            # Rolling Buffer fuellen
-            n = len(mono)
-            if n >= FFT_SIZE:
-                self._sample_buffer = mono[-FFT_SIZE:]
-            else:
-                self._sample_buffer = np.roll(self._sample_buffer, -n)
-                self._sample_buffer[-n:] = mono
+            try:
+                self._sample_queue.put_nowait(mono)
+            except queue.Full:
+                pass
 
-        except Exception as e:
-            logger.debug(f"[MUSIC-LISTENER] Packet-Decode Fehler: {e}")
-            return
+    # =========================================================================
+    # Thread 2: Analyse (blockiert auf Queue)
+    # =========================================================================
 
-        # FFT-Analyse throttlen
-        now = time.monotonic()
-        if now - self._last_event_time < self._event_interval:
-            return
-        self._last_event_time = now
+    def _run_analysis(self):
+        """Holt Chunks aus Queue, fuehrt Beat + Band-Analyse durch."""
+        logger.info("[MUSIC-LISTENER] Analysis-Thread aktiv")
 
-        self._analyze(now)
+        while self._running:
+            # Auf neuen Chunk warten (blockiert, kein Polling!)
+            try:
+                chunk = self._sample_queue.get(timeout=0.2)
+            except queue.Empty:
+                continue
 
-    def _analyze(self, now: float):
-        """FFT-Analyse des aktuellen Buffers."""
-        samples = self._sample_buffer.copy()
+            if chunk is None:  # Stop-Signal
+                break
 
-        # Silence Gate
+            now = time.monotonic()
+
+            # Ring-Buffer fuellen
+            self._ring.extend(chunk.tolist())
+
+            # --- BEAT: jeder Chunk, ~5ms Latenz, kein FFT ---
+            chunk_rms = float(np.sqrt(np.mean(chunk ** 2)))
+            self._rms_history.append(chunk_rms)
+            avg_rms = sum(self._rms_history) / len(self._rms_history)
+
+            beat = (
+                chunk_rms > avg_rms * BEAT_THRESHOLD
+                and chunk_rms > SILENCE_THRESHOLD
+                and now > self._beat_cooldown_until
+            )
+            if beat:
+                self._beat_cooldown_until = now + BEAT_COOLDOWN_MS / 1000.0
+                if self._last_beat_time > 0:
+                    interval = now - self._last_beat_time
+                    if 0.2 < interval < 2.0:
+                        bpm = 60.0 / interval
+                        self._bpm_estimate = bpm * 0.8 + self._bpm_estimate * 0.2
+                self._last_beat_time = now
+                # Beat sofort publishen + SHM schreiben
+                self._bus.publish(
+                    event_type="music.beat",
+                    source="music_listener",
+                    priority=PRIO_INFO,
+                    payload={
+                        "strength":     round(chunk_rms * NORM_RMS, 3),
+                        "bpm_estimate": round(self._bpm_estimate, 1),
+                    },
+                )
+                self._write_to_shm(now, active=True, beat=True)
+
+            # --- BAND-FFT: 40Hz throttled, genaue Frequenzen ---
+            if now - self._last_band_time >= self._band_interval:
+                self._last_band_time = now
+                self._analyze_bands(now, beat)
+
+    def _analyze_bands(self, now: float, beat: bool):
+        """FFT-Band-Analyse auf dem Ring-Buffer (2048 Samples)."""
+        if len(self._ring) < FFT_SIZE:
+            return  # Noch nicht genug Daten
+
+        samples = np.array(list(self._ring), dtype=np.float32)
         rms_raw = float(np.sqrt(np.mean(samples ** 2)))
-        if rms_raw < SILENCE_RAW_THRESHOLD:
-            # Stille — alles auf 0 fahren
-            self._s_bass *= 0.7
-            self._s_mid  *= 0.7
-            self._s_high *= 0.7
-            self._s_rms  *= 0.7
-            self._write_to_shm(now, active=True, beat=False)
+
+        if rms_raw < SILENCE_THRESHOLD:
+            # Stille: Werte exponentiell abklingen lassen
+            self._s_bass *= 0.8
+            self._s_mid  *= 0.8
+            self._s_high *= 0.8
+            self._s_rms  *= 0.8
+            self._write_to_shm(now, active=True, beat=beat)
             return
 
-        # Hanning Window + FFT
+        # Hanning + FFT
         windowed = samples * np.hanning(FFT_SIZE)
         fft_mag = np.abs(np.fft.rfft(windowed))
 
-        # Band-Energien (quadratischer Mittelwert)
         bass_raw = self._band_rms(fft_mag, self._bass_mask)
         mid_raw  = self._band_rms(fft_mag, self._mid_mask)
         high_raw = self._band_rms(fft_mag, self._high_mask)
 
-        # Normalisierung auf 0-1
+        # Normalisierung
         rms_norm  = min(1.0, rms_raw  * NORM_RMS)
         bass_norm = min(1.0, bass_raw * NORM_BASS)
         mid_norm  = min(1.0, mid_raw  * NORM_MID)
         high_norm = min(1.0, high_raw * NORM_HIGH)
 
         # EMA Smoothing
-        a = self._alpha
+        a = EMA_ALPHA
         self._s_rms  += (rms_norm  - self._s_rms)  * a
         self._s_bass += (bass_norm - self._s_bass) * a
         self._s_mid  += (mid_norm  - self._s_mid)  * a
         self._s_high += (high_norm - self._s_high) * a
 
-        # Beat Detection
-        self._bass_history.append(bass_norm)
-        if len(self._bass_history) > 30:
-            self._bass_history.pop(0)
-        avg_bass = sum(self._bass_history) / len(self._bass_history)
-
-        beat = (
-            bass_norm > avg_bass * BEAT_THRESHOLD
-            and bass_norm > 0.25
-            and now > self._beat_cooldown_until
-        )
-        if beat:
-            self._beat_cooldown_until = now + BEAT_COOLDOWN_MS / 1000.0
-            if self._last_beat_time > 0:
-                interval = now - self._last_beat_time
-                bpm = 60.0 / interval if 0.2 < interval < 2.0 else self._bpm_estimate
-                self._bpm_estimate = bpm * 0.8 + self._bpm_estimate * 0.2  # EMA
-            self._last_beat_time = now
-
-        # IPC Binary schreiben
+        # IPC + Event
         self._write_to_shm(now, active=True, beat=beat)
-
-        # Events publishen
-        self._publish_events(beat)
-
-    def _publish_events(self, beat: bool):
-        """Events auf den Event Bus schreiben."""
-        # Frequenz-Baender Event (20x/Sek)
         self._bus.publish(
             event_type="music.frequency_bands",
             source="music_listener",
@@ -324,29 +356,13 @@ class MusicListener:
                 "overall_energy": round(self._s_rms,  3),
             },
         )
-        # Beat Event (nur wenn Beat erkannt)
-        if beat:
-            self._bus.publish(
-                event_type="music.beat",
-                source="music_listener",
-                priority=PRIO_INFO,
-                payload={
-                    "strength":     round(self._s_bass, 3),
-                    "bpm_estimate": round(self._bpm_estimate, 1),
-                },
-            )
 
     # =========================================================================
     # IPC Binary
     # =========================================================================
 
     def _write_to_shm(self, now: float, active: bool, beat: bool):
-        """Schreibt Analyse-Daten in /dev/shm/moloch_music.bin.
-
-        Format identisch mit music_visualizer.py: =5f2B
-        (rms, bass, mid, high, timestamp, active_byte, beat_byte)
-        Skaliert auf MAX_VISUAL_AMP fuer panel_avatar.py.
-        """
+        """Schreibt Daten in /dev/shm/moloch_music.bin (panel_avatar.py Format)."""
         try:
             struct.pack_into(
                 SHM_FORMAT, self._shm_buf, 0,
@@ -364,7 +380,6 @@ class MusicListener:
             pass
 
     def _write_idle_to_shm(self):
-        """Nullwerte in IPC schreiben (Musik-Modus inaktiv)."""
         try:
             buf = struct.pack(SHM_FORMAT, 0.0, 0.0, 0.0, 0.0, time.monotonic(), 0, 0)
             with open(SHM_PATH, "wb") as f:
@@ -374,7 +389,6 @@ class MusicListener:
 
     @staticmethod
     def _band_rms(fft_mag: np.ndarray, mask: np.ndarray) -> float:
-        """Quadratischer Mittelwert eines Frequenz-Bands."""
         if not np.any(mask):
             return 0.0
         return float(np.sqrt(np.mean(fft_mag[mask] ** 2)))
@@ -389,7 +403,6 @@ _instance_lock = threading.Lock()
 
 
 def get_music_listener() -> MusicListener:
-    """Singleton-Zugriff auf den MusicListener."""
     global _instance
     if _instance is None:
         with _instance_lock:
