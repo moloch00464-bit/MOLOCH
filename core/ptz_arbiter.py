@@ -18,7 +18,9 @@ Status wird in /dev/shm/moloch_status.json exportiert.
 import time
 import logging
 import threading
+from collections import deque
 from enum import Enum
+from typing import Optional, Tuple
 
 logger = logging.getLogger("PTZArbiter")
 
@@ -57,6 +59,35 @@ class PTZArbiter:
 
         # G1-T03: Callback bei Auto-Resume (Manuell -> Autonom)
         self.on_auto_resume = None  # Callable[[], None]
+
+        # === SMART_SEARCH_RETURN (G1-T04) ===
+        # Letzte bekannte Zielposition (pan, tilt)
+        self._last_known_position: Optional[Tuple[float, float]] = None
+        # Zeitpunkt des Ziel-Verlusts
+        self._target_lost_time: Optional[float] = None
+        # True waehrend 3s Wartezeit nach Rueckkehr zur letzten Position
+        self._smart_search_waiting: bool = False
+        # True wenn Wartezeit abgelaufen → patrol_scan soll starten
+        self.smart_search_patrol_ready: bool = False
+        # Wartezeit in Sekunden bevor patrol_scan aktiviert wird
+        SMART_SEARCH_WAIT_SEC: float = 3.0
+        self._smart_search_wait_sec: float = SMART_SEARCH_WAIT_SEC
+
+        # === FACE_LOCK_MODE (SCRFD-basiert) ===
+        # Wie viele aufeinanderfolgende Frames face_confidence > 0.8
+        self._face_lock_confidence_count: int = 0
+        # Ab N Frames wird face_lock aktiviert
+        FACE_LOCK_FRAMES: int = 5
+        self._face_lock_frames: int = FACE_LOCK_FRAMES
+        # Face-Lock aktiv: PTZ zielt auf face_bbox_center statt body_center
+        self.face_lock_active: bool = False
+        # Schwellwerte
+        self._face_lock_enter_conf: float = 0.8
+        self._face_lock_exit_conf: float = 0.5
+
+        # === MULTI_PERSON_SCENE ===
+        # Prioritaet: markus > groesste BBox > zuletzt getracktes Target
+        self._last_tracked_target_id: Optional[str] = None
 
     # =========================================================================
     # Properties (Thread-safe)
@@ -162,19 +193,22 @@ class PTZArbiter:
         """Manuell-Timeout: zurueck zu AUTONOM nach 30s. G1-T03: mit Callback."""
         with self._lock:
             if self._mode != ArbiterMode.MOLOCH_MANUELL:
-                return
-            now = time.time()
-            elapsed = now - self._last_manual_time
-            if elapsed > self.MANUAL_TIMEOUT_SEC:
-                self._moloch_tracking_on = True
-                self._switch_mode(ArbiterMode.MOLOCH_AUTONOM,
-                                  f"manual_timeout_{elapsed:.0f}s")
-                # G1-T03: Auto-Resume Callback (TTS Spruch etc.)
-                if self.on_auto_resume:
-                    try:
-                        self.on_auto_resume()
-                    except Exception as e:
-                        logger.warning(f"[ARBITER] on_auto_resume Fehler: {e}")
+                pass
+            else:
+                now = time.time()
+                elapsed = now - self._last_manual_time
+                if elapsed > self.MANUAL_TIMEOUT_SEC:
+                    self._moloch_tracking_on = True
+                    self._switch_mode(ArbiterMode.MOLOCH_AUTONOM,
+                                      f"manual_timeout_{elapsed:.0f}s")
+                    # G1-T03: Auto-Resume Callback (TTS Spruch etc.)
+                    if self.on_auto_resume:
+                        try:
+                            self.on_auto_resume()
+                        except Exception as e:
+                            logger.warning(f"[ARBITER] on_auto_resume Fehler: {e}")
+        # SmartSearch Wartezeit pruefen (ausserhalb des Mode-Checks)
+        self.check_smart_search_timeout()
 
     # =========================================================================
     # Sync (Legacy-Kompatibilitaet)
@@ -200,7 +234,176 @@ class PTZArbiter:
                     time.localtime(self._mode_since)
                 ),
                 "ptz_switch_reason": self._switch_reason,
+                "face_lock_active": self.face_lock_active,
+                "smart_search_patrol_ready": self.smart_search_patrol_ready,
+                "last_known_pan": self._last_known_position[0] if self._last_known_position else None,
+                "last_known_tilt": self._last_known_position[1] if self._last_known_position else None,
             }
+
+    # =========================================================================
+    # SMART_SEARCH_RETURN (G1-T04)
+    # =========================================================================
+
+    def update_target_position(self, pan: float, tilt: float):
+        """Aktuelle Zielposition merken (aufgerufen wenn Track aktiv).
+
+        Muss vom Tracker bei jedem Frame mit gueltiger Zielposition aufgerufen werden.
+        """
+        with self._lock:
+            self._last_known_position = (pan, tilt)
+            self._target_lost_time = None
+            self._smart_search_waiting = False
+            self.smart_search_patrol_ready = False
+
+    def on_target_lost(self):
+        """Ziel verloren — startet SMART_SEARCH_RETURN Ablauf.
+
+        1. Speichert letzte bekannte Position (bereits gespeichert)
+        2. Setzt Verlust-Zeitpunkt
+        3. smart_search_waiting = True (PTZ soll zur letzten Position fahren)
+        4. Nach 3s: smart_search_patrol_ready = True (patrol_scan aktivieren)
+        """
+        with self._lock:
+            if self._last_known_position is None:
+                # Noch nie ein Ziel gehabt → direkt zu patrol
+                self.smart_search_patrol_ready = True
+                return
+            self._target_lost_time = time.time()
+            self._smart_search_waiting = True
+            self.smart_search_patrol_ready = False
+            logger.info(
+                f"[ARBITER] SmartSearch: Rueckkehr zu "
+                f"pan={self._last_known_position[0]:.1f} "
+                f"tilt={self._last_known_position[1]:.1f}"
+            )
+
+    def check_smart_search_timeout(self):
+        """Wartezeit pruefen (periodisch aufrufen, z.B. aus check_timeout).
+
+        Nach 3s Wartezeit → smart_search_patrol_ready = True.
+        """
+        with self._lock:
+            if not self._smart_search_waiting:
+                return
+            if self._target_lost_time is None:
+                return
+            elapsed = time.time() - self._target_lost_time
+            if elapsed >= self._smart_search_wait_sec:
+                self._smart_search_waiting = False
+                self.smart_search_patrol_ready = True
+                logger.info(
+                    f"[ARBITER] SmartSearch: {elapsed:.1f}s gewartet → patrol_scan"
+                )
+
+    @property
+    def smart_search_return_position(self) -> Optional[Tuple[float, float]]:
+        """Gibt letzte bekannte Zielposition zurueck (oder None)."""
+        with self._lock:
+            if self._smart_search_waiting:
+                return self._last_known_position
+            return None
+
+    # =========================================================================
+    # FACE_LOCK_MODE
+    # =========================================================================
+
+    def update_face_confidence(self, face_confidence: float):
+        """SCRFD Face-Confidence einpflegen. Aktiviert/deaktiviert Face-Lock.
+
+        face_lock_active = True  wenn face_confidence > 0.8 fuer 5 Frames
+        face_lock_active = False wenn face_confidence < 0.5
+        """
+        with self._lock:
+            if face_confidence >= self._face_lock_enter_conf:
+                self._face_lock_confidence_count += 1
+                if (not self.face_lock_active
+                        and self._face_lock_confidence_count >= self._face_lock_frames):
+                    self.face_lock_active = True
+                    logger.info(
+                        f"[ARBITER] Face-Lock AKTIV "
+                        f"(conf={face_confidence:.2f}, frames={self._face_lock_confidence_count})"
+                    )
+            elif face_confidence < self._face_lock_exit_conf:
+                if self.face_lock_active:
+                    logger.info(
+                        f"[ARBITER] Face-Lock AUS (conf={face_confidence:.2f})"
+                    )
+                self.face_lock_active = False
+                self._face_lock_confidence_count = 0
+            # Zwischen 0.5 und 0.8: Zaehler nicht resetten (Hysterese)
+
+    # =========================================================================
+    # MULTI_PERSON_SCENE
+    # =========================================================================
+
+    def select_tracking_target(self, persons: list) -> Optional[dict]:
+        """Waehlt bestes Ziel aus mehreren erkannten Personen.
+
+        Prioritaet:
+          1. face_id == "markus" (oder "Markus")
+          2. Groesste Bounding Box (bbox_area)
+          3. Zuletzt getracktes Target (last_tracked_target_id)
+
+        Args:
+            persons: Liste von Dicts mit Feldern:
+                     - id: str (optional)
+                     - face_id: str (optional, "markus"|"unknown"|None)
+                     - bbox: (x1, y1, x2, y2) normalisiert (optional)
+        Returns:
+            Bestes Ziel-Dict oder None wenn Liste leer
+        """
+        if not persons:
+            return None
+
+        # Prioritaet 1: Markus erkannt
+        for p in persons:
+            fid = (p.get("face_id") or "").lower()
+            if fid == "markus":
+                with self._lock:
+                    self._last_tracked_target_id = p.get("id")
+                logger.debug("[ARBITER] MultiPerson: Markus erkannt → Prioritaet 1")
+                return p
+
+        # Prioritaet 2: Groesste BBox
+        best = None
+        best_area = -1.0
+        for p in persons:
+            bbox = p.get("bbox")
+            if bbox is None:
+                continue
+            x1, y1, x2, y2 = bbox
+            area = (x2 - x1) * (y2 - y1)
+            if area > best_area:
+                best_area = area
+                best = p
+
+        if best is not None:
+            # Prioritaet 3: Falls gleich gross, zuletzt getracktes bevorzugen
+            last_id = None
+            with self._lock:
+                last_id = self._last_tracked_target_id
+            if last_id is not None:
+                for p in persons:
+                    if p.get("id") == last_id:
+                        bbox = p.get("bbox")
+                        if bbox:
+                            x1, y1, x2, y2 = bbox
+                            area = (x2 - x1) * (y2 - y1)
+                            # Nur wechseln wenn neue BBox groesser als 20% besser
+                            if best_area > 0 and (best_area - area) / best_area < 0.20:
+                                best = p
+                                break
+
+            with self._lock:
+                self._last_tracked_target_id = best.get("id")
+            logger.debug(
+                f"[ARBITER] MultiPerson: {len(persons)} Personen → "
+                f"groesste BBox (area={best_area:.3f})"
+            )
+            return best
+
+        # Fallback: erste Person in Liste
+        return persons[0]
 
 
 # Singleton
