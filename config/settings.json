@@ -16,7 +16,7 @@
   },
   "audio": {
     "mic_gain": 1.89,
-    "noise_gate_db": -30.0,
+    "noise_gate_db": -40.0,
     "agc_enabled": false,
     "wifi_samplerate": 16000,
     "audio_source": "wifi",
