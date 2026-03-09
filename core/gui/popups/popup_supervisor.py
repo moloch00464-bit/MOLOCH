@@ -70,11 +70,16 @@ _OK = "OK"
 _DEGRADED = "DEGRADED"
 _BROKEN = "BROKEN"
 
+# Nervensystem-Farben (eigene Werte, panel_styles hat anderen Kontrast)
+_NERVE_OK = "#00FFCC"
+_NERVE_DEGRADED = "#FFFF00"
+_NERVE_BROKEN = "#FF0033"
+
 # Farben pro Status
 _STATUS_COLORS = {
-    _OK: STATUS_GREEN,
-    _DEGRADED: STATUS_YELLOW,
-    _BROKEN: STATUS_RED,
+    _OK: _NERVE_OK,
+    _DEGRADED: _NERVE_DEGRADED,
+    _BROKEN: _NERVE_BROKEN,
 }
 
 
@@ -304,61 +309,97 @@ class SupervisorPopup:
     # =========================================================================
 
     def _run_checks(self, data: Dict[str, Any]) -> Dict[str, Tuple[str, str]]:
-        """Alle 5 Pipeline-Checks ausfuehren. Gibt Dict {key: (status, detail)} zurueck."""
-        checks = {}
+        """Alle 5 Pipeline-Checks ausfuehren. Gibt Dict {key: (status, detail)} zurueck.
+
+        Alle Checks laufen client-side aus den API-Daten — kein Backend-Eingriff.
+        try/except pro Check damit ein Fehler nicht alle anderen blockiert.
+        """
+        checks: Dict[str, Tuple[str, str]] = {}
 
         # --- 1. Vision → Core ---
-        # event_bus_subscribers ist dict: topic -> count
-        subs = data.get("event_bus_subscribers", {})
-        if isinstance(subs, dict):
-            has_perception = subs.get("perception.person_detected", 0) > 0
-        else:
-            has_perception = False
+        # Prueft: event_bus_subscribers hat perception.* Eintraege? Ja=OK, Nein=BROKEN
+        try:
+            subs = data.get("event_bus_subscribers", {})
+            if isinstance(subs, dict):
+                has_perception = any(
+                    k.startswith("perception.") and v > 0
+                    for k, v in subs.items()
+                    if isinstance(v, (int, float))
+                )
+            else:
+                # Fallback: int Gesamt-Count > 0 als schwaches OK
+                has_perception = isinstance(subs, int) and subs > 0
 
-        pipeline_alive = data.get("pipeline_alive", False)
+            pipeline_alive = data.get("pipeline_alive", False)
 
-        if pipeline_alive and has_perception:
-            checks["vision_core"] = (_OK, "Pipeline + Subscriber aktiv")
-        elif pipeline_alive:
-            checks["vision_core"] = (_DEGRADED, "Pipeline aktiv, keine Perception-Subs")
-        else:
-            checks["vision_core"] = (_BROKEN, "Vision-Pipeline nicht aktiv")
+            if pipeline_alive and has_perception:
+                checks["vision_core"] = (_OK, "Pipeline + Perception-Subs aktiv")
+            elif pipeline_alive:
+                checks["vision_core"] = (_DEGRADED, "Pipeline aktiv, keine Perception-Subs")
+            else:
+                checks["vision_core"] = (_BROKEN, "Vision-Pipeline nicht aktiv")
+        except Exception as e:
+            logger.error(f"Check vision_core Fehler: {e}")
+            checks["vision_core"] = (_BROKEN, f"Check-Fehler: {e}")
 
         # --- 2. Core → Bridge ---
-        bridge_state = data.get("bridge_state", "unknown")
-        gueltige_states = ("idle", "searching", "tracking", "interaction", "manual_override")
+        # Prueft: bridge_state bekannt (nicht null/unknown)? Ja=OK, Nein=BROKEN
+        try:
+            bridge_state = data.get("bridge_state") or "unknown"
+            gueltige_states = ("idle", "searching", "tracking", "interaction", "manual_override")
 
-        if bridge_state in gueltige_states:
-            checks["core_bridge"] = (_OK, f"Bridge: {bridge_state}")
-        else:
-            checks["core_bridge"] = (_BROKEN, f"Bridge: {bridge_state}")
+            if bridge_state in gueltige_states:
+                checks["core_bridge"] = (_OK, f"Bridge: {bridge_state}")
+            else:
+                checks["core_bridge"] = (_BROKEN, f"Bridge nicht initialisiert ({bridge_state})")
+        except Exception as e:
+            logger.error(f"Check core_bridge Fehler: {e}")
+            bridge_state = "unknown"
+            checks["core_bridge"] = (_BROKEN, f"Check-Fehler: {e}")
 
         # --- 3. Bridge → Tracker ---
-        person_detected = data.get("person_detected", False)
+        # Prueft: person_detected + bridge_state=tracking/interaction? Ja=OK
+        try:
+            person_detected = bool(data.get("person_detected", False))
 
-        if not person_detected:
-            checks["bridge_tracker"] = (_OK, f"Kein Target ({bridge_state})")
-        elif bridge_state in ("tracking", "interaction"):
-            checks["bridge_tracker"] = (_OK, f"Aktiv: {bridge_state}")
-        elif bridge_state == "searching":
-            checks["bridge_tracker"] = (_DEGRADED, "Person da, suche Gesicht...")
-        else:
-            checks["bridge_tracker"] = (_DEGRADED, f"Person da, Bridge: {bridge_state}")
+            if not person_detected:
+                checks["bridge_tracker"] = (_OK, f"Kein Target ({bridge_state})")
+            elif bridge_state in ("tracking", "interaction"):
+                checks["bridge_tracker"] = (_OK, f"Aktiv: {bridge_state}")
+            elif bridge_state == "searching":
+                checks["bridge_tracker"] = (_DEGRADED, "Person da, suche Gesicht...")
+            elif bridge_state == "manual_override":
+                checks["bridge_tracker"] = (_DEGRADED, "Manueller Modus")
+            else:
+                checks["bridge_tracker"] = (_BROKEN, f"Person da, Bridge: {bridge_state}")
+        except Exception as e:
+            logger.error(f"Check bridge_tracker Fehler: {e}")
+            person_detected = False
+            checks["bridge_tracker"] = (_BROKEN, f"Check-Fehler: {e}")
 
-        # --- 4. ESP → Audio (aus Thread-Cache) ---
-        with self._esp_lock:
-            checks["esp_audio"] = (self._esp_status, self._esp_detail)
+        # --- 4. ESP → Audio (aus Background-Thread-Cache, blockiert nicht) ---
+        try:
+            with self._esp_lock:
+                checks["esp_audio"] = (self._esp_status, self._esp_detail)
+        except Exception as e:
+            logger.error(f"Check esp_audio Fehler: {e}")
+            checks["esp_audio"] = (_BROKEN, f"Check-Fehler: {e}")
 
         # --- 5. Feedback Loop ---
-        face_id = data.get("face_id", None)
+        # Prueft: person_detected + face_id gesetzt? Ja=OK
+        try:
+            face_id = data.get("face_id") or None
 
-        if not person_detected:
-            checks["feedback_loop"] = (_OK, "Kein Target (idle)")
-        elif face_id:
-            sim = data.get("face_similarity", 0.0)
-            checks["feedback_loop"] = (_OK, f"Erkannt: {face_id} ({sim:.0%})")
-        else:
-            checks["feedback_loop"] = (_DEGRADED, "Person da, kein Gesicht")
+            if not person_detected:
+                checks["feedback_loop"] = (_OK, "Kein Target (idle)")
+            elif face_id:
+                sim = data.get("face_similarity", 0.0)
+                checks["feedback_loop"] = (_OK, f"Erkannt: {face_id} ({sim:.0%})")
+            else:
+                checks["feedback_loop"] = (_DEGRADED, "Person da, kein Gesicht erkannt")
+        except Exception as e:
+            logger.error(f"Check feedback_loop Fehler: {e}")
+            checks["feedback_loop"] = (_BROKEN, f"Check-Fehler: {e}")
 
         return checks
 
@@ -387,6 +428,9 @@ class SupervisorPopup:
             self._draw_ampel(FG_DIM)
             self._lbl_ampel.config(text="Keine Verbindung", fg=FG_DIM)
             self._lbl_score.config(text="", fg=FG_DIM)
+            # Nervensystem-Labels auf API-offline setzen (kein staler "---" Wert)
+            for lbl in self._pipe_labels.values():
+                lbl.config(text=f"{_BROKEN}  API nicht erreichbar", fg=_NERVE_BROKEN)
 
         # ESP-Check alle 4 Sekunden (jeden 2. Poll)
         if not hasattr(self, "_esp_tick"):
