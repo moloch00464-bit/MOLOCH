@@ -746,7 +746,7 @@ class VoicePipeline:
                 logger.warning(f"[VAD] Unerwartetes Format: {rate}Hz {channels}ch {sample_width}B — ueberspringe VAD")
                 return True
 
-            vad = webrtcvad.Vad(2)  # Aggressiveness 2 — guter Balance fuer Deutsch/Dialekt
+            vad = webrtcvad.Vad(0)  # Aggressiveness 0 — tolerantester Modus fuer WiFi-Mic (niedriger Pegel)
             frame_ms = 30
             frame_bytes = int(rate * frame_ms / 1000) * sample_width  # 960 Bytes
 
