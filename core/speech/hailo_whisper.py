@@ -241,12 +241,24 @@ class MolochWhisper:
 
             logger.info(f"NPU transcribing {audio_duration_s:.1f}s audio (timeout={timeout_ms}ms)...")
 
-            segments = self._npu_processor.generate_all_segments(
-                audio_data=audio_data,
-                task=Speech2TextTask.TRANSCRIBE,
-                language=language,
-                timeout_ms=timeout_ms
-            )
+            # Hailo API aufrufen — initial_prompt als optionaler Kwarg
+            try:
+                segments = self._npu_processor.generate_all_segments(
+                    audio_data=audio_data,
+                    task=Speech2TextTask.TRANSCRIBE,
+                    language=language,
+                    timeout_ms=timeout_ms,
+                    initial_prompt="Ich spreche Deutsch. Fränkischer Dialekt möglich.",
+                )
+            except TypeError:
+                # Hailo API-Version unterstuetzt initial_prompt nicht → ohne Prompt
+                logger.debug("Hailo API: initial_prompt nicht unterstuetzt — ohne Prompt")
+                segments = self._npu_processor.generate_all_segments(
+                    audio_data=audio_data,
+                    task=Speech2TextTask.TRANSCRIBE,
+                    language=language,
+                    timeout_ms=timeout_ms
+                )
 
             if not segments:
                 logger.warning("No speech detected in audio")
@@ -254,6 +266,20 @@ class MolochWhisper:
 
             text = "".join([seg.text for seg in segments]).strip()
             text = re.sub(r'<\|[^>]+\|>', '', text).strip()
+
+            # Bekannte Whisper-Halluzinationen filtern (Stille/Hintergrundgeraeusch)
+            halluzinationen = [
+                "Untertitel", "Danke", "Tschüss", "Tschüss!", "Auf Wiedersehen",
+                "Bitte abonnieren", "Abonnieren", "Vielen Dank", "Vielen Dank!",
+                "Thank you", "Thanks", "Bye", "Goodbye", "Subscribe",
+                "[Musik]", "[musik]", "[MUSIK]", "[Applaus]", "[applaus]",
+                "[Gelächter]", "(Musik)", "(Stille)",
+            ]
+            text_lower = text.lower().strip()
+            for h in halluzinationen:
+                if text_lower == h.lower().strip():
+                    logger.info(f"Halluzination gefiltert: '{text}'")
+                    return ""
 
             logger.info(f"NPU transcribed: {text[:50]}..." if len(text) > 50 else f"NPU transcribed: {text}")
             return text

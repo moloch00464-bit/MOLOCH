@@ -29,8 +29,9 @@ ZUSTAND_LED_MAP = {
     "shadow_modus":     "LED:rot pulsierend schnell",
     "fehler":           "LED:rot blinkend schnell",
     "nachtmodus":       "LED:blau pulsierend langsam",
-    "listening":        "LED:cyan pulsierend mittel",
-    "speaking":         "LED:magenta pulsierend mittel",
+    "listening":        "LED:cyan pulsierend schnell",   # PTT aktiv — rotierendes Cyan
+    "thinking":         "LED:gelb blinkend mittel",      # Whisper verarbeitet — Gelb blinkend
+    "speaking":         "LED:magenta pulsierend mittel", # TTS spricht
     "tracking":         "LED:gruen pulsierend mittel",
     "enrollment":       "LED:gelb blinkend mittel",
     "boot":             "LED:regenbogen",
@@ -47,6 +48,7 @@ class RGBLedController:
         self._event_bus = event_bus
         self._sock: Optional[socket.socket] = None
         self._current_state = "idle"
+        self._current_mood = "guardian"  # guardian oder shadow
         self._lock = threading.Lock()
 
     # =========================================================================
@@ -65,6 +67,7 @@ class RGBLedController:
             self._event_bus.on("perception.person_detected", self._on_person)
             self._event_bus.on("perception.face_recognized", self._on_face)
             self._event_bus.on("audio.listening_start", self._on_listening)
+            self._event_bus.on("whisper.processing", self._on_thinking)    # Whisper denkt
             self._event_bus.on("audio.speaking_start", self._on_speaking)
             self._event_bus.on("audio.speaking_end", self._on_idle)
             logger.info("Event-Bus Subscriptions aktiv")
@@ -118,8 +121,10 @@ class RGBLedController:
     # =========================================================================
 
     def _on_mood_changed(self, data):
-        """Mood/Zone Aenderung."""
+        """Mood/Zone Aenderung — Mood merken fuer SPEAKING-Farbe."""
         mood = data.get("mood", "")
+        if mood in ("shadow", "guardian"):
+            self._current_mood = mood
         if mood == "shadow":
             self.set_state("shadow_modus")
         elif mood == "guardian":
@@ -142,12 +147,23 @@ class RGBLedController:
             self.set_state("markus_erkannt")
 
     def _on_listening(self, data):
-        """Mikrofon aktiv."""
+        """Mikrofon aktiv — PTT gedrueckt."""
         self.set_state("listening")
 
+    def _on_thinking(self, data):
+        """Whisper verarbeitet — NPU denkt."""
+        self.set_state("thinking")
+
     def _on_speaking(self, data):
-        """TTS spricht."""
-        self.set_state("speaking")
+        """TTS spricht — Farbe je nach Mood (Guardian=magenta, Shadow=rot)."""
+        if self._current_mood == "shadow":
+            # Shadow Modus: Rot pulsierend
+            self._current_state = ""  # Reset damit set_state nicht skippt
+            self.send_command("LED:rot pulsierend mittel")
+            self._current_state = "speaking_shadow"
+        else:
+            # Guardian Modus: Magenta pulsierend (Standard)
+            self.set_state("speaking")
 
     def _on_idle(self, data):
         """Zurueck zu Idle."""

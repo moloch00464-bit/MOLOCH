@@ -547,6 +547,19 @@ class VoicePipeline:
     # PTT Recording
     # =========================================================================
 
+    def _publish_event(self, event_type: str, payload: dict = None):
+        """Event-Bus Event publishen (fire-and-forget, kein Crash bei Fehler)."""
+        try:
+            from core.moloch_event_bus import get_event_bus
+            get_event_bus().publish(
+                event_type=event_type,
+                payload=payload or {},
+                source="voice_pipeline",
+                priority=5,
+            )
+        except Exception:
+            pass
+
     def start_recording(self):
         """Aufnahme starten — WiFi-Mic bevorzugt, Fallback auf arecord."""
         with self._lock:
@@ -554,6 +567,9 @@ class VoicePipeline:
                 return
             self._recording = True
             self._whisper_status = "Aufnahme..."
+
+        # LED: LISTENING
+        self._publish_event("audio.listening_start")
 
         wav_path = os.path.join(TEMP_DIR, "moloch_ptt_recording.wav")
 
@@ -730,14 +746,17 @@ class VoicePipeline:
                 logger.warning(f"[VAD] Unerwartetes Format: {rate}Hz {channels}ch {sample_width}B — ueberspringe VAD")
                 return True
 
-            vad = webrtcvad.Vad(1)  # Aggressiveness 1 (weniger aggressiv, toleriert Pausen)
+            vad = webrtcvad.Vad(2)  # Aggressiveness 2 — guter Balance fuer Deutsch/Dialekt
             frame_ms = 30
             frame_bytes = int(rate * frame_ms / 1000) * sample_width  # 960 Bytes
 
             # In Frames aufteilen und VAD pruefen
+            # Silence-Toleranz: mind. 800ms Stille zwischen Woertern ignorieren
             voiced_frames = []
             first_voice = -1
             last_voice = -1
+            silence_frames_after_voice = 0
+            max_silence_frames = int(800 / frame_ms)  # 800ms / 30ms = ~26 Frames
             for i in range(0, len(raw) - frame_bytes + 1, frame_bytes):
                 frame = raw[i:i + frame_bytes]
                 is_speech = vad.is_speech(frame, rate)
@@ -746,14 +765,17 @@ class VoicePipeline:
                     if first_voice == -1:
                         first_voice = i
                     last_voice = i + frame_bytes
+                    silence_frames_after_voice = 0
+                elif first_voice != -1:
+                    silence_frames_after_voice += 1
 
             if first_voice == -1:
                 logger.info("[VAD] Keine Sprache erkannt — nur Stille")
                 return False
 
-            # 10 Frames (~300ms) Padding vor/nach Sprache behalten
-            # (grosszuegiger als vorher 3 Frames, damit Wortanfaenge/-enden erhalten bleiben)
-            pad = frame_bytes * 10
+            # 13 Frames (~400ms) Padding vor/nach Sprache behalten
+            # (grosszuegiger, damit Wortanfaenge/-enden erhalten bleiben)
+            pad = frame_bytes * 13
             trim_start = max(0, first_voice - pad)
             trim_end = min(len(raw), last_voice + pad)
             trimmed = raw[trim_start:trim_end]
@@ -802,6 +824,7 @@ class VoicePipeline:
 
         # 1. Whisper STT
         self._whisper_status = "Transkribiere..."
+        self._publish_event("whisper.processing")  # LED: THINKING
         t_whisper = time.time()
         text = self._transcribe(wav_path)
         whisper_duration_ms = (time.time() - t_whisper) * 1000
@@ -1466,6 +1489,10 @@ class VoicePipeline:
                         f"{len(sentences)} Saetze, {len(full_audio)//1024}KB "
                         f"in {gen_time:.1f}s — starte Playback")
 
+            # LED: SPEAKING (mit Amplitude-Info fuer Pulsieren)
+            amplitude = min(1.0, len(full_audio) / 50000.0)  # Grobe Amplitude-Schaetzung
+            self._publish_event("audio.speaking_start", {"amplitude": amplitude, "text_len": len(text)})
+
             subprocess.run(pw_cmd, input=full_audio, timeout=120)
 
             dt = time.time() - t0
@@ -1478,6 +1505,8 @@ class VoicePipeline:
         finally:
             with self._lock:
                 self._speaking = False
+            # LED: zurueck zu IDLE
+            self._publish_event("audio.speaking_end")
 
     def _piper_synthesize(self, text: str, model_path) -> bytes:
         """Einzelnen Text-Chunk mit Piper in raw PCM generieren (in RAM)."""
