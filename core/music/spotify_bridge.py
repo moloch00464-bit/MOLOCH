@@ -35,7 +35,7 @@ class SpotifyBridge:
     NICHT aus Spotify API (deprecated seit 2024).
     """
 
-    _POLL_INTERVAL = 5.0  # Sekunden
+    _POLL_INTERVAL = 2.0  # Sekunden (2s fuer schnellere Reaktion auf Musik-Start)
 
     def __init__(self):
         self._bus = get_event_bus()
@@ -47,6 +47,7 @@ class SpotifyBridge:
         self._last_progress_ms: int = 0
         self._last_duration_ms: int = 0
         self._was_playing: bool = False
+        self._is_playing: bool = False  # Fuer music.playing / music.stopped Events
 
     def start(self):
         """Poll-Thread starten."""
@@ -87,6 +88,15 @@ class SpotifyBridge:
             # Nichts laeuft — pruefen ob vorher was lief (= Track finished)
             if self._was_playing and self._current_uri:
                 self._publish_track_finished()
+            if self._is_playing:
+                self._is_playing = False
+                self._bus.publish(
+                    event_type="music.stopped",
+                    source="spotify_bridge",
+                    priority=PRIO_INFO,
+                    payload={},
+                )
+                logger.info("[SPOTIFY-BRIDGE] music.stopped")
             self._was_playing = False
             return
 
@@ -101,19 +111,29 @@ class SpotifyBridge:
             if self._was_playing and self._current_uri:
                 self._publish_track_finished()
 
-            # Neuen Track melden
+            # Neuen Track melden (altes Event fuer Backward-Compat)
             self._current_uri = uri
+            track_payload = {
+                "artist": track.get("artist", "?"),
+                "track": track.get("track", "?"),
+                "album": track.get("album", "?"),
+                "album_art": track.get("album_art", ""),
+                "uri": uri,
+                "duration_ms": duration_ms,
+            }
             self._bus.publish(
                 event_type="music_track_started",
                 source="spotify_bridge",
                 priority=PRIO_INFO,
-                payload={
-                    "artist": track.get("artist", "?"),
-                    "track": track.get("track", "?"),
-                    "album": track.get("album", "?"),
-                    "uri": uri,
-                    "duration_ms": duration_ms,
-                },
+                payload=track_payload,
+            )
+            # Neues Event
+            self._bus.publish(
+                event_type="music.track_changed",
+                source="spotify_bridge",
+                priority=PRIO_INFO,
+                payload={"track": track.get("track", "?"), "artist": track.get("artist", "?"),
+                         "album_art": track.get("album_art", "")},
             )
             logger.info(f"[SPOTIFY-BRIDGE] Track: {track.get('artist')} - {track.get('track')}")
 
@@ -122,6 +142,30 @@ class SpotifyBridge:
                 and progress_ms >= duration_ms - 2000
                 and self._last_progress_ms < duration_ms - 5000):
             self._publish_track_finished()
+
+        # music.playing Event (wenn Playback startet oder Track wechselt)
+        if is_playing and not self._is_playing:
+            self._is_playing = True
+            self._bus.publish(
+                event_type="music.playing",
+                source="spotify_bridge",
+                priority=PRIO_INFO,
+                payload={
+                    "track": track.get("track", "?"),
+                    "artist": track.get("artist", "?"),
+                    "album_art": track.get("album_art", ""),
+                },
+            )
+            logger.info("[SPOTIFY-BRIDGE] music.playing")
+        elif not is_playing and self._is_playing:
+            self._is_playing = False
+            self._bus.publish(
+                event_type="music.stopped",
+                source="spotify_bridge",
+                priority=PRIO_INFO,
+                payload={},
+            )
+            logger.info("[SPOTIFY-BRIDGE] music.stopped")
 
         self._last_progress_ms = progress_ms
         self._last_duration_ms = duration_ms
