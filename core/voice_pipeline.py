@@ -18,6 +18,7 @@ import re
 import sys
 import json
 import time
+import wave
 import logging
 import subprocess
 import threading
@@ -51,6 +52,36 @@ def _sanitize_text(text: str) -> str:
     if not text:
         return text
     return _SURROGATE_RE.sub('?', text)
+
+
+def _filter_hallucinations(text: str, wav_path: str) -> str:
+    """Whisper-Halluzinationen herausfiltern.
+
+    1. Wiederholungs-Filter: Wort 3+ mal hintereinander → ab der 3. abschneiden.
+    2. Laengen-Filter: Mehr als 15 Woerter pro Sekunde Aufnahme → kuerzen.
+    """
+    if not text:
+        return text
+
+    # 1. Wiederholungs-Filter (case-insensitive, Grossschreibung erhalten)
+    text = re.sub(r'\b(\w+)(\s+\1){2,}\b', r'\1', text, flags=re.IGNORECASE)
+
+    # 2. Laengen-Filter basierend auf WAV-Dauer
+    try:
+        with wave.open(wav_path, 'rb') as wf:
+            audio_duration_s = wf.getnframes() / wf.getframerate()
+        max_words = max(5, int(audio_duration_s * 15))
+        words = text.split()
+        if len(words) > max_words:
+            logger.warning(
+                f"[HALLUZ] Text zu lang ({len(words)} Woerter, max {max_words} "
+                f"fuer {audio_duration_s:.1f}s Audio) — gekuerzt"
+            )
+            text = ' '.join(words[:max_words])
+    except Exception:
+        pass  # WAV nicht lesbar → Filter ueberspringen
+
+    return text
 
 
 def _load_api_key() -> Optional[str]:
@@ -531,7 +562,8 @@ class VoicePipeline:
                     logger.info(f"[WHISPER-TEST] Leer nach {dt_ms:.0f}ms")
                 else:
                     text = _sanitize_text(text)
-                    self._store_whisper_result(text, dt_ms)
+                    text = _filter_hallucinations(text, wav_path)
+                    self._store_whisper_result(text or "[Halluzination gefiltert]", dt_ms)
                     logger.info(f"[WHISPER-TEST] OK ({dt_ms:.0f}ms): {text}")
 
                 self._whisper_status = "Idle"
@@ -836,6 +868,12 @@ class VoicePipeline:
             return
 
         text = _sanitize_text(text)
+        text = _filter_hallucinations(text, wav_path)
+        if not text or not text.strip():
+            logger.info("[VOICE] Nach Halluzinations-Filter: leer — verwerfen")
+            self._store_whisper_info("[Halluzination gefiltert]")
+            self._whisper_status = "Idle"
+            return
         logger.info(f"[VOICE] Transkription ({whisper_duration_ms:.0f}ms): {text}")
         self._emit_message("Du", text)
 
