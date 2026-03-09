@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "total_decisions": 905100,
+  "total_decisions": 905500,
   "weights": {
-    "scrfd": -0.1,
+    "scrfd": 0.0,
     "arcface": -0.1,
     "yolov8m": 0.0,
     "pose": -0.1,
@@ -15,7 +15,7 @@
     "hand_landmark": 0.2
   },
   "effective_scores": {
-    "scrfd": 0.5,
+    "scrfd": 0.6,
     "arcface": 0.4,
     "yolov8m": 0.4,
     "hand_landmark": 0.2
