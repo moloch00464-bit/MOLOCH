@@ -88,16 +88,24 @@ class TrackingConfig:
 
     # === AbsoluteMove Tracking Parameters ===
     # Kamera Motor-Speed: ~30 deg/s (Kalibrierung: 342deg in ~12s)
+    # -----------------------------------------------------------------------
+    # SMOOTHING-TUNING (Markus: alle Parameter hier anpassen!)
+    # smooth_alpha: EMA-Glaettung 0.0=eingefroren / 1.0=kein Glaetten
+    # min_step_deg: Mikro-Zittern unterdruecken (< 2 Grad = kein Befehl)
+    # max_step_pan/tilt: Max-Sprung pro Update (Grad) — kein Ruckeln bei grossen Fehlern
+    # move_cooldown_ms: Min. Abstand zwischen zwei Befehlen (kein Command-Flood)
+    # tracking_speed: Basis-Speed (0.0-1.0), skaliert proportional mit Fehlergroesse
+    # -----------------------------------------------------------------------
     fov_horizontal: float = 110.0
     fov_vertical: float = 65.0
     pan_gain: float = 0.20          # G1-T05: sanfter (war 0.25), weniger Ueberschwinger
     tilt_gain: float = 0.15         # G1-T05: sanfter (war 0.20)
-    max_step_pan: float = 4.0       # G1-T05: max 4 Grad (war 5.0)
-    max_step_tilt: float = 2.5      # G1-T05: max 2.5 Grad (war 3.0)
-    min_step_deg: float = 0.3
+    max_step_pan: float = 8.0       # SMOOTH: 8 Grad (war 4.0) — fluessiger bei grossem Error
+    max_step_tilt: float = 5.0      # SMOOTH: 5 Grad (war 2.5)
+    min_step_deg: float = 2.0       # SMOOTH: Dead-Zone 2 Grad (war 0.3) — kein Micro-Ruckeln
     tracking_speed: float = 0.6     # G1-T05: 60% Speed (war 0.7)
-    move_cooldown_ms: float = 500.0  # G1-T05: 500ms (war 400), weniger Ueberschwinger
-    smooth_alpha: float = 0.20      # EMA etwas schneller fuer bessere Reaktion (war 0.15)
+    move_cooldown_ms: float = 100.0  # SMOOTH: 100ms (war 500ms) — mehr Updates, kleinere Schritte
+    smooth_alpha: float = 0.30      # SMOOTH: EMA alpha 0.30 (war 0.20) — fluessigere Reaktion
 
     # Kamera Hardware-Limits (SonoffCameraController clampt intern,
     # aber Tracker muss gecachte Position AUCH clampen!)
@@ -1202,6 +1210,12 @@ class AutonomousTracker:
 
         if result:
             self.stats["tracking_moves"] += 1
+            # TESTER-Log: pan_delta, tilt_delta, smoothed_delta bei jedem Move
+            ptz_debug.info(
+                f"MOVE_SENT smooth=({self._smooth_x:.3f},{self._smooth_y:.3f}) "
+                f"pan_delta={pan_delta:+.2f}deg tilt_delta={tilt_delta:+.2f}deg "
+                f"speed={move_speed:.2f} err_pct={error_magnitude_pct:.3f}"
+            )
 
         if self.stats["tracking_moves"] % 15 == 0:
             logger.info(f"TRACK: err=({error_x:+.0f},{error_y:+.0f})px err_pct={error_magnitude_pct:.3f} "
