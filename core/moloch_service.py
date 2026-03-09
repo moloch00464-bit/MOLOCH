@@ -788,6 +788,20 @@ class MolochService:
             self._spotify_bridge = None
             logger.warning(f"[INIT] SpotifyBridge nicht verfuegbar: {e}")
 
+        # 8b. MicModeController + MusicListener (Music Soul System)
+        self._mic_mode_ctrl = None
+        self._music_listener = None
+        try:
+            from core.audio.mic_mode_controller import get_mic_mode_controller
+            from core.audio.music_listener import get_music_listener
+            self._mic_mode_ctrl = get_mic_mode_controller()
+            self._mic_mode_ctrl.start()
+            self._music_listener = get_music_listener()
+            self._music_listener.start()
+            logger.info("[INIT] MicModeController + MusicListener gestartet")
+        except Exception as e:
+            logger.warning(f"[INIT] Music Soul nicht verfuegbar: {e}")
+
         # 9. Awareness Module (Gate 3: Situational Awareness)
         self._room_map = None
         self._motion_analyzer = None
@@ -1329,6 +1343,20 @@ class MolochService:
             try:
                 self._action_bridge.stop()
                 logger.info("[STOP] ActionBridge gestoppt")
+            except Exception:
+                pass
+
+        # MusicListener + MicModeController stoppen
+        if hasattr(self, '_music_listener') and self._music_listener:
+            try:
+                self._music_listener.stop()
+                logger.info("[STOP] MusicListener gestoppt")
+            except Exception:
+                pass
+        if hasattr(self, '_mic_mode_ctrl') and self._mic_mode_ctrl:
+            try:
+                self._mic_mode_ctrl.stop()
+                logger.info("[STOP] MicModeController gestoppt")
             except Exception:
                 pass
 
