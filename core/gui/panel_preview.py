@@ -59,9 +59,9 @@ class PreviewModule:
         self._running = False
         self._after_id = None
 
-        # Resize-Ziel (Aufloesung aus Dropdown)
-        self._resize_w = RESOLUTIONS[0][1]
-        self._resize_h = RESOLUTIONS[0][2]
+        # Resize-Ziel (Aufloesung aus Dropdown) — Default: HD 800x450
+        self._resize_w = RESOLUTIONS[1][1]
+        self._resize_h = RESOLUTIONS[1][2]
 
         # Canvas-Groesse (gekappt auf MAX_CANVAS)
         self._canvas_w = min(self._resize_w, MAX_CANVAS_W)

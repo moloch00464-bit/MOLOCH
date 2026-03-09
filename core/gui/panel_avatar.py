@@ -37,7 +37,7 @@ except ImportError:
     _PYGAME_OK = False
 
 try:
-    from PIL import Image, ImageTk
+    from PIL import Image, ImageTk, ImageFilter, ImageChops
     _PIL_OK = True
 except ImportError:
     _PIL_OK = False
@@ -765,10 +765,25 @@ class AvatarModule:
     # Surface -> Tkinter Konvertierung
     # =========================================================================
 
+    # Zone-Glow Farben: Guardian=Cyan, Shadow=Rot, Berserker=Lila
+    _GLOW_TINTS = {
+        "guardian":  (0, 110, 255),
+        "shadow":    (255, 20, 0),
+        "berserker": (140, 0, 255),
+    }
+
     def _blit_to_tkinter(self):
-        """PyGame Surface -> PIL Image -> ImageTk -> Label."""
+        """PyGame Surface -> PIL Image -> Gaussian Blur Glow -> ImageTk -> Label."""
         data = pygame.image.tostring(self._surface, 'RGB')
         img = Image.frombytes('RGB', (AVATAR_SIZE, AVATAR_SIZE), data)
+
+        # PIL Gaussian Blur Glow (zone-spezifisch, Screen-Blend)
+        glow = img.filter(ImageFilter.GaussianBlur(radius=14))
+        tint = self._GLOW_TINTS.get(self._zone, (0, 110, 255))
+        tint_layer = Image.new('RGB', (AVATAR_SIZE, AVATAR_SIZE), tint)
+        glow_tinted = ImageChops.multiply(glow, tint_layer)
+        img = ImageChops.screen(img, glow_tinted)
+
         self._photo = ImageTk.PhotoImage(img)
         self._label.config(image=self._photo)
 
