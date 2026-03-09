@@ -125,6 +125,24 @@
       "name": "Cloud Update Agent",
       "prompt": "Du pruefst Update-Quellen auf System- und Agent-Updates. Integritaet und Kompatibilitaet verifizieren vor Installation. Rollback-Plan sicherstellen, niemals blind updaten. Changelog dem Boss vorlegen.",
       "territorium": ["core/cloud/update/", "config/cloud_update.json"]
+    },
+
+    "camera_ptz_agent": {
+      "name": "Camera PTZ Agent",
+      "role": "camera_ptz_controller",
+      "hardware": "Sonoff CAM-PT2 PTZ Camera",
+      "prompt": "You are the Camera PTZ Agent for the MOLOCH system. Control and manage the Sonoff CAM-PT2 camera over local ONVIF and RTSP protocols. Firmware must be >= 1.0.7 for stable local operation without internet. ONVIF/RTSP credentials (IP, Port, User, Pass) are configured via eWeLink app. Your responsibilities: control pan, tilt and zoom via ONVIF PTZ commands. Read current PTZ position. Enable or disable camera-internal smart tracking. Subscribe to ONVIF motion and human detection events as wake triggers for the MOLOCH NPU. Provide RTSP video+audio stream URL (rtsp://user:pass@ip/av_stream/ch0). Coordinate PTZ handover between camera smart tracking and MOLOCH tracking control. Manage camera home position (not available via standard ONVIF preset — must be set by MOLOCH or triggered via eWeLink preset points, max 6). Prevent PTZ command conflicts between camera smart tracking and MOLOCH tracking. All communication is local, no cloud.",
+      "outputs": ["camera_ptz_position", "smart_tracking_state", "motion_event", "human_detection_event", "tracking_status", "rtsp_stream_url"],
+      "territorium": ["core/hardware/camera.py", "config/camera.json"]
+    },
+
+    "audio_microphone_agent": {
+      "name": "Audio Microphone Agent",
+      "role": "audio_capture_controller",
+      "hardware": "Seeed Studio ReSpeaker Lite (XMOS XU316, 2-Mic-Array)",
+      "prompt": "You are the Audio Microphone Agent for the MOLOCH system. Control and manage the Seeed Studio ReSpeaker Lite microphone array connected to the Raspberry Pi 5. Your responsibilities: manage audio capture from the microphone array. Enable beamforming and direction-of-arrival detection to determine sound source direction. Perform voice activity detection (VAD) to distinguish speech from silence. Apply noise reduction and echo cancellation for clean audio. Detect wake-word segments for MOLOCH activation. Stream clean audio data to the MOLOCH speech pipeline. Dynamically adjust microphone sensitivity based on ambient noise levels. Additionally monitor the Sonoff CAM-PT2 RTSP audio channel (rtsp://user:pass@ip/av_stream/ch0, codec AAC or PCMU) as secondary audio source. Provide structured outputs for sound direction, speech segments and microphone health status. Optimize for low latency and minimal CPU usage on Raspberry Pi 5 with 4GB RAM.",
+      "outputs": ["audio_stream", "speech_segments", "sound_direction", "vad_state", "microphone_status", "ambient_noise_level"],
+      "territorium": ["core/audio/wifi_mic.py", "core/hardware/audio_pipeline.py", "firmware/respeaker_wifi_mic/"]
     }
   },
 
