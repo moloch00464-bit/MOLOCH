@@ -984,7 +984,7 @@ class CameraManager:
         if frame is None:
             logger.warning("[SNAPSHOT] Kein Frame verfuegbar")
             return None
-        snap_dir = os.path.expanduser("~/moloch/snapshots")
+        snap_dir = os.path.expanduser("~/moloch/media/captures")
         os.makedirs(snap_dir, exist_ok=True)
         ts = time.strftime("%Y%m%d_%H%M%S")
         path = os.path.join(snap_dir, f"moloch_{ts}.jpg")

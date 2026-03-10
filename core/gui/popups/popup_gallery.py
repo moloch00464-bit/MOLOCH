@@ -1,25 +1,26 @@
 #!/usr/bin/env python3
 """
-M.O.L.O.C.H. Snapshot Galerie Popup
-=====================================
+M.O.L.O.C.H. Snapshot Galerie Popup — v3.0
+============================================
 
-Eigenstaendiges Toplevel-Fenster mit 2 Tabs (ttk.Notebook):
-  Tab 1: Snapshots — ~/moloch/snapshots/ (manuelle Snap-Button Fotos)
-  Tab 2: Teachen  — /mnt/moloch-data/Teachen/<YYYY-MM-DD>/ (DailyLearner)
+3 Tabs:
+  Tab 1: Personen  — ~/moloch/media/snapshots/ (Person-Unterordner: markus, franzi, ...)
+  Tab 2: Enrollment — ~/moloch/media/faces/ (Teachen/Enrollment Bilder)
+  Tab 3: Captures  — ~/moloch/media/captures/ (manuelle SNAP-Button Fotos)
 
 Features:
-- Thumbnail-Grid (3 Spalten, 150x112px)
-- Klick auf Thumbnail oeffnet Vollbild
-- Dateiname + Datum unter jedem Thumbnail
-- Refresh-Button pro Tab
-- Loeschen-Button pro Bild (sofort, ohne Bestaetigung)
-- Scrollbar bei vielen Bildern (Canvas + Scrollbar Pattern)
-- Thumbnails in Background-Thread laden (kein GUI-Freeze)
+- Thumbnails 100x100px, 4 Spalten
+- Max 50 pro Seite, Blättern mit Prev/Next
+- Klick = Vollbild
+- Dateiname + Datum + Bildgröße
+- Refresh pro Tab
+- Löschen-Button
+- Suchleiste (filtert Dateiname)
+- Background-Threading (kein GUI-Freeze)
 
-Importiert NUR panel_styles und tkinter. KEIN Import von moloch_service.
+Importiert NUR panel_styles + tkinter. KEIN Import von moloch_service.
 """
 
-import json
 import logging
 import os
 import threading
@@ -39,76 +40,103 @@ from core.gui.panel_styles import (
 
 logger = logging.getLogger("moloch.popup_gallery")
 
-# Pfade
-SNAP_DIR = os.path.expanduser("~/moloch/snapshots")
-DAILY_DIR = "/mnt/moloch-data/Teachen"
+# Zentrale Bildpfade
+MEDIA_DIR    = os.path.expanduser("~/moloch/media")
+SNAPSHOTS_DIR = os.path.join(MEDIA_DIR, "snapshots")   # Person-Unterordner
+FACES_DIR    = os.path.join(MEDIA_DIR, "faces")         # Enrollment
+CAPTURES_DIR = os.path.join(MEDIA_DIR, "captures")      # Manuell SNAP
 
-THUMB_W = 150
-THUMB_H = 112
-COLUMNS = 3
+THUMB_W  = 100
+THUMB_H  = 100
+COLUMNS  = 4
+PAGE_SIZE = 50
 
 
 class _ScrollableGrid:
-    """Wiederverwendbarer scrollbarer Thumbnail-Grid Container."""
+    """Scrollbarer Thumbnail-Grid Container."""
 
     def __init__(self, parent):
         self._thumb_refs = []
-        self._parent = parent
 
         container = tk.Frame(parent, bg=BG_DARK)
         container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         self.canvas = tk.Canvas(container, bg=BG_DARK, highlightthickness=0)
-        self._scrollbar = tk.Scrollbar(container, orient=tk.VERTICAL, command=self.canvas.yview)
-        self.canvas.configure(yscrollcommand=self._scrollbar.set)
+        scrollbar = tk.Scrollbar(container, orient=tk.VERTICAL, command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=scrollbar.set)
 
-        self._scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         self.grid_frame = tk.Frame(self.canvas, bg=BG_DARK)
-        self._canvas_window = self.canvas.create_window(
-            (0, 0), window=self.grid_frame, anchor=tk.NW
-        )
+        self._win = self.canvas.create_window((0, 0), window=self.grid_frame, anchor=tk.NW)
 
-        self.grid_frame.bind("<Configure>", self._on_grid_configure)
-        self.canvas.bind("<Configure>", self._on_canvas_configure)
-
-    def _on_grid_configure(self, event):
-        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-
-    def _on_canvas_configure(self, event):
-        self.canvas.itemconfig(self._canvas_window, width=event.width)
+        self.grid_frame.bind("<Configure>", lambda e: self.canvas.configure(
+            scrollregion=self.canvas.bbox("all")))
+        self.canvas.bind("<Configure>", lambda e: self.canvas.itemconfig(
+            self._win, width=e.width))
 
     def clear(self):
-        """Alle Widgets und Thumbnail-Referenzen entfernen."""
         for w in self.grid_frame.winfo_children():
             w.destroy()
         self._thumb_refs.clear()
 
-    def add_thumb_ref(self, ref):
-        """ImageTk Referenz halten (GC-Schutz)."""
+    def add_ref(self, ref):
         self._thumb_refs.append(ref)
 
 
+def _collect_images(base_dir, query=None):
+    """Alle Bilder aus base_dir sammeln (inkl. Unterordner).
+    Gibt Liste von (path, fname, mtime, person) zurück, sortiert nach mtime desc."""
+    result = []
+    if not os.path.isdir(base_dir):
+        return result
+
+    entries = os.scandir(base_dir)
+    for entry in entries:
+        if entry.is_dir():
+            # Personen-Unterordner
+            person = entry.name
+            try:
+                for f in os.scandir(entry.path):
+                    if f.is_file() and f.name.lower().endswith((".jpg", ".jpeg", ".png")):
+                        if query and query not in f.name.lower() and query not in person.lower():
+                            continue
+                        result.append((f.path, f.name, f.stat().st_mtime, person))
+            except OSError:
+                pass
+        elif entry.is_file() and entry.name.lower().endswith((".jpg", ".jpeg", ".png")):
+            if query and query not in entry.name.lower():
+                continue
+            result.append((entry.path, entry.name, entry.stat().st_mtime, ""))
+
+    result.sort(key=lambda x: x[2], reverse=True)
+    return result
+
+
 class SnapshotGallery:
-    """Snapshot Galerie als eigenstaendiges Toplevel mit 2 Tabs."""
+    """Galerie-Popup mit 3 Tabs: Personen, Enrollment, Captures."""
 
     def __init__(self, parent):
         self._parent = parent
-        self._loading = False
         self._search_timer = None
 
-        # Toplevel erstellen
+        # Seitenzähler pro Tab [personen, enrollment, captures]
+        self._pages = [0, 0, 0]
+        # Gesamtliste pro Tab (gecacht nach Load)
+        self._all_files = [[], [], []]
+
+        # Toplevel
         self.win = tk.Toplevel(parent)
-        self.win.attributes('-topmost', True)
+        self.win.attributes("-topmost", True)
         self.win.transient(parent)
         self.win.title("M.O.L.O.C.H. Galerie")
         self.win.configure(bg=BG_DARK)
-        self.win.geometry("560x650")
+        self.win.geometry("600x680")
         self.win.resizable(True, True)
-        self.win.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.win.protocol("WM_DELETE_WINDOW", self.win.destroy)
 
-        # --- Suchleiste oben ---
+        # Suchleiste
         search_frame = tk.Frame(self.win, bg=BG_DARK)
         search_frame.pack(fill=tk.X, padx=5, pady=(5, 0))
         tk.Label(search_frame, text="Suche:", bg=BG_DARK, fg=FG_LABEL,
@@ -117,431 +145,299 @@ class SnapshotGallery:
         self._search_entry = tk.Entry(
             search_frame, textvariable=self._search_var,
             bg=BG_FRAME, fg=FG_WHITE, insertbackground=FG_WHITE,
-            font=FONT_LABEL, width=25,
-        )
+            font=FONT_LABEL, width=25)
         self._search_entry.pack(side=tk.LEFT, padx=3, fill=tk.X, expand=True)
         self._search_var.trace_add("write", self._on_search_changed)
         tk.Button(search_frame, text="X", width=3,
                   bg=BG_BUTTON, fg=FG_LABEL, font=FONT_SMALL,
-                  command=self._clear_search).pack(side=tk.LEFT, padx=3)
+                  command=lambda: self._search_var.set("")).pack(side=tk.LEFT, padx=3)
 
-        # ttk Style fuer dunkle Tabs
+        # Notebook
         style = ttk.Style()
         style.configure("Dark.TNotebook", background=BG_DARK)
-        style.configure("Dark.TNotebook.Tab",
-                        background=BG_FRAME, foreground=FG_LABEL,
-                        padding=[10, 4])
+        style.configure("Dark.TNotebook.Tab", background=BG_FRAME,
+                        foreground=FG_LABEL, padding=[10, 4])
         style.map("Dark.TNotebook.Tab",
                   background=[("selected", BG_DARK)],
                   foreground=[("selected", FG_WHITE)])
 
-        # Notebook (Tabs)
         self._notebook = ttk.Notebook(self.win, style="Dark.TNotebook")
         self._notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self._notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
-        # Tab 1: Snapshots (manuelle Fotos)
-        self._tab_snapshots = tk.Frame(self._notebook, bg=BG_DARK)
-        self._notebook.add(self._tab_snapshots, text="Snapshots")
-        self._grid_snapshots = self._build_tab(self._tab_snapshots, self._load_snapshots)
+        # Tab 0: Personen
+        self._tab_frames = []
+        self._grids = []
+        self._pagers = []  # (prev_btn, next_btn, page_lbl) pro Tab
 
-        # Tab 2: Teachen (DailyLearner)
-        self._tab_teachen = tk.Frame(self._notebook, bg=BG_DARK)
-        self._notebook.add(self._tab_teachen, text="Teachen")
-        self._grid_teachen, self._day_var, self._day_menu = self._build_teachen_tab()
+        for tab_name in ("Personen", "Enrollment", "Captures"):
+            frame = tk.Frame(self._notebook, bg=BG_DARK)
+            self._notebook.add(frame, text=tab_name)
+            self._tab_frames.append(frame)
 
-        # Mausrad-Scrolling (nur fuer aktiven Tab)
-        self.win.bind("<Button-4>", self._on_scroll_up)
-        self.win.bind("<Button-5>", self._on_scroll_down)
+        self._build_tab_ui()
 
-        # Beide Tabs laden (im Background)
-        self._load_snapshots()
-        self._load_teachen()
+        # Mausrad-Scrolling
+        self.win.bind("<Button-4>", self._scroll_up)
+        self.win.bind("<Button-5>", self._scroll_down)
 
-    # =========================================================================
-    # Tab-Builder
-    # =========================================================================
-
-    def _build_tab(self, tab_frame, refresh_callback):
-        """Standard-Tab mit Header + ScrollableGrid bauen."""
-        header = tk.Frame(tab_frame, bg=BG_DARK)
-        header.pack(fill=tk.X, padx=5, pady=(5, 0))
-
-        tk.Button(
-            header, text="REFRESH", width=10,
-            bg=BG_BUTTON, fg=FG_LABEL, font=FONT_BUTTON,
-            activebackground=BG_FRAME,
-            command=refresh_callback,
-        ).pack(side=tk.RIGHT, padx=5)
-
-        grid = _ScrollableGrid(tab_frame)
-        return grid
-
-    def _build_teachen_tab(self):
-        """Teachen-Tab mit Tages-Dropdown + ScrollableGrid."""
-        header = tk.Frame(self._tab_teachen, bg=BG_DARK)
-        header.pack(fill=tk.X, padx=5, pady=(5, 0))
-
-        tk.Label(
-            header, text="Tag:", bg=BG_DARK, fg=FG_LABEL, font=FONT_LABEL,
-        ).pack(side=tk.LEFT, padx=5)
-
-        # Tage ermitteln
-        days = self._get_daily_days()
-        day_var = tk.StringVar(value=days[0] if days else "(leer)")
-
-        day_menu = tk.OptionMenu(
-            header, day_var, *(days if days else ["(leer)"]),
-            command=lambda _: self._load_teachen(),
-        )
-        day_menu.config(bg=BG_BUTTON, fg=FG_WHITE, font=FONT_SMALL,
-                        activebackground=BG_FRAME, highlightthickness=0)
-        day_menu.pack(side=tk.LEFT, padx=5)
-
-        tk.Button(
-            header, text="REFRESH", width=10,
-            bg=BG_BUTTON, fg=FG_LABEL, font=FONT_BUTTON,
-            activebackground=BG_FRAME,
-            command=self._refresh_teachen,
-        ).pack(side=tk.RIGHT, padx=5)
-
-        grid = _ScrollableGrid(self._tab_teachen)
-        return grid, day_var, day_menu
+        # Initialer Load aller 3 Tabs im Background
+        for i in range(3):
+            self._load_tab(i)
 
     # =========================================================================
-    # Datenladen
+    # UI Aufbau
     # =========================================================================
 
-    def _get_daily_days(self):
-        """Verfuegbare Tage aus /mnt/moloch-data/daily/ ermitteln."""
-        if not os.path.isdir(DAILY_DIR):
-            return []
-        days = []
-        for d in os.listdir(DAILY_DIR):
-            full = os.path.join(DAILY_DIR, d)
-            if os.path.isdir(full) and d.startswith("20"):
-                days.append(d)
-        days.sort(reverse=True)
-        return days
+    def _build_tab_ui(self):
+        """Header + Grid + Pager für alle 3 Tabs bauen."""
+        tab_dirs = [SNAPSHOTS_DIR, FACES_DIR, CAPTURES_DIR]
+        refresh_cbs = [lambda: self._refresh(0), lambda: self._refresh(1),
+                       lambda: self._refresh(2)]
 
-    def _load_snapshots(self, query=None):
-        """Tab Snapshots: Fotos aus ~/moloch/snapshots/ laden, optional gefiltert."""
-        grid = self._grid_snapshots
-        grid.clear()
+        for i, (frame, base_dir, cb) in enumerate(zip(self._tab_frames, tab_dirs, refresh_cbs)):
+            # Header
+            header = tk.Frame(frame, bg=BG_DARK)
+            header.pack(fill=tk.X, padx=5, pady=(5, 0))
+            tk.Label(header, text=base_dir.replace(os.path.expanduser("~"), "~"),
+                     bg=BG_DARK, fg=FG_DIM, font=FONT_SMALL).pack(side=tk.LEFT, padx=5)
+            tk.Button(header, text="REFRESH", width=9,
+                      bg=BG_BUTTON, fg=FG_LABEL, font=FONT_BUTTON,
+                      activebackground=BG_FRAME,
+                      command=cb).pack(side=tk.RIGHT, padx=5)
 
-        def _bg_load():
-            os.makedirs(SNAP_DIR, exist_ok=True)
-            files = []
-            if os.path.isdir(SNAP_DIR):
-                for f in os.listdir(SNAP_DIR):
-                    if not f.lower().endswith((".jpg", ".jpeg", ".png")):
-                        continue
-                    if query and query not in f.lower():
-                        continue
-                    path = os.path.join(SNAP_DIR, f)
-                    mtime = os.path.getmtime(path)
-                    files.append((path, f, mtime))
-            files.sort(key=lambda x: x[2], reverse=True)
+            # Grid
+            grid = _ScrollableGrid(frame)
+            self._grids.append(grid)
 
+            # Pager
+            pager_frame = tk.Frame(frame, bg=BG_DARK)
+            pager_frame.pack(fill=tk.X, padx=5, pady=(0, 5))
+            prev_btn = tk.Button(pager_frame, text="< Zurück", width=9,
+                                 bg=BG_BUTTON, fg=FG_LABEL, font=FONT_SMALL,
+                                 state=tk.DISABLED,
+                                 command=lambda idx=i: self._page_prev(idx))
+            prev_btn.pack(side=tk.LEFT, padx=5)
+            page_lbl = tk.Label(pager_frame, text="", bg=BG_DARK, fg=FG_DIM, font=FONT_SMALL)
+            page_lbl.pack(side=tk.LEFT, expand=True)
+            next_btn = tk.Button(pager_frame, text="Weiter >", width=9,
+                                 bg=BG_BUTTON, fg=FG_LABEL, font=FONT_SMALL,
+                                 state=tk.DISABLED,
+                                 command=lambda idx=i: self._page_next(idx))
+            next_btn.pack(side=tk.RIGHT, padx=5)
+            self._pagers.append((prev_btn, next_btn, page_lbl))
+
+    # =========================================================================
+    # Laden
+    # =========================================================================
+
+    def _load_tab(self, tab_idx, query=None):
+        """Tab im Background laden."""
+        dirs = [SNAPSHOTS_DIR, FACES_DIR, CAPTURES_DIR]
+        base_dir = dirs[tab_idx]
+
+        def _bg():
+            # Verzeichnis anlegen falls nicht vorhanden
+            os.makedirs(base_dir, exist_ok=True)
+            files = _collect_images(base_dir, query)
             try:
-                self.win.after(0, lambda: self._populate_grid(
-                    grid, files, f"Snapshots ({len(files)})", 0))
+                self.win.after(0, lambda: self._on_files_loaded(tab_idx, files))
             except tk.TclError:
                 pass
 
-        threading.Thread(target=_bg_load, daemon=True).start()
+        threading.Thread(target=_bg, daemon=True).start()
 
-    def _load_teachen(self):
-        """Tab Teachen: Bilder aus ausgewaehltem Tag laden."""
-        grid = self._grid_teachen
-        grid.clear()
+    def _on_files_loaded(self, tab_idx, files):
+        """Wird im GUI-Thread aufgerufen nach Background-Load."""
+        self._all_files[tab_idx] = files
+        self._pages[tab_idx] = 0
+        self._render_page(tab_idx)
 
-        day = self._day_var.get()
-        if not day or day == "(leer)":
-            self._show_empty(grid, "Keine Teachen-Daten")
-            self._update_tab_title(1, "Teachen (0)")
-            return
-
-        day_dir = os.path.join(DAILY_DIR, day)
-
-        def _bg_load():
-            files = []
-            if os.path.isdir(day_dir):
-                for f in os.listdir(day_dir):
-                    if f.lower().endswith((".jpg", ".jpeg", ".png")):
-                        path = os.path.join(day_dir, f)
-                        mtime = os.path.getmtime(path)
-                        # Metadaten-JSON laden wenn vorhanden
-                        json_path = path.rsplit(".", 1)[0] + ".json"
-                        meta = None
-                        if os.path.exists(json_path):
-                            try:
-                                with open(json_path, "r") as jf:
-                                    meta = json.load(jf)
-                            except Exception:
-                                pass
-                        files.append((path, f, mtime, meta))
-            files.sort(key=lambda x: x[2], reverse=True)
-
-            try:
-                self.win.after(0, lambda: self._populate_teachen_grid(
-                    grid, files, len(files)))
-            except tk.TclError:
-                pass
-
-        threading.Thread(target=_bg_load, daemon=True).start()
-
-    def _refresh_teachen(self):
-        """Teachen-Tab komplett refreshen (inkl. Tage-Dropdown)."""
-        days = self._get_daily_days()
-        menu = self._day_menu["menu"]
-        menu.delete(0, "end")
-        for d in (days if days else ["(leer)"]):
-            menu.add_command(label=d, command=lambda v=d: (self._day_var.set(v), self._load_teachen()))
-        if days and self._day_var.get() not in days:
-            self._day_var.set(days[0])
-        self._load_teachen()
+    def _refresh(self, tab_idx):
+        query = self._search_var.get().strip().lower() or None
+        self._load_tab(tab_idx, query)
 
     # =========================================================================
-    # Grid Population
+    # Pagination
     # =========================================================================
 
-    def _populate_grid(self, grid, files, tab_title, tab_index):
-        """Standard-Grid mit Thumbnails fuellen (Snapshots-Tab)."""
-        grid.clear()
-        self._update_tab_title(tab_index, tab_title)
+    def _page_prev(self, tab_idx):
+        if self._pages[tab_idx] > 0:
+            self._pages[tab_idx] -= 1
+            self._render_page(tab_idx)
 
-        if not files:
-            self._show_empty(grid, "Keine Snapshots vorhanden")
+    def _page_next(self, tab_idx):
+        total = len(self._all_files[tab_idx])
+        if (self._pages[tab_idx] + 1) * PAGE_SIZE < total:
+            self._pages[tab_idx] += 1
+            self._render_page(tab_idx)
+
+    def _render_page(self, tab_idx):
+        """Aktuelle Seite im Grid anzeigen."""
+        files = self._all_files[tab_idx]
+        page = self._pages[tab_idx]
+        grid = self._grids[tab_idx]
+        prev_btn, next_btn, page_lbl = self._pagers[tab_idx]
+
+        grid.clear()
+
+        total = len(files)
+        tab_names = ["Personen", "Enrollment", "Captures"]
+        # Tab-Titel aktualisieren
+        try:
+            self._notebook.tab(tab_idx, text=f"{tab_names[tab_idx]} ({total})")
+        except Exception:
+            pass
+
+        if total == 0:
+            tk.Label(grid.grid_frame, text="Keine Bilder vorhanden",
+                     bg=BG_DARK, fg=FG_DIM, font=FONT_LABEL).grid(
+                row=0, column=0, columnspan=COLUMNS, pady=40)
+            page_lbl.config(text="")
+            prev_btn.config(state=tk.DISABLED)
+            next_btn.config(state=tk.DISABLED)
             return
 
-        for idx, (path, fname, mtime) in enumerate(files):
+        start = page * PAGE_SIZE
+        end = min(start + PAGE_SIZE, total)
+        page_files = files[start:end]
+
+        total_pages = (total - 1) // PAGE_SIZE + 1
+        page_lbl.config(text=f"Seite {page + 1}/{total_pages}  ({start + 1}–{end} von {total})")
+        prev_btn.config(state=tk.NORMAL if page > 0 else tk.DISABLED)
+        next_btn.config(state=tk.NORMAL if end < total else tk.DISABLED)
+
+        for idx, (path, fname, mtime, person) in enumerate(page_files):
             row = idx // COLUMNS
             col = idx % COLUMNS
-            self._build_thumbnail(grid, row, col, path, fname, mtime)
+            self._build_thumb(grid, tab_idx, row, col, path, fname, mtime, person)
 
-    def _populate_teachen_grid(self, grid, files, count):
-        """Teachen-Grid mit Thumbnails + Metadaten fuellen."""
-        grid.clear()
-        self._update_tab_title(1, f"Teachen ({count})")
+    # =========================================================================
+    # Thumbnail Aufbau
+    # =========================================================================
 
-        if not files:
-            self._show_empty(grid, "Keine Teachen-Bilder fuer diesen Tag")
-            return
+    def _build_thumb(self, grid, tab_idx, row, col, path, fname, mtime, person):
+        """Einzelnes Thumbnail-Widget."""
+        cell = tk.Frame(grid.grid_frame, bg=BG_FRAME, padx=2, pady=2)
+        cell.grid(row=row, column=col, padx=3, pady=3, sticky=tk.N)
 
-        for idx, (path, fname, mtime, meta) in enumerate(files):
-            row = idx // COLUMNS
-            col = idx % COLUMNS
-            self._build_thumbnail(grid, row, col, path, fname, mtime, meta=meta)
-
-    def _build_thumbnail(self, grid, row, col, path, fname, mtime, meta=None):
-        """Einzelnes Thumbnail mit Label und Loeschen-Button."""
-        cell = tk.Frame(grid.grid_frame, bg=BG_FRAME, padx=3, pady=3)
-        cell.grid(row=row, column=col, padx=4, pady=4, sticky=tk.N)
-
-        # Thumbnail laden
+        # Bild laden
         try:
             img = Image.open(path)
-            img.thumbnail((THUMB_W, THUMB_H))
+            orig_w, orig_h = img.size
+            img.thumbnail((THUMB_W, THUMB_H), Image.NEAREST)
             photo = ImageTk.PhotoImage(img)
-            grid.add_thumb_ref(photo)
-
+            grid.add_ref(photo)
             lbl_img = tk.Label(cell, image=photo, bg=BG_FRAME, cursor="hand2")
             lbl_img.pack(padx=2, pady=2)
             lbl_img.bind("<Button-1>", lambda e, p=path: self._open_fullsize(p))
-        except Exception as e:
-            logger.warning(f"Thumbnail Fehler fuer {fname}: {e}")
-            tk.Label(
-                cell, text="[Fehler]", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
-                width=20, height=7,
-            ).pack(padx=2, pady=2)
+        except Exception:
+            tk.Label(cell, text="[Fehler]", bg=BG_FRAME, fg=FG_DIM,
+                     font=FONT_SMALL, width=14, height=6).pack(padx=2, pady=2)
+            orig_w, orig_h = 0, 0
 
-        # Dateiname (gekuerzt) + Ordner wenn aus Unterordner
-        parent_dir = os.path.basename(os.path.dirname(path))
-        if parent_dir.startswith("20"):
-            display = f"{parent_dir}/{fname}" if len(fname) <= 18 else f"{parent_dir}/{fname[:15]}..."
-        else:
-            display = fname if len(fname) <= 25 else fname[:22] + "..."
-        tk.Label(
-            cell, text=display, bg=BG_FRAME, fg=FG_LABEL,
-            font=FONT_SMALL, wraplength=THUMB_W + 30,
-        ).pack()
+        # Person-Label (nur bei Unterordner-Quellen)
+        if person:
+            tk.Label(cell, text=person, bg=BG_FRAME, fg=ACCENT_CYAN,
+                     font=FONT_SMALL).pack()
 
-        # Datum
-        date_str = time.strftime("%d.%m.%Y %H:%M", time.localtime(mtime))
-        tk.Label(
-            cell, text=date_str, bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
-        ).pack()
+        # Dateiname (gekürzt)
+        short = fname if len(fname) <= 18 else fname[:15] + "..."
+        tk.Label(cell, text=short, bg=BG_FRAME, fg=FG_LABEL,
+                 font=FONT_SMALL).pack()
 
-        # Metadaten (Teachen-Tab)
-        if meta:
-            name = meta.get("name", "?")
-            conf = meta.get("confidence", 0)
-            meta_text = f"{name} ({conf:.0%})"
-            tk.Label(
-                cell, text=meta_text, bg=BG_FRAME, fg=ACCENT_CYAN, font=FONT_SMALL,
-            ).pack()
+        # Datum + Größe
+        date_str = time.strftime("%d.%m.%y %H:%M", time.localtime(mtime))
+        size_str = f" {orig_w}×{orig_h}" if orig_w else ""
+        tk.Label(cell, text=f"{date_str}{size_str}", bg=BG_FRAME, fg=FG_DIM,
+                 font=FONT_SMALL).pack()
 
-        # Loeschen-Button
-        tk.Button(
-            cell, text="X", width=3,
-            bg=BTN_OFF_DARK, fg=BTN_ALARM_RED, font=FONT_SMALL,
-            activebackground=BG_FRAME,
-            command=lambda p=path, f=fname: self._delete_file(p, f),
-        ).pack(pady=(2, 0))
+        # Löschen-Button
+        tk.Button(cell, text="X", width=3,
+                  bg=BTN_OFF_DARK, fg=BTN_ALARM_RED, font=FONT_SMALL,
+                  activebackground=BG_FRAME,
+                  command=lambda p=path, ti=tab_idx: self._delete(p, ti)
+                  ).pack(pady=(2, 0))
 
     # =========================================================================
     # Aktionen
     # =========================================================================
 
     def _open_fullsize(self, path):
-        """Bild in voller Groesse in neuem Toplevel oeffnen."""
         try:
             img = Image.open(path)
         except Exception as e:
-            logger.error(f"Bild oeffnen fehlgeschlagen: {e}")
+            logger.error(f"Bild öffnen fehlgeschlagen: {e}")
             return
-
-        full_win = tk.Toplevel(self.win)
-        full_win.title(os.path.basename(path))
-        full_win.configure(bg=BG_DARK)
-
+        win = tk.Toplevel(self.win)
+        win.title(os.path.basename(path))
+        win.configure(bg=BG_DARK)
         max_w, max_h = 1024, 768
         w, h = img.size
         if w > max_w or h > max_h:
             ratio = min(max_w / w, max_h / h)
             img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
-
         photo = ImageTk.PhotoImage(img)
-        full_win._photo_ref = photo
-        full_win.geometry(f"{img.size[0]}x{img.size[1]}")
-        full_win.resizable(False, False)
-        tk.Label(full_win, image=photo, bg=BG_DARK).pack()
+        win._photo_ref = photo
+        win.geometry(f"{img.size[0]}x{img.size[1]}")
+        win.resizable(False, False)
+        tk.Label(win, image=photo, bg=BG_DARK).pack()
 
-    def _delete_file(self, path, fname):
-        """Datei sofort loeschen (ohne Bestaetigung)."""
+    def _delete(self, path, tab_idx):
         try:
             os.remove(path)
-            # Zugehoerige JSON-Metadaten auch loeschen
+            # Zugehörige JSON-Meta auch löschen
             json_path = path.rsplit(".", 1)[0] + ".json"
             if os.path.exists(json_path):
                 os.remove(json_path)
-            logger.info(f"Geloescht: {fname}")
         except Exception as e:
-            logger.error(f"Loeschen fehlgeschlagen: {e}")
+            logger.error(f"Löschen fehlgeschlagen: {e}")
             return
-
-        # Aktuellen Tab neu laden
-        tab_idx = self._notebook.index(self._notebook.select())
-        if tab_idx == 0:
-            self._load_snapshots()
-        elif tab_idx == 1:
-            self._load_teachen()
-
-    # =========================================================================
-    # Hilfsfunktionen
-    # =========================================================================
-
-    def _show_empty(self, grid, text):
-        """Leer-Hinweis im Grid anzeigen."""
-        tk.Label(
-            grid.grid_frame, text=text,
-            bg=BG_DARK, fg=FG_DIM, font=FONT_LABEL,
-        ).grid(row=0, column=0, columnspan=COLUMNS, pady=40)
-
-    def _update_tab_title(self, index, title):
-        """Tab-Titel mit Anzahl aktualisieren."""
-        try:
-            self._notebook.tab(index, text=title)
-        except Exception:
-            pass
-
-    def _on_scroll_up(self, event):
-        """Mausrad hoch fuer aktiven Tab."""
-        grid = self._get_active_grid()
-        if grid:
-            grid.canvas.yview_scroll(-3, "units")
-
-    def _on_scroll_down(self, event):
-        """Mausrad runter fuer aktiven Tab."""
-        grid = self._get_active_grid()
-        if grid:
-            grid.canvas.yview_scroll(3, "units")
-
-    def _get_active_grid(self):
-        """ScrollableGrid des aktiven Tabs zurueckgeben."""
-        try:
-            idx = self._notebook.index(self._notebook.select())
-        except Exception:
-            return None
-        if idx == 0:
-            return self._grid_snapshots
-        elif idx == 1:
-            return self._grid_teachen
-        return None
+        # Aus Cache entfernen + Seite neu rendern
+        self._all_files[tab_idx] = [
+            f for f in self._all_files[tab_idx] if f[0] != path]
+        self._render_page(tab_idx)
 
     # =========================================================================
     # Suche
     # =========================================================================
 
-    def _on_search_changed(self, *_args):
-        """Suchfeld geaendert — mit 300ms Debounce beide Tabs neu laden."""
+    def _on_search_changed(self, *_):
         if self._search_timer:
             self.win.after_cancel(self._search_timer)
         self._search_timer = self.win.after(300, self._apply_search)
 
     def _apply_search(self):
-        """Suche anwenden: beide Tabs neu laden mit Filter."""
-        query = self._search_var.get().strip().lower()
-        if query:
-            # Bei Suche: Teachen ueber ALLE Tage, Snapshots gefiltert
-            self._load_snapshots(query)
-            self._load_teachen_all(query)
-        else:
-            self._load_snapshots()
-            self._load_teachen()
+        query = self._search_var.get().strip().lower() or None
+        tab_idx = self._notebook.index(self._notebook.select())
+        self._load_tab(tab_idx, query)
 
-    def _clear_search(self):
-        """Suchfeld leeren."""
-        self._search_var.set("")
+    # =========================================================================
+    # Scrolling + Tab-Wechsel
+    # =========================================================================
 
-    def _load_teachen_all(self, query):
-        """Teachen-Tab: Alle Tage durchsuchen, nach query filtern."""
-        grid = self._grid_teachen
-        grid.clear()
+    def _scroll_up(self, _event):
+        grid = self._get_active_grid()
+        if grid:
+            grid.canvas.yview_scroll(-3, "units")
 
-        def _bg_load():
-            files = []
-            if not os.path.isdir(DAILY_DIR):
-                return
-            for day in os.listdir(DAILY_DIR):
-                day_dir = os.path.join(DAILY_DIR, day)
-                if not os.path.isdir(day_dir) or not day.startswith("20"):
-                    continue
-                for f in os.listdir(day_dir):
-                    if not f.lower().endswith((".jpg", ".jpeg", ".png")):
-                        continue
-                    if query and query not in f.lower():
-                        continue
-                    path = os.path.join(day_dir, f)
-                    mtime = os.path.getmtime(path)
-                    json_path = path.rsplit(".", 1)[0] + ".json"
-                    meta = None
-                    if os.path.exists(json_path):
-                        try:
-                            with open(json_path, "r") as jf:
-                                meta = json.load(jf)
-                        except Exception:
-                            pass
-                    files.append((path, f, mtime, meta))
-            files.sort(key=lambda x: x[2], reverse=True)
-            try:
-                self.win.after(0, lambda: self._populate_teachen_grid(
-                    grid, files, len(files)))
-            except tk.TclError:
-                pass
+    def _scroll_down(self, _event):
+        grid = self._get_active_grid()
+        if grid:
+            grid.canvas.yview_scroll(3, "units")
 
-        threading.Thread(target=_bg_load, daemon=True).start()
+    def _get_active_grid(self):
+        try:
+            idx = self._notebook.index(self._notebook.select())
+            return self._grids[idx]
+        except Exception:
+            return None
 
-    def _on_close(self):
-        """Fenster schliessen."""
-        self.win.destroy()
+    def _on_tab_changed(self, _event):
+        """Bei Tab-Wechsel: Falls noch nicht geladen, jetzt laden."""
+        try:
+            idx = self._notebook.index(self._notebook.select())
+        except Exception:
+            return
+        if not self._all_files[idx]:
+            self._load_tab(idx)

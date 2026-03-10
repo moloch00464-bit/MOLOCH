@@ -728,7 +728,7 @@ class HailoControlPanel:
         if frame is None:
             self._gui_status("Kein Frame fuer Snapshot")
             return
-        snap_dir = os.path.expanduser("~/moloch/snapshots")
+        snap_dir = os.path.expanduser("~/moloch/media/captures")
         os.makedirs(snap_dir, exist_ok=True)
         ts = time.strftime("%Y%m%d_%H%M%S")
         path = os.path.join(snap_dir, f"hailo_{ts}.jpg")
