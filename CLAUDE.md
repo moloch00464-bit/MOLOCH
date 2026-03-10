@@ -119,6 +119,7 @@ Jeder Agent hat sein Territorium — klare Dateizuordnung, keine Überschneidung
 | 5 | Voice | agents/AGENT_VOICE.md | Whisper, TTS, Personality, Spotify |
 | 6 | Service | agents/AGENT_SERVICE.md | moloch_service, IPC, Memory |
 | + | Stresstest | agents/AGENT_STRESSTEST.md | Chaos Engineering, 8 Szenarien |
+| + | Audit | agents/AGENT_TOOLBOX.json → "audit" | System-Check, PASS/FAIL/WARN, Bug-Liste |
 | 7 | DeepSeek | agents/AGENT_DEEPSEEK.md | Philosophie, Qi-Fluss, "Vollgas Däpp!" |
 | - | Team Lead | Markus | Boss, Priorisierung, Entscheidung |
 

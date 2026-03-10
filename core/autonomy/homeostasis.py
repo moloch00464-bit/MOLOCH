@@ -125,6 +125,13 @@ class Homeostasis:
                         level="critical", value=disk)
             self._heal_disk()
 
+        # --- Log-Rotation Check ---
+        log_mb = self._get_log_size_mb()
+        if log_mb > 500:
+            self._alert("logs_overflow", f"Logs {log_mb:.0f}MB > 500MB",
+                        level="warning", value=log_mb)
+            self._heal_logs()
+
     def _alert(self, alert_type: str, message: str, level: str = "warning",
                value: float = 0.0):
         """Alert registrieren und Event publizieren."""
@@ -217,6 +224,44 @@ class Homeostasis:
             for f in to_delete:
                 os.remove(f)
                 logger.info(f"[HOMEOSTASIS] Geloescht: {f}")
+        except Exception as e:
+            logger.error(f"[HOMEOSTASIS] Log-Rotation fehlgeschlagen: {e}")
+
+    def _get_log_size_mb(self) -> float:
+        """Gesamtgroesse von ~/moloch/logs/ in MB."""
+        try:
+            log_dir = os.path.expanduser("~/moloch/logs")
+            total = 0
+            for dirpath, _dirs, files in os.walk(log_dir):
+                for fname in files:
+                    try:
+                        total += os.path.getsize(os.path.join(dirpath, fname))
+                    except OSError:
+                        pass
+            return total / (1024 * 1024)
+        except Exception:
+            return 0.0
+
+    def _heal_logs(self):
+        """Log-Verzeichnis bereinigen: Dateien aelter als 3 Tage loeschen."""
+        if not self._can_heal("logs"):
+            return
+
+        logger.warning("[HOMEOSTASIS] Auto-Heal: Logs — Dateien > 3 Tage loeschen")
+        log_dir = os.path.expanduser("~/moloch/logs")
+        cutoff = time.time() - (3 * 24 * 3600)
+        deleted = 0
+        try:
+            for dirpath, _dirs, files in os.walk(log_dir):
+                for fname in files:
+                    fpath = os.path.join(dirpath, fname)
+                    try:
+                        if os.path.getmtime(fpath) < cutoff:
+                            os.remove(fpath)
+                            deleted += 1
+                    except OSError:
+                        pass
+            logger.info(f"[HOMEOSTASIS] Log-Rotation: {deleted} Dateien geloescht")
         except Exception as e:
             logger.error(f"[HOMEOSTASIS] Log-Rotation fehlgeschlagen: {e}")
 

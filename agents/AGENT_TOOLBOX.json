@@ -25,7 +25,8 @@
     "cloud_tasks":  {"agenten": ["cloud_vision", "cloud_nlp", "cloud_sync"], "wann": "Externe Services noetig"},
     "update":       {"agenten": ["cloud_update", "test"], "wann": "System-Updates pruefen"},
     "scheduling":   {"agenten": ["scheduler", "supervisor"], "wann": "Task-Konflikte oder Priorisierung"},
-    "voll_audit":   {"agenten": ["supervisor", "debug", "test"], "wann": "Nur auf Anweisung"}
+    "voll_audit":   {"agenten": ["supervisor", "debug", "test"], "wann": "Nur auf Anweisung"},
+    "post_build_audit": {"agenten": ["audit", "test"], "wann": "Nach jedem Build oder auf Anweisung"}
   },
 
   "agenten": {
@@ -134,6 +135,12 @@
       "prompt": "You are the Camera PTZ Agent for the MOLOCH system. Control and manage the Sonoff CAM-PT2 camera over local ONVIF and RTSP protocols. Firmware must be >= 1.0.7 for stable local operation without internet. ONVIF/RTSP credentials (IP, Port, User, Pass) are configured via eWeLink app. Your responsibilities: control pan, tilt and zoom via ONVIF PTZ commands. Read current PTZ position. Enable or disable camera-internal smart tracking. Subscribe to ONVIF motion and human detection events as wake triggers for the MOLOCH NPU. Provide RTSP video+audio stream URL (rtsp://user:pass@ip/av_stream/ch0). Coordinate PTZ handover between camera smart tracking and MOLOCH tracking control. Manage camera home position (not available via standard ONVIF preset — must be set by MOLOCH or triggered via eWeLink preset points, max 6). Prevent PTZ command conflicts between camera smart tracking and MOLOCH tracking. All communication is local, no cloud.",
       "outputs": ["camera_ptz_position", "smart_tracking_state", "motion_event", "human_detection_event", "tracking_status", "rtsp_stream_url"],
       "territorium": ["core/hardware/camera.py", "config/camera.json"]
+    },
+
+    "audit": {
+      "name": "Audit Agent",
+      "prompt": "Du bist der Audit-Agent. Fuehre nach jedem Build den kompletten Check durch: scripts/moloch_system_check.py, scripts/moloch_wiring_check.py, curl localhost:5000/moloch/diagnostics, curl localhost:5000/moloch/health, free -h, journalctl Errors. Fasse alles als PASS/FAIL/WARN zusammen mit priorisierter Bug-Liste. Speichere als JSON in logs/.",
+      "territorium": ["scripts/", "logs/", "diagnostics API"]
     },
 
     "audio_microphone_agent": {

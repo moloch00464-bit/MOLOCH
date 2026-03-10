@@ -193,15 +193,27 @@ def check_tappas_pipeline():
 
 def check_vision_models():
     """HEF-Dateien für YOLO, SCRFD, ArcFace vorhanden?"""
-    hef_dir = MOLOCH_ROOT / "models"
-    if not hef_dir.exists():
-        # Alternativ-Pfade
-        for alt in [Path("/usr/share/hailo-models"), MOLOCH_ROOT / "hefs"]:
-            if alt.exists():
-                hef_dir = alt
+    # Alle bekannten HEF-Verzeichnisse in Prioritaetsreihenfolge
+    hef_candidates = [
+        Path("/mnt/moloch-data/hailo/models"),
+        MOLOCH_ROOT / "models" / "hailo",
+        MOLOCH_ROOT / "models",
+        Path("/usr/share/hailo-models"),
+        MOLOCH_ROOT / "hefs",
+    ]
+    hef_dir = None
+    for candidate in hef_candidates:
+        if candidate.exists() and list(candidate.glob("*.hef")):
+            hef_dir = candidate
+            break
+    if hef_dir is None:
+        # Fallback auf ersten existierenden Pfad
+        for candidate in hef_candidates:
+            if candidate.exists():
+                hef_dir = candidate
                 break
 
-    hefs = list(hef_dir.rglob("*.hef")) if hef_dir.exists() else []
+    hefs = list(hef_dir.rglob("*.hef")) if hef_dir and hef_dir.exists() else []
     names = [h.name for h in hefs]
 
     found = []

@@ -73,12 +73,50 @@ HEF_TASKS = {
 TAPPAS_ACTIVE = {"yolov8m_h10", "scrfd_10g", "arcface_mobilefacenet", "yolov8s_pose_h10"}
 
 
+EVOLUTION_LOG_PATH = MOLOCH_ROOT / "logs" / "moloch_evolution_log.json"
+
+
 class CapabilityMonitor:
     """Scannt System-Faehigkeiten und erkennt Aenderungen."""
 
     def __init__(self):
         self._previous = self._load_previous()
         self._current = None
+        self._subscribe_capability_events()
+
+    def _subscribe_capability_events(self):
+        """Abonniert capability.* Events und schreibt sie ins evolution_log."""
+        try:
+            from core.moloch_event_bus import get_event_bus
+            get_event_bus().subscribe("capability.*", self._on_capability_event)
+            logger.info("[CAP] Subscribt auf capability.* Events")
+        except Exception as e:
+            logger.debug(f"[CAP] Bus-Subscribe fehlgeschlagen (noch nicht bereit): {e}")
+
+    def _on_capability_event(self, event):
+        """Capability-Event ins evolution_log schreiben."""
+        try:
+            entry = {
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "event_type": getattr(event, "event_type", str(event)),
+                "payload": getattr(event, "payload", {}),
+            }
+            log = []
+            if EVOLUTION_LOG_PATH.exists():
+                try:
+                    log = json.loads(EVOLUTION_LOG_PATH.read_text())
+                    if not isinstance(log, list):
+                        log = []
+                except (json.JSONDecodeError, OSError):
+                    log = []
+            log.append(entry)
+            # Nur letzte 500 Eintraege behalten
+            if len(log) > 500:
+                log = log[-500:]
+            EVOLUTION_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+            EVOLUTION_LOG_PATH.write_text(json.dumps(log, indent=2, ensure_ascii=False) + "\n")
+        except Exception as e:
+            logger.error(f"[CAP] evolution_log schreiben fehlgeschlagen: {e}")
 
     def _load_previous(self) -> dict:
         """Laedt die vorherige system_capabilities.json."""
