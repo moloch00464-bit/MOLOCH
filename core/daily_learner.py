@@ -24,8 +24,9 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Storage auf moloch-data SSD (nicht System-SSD)
-DAILY_DIR = Path("/mnt/moloch-data/Teachen")
+# Storage: Person-Unterordner unter ~/moloch/media/snapshots/ (Galerie-kompatibel)
+DAILY_DIR = Path("/mnt/moloch-data/Teachen")  # Backup-Pfad (NTFS, historisch)
+SNAPSHOTS_DIR = Path("~/moloch/media/snapshots").expanduser()
 
 # Qualitaetscheck: Mindest-Similarity zum bestehenden Basis-Embedding
 LEARN_MIN_SIMILARITY = 0.4
@@ -282,23 +283,22 @@ class DailyLearner:
         """
         learned = False
         try:
-            # Verzeichnis: /mnt/moloch-data/daily/YYYY-MM-DD/
-            today = time.strftime("%Y-%m-%d")
-            day_dir = DAILY_DIR / today
-            day_dir.mkdir(parents=True, exist_ok=True)
+            # Verzeichnis: ~/moloch/media/snapshots/PERSON/ (Galerie-kompatibel)
+            person_dir = SNAPSHOTS_DIR / name
+            person_dir.mkdir(parents=True, exist_ok=True)
 
-            # Dateiname: HH-MM-SS_name_conf_angle_light_dist.jpg
-            timestamp = time.strftime("%H-%M-%S")
-            filename = f"{timestamp}_{name}_c{int(confidence*100)}_a{angle}_l{light}_d{distance}.jpg"
-            filepath = day_dir / filename
+            # Dateiname: YYYY-MM-DD_HH-MM-SS_conf_angle_light_dist.jpg
+            timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
+            filename = f"{timestamp}_c{int(confidence*100)}_a{angle}_l{light}_d{distance}.jpg"
+            filepath = person_dir / filename
 
             # Speichere Face-Crop (JPEG Quality 95)
             cv2.imwrite(str(filepath), face_crop, [cv2.IMWRITE_JPEG_QUALITY, 95])
 
             # Speichere Full-Frame als Referenzbild
             if full_frame is not None:
-                full_filename = f"{timestamp}_{name}_c{int(confidence*100)}_a{angle}_l{light}_d{distance}_full.jpg"
-                full_filepath = day_dir / full_filename
+                full_filename = f"{timestamp}_c{int(confidence*100)}_a{angle}_l{light}_d{distance}_full.jpg"
+                full_filepath = person_dir / full_filename
                 cv2.imwrite(str(full_filepath), full_frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
 
             # Real-Time Learning: Embedding in Face-DB aufnehmen
@@ -411,12 +411,13 @@ class DailyLearner:
 
     def get_stats(self) -> Dict:
         """Stats für Display."""
-        today = time.strftime("%Y-%m-%d")
-        day_dir = DAILY_DIR / today
-
         snapshots_today = 0
-        if day_dir.exists():
-            snapshots_today = len(list(day_dir.glob("*.jpg")))
+        if SNAPSHOTS_DIR.exists():
+            today = time.strftime("%Y-%m-%d")
+            # Zähle Dateien von heute in allen Person-Unterordnern
+            for p in SNAPSHOTS_DIR.iterdir():
+                if p.is_dir():
+                    snapshots_today += len(list(p.glob(f"{today}*.jpg")))
 
         learned_total = 0
         if self._face_db:
