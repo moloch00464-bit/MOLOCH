@@ -100,6 +100,7 @@ class ActionBridge:
         # Decision-Log: Jede Transition als Thought->Intent->Action->Result
         self._decision_log: List[dict] = []
         self._max_decisions = 200
+        self._total_decisions = 0  # Echter Gesamtzaehler (nicht durch Ringbuffer begrenzt)
 
         # Bus-Subscriptions (PRIO_PERCEPTION = Perception-Input)
         self._bus.subscribe("perception.person_detected", self._on_person_detected, priority=PRIO_PERCEPTION)
@@ -367,6 +368,7 @@ class ActionBridge:
             "new_state": new_state.value,
         }
         self._decision_log.append(decision)
+        self._total_decisions += 1
         if len(self._decision_log) > self._max_decisions:
             self._decision_log.pop(0)
 
@@ -397,7 +399,7 @@ class ActionBridge:
                 "face_confirmed": self._context.face_confirmed,
                 "owner_detected": self._context.owner_detected,
                 "owner_name": self._context.owner_name,
-                "decisions": len(self._decision_log),
+                "decisions": self._total_decisions,  # Gesamtzaehler, nicht Ringbuffer-Groesse
             }
 
     def get_decisions(self, count: int = 20) -> List[dict]:
