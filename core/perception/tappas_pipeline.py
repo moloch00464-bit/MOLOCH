@@ -69,7 +69,7 @@ WHOLE_BUFFER_SO = "/usr/lib/aarch64-linux-gnu/hailo/tappas/post_processes/croppi
 VDEVICE_GROUP_ID = "SHARED"
 
 # YOLO Klassen-Whitelist (nur diese werden verarbeitet, Rest ignoriert)
-YOLO_ALLOWED_CLASSES = {"person", "cell phone", "laptop", "bottle", "cup", "chair", "couch", "tv"}
+YOLO_ALLOWED_CLASSES = {"person"}
 
 # IPC: Frame-Preview fuer Panel (gleicher Weg wie InferenceEngine → IPCRouter)
 SHM_FRAME_PATH = "/dev/shm/moloch_frame"
@@ -193,6 +193,7 @@ class TappasPipeline:
         logger.info("Starte TAPPAS Multi-Model Pipeline...")
         logger.info(f"  RTSP: {self._rtsp_url.split('@')[1] if '@' in self._rtsp_url else self._rtsp_url}")
         logger.info(f"  Modelle: YOLO + SCRFD + ArcFace (vdevice-group-id={VDEVICE_GROUP_ID})")
+        logger.info(f"  YOLO filter: person-only active (allowed={YOLO_ALLOWED_CLASSES})")
 
         pipeline_str = self._build_pipeline_string()
 

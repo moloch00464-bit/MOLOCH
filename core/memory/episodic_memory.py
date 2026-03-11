@@ -28,7 +28,7 @@ import numpy as np
 
 logger = logging.getLogger("MolochEpisodicMemory")
 
-QDRANT_PATH = "/mnt/moloch-data/qdrant"
+QDRANT_PATH = "/home/molochzuhause/moloch/data/qdrant"  # ext4 SSD1 (NTFS hatte SQLite-Journal-Bug)
 COLLECTION_NAME = "episodes"
 EMBEDDING_DIM = 512
 
