@@ -188,6 +188,10 @@ class TappasPipeline:
         self._sched_face_last_seen = 0.0
         self._sched_lock = threading.Lock()
 
+        # hailonet Referenzen fuer pass-through Steuerung (nach start() gesetzt)
+        self._scrfd_hailonet_el = None
+        self._arcface_hailonet_el = None
+
         # GStreamer einmal initialisieren
         if not Gst.is_initialized():
             Gst.init(None)
@@ -237,6 +241,14 @@ class TappasPipeline:
         appsink = self._pipeline.get_by_name("sink")
         if appsink:
             appsink.connect("new-sample", self._on_appsink_sample)
+
+        # hailonet Referenzen fuer pass-through Steuerung durch Scheduler
+        self._scrfd_hailonet_el = self._pipeline.get_by_name("scrfd_hailonet")
+        self._arcface_hailonet_el = self._pipeline.get_by_name("arcface_hailonet")
+        if self._scrfd_hailonet_el:
+            logger.info("[NPU-SCHED] scrfd_hailonet gefunden — pass-through Steuerung aktiv")
+        if self._arcface_hailonet_el:
+            logger.info("[NPU-SCHED] arcface_hailonet gefunden — pass-through Steuerung aktiv")
 
         # Bus fuer Fehler/EOS
         bus = self._pipeline.get_bus()
@@ -361,6 +373,24 @@ class TappasPipeline:
             if self._sched_mode != new_mode:
                 logger.info(f"[NPU-SCHED] {self._sched_mode} → {new_mode}")
                 self._sched_mode = new_mode
+
+                # hailonet pass-through steuern (spart echte NPU-Zyklen)
+                scrfd_pt = (new_mode == SCHED_YOLO_ONLY)
+                arcface_pt = (new_mode != SCHED_ALL_ACTIVE)
+                if self._scrfd_hailonet_el:
+                    try:
+                        self._scrfd_hailonet_el.set_property("pass-through", scrfd_pt)
+                    except Exception as e:
+                        logger.warning(f"[NPU-SCHED] scrfd pass-through Fehler: {e}")
+                if self._arcface_hailonet_el:
+                    try:
+                        self._arcface_hailonet_el.set_property("pass-through", arcface_pt)
+                    except Exception as e:
+                        logger.warning(f"[NPU-SCHED] arcface pass-through Fehler: {e}")
+
+                # Model-Active-Flags fuer GUI-Checkboxen + Status-JSON
+                self.scrfd_active = not scrfd_pt
+                self.arcface_active = not arcface_pt
 
     def reload_face_db(self, face_db: dict = None):
         """Face-DB aktualisieren.
