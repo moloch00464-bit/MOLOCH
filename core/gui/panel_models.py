@@ -21,7 +21,7 @@ from core.gui.panel_styles import (
     BG_FRAME, BG_BUTTON,
     BTN_ON_GREEN, BTN_OFF_DARK,
     ACCENT_GREEN, ACCENT_CYAN,
-    STATUS_YELLOW,
+    STATUS_YELLOW, STATUS_GREEN,
     FG_WHITE, FG_LABEL, FG_DIM,
     FONT_BUTTON, FONT_LABEL, FONT_SMALL, FONT_MONO,
     STATUS_UPDATE_MS,
@@ -125,6 +125,7 @@ class ModelsModule:
 
         # GUI aufbauen
         self._build_pipeline_status()
+        self._build_npu_status()
         self._build_model_checkboxes()
         self._build_fps_display()
         self._build_save_button()
@@ -222,6 +223,72 @@ class ModelsModule:
             row, text="--", bg=BG_FRAME, fg=FG_DIM, font=FONT_MONO,
         )
         self._lbl_pipeline.pack(side=tk.LEFT, padx=5)
+
+    # =========================================================================
+    # NPU Scheduler + Tracking Status
+    # =========================================================================
+
+    def _build_npu_status(self):
+        """NPU Scheduler Status + Tracking Source Anzeige."""
+        section = tk.LabelFrame(
+            self._parent,
+            text="NPU Status",
+            bg=BG_FRAME,
+            fg=FG_LABEL,
+            font=FONT_LABEL,
+        )
+        section.pack(fill=tk.X, padx=5, pady=(2, 2))
+
+        # Zeile 1: Aktive Modelle (Scheduler)
+        row1 = tk.Frame(section, bg=BG_FRAME)
+        row1.pack(fill=tk.X, padx=8, pady=(4, 1))
+
+        tk.Label(
+            row1, text="Aktiv:", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
+        ).pack(side=tk.LEFT)
+
+        self._lbl_npu_models = tk.Label(
+            row1, text="--", bg=BG_FRAME, fg=FG_DIM, font=FONT_MONO,
+        )
+        self._lbl_npu_models.pack(side=tk.LEFT, padx=5)
+
+        # Zeile 2: Tracking Source
+        row2 = tk.Frame(section, bg=BG_FRAME)
+        row2.pack(fill=tk.X, padx=8, pady=(1, 4))
+
+        self._lbl_tracking_src = tk.Label(
+            row2, text="--", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
+        )
+        self._lbl_tracking_src.pack(side=tk.LEFT)
+
+    def _update_npu_status_display(self, status):
+        """NPU Scheduler Mode + Tracking Source aus Status aktualisieren."""
+        # Aktive Modelle basierend auf Scheduler-Modus
+        sched = status.get("npu_sched_mode", "")
+        if sched == "ALL_ACTIVE":
+            self._lbl_npu_models.config(text="YOLO + SCRFD + ArcFace", fg=ACCENT_GREEN)
+        elif sched == "YOLO_SCRFD":
+            self._lbl_npu_models.config(text="YOLO + SCRFD", fg=STATUS_YELLOW)
+        elif sched == "YOLO_ONLY":
+            self._lbl_npu_models.config(text="YOLO only", fg=FG_DIM)
+        elif not sched:
+            # Kein TAPPAS oder Status noch nicht da
+            active = status.get("active_models", [])
+            if active:
+                self._lbl_npu_models.config(text=" + ".join(active), fg=ACCENT_CYAN)
+
+        # Tracking Source: PTZ Arbiter Mode
+        arbiter = status.get("ptz_arbiter_mode", "")
+        if arbiter == "MOLOCH_AUTONOM":
+            self._lbl_tracking_src.config(
+                text="\U0001f535 Moloch Tracking aktiv", fg=ACCENT_CYAN,
+            )
+        elif arbiter == "MOLOCH_MANUELL":
+            self._lbl_tracking_src.config(
+                text="\U0001f7e1 Manuell uebernommen", fg=STATUS_YELLOW,
+            )
+        elif arbiter:
+            self._lbl_tracking_src.config(text=arbiter, fg=FG_DIM)
 
     # =========================================================================
     # Model Checkboxen
@@ -464,6 +531,9 @@ class ModelsModule:
             if self._learner_flash != flash_active:
                 self._learner_flash = flash_active
                 self._update_blitz_button()
+
+            # NPU Scheduler + Tracking Status aktualisieren
+            self._update_npu_status_display(status)
 
         # Widgets sofort neu zeichnen
         self._parent.update_idletasks()

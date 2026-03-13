@@ -71,6 +71,12 @@ VDEVICE_GROUP_ID = "SHARED"
 # YOLO Klassen-Whitelist (nur diese werden verarbeitet, Rest ignoriert)
 YOLO_ALLOWED_CLASSES = {"person"}
 
+# NPU Model-Scheduler Zustände
+SCHED_YOLO_ONLY = "YOLO_ONLY"    # Niemand da → nur YOLO aktiv
+SCHED_YOLO_SCRFD = "YOLO_SCRFD"  # Person erkannt → YOLO + SCRFD
+SCHED_ALL_ACTIVE = "ALL_ACTIVE"   # Gesicht sichtbar → alle Modelle
+SCHED_COOLDOWN_DOWN = 3.0         # Sekunden ohne Daten bis Downgrade
+
 # IPC: Frame-Preview fuer Panel (gleicher Weg wie InferenceEngine → IPCRouter)
 SHM_FRAME_PATH = "/dev/shm/moloch_frame"
 SHM_PREVIEW_W = 640
@@ -175,6 +181,12 @@ class TappasPipeline:
         # Event Bus fuer Action Bridge
         self._event_bus = get_event_bus()
         self._last_person_state = False  # Fuer target_lost Erkennung
+
+        # --- NPU Model-Scheduler ---
+        self._sched_mode = SCHED_YOLO_ONLY
+        self._sched_person_last_seen = 0.0
+        self._sched_face_last_seen = 0.0
+        self._sched_lock = threading.Lock()
 
         # GStreamer einmal initialisieren
         if not Gst.is_initialized():
@@ -321,6 +333,34 @@ class TappasPipeline:
                 "total": self._current_fps,
                 # Modelle laufen parallel in Pipeline — gleiche Frame-Rate
             }
+
+    def get_npu_sched_mode(self) -> str:
+        """Aktueller NPU Scheduler-Modus: YOLO_ONLY / YOLO_SCRFD / ALL_ACTIVE."""
+        with self._sched_lock:
+            return self._sched_mode
+
+    def _update_npu_scheduler(self, has_person: bool, has_face: bool):
+        """Scheduler-Modus basierend auf aktuellen Detections aktualisieren."""
+        now = time.time()
+        if has_person:
+            self._sched_person_last_seen = now
+        if has_face:
+            self._sched_face_last_seen = now
+
+        person_recent = (now - self._sched_person_last_seen) < SCHED_COOLDOWN_DOWN
+        face_recent = (now - self._sched_face_last_seen) < SCHED_COOLDOWN_DOWN
+
+        if face_recent:
+            new_mode = SCHED_ALL_ACTIVE
+        elif person_recent:
+            new_mode = SCHED_YOLO_SCRFD
+        else:
+            new_mode = SCHED_YOLO_ONLY
+
+        with self._sched_lock:
+            if self._sched_mode != new_mode:
+                logger.info(f"[NPU-SCHED] {self._sched_mode} → {new_mode}")
+                self._sched_mode = new_mode
 
     def reload_face_db(self, face_db: dict = None):
         """Face-DB aktualisieren.
@@ -1042,6 +1082,21 @@ class TappasPipeline:
                 face_id = f.get("face_id")
                 face_similarity = f.get("face_similarity", 0)
 
+        # --- NPU Model-Scheduler: Modus aktualisieren + Ergebnisse unterdrücken ---
+        self._update_npu_scheduler(len(persons) > 0, len(faces) > 0)
+        sched_mode = self.get_npu_sched_mode()
+        if sched_mode == SCHED_YOLO_ONLY:
+            # SCRFD/ArcFace Ergebnisse ignorieren (Pipeline laeuft, Daten werden verworfen)
+            faces = []
+            best_face_conf = 0.0
+            best_face_bbox = None
+            face_id = None
+            face_similarity = 0.0
+        elif sched_mode == SCHED_YOLO_SCRFD:
+            # ArcFace Matching ignorieren
+            face_id = None
+            face_similarity = 0.0
+
         # PerceptionFrame bauen
         pf = self._build_pframe(persons, faces, best_face_conf,
                                 best_face_bbox, face_id, face_similarity)
@@ -1309,8 +1364,14 @@ class TappasPipeline:
             if best_attr_face.get("smiling") is not None:
                 pf.emotion = "happy" if best_attr_face["smiling"] else "neutral"
 
-        # Active Models (TAPPAS Pipeline = alle immer aktiv)
-        pf.active_models = ["yolov8m", "scrfd", "arcface", "face_attr"]
+        # Active Models (Scheduler-basiert: logisch aktiv, nicht nur NPU-seitig)
+        sched = self.get_npu_sched_mode()
+        if sched == SCHED_ALL_ACTIVE:
+            pf.active_models = ["yolov8m", "scrfd", "arcface"]
+        elif sched == SCHED_YOLO_SCRFD:
+            pf.active_models = ["yolov8m", "scrfd"]
+        else:
+            pf.active_models = ["yolov8m"]
 
         return pf
 

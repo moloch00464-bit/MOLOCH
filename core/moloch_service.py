@@ -1462,6 +1462,8 @@ class MolochService:
                     status["face_confidence"] = round(getattr(pframe, 'face_confidence', 0.0), 3)
                     status["face_similarity"] = round(getattr(pframe, 'face_similarity', 0.0), 3)
                     status["mode"] = "tappas"
+                if hasattr(self._inference, 'get_npu_sched_mode'):
+                    status["npu_sched_mode"] = self._inference.get_npu_sched_mode()
 
             # Einpraegen Status (TAPPAS Enrollment oder Legacy)
             if hasattr(self._inference, 'get_enrollment_status'):
