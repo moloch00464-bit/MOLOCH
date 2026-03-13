@@ -1421,8 +1421,11 @@ class MolochService:
                 "hand_active": getattr(_inf, 'hand_active', False),
                 "pose_active": getattr(_inf, 'pose_active', False),
                 "npu_paused": self._orchestrator._npu_paused,
-                "active_models": active_models if active_models else (
-                    ["scrfd", "arcface", "yolov8m"] if USE_TAPPAS else []),
+                "active_models": (
+                    # TAPPAS: Scheduler-basiert aus pframe, nicht aus _active_ctx
+                    getattr(_inf.get_current_pframe(), 'active_models', ["yolov8m"])
+                    if USE_TAPPAS and hasattr(_inf, 'get_current_pframe')
+                    else (active_models if active_models else [])),
                 "autonomous_mode": self._cam._autonomous_mode,
                 "manual_mode": self._cam._manual_mode,
                 "moloch_has_control": self._cam._moloch_has_control,

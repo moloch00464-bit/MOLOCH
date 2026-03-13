@@ -149,9 +149,10 @@ class TappasPipeline:
         self._face_attr_cache = {}  # {"gender": "M"|"F", "smiling": True|False}
         self._face_attr_lock = threading.Lock()
 
-        # --- Model-Active-Flags (TAPPAS = immer aktiv, Panel liest diese) ---
-        self.scrfd_active = True
-        self.arcface_active = True
+        # --- Model-Active-Flags (Scheduler-basiert, Panel liest diese) ---
+        # Start in YOLO_ONLY → scrfd/arcface inaktiv bis Person erkannt
+        self.scrfd_active = False
+        self.arcface_active = False
         self.yolo_active = True
         self.hand_active = False   # Hand-Modell nicht in TAPPAS Pipeline
         self.pose_active = False   # Pose-Modell nicht in TAPPAS Pipeline
@@ -242,14 +243,6 @@ class TappasPipeline:
         if appsink:
             appsink.connect("new-sample", self._on_appsink_sample)
 
-        # hailonet Referenzen fuer pass-through Steuerung durch Scheduler
-        self._scrfd_hailonet_el = self._pipeline.get_by_name("scrfd_hailonet")
-        self._arcface_hailonet_el = self._pipeline.get_by_name("arcface_hailonet")
-        if self._scrfd_hailonet_el:
-            logger.info("[NPU-SCHED] scrfd_hailonet gefunden — pass-through Steuerung aktiv")
-        if self._arcface_hailonet_el:
-            logger.info("[NPU-SCHED] arcface_hailonet gefunden — pass-through Steuerung aktiv")
-
         # Bus fuer Fehler/EOS
         bus = self._pipeline.get_bus()
         bus.add_signal_watch()
@@ -275,6 +268,13 @@ class TappasPipeline:
             target=self._run_loop, name="TappasPipeline-GLib", daemon=True
         )
         self._loop_thread.start()
+
+        # hailonet Referenzen NACH set_state(PLAYING) holen:
+        # hailocropper reorganisiert interne Bins beim PLAYING-Uebergang,
+        # danach sind alle Elemente korrekt erreichbar.
+        threading.Thread(
+            target=self._find_hailonet_elements, daemon=True, name="HailoNetFinder"
+        ).start()
 
         logger.info("TAPPAS Pipeline gestartet")
 
@@ -391,6 +391,41 @@ class TappasPipeline:
                 # Model-Active-Flags fuer GUI-Checkboxen + Status-JSON
                 self.scrfd_active = not scrfd_pt
                 self.arcface_active = not arcface_pt
+
+    def _find_hailonet_elements(self):
+        """hailonet Elemente nach Pipeline-Start suchen (nach PLAYING-Uebergang).
+
+        hailocropper reorganisiert seine internen Bins erst beim PLAYING-Uebergang,
+        daher muss get_by_name() nach set_state(PLAYING) aufgerufen werden.
+        3 Versuche mit je 2s Pause.
+        """
+        for attempt in range(3):
+            time.sleep(2)
+            if not self._running:
+                return
+            scrfd_el = self._pipeline.get_by_name("scrfd_hailonet") if self._pipeline else None
+            arcface_el = self._pipeline.get_by_name("arcface_hailonet") if self._pipeline else None
+            if scrfd_el and arcface_el:
+                self._scrfd_hailonet_el = scrfd_el
+                self._arcface_hailonet_el = arcface_el
+                # Startzustand YOLO_ONLY: pass-through sofort setzen
+                try:
+                    scrfd_el.set_property("pass-through", True)
+                    arcface_el.set_property("pass-through", True)
+                    logger.info("[NPU-SCHED] scrfd_hailonet + arcface_hailonet gefunden "
+                                f"(Versuch {attempt+1}) — pass-through=True gesetzt (YOLO_ONLY)")
+                except Exception as e:
+                    logger.warning(f"[NPU-SCHED] Initial pass-through Fehler: {e}")
+                return
+            logger.info(f"[NPU-SCHED] Versuch {attempt+1}: scrfd={scrfd_el is not None} "
+                        f"arcface={arcface_el is not None} — warte...")
+        # Fallback: einzeln zuweisen was gefunden wurde
+        if self._pipeline:
+            self._scrfd_hailonet_el = self._pipeline.get_by_name("scrfd_hailonet")
+            self._arcface_hailonet_el = self._pipeline.get_by_name("arcface_hailonet")
+        logger.warning(f"[NPU-SCHED] Elementsuche nach 3 Versuchen: "
+                       f"scrfd={self._scrfd_hailonet_el is not None} "
+                       f"arcface={self._arcface_hailonet_el is not None}")
 
     def reload_face_db(self, face_db: dict = None):
         """Face-DB aktualisieren.
