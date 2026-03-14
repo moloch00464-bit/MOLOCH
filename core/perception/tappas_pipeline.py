@@ -189,6 +189,10 @@ class TappasPipeline:
         self._sched_face_last_seen = 0.0
         self._sched_lock = threading.Lock()
 
+        # --- SCRFD Valve-Gating (echtes NPU-Gating via GStreamer valve) ---
+        self._scrfd_valve = None       # valve element: drop=True = SCRFD aus
+        self._scrfd_selector = None    # input-selector: sink_0=SCRFD, sink_1=Bypass
+
         # GStreamer einmal initialisieren
         if not Gst.is_initialized():
             Gst.init(None)
@@ -215,6 +219,24 @@ class TappasPipeline:
         except GLib.Error as e:
             logger.error(f"Pipeline-Erstellen fehlgeschlagen: {e}")
             raise RuntimeError(f"GStreamer Pipeline Error: {e}")
+
+        # SCRFD Valve + Selector (echtes NPU-Gating)
+        self._scrfd_valve = self._pipeline.get_by_name("scrfd_valve")
+        self._scrfd_selector = self._pipeline.get_by_name("scrfd_sel")
+        if self._scrfd_valve and self._scrfd_selector:
+            # Initial-State VOR PLAYING setzen: Valve zu, Bypass aktiv
+            # (input-selector default-active-pad waere sink_0=SCRFD, aber Valve ist zu → kein Frame)
+            self._scrfd_valve.set_property("drop", True)
+            sink1 = self._scrfd_selector.get_static_pad("sink_1")
+            if sink1:
+                self._scrfd_selector.set_property("active-pad", sink1)
+                logger.info("[SCRFD-GATE] Initial: Valve=drop, Selector=sink_1(bypass) — echtes NPU-Gating aktiv")
+            else:
+                # Pad noch nicht verhandelt → GLib-Timeout als Fallback
+                logger.info("[SCRFD-GATE] sink_1 noch nicht bereit, Fallback via GLib-Timeout")
+                GLib.timeout_add(200, self._init_scrfd_gate)
+        else:
+            logger.warning("[SCRFD-GATE] Valve oder Selector NICHT gefunden — kein Gating!")
 
         # Identity Callback (Pad-Probe fuer Detection-Auswertung)
         identity = self._pipeline.get_by_name("identity_callback")
@@ -289,6 +311,8 @@ class TappasPipeline:
         self._pipeline = None
         self._loop = None
         self._loop_thread = None
+        self._scrfd_valve = None
+        self._scrfd_selector = None
 
         # SHM-Frame loeschen damit Panel "Kein Signal" zeigt statt Frozen Frame
         self._cleanup_shm()
@@ -340,6 +364,43 @@ class TappasPipeline:
         with self._sched_lock:
             return self._sched_mode
 
+    def _init_scrfd_gate(self) -> bool:
+        """GLib-Timeout-Callback: Initalen Gate-State nach Pipeline-Start setzen.
+
+        Wird 300ms nach set_state(PLAYING) aufgerufen, damit Pads verhandelt sind.
+        Startet in YOLO_ONLY → Valve zu, Selector auf Bypass (sink_1).
+        """
+        self._apply_scrfd_gate(enabled=False)
+        logger.info("[SCRFD-GATE] Initial-State gesetzt: YOLO_ONLY (Valve zu, Bypass aktiv)")
+        return False  # Nicht wiederholen
+
+    def _apply_scrfd_gate(self, enabled: bool):
+        """SCRFD echtes NPU-Gating via GStreamer valve + input-selector.
+
+        enabled=True  → SCRFD aktiv: Valve auf, Selector auf SCRFD-Pfad (sink_0)
+        enabled=False → SCRFD aus:   Valve zu, Selector auf Bypass-Pfad (sink_1)
+
+        Reihenfolge beim Deaktivieren: erst Valve zu, dann Selector umschalten.
+        Reihenfolge beim Aktivieren:   erst Selector umschalten, dann Valve auf.
+        """
+        if self._scrfd_valve is None or self._scrfd_selector is None:
+            return
+
+        if enabled:
+            # Erst Selector auf SCRFD-Pfad, dann Valve öffnen
+            sink0 = self._scrfd_selector.get_static_pad("sink_0")
+            if sink0:
+                self._scrfd_selector.set_property("active-pad", sink0)
+            self._scrfd_valve.set_property("drop", False)
+            logger.debug("[SCRFD-GATE] SCRFD aktiviert (Valve auf, sink_0)")
+        else:
+            # Erst Valve schliessen, dann Selector auf Bypass
+            self._scrfd_valve.set_property("drop", True)
+            sink1 = self._scrfd_selector.get_static_pad("sink_1")
+            if sink1:
+                self._scrfd_selector.set_property("active-pad", sink1)
+            logger.debug("[SCRFD-GATE] SCRFD deaktiviert (Valve zu, sink_1 Bypass)")
+
     def _update_npu_scheduler(self, has_person: bool, has_face: bool):
         """Scheduler-Modus basierend auf aktuellen Detections aktualisieren."""
         now = time.time()
@@ -358,18 +419,25 @@ class TappasPipeline:
         else:
             new_mode = SCHED_YOLO_ONLY
 
+        mode_changed = False
+        scrfd_needed = False
         with self._sched_lock:
             if self._sched_mode != new_mode:
                 self._sched_mode = new_mode
+                mode_changed = True
+                scrfd_needed = (new_mode in (SCHED_YOLO_SCRFD, SCHED_ALL_ACTIVE))
 
-                # Model-Active-Flags fuer GUI-Checkboxen + Status-JSON (logisch, Python-side)
-                # NPU laeuft immer durch — Ergebnisse werden in _on_buffer gefiltert
-                self.scrfd_active = (new_mode in (SCHED_YOLO_SCRFD, SCHED_ALL_ACTIVE))
+                # Model-Active-Flags fuer GUI-Checkboxen + Status-JSON
+                self.scrfd_active = scrfd_needed
                 self.arcface_active = (new_mode == SCHED_ALL_ACTIVE)
 
                 logger.info(f"[NPU-SCHED] → {new_mode} "
-                            f"(scrfd={'aktiv' if self.scrfd_active else 'unterdr.'}, "
-                            f"arcface={'aktiv' if self.arcface_active else 'unterdr.'})")
+                            f"(scrfd={'AKTIV (Valve auf)' if self.scrfd_active else 'AUS (Valve zu)'}, "
+                            f"arcface={'aktiv' if self.arcface_active else 'nativ gated'})")
+
+        # Valve-Gating ausserhalb des Locks (GStreamer-Calls nicht unter Lock)
+        if mode_changed:
+            self._apply_scrfd_gate(enabled=scrfd_needed)
 
     def reload_face_db(self, face_db: dict = None):
         """Face-DB aktualisieren.
@@ -940,14 +1008,33 @@ class TappasPipeline:
             f'appsink name=sink emit-signals=true drop=true max-buffers=1 sync=false'
         )
 
+        # --- SCRFD Valve-Gating: tee → (A) valve → scrfd → selector.sink_0
+        #                                  → (B) bypass  → selector.sink_1
+        # Wenn Valve zu: Frames gehen direkt via Bypass zum Tracker (kein SCRFD auf NPU).
+        # Wenn Valve auf: Frames gehen durch SCRFD, Bypass-Queue dropt (leaky=downstream).
+        # input-selector gibt IMMER nur den aktiven Pfad weiter.
+        #
+        # ArcFace (face_cropper) ist bereits nativ gated: hailocropper erzeugt
+        # nur Crops wenn Face-ROIs im Buffer sind → kein Face = kein ArcFace-Inference.
+        # Pipeline-Topologie mit SCRFD Valve-Gating:
+        #   yolo_out → tee → (src_0) valve → scrfd_wrapper → selector.sink_0
+        #                  → (src_1) bypass_q              → selector.sink_1
+        #   selector → tracker → face_cropper → face_attr → callback → sink
+        #
+        # tee name=scrfd_tee ! valve ...  = tee.src_0 per "!" mit valve verbunden
+        # scrfd_tee. ! queue ...          = tee.src_1 per Namens-Referenz verbunden
         return (
             f'{source} ! '
             f'{yolo_wrapper} ! '
-            f'{scrfd_wrapper} ! '
+            f'tee name=scrfd_tee ! '
+            f'valve name=scrfd_valve drop=true ! {scrfd_wrapper} ! scrfd_sel.sink_0 '
+            f'input-selector name=scrfd_sel ! '
             f'{tracker} ! '
             f'{face_cropper} ! '
             f'{face_attr_cropper} ! '
-            f'{callback_and_sink}'
+            f'{callback_and_sink} '
+            f'scrfd_tee. ! queue name=scrfd_bypass_q leaky=downstream max-size-buffers=5 '
+            f'max-size-bytes=0 max-size-time=0 ! scrfd_sel.sink_1'
         )
 
     # =====================================================================
