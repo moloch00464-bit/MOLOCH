@@ -189,10 +189,6 @@ class TappasPipeline:
         self._sched_face_last_seen = 0.0
         self._sched_lock = threading.Lock()
 
-        # hailonet Referenzen fuer pass-through Steuerung (nach start() gesetzt)
-        self._scrfd_hailonet_el = None
-        self._arcface_hailonet_el = None
-
         # GStreamer einmal initialisieren
         if not Gst.is_initialized():
             Gst.init(None)
@@ -268,13 +264,6 @@ class TappasPipeline:
             target=self._run_loop, name="TappasPipeline-GLib", daemon=True
         )
         self._loop_thread.start()
-
-        # hailonet Referenzen NACH set_state(PLAYING) holen:
-        # hailocropper reorganisiert interne Bins beim PLAYING-Uebergang,
-        # danach sind alle Elemente korrekt erreichbar.
-        threading.Thread(
-            target=self._find_hailonet_elements, daemon=True, name="HailoNetFinder"
-        ).start()
 
         logger.info("TAPPAS Pipeline gestartet")
 
@@ -371,61 +360,16 @@ class TappasPipeline:
 
         with self._sched_lock:
             if self._sched_mode != new_mode:
-                logger.info(f"[NPU-SCHED] {self._sched_mode} → {new_mode}")
                 self._sched_mode = new_mode
 
-                # hailonet pass-through steuern (spart echte NPU-Zyklen)
-                scrfd_pt = (new_mode == SCHED_YOLO_ONLY)
-                arcface_pt = (new_mode != SCHED_ALL_ACTIVE)
-                if self._scrfd_hailonet_el:
-                    try:
-                        self._scrfd_hailonet_el.set_property("pass-through", scrfd_pt)
-                    except Exception as e:
-                        logger.warning(f"[NPU-SCHED] scrfd pass-through Fehler: {e}")
-                if self._arcface_hailonet_el:
-                    try:
-                        self._arcface_hailonet_el.set_property("pass-through", arcface_pt)
-                    except Exception as e:
-                        logger.warning(f"[NPU-SCHED] arcface pass-through Fehler: {e}")
+                # Model-Active-Flags fuer GUI-Checkboxen + Status-JSON (logisch, Python-side)
+                # NPU laeuft immer durch — Ergebnisse werden in _on_buffer gefiltert
+                self.scrfd_active = (new_mode in (SCHED_YOLO_SCRFD, SCHED_ALL_ACTIVE))
+                self.arcface_active = (new_mode == SCHED_ALL_ACTIVE)
 
-                # Model-Active-Flags fuer GUI-Checkboxen + Status-JSON
-                self.scrfd_active = not scrfd_pt
-                self.arcface_active = not arcface_pt
-
-    def _find_hailonet_elements(self):
-        """hailonet Elemente nach Pipeline-Start suchen (nach PLAYING-Uebergang).
-
-        hailocropper reorganisiert seine internen Bins erst beim PLAYING-Uebergang,
-        daher muss get_by_name() nach set_state(PLAYING) aufgerufen werden.
-        3 Versuche mit je 2s Pause.
-        """
-        for attempt in range(3):
-            time.sleep(2)
-            if not self._running:
-                return
-            scrfd_el = self._pipeline.get_by_name("scrfd_hailonet") if self._pipeline else None
-            arcface_el = self._pipeline.get_by_name("arcface_hailonet") if self._pipeline else None
-            if scrfd_el and arcface_el:
-                self._scrfd_hailonet_el = scrfd_el
-                self._arcface_hailonet_el = arcface_el
-                # Startzustand YOLO_ONLY: pass-through sofort setzen
-                try:
-                    scrfd_el.set_property("pass-through", True)
-                    arcface_el.set_property("pass-through", True)
-                    logger.info("[NPU-SCHED] scrfd_hailonet + arcface_hailonet gefunden "
-                                f"(Versuch {attempt+1}) — pass-through=True gesetzt (YOLO_ONLY)")
-                except Exception as e:
-                    logger.warning(f"[NPU-SCHED] Initial pass-through Fehler: {e}")
-                return
-            logger.info(f"[NPU-SCHED] Versuch {attempt+1}: scrfd={scrfd_el is not None} "
-                        f"arcface={arcface_el is not None} — warte...")
-        # Fallback: einzeln zuweisen was gefunden wurde
-        if self._pipeline:
-            self._scrfd_hailonet_el = self._pipeline.get_by_name("scrfd_hailonet")
-            self._arcface_hailonet_el = self._pipeline.get_by_name("arcface_hailonet")
-        logger.warning(f"[NPU-SCHED] Elementsuche nach 3 Versuchen: "
-                       f"scrfd={self._scrfd_hailonet_el is not None} "
-                       f"arcface={self._arcface_hailonet_el is not None}")
+                logger.info(f"[NPU-SCHED] → {new_mode} "
+                            f"(scrfd={'aktiv' if self.scrfd_active else 'unterdr.'}, "
+                            f"arcface={'aktiv' if self.arcface_active else 'unterdr.'})")
 
     def reload_face_db(self, face_db: dict = None):
         """Face-DB aktualisieren.
