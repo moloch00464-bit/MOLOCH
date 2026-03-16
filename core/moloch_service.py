@@ -328,13 +328,13 @@ class MolochService:
         import json
         import os
 
-        # FIX 3: Lockere Thresholds fuer Teach
+        # Teach-Qualitaet: Lieber ein mittleres Bild als gar keins
         MAX_RETRIES = 3
-        MIN_CONF = 0.65       # war 0.80 — besser ein Bild als keins
-        MIN_FACE_PX = 60      # war 80 — Gesicht muss nicht riesig sein
+        MIN_CONF = 0.65       # SCRFD Confidence (war 0.80)
+        MIN_FACE_PX = 60      # Gesicht Mindestgroesse in Pixel (war 80)
         MIN_BRIGHTNESS = 25
         MAX_BRIGHTNESS = 230
-        MIN_EMB_NORM = 5.0    # war 10.0 — ArcFace liefert oft kleine Normen
+        MIN_EMB_NORM = 0.5    # ArcFace MobileFaceNet liefert L2-norm ≈ 1.0 (war 10.0!)
 
         self._teach_busy = True
         self._teach_result = {"status": "running", "attempt": 0, "detail": ""}
@@ -444,7 +444,7 @@ class MolochService:
                 f"Conf: {int(face_conf * 100)}%" + (" \u2713" if conf_ok else " \u2717"),
                 f"Gr: {face_w}x{face_h}" + (" \u2713" if size_ok else " \u2717"),
                 f"Hell: {brightness}" + (" \u2713" if bright_ok else " \u2717"),
-                f"Emb: {'OK' if emb_ok else 'FEHLT'}",
+                f"Emb: {'OK' if emb_ok else 'FEHLT'} (n={emb_norm:.2f})",
             ]
             detail_str = " | ".join(detail_parts)
             self._teach_result["detail"] = detail_str
