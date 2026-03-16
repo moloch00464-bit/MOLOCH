@@ -19,8 +19,8 @@ import tkinter as tk
 
 from core.gui.panel_styles import (
     BG_FRAME, BG_BUTTON,
-    BTN_ALARM_RED, BTN_OFF_DARK, BTN_SNAP_CYAN,
-    ACCENT_CYAN,
+    BTN_ALARM_RED, BTN_OFF_DARK, BTN_SNAP_CYAN, BTN_ON_GREEN,
+    ACCENT_CYAN, ACCENT_GREEN,
     FG_WHITE, FG_LABEL, FG_DIM,
     FONT_BUTTON, FONT_LABEL, FONT_SMALL,
 )
@@ -87,13 +87,14 @@ class EwelinkModule:
             command=self._take_snapshot,
         ).grid(row=0, column=1, padx=3, pady=2)
 
-        # TEACH (lila, einmal-klick) → speichert in media/teach/ + LED weiss
-        tk.Button(
+        # TEACH (Toggle: Lernmodus AN/AUS im Service)
+        self._btn_teach = tk.Button(
             row, text="TEACH", width=8,
-            bg="#9933cc", fg=FG_WHITE, font=FONT_BUTTON,
-            activebackground="#7722aa",
-            command=self._take_teach_photo,
-        ).grid(row=0, column=2, padx=3, pady=2)
+            bg=BTN_OFF_DARK, fg=FG_WHITE, font=FONT_BUTTON,
+            activebackground=BG_FRAME,
+            command=self._toggle_teach_mode,
+        )
+        self._btn_teach.grid(row=0, column=2, padx=3, pady=2)
 
         # FLUTLICHT (weisse LEDs toggle, nightVision 0=aus / 2=an)
         self._btn_flutlicht = tk.Button(
@@ -164,8 +165,6 @@ class EwelinkModule:
 
         # Einpraegen Poll-State
         self._einpraegen_polling = False
-        # Teach Smart Poll-State
-        self._teach_polling = False
 
     def _toggle_alarm(self):
         """Alarm an/aus."""
@@ -190,67 +189,9 @@ class EwelinkModule:
             text="bereit", fg=FG_DIM
         ))
 
-    def _take_teach_photo(self):
-        """Teach-Foto schiessen — Smart Qualitaetspruefung via NPU."""
-        self._service._write_command("teach_snapshot")
-        self._lbl_teach.config(text="Pruefe...", fg="#cc88ff")
-        self._teach_polling = True
-        self._parent.after(500, self._poll_teach_result)
-
-    def _poll_teach_result(self):
-        """Pollt teach_result vom Service (alle 500ms bis fertig)."""
-        if not self._teach_polling:
-            return
-        try:
-            status = self._service.read_status()
-            teach = status.get("teach_result", {})
-            st = teach.get("status", "")
-
-            if st == "running" or st == "starting":
-                attempt = teach.get("attempt", 0)
-                detail = teach.get("detail", "")
-                if attempt > 0:
-                    self._lbl_teach.config(
-                        text=f"Versuch {attempt}/3...", fg="#cc88ff"
-                    )
-                self._parent.after(500, self._poll_teach_result)
-
-            elif st == "retry":
-                reason = teach.get("reason", "")
-                self._lbl_teach.config(text=reason, fg="#ff6666")
-                self._parent.after(500, self._poll_teach_result)
-
-            elif st == "success":
-                self._teach_polling = False
-                sim = teach.get("similarity", 0)
-                detail = teach.get("detail", "")
-                # Kurze Zusammenfassung: Confidence + Similarity
-                sim_pct = int(sim * 100)
-                self._lbl_teach.config(
-                    text=f"\u2713 Gespeichert — Sim: {sim_pct}%",
-                    fg="#66ff66",
-                )
-                self._parent.after(5000, lambda: self._lbl_teach.config(
-                    text="bereit", fg=FG_DIM
-                ))
-
-            elif st == "failed":
-                self._teach_polling = False
-                reason = teach.get("reason", "Fehlgeschlagen")
-                self._lbl_teach.config(text=reason, fg="#ff4444")
-                self._parent.after(5000, lambda: self._lbl_teach.config(
-                    text="bereit", fg=FG_DIM
-                ))
-            else:
-                # Unbekannter Status — weiter pollen
-                self._parent.after(500, self._poll_teach_result)
-
-        except Exception:
-            self._teach_polling = False
-            self._lbl_teach.config(text="Fehler", fg="#ff4444")
-            self._parent.after(3000, lambda: self._lbl_teach.config(
-                text="bereit", fg=FG_DIM
-            ))
+    def _toggle_teach_mode(self):
+        """Teach-Modus AN/AUS im Service umschalten."""
+        self._service._write_command("teach_mode_toggle")
 
     def _toggle_flutlicht(self):
         """Weisse LEDs an/aus (nightVision 0=day/aus, 2=night/an)."""
@@ -332,10 +273,10 @@ class EwelinkModule:
         self._lbl_einpraegen.config(text="", fg=FG_DIM)
 
     def update_from_status(self, status):
-        """Vom panel_main Poll aufgerufen: ERKANNT-Indikator aktualisieren.
+        """Vom panel_main Poll aufgerufen: Status-Indikatoren aktualisieren.
 
-        Gate0 Phase 6: LED zeigt Wahrheit — Farbe folgt personality_mode.
-        Gate 1+: Zeigt Face-ID Name + Confidence Score.
+        - ERKANNT: LED-State + personality_mode + Face-ID
+        - TEACH Button: Modus (gruen/grau) + Prozess-Status (pulsierend/gruen/rot)
         """
         led_on = status.get("led_markus_on", False)
         led_mode = status.get("led_personality_mode", "guardian")
@@ -360,6 +301,42 @@ class EwelinkModule:
             self._lbl_erkannt.config(text="unbekannt", fg="#ffcc00")
         elif not self._erkannt_led_on:
             self._lbl_erkannt.config(text="---", fg=FG_DIM)
+
+        # --- TEACH Modus Button (gruen=AN, grau=AUS) ---
+        teach_on = status.get("teach_mode_enabled", False)
+        if teach_on:
+            self._btn_teach.config(bg=BTN_ON_GREEN, text="TEACH AN")
+        else:
+            self._btn_teach.config(bg=BTN_OFF_DARK, text="TEACH")
+
+        # --- TEACH Prozess-Status (Label = Spiegel vom Service) ---
+        teach = status.get("teach_result", {})
+        teach_st = teach.get("status", "")
+
+        if teach_st in ("running", "starting"):
+            attempt = teach.get("attempt", 0)
+            if attempt > 0:
+                self._lbl_teach.config(
+                    text=f"\u23f3 Versuch {attempt}/3...", fg="#ffaa00"
+                )
+            else:
+                self._lbl_teach.config(text="\u23f3 Verarbeite...", fg="#ffaa00")
+        elif teach_st == "retry":
+            reason = teach.get("reason", "")
+            self._lbl_teach.config(text=reason, fg="#ff6666")
+        elif teach_st == "success":
+            sim = teach.get("similarity", 0)
+            sim_pct = int(sim * 100)
+            self._lbl_teach.config(
+                text=f"\u2713 Sim: {sim_pct}%", fg=ACCENT_GREEN
+            )
+        elif teach_st == "failed":
+            reason = teach.get("reason", "Fehlgeschlagen")
+            self._lbl_teach.config(text=f"\u2717 {reason}", fg="#ff4444")
+        elif teach_on:
+            self._lbl_teach.config(text="AN", fg=ACCENT_GREEN)
+        else:
+            self._lbl_teach.config(text="AUS", fg=FG_DIM)
 
     def _open_gallery(self):
         """Snapshot Galerie Popup oeffnen."""

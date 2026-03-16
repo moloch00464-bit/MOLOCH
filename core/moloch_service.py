@@ -174,8 +174,12 @@ class MolochService:
         # RGB-LED Controller (ESP32 WS2812 via UDP)
         self._rgb_led = None
 
-        # Teach Smart Snapshot Status (fuer GUI-Polling)
-        self._teach_result = {}
+        # Teach-Modus: Automatische Qualitaetspruefung bei Gesichtserkennung
+        self._teach_mode_enabled = False      # Toggle via IPC, persistent in settings.json
+        self._teach_result = {}               # Aktueller Teach-Vorgang Status (GUI-Polling)
+        self._teach_busy = False              # Verhindert Doppel-Trigger
+        self._teach_last_trigger = 0.0        # Cooldown: min 30s zwischen Auto-Teaches
+        self._teach_cooldown = 30.0           # Sekunden zwischen automatischen Teach-Versuchen
 
         # CameraManager (RTSP + Cloud + Tentakel + Autonomer Modus, Phase 4)
         self._cam = CameraManager(
@@ -328,8 +332,25 @@ class MolochService:
         MAX_BRIGHTNESS = 220
         MIN_EMB_NORM = 10.0
 
+        self._teach_busy = True
         # Status fuer GUI-Polling initialisieren
         self._teach_result = {"status": "running", "attempt": 0, "detail": ""}
+        try:
+            self._teach_smart_snapshot_inner(
+                cv2, np, json, os,
+                MAX_RETRIES, MIN_CONF, MIN_FACE_PX,
+                MIN_BRIGHTNESS, MAX_BRIGHTNESS, MIN_EMB_NORM
+            )
+        except Exception as e:
+            logger.error(f"[TEACH] Unerwarteter Fehler: {e}")
+            self._teach_result = {"status": "failed", "detail": str(e), "reason": str(e)}
+        finally:
+            self._teach_busy = False
+
+    def _teach_smart_snapshot_inner(self, cv2, np, json, os,
+                                     MAX_RETRIES, MIN_CONF, MIN_FACE_PX,
+                                     MIN_BRIGHTNESS, MAX_BRIGHTNESS, MIN_EMB_NORM):
+        """Innere Logik fuer _teach_smart_snapshot (try/finally-sicher)."""
 
         for attempt in range(1, MAX_RETRIES + 1):
             self._teach_result["attempt"] = attempt
@@ -687,6 +708,24 @@ class MolochService:
                                 )
                     except Exception as e:
                         logger.debug(f"[TAPPAS-PERC] DailyLearner: {e}")
+
+                # --- Teach-Modus: Auto-Trigger bei Gesichtserkennung ---
+                if self._teach_mode_enabled and not self._teach_busy:
+                    try:
+                        _t_face = getattr(pframe, 'face_detected', False)
+                        _t_conf = getattr(pframe, 'face_confidence', 0.0)
+                        _t_now = time.time()
+                        _t_cooldown_ok = (_t_now - self._teach_last_trigger) >= self._teach_cooldown
+                        if _t_face and _t_conf >= 0.60 and _t_cooldown_ok:
+                            self._teach_busy = True
+                            self._teach_last_trigger = _t_now
+                            self._teach_result = {"status": "starting", "attempt": 0, "detail": ""}
+                            threading.Thread(
+                                target=self._teach_smart_snapshot,
+                                daemon=True, name="TeachAuto"
+                            ).start()
+                    except Exception as e:
+                        logger.debug(f"[TAPPAS-PERC] Teach auto: {e}")
 
                 # --- Awareness: RoomMap + Motion + Activity + Context ---
                 if self._context_evaluator:
@@ -1721,7 +1760,8 @@ class MolochService:
                 status["einpraegen_progress"] = self._einpraegen.progress
                 status["einpraegen_done"] = self._einpraegen.is_done
 
-            # Teach Smart Snapshot Status (Qualitaetspruefung)
+            # Teach-Modus + Smart Snapshot Status
+            status["teach_mode_enabled"] = getattr(self, '_teach_mode_enabled', False)
             if hasattr(self, '_teach_result') and self._teach_result:
                 status["teach_result"] = self._teach_result
 
@@ -2153,13 +2193,22 @@ class MolochService:
             self._cam.cloud_toggle_alarm()
         elif action == 'snapshot':
             self._cam.take_snapshot()
+        elif action == 'teach_mode_toggle':
+            # Teach-Modus AN/AUS umschalten (persistent)
+            self._teach_mode_enabled = not self._teach_mode_enabled
+            logger.info(f"[TEACH] Modus: {'AN' if self._teach_mode_enabled else 'AUS'}")
+            self._save_settings()
+            if not self._teach_mode_enabled:
+                # Modus ausgeschaltet — Result zuruecksetzen
+                self._teach_result = {}
         elif action == 'teach_snapshot':
-            # Smart Teach: Qualitaetspruefung via NPU, 3 Retries, LED-Feedback
-            self._teach_result = {"status": "starting", "attempt": 0, "detail": ""}
-            threading.Thread(
-                target=self._teach_smart_snapshot,
-                daemon=True, name="TeachSmart"
-            ).start()
+            # Manueller Smart Teach (Fallback fuer direkte Aufrufe)
+            if not self._teach_busy:
+                self._teach_result = {"status": "starting", "attempt": 0, "detail": ""}
+                threading.Thread(
+                    target=self._teach_smart_snapshot,
+                    daemon=True, name="TeachSmart"
+                ).start()
         elif action == 'cloud_status_led':
             self._cam.cloud_toggle_status_led()
         elif action == 'cloud_sync':
@@ -2420,6 +2469,17 @@ class MolochService:
         except Exception as e:
             logger.warning(f"[SETTINGS] Learner-Fehler: {e}")
 
+        # Teach-Modus (persistent)
+        try:
+            teach = data.get("teach", {})
+            if "mode_enabled" in teach:
+                self._teach_mode_enabled = bool(teach["mode_enabled"])
+                logger.info(f"[SETTINGS] Teach-Modus: {'AN' if self._teach_mode_enabled else 'AUS'}")
+            if "cooldown" in teach:
+                self._teach_cooldown = float(teach["cooldown"])
+        except Exception as e:
+            logger.warning(f"[SETTINGS] Teach-Fehler: {e}")
+
         # Orchestration Mode — NPU Idle-Modus ersetzt always_on
         # PerceptionEngine steuert jetzt die Modelle stufenweise (idle/person/face)
         try:
@@ -2544,6 +2604,12 @@ class MolochService:
         # Learner (von InferenceEngine)
         data["learner"] = {
             "flash_enabled": _inf._learner_flash,
+        }
+
+        # Teach-Modus (persistent)
+        data["teach"] = {
+            "mode_enabled": self._teach_mode_enabled,
+            "cooldown": self._teach_cooldown,
         }
 
         # Orchestration Mode
