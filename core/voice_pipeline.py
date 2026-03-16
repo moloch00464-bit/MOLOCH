@@ -458,8 +458,11 @@ Du kannst Spotify steuern mit Tags in deiner Antwort (werden automatisch entfern
 - [SPOTIFY:search=Suicide Commando Hellraiser] — Track suchen und abspielen
 - [SPOTIFY:artist=VNV Nation] — Artist spielen
 - [SPOTIFY:mood=shadow] — Musik passend zur Zone (guardian/shadow/berserker)
+- [SPOTIFY:playlist=Tanzen Tanzen Tanzen] — Playlist abspielen (Fuzzy-Match)
 Beispiel: "Klar, ich leg Suicide Commando auf! [SPOTIFY:artist=Suicide Commando]"
+Beispiel: "Playlist laeuft! [SPOTIFY:playlist=Tanzen Tanzen Tanzen]"
 Benutze diese Tags wenn Markus nach Musik fragt oder Steuerung will.
+Tipp: Sei kreativ bei Musikauswahl — nicht immer die gleichen Artists.
 """
 
     # Brain Context laden wenn vorhanden
@@ -1334,6 +1337,32 @@ class VoicePipeline:
                 return "Musik laeuft."
             return "Spotify reagiert nicht — spotifyd laeuft?"
 
+        # --- PLAYLIST Commands ---
+        # "spiel playlist X", "playlist X abspielen", "leg playlist X auf"
+        playlist_match = re.match(
+            r'^(?:spiel|spiele|play|leg)\s+(?:die\s+)?playlist\s+(.+?)(?:\s+ab(?:spielen)?)?$',
+            lower
+        )
+        if not playlist_match:
+            playlist_match = re.match(
+                r'^playlist\s+(.+?)(?:\s+abspielen|\s+an)?$', lower
+            )
+        if playlist_match:
+            pl_name = playlist_match.group(1).strip()
+            # Fuellwoerter raus
+            pl_name = re.sub(r'\b(?:mal|mir|doch|bitte)\b', '', pl_name).strip()
+            if pl_name:
+                logger.info(f"[SPOTIFY-DIRECT] Playlist: '{pl_name}'")
+                if sp.play_playlist(pl_name):
+                    return f"Playlist '{pl_name}' laeuft!"
+                return f"Playlist '{pl_name}' nicht gefunden. Sag 'welche Playlists' fuer eine Liste."
+
+        # --- PLAYLISTS AUFLISTEN ---
+        if any(kw in lower for kw in ("welche playlists", "meine playlists",
+                                       "zeig playlists", "playlist liste",
+                                       "alle playlists", "was fuer playlists")):
+            return sp.list_playlists()
+
         # --- "SPIEL ..." Commands (mit Argument) ---
 
         # Pattern: "spiel(e) [etwas]" / "mach [artist] an" / "musik von [artist]"
@@ -1372,7 +1401,9 @@ class VoicePipeline:
 
             logger.info(f"[SPOTIFY-DIRECT] Suche: '{query}'")
 
-            # Erst als Artist versuchen, dann als allgemeine Suche
+            # Reihenfolge: Playlist → Artist → Track-Suche
+            if sp.play_playlist(query):
+                return f"Playlist '{query}' laeuft!"
             if sp.play_artist(query):
                 return f"Spiele {query}."
             if sp.search_and_play(query):
@@ -1440,6 +1471,8 @@ class VoicePipeline:
                         sp.play_artist(value)
                     elif action == 'mood' and value:
                         sp.play_by_mood(value)
+                    elif action == 'playlist' and value:
+                        sp.play_playlist(value)
                     else:
                         logger.warning(f"[SPOTIFY] Unbekannter Command: {cmd_str}")
 

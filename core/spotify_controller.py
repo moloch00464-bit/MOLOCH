@@ -189,6 +189,14 @@ class SpotifyController:
         # spotifyd Health Check
         self._last_spotifyd_check = 0.0
 
+        # Playlist-Cache: [{name, id, uri, track_count}]
+        self._playlists: List[Dict] = []
+        self._playlists_loaded = False
+
+        # Kuerzlich gespielt — Ausschluss (keine Wiederholung)
+        self._recently_played: List[str] = []   # URIs der letzten ~50 gespielten Tracks
+        self._RECENT_MAX = 50
+
         # Cached Status — wird vom Status-Thread aktualisiert, nicht von der Pipeline
         self._cached_status: Dict[str, Any] = {}
         self._status_thread: Optional[threading.Thread] = None
@@ -442,6 +450,30 @@ class SpotifyController:
         random.shuffle(uris)
         return uris[:count]
 
+    def _get_random_index_tracks(self, count: int = 5) -> List[str]:
+        """Zufaellige Tracks aus dem GESAMTEN Index (Ueberraschungs-Mix).
+
+        Waehlt zufaellige Artists und jeweils 1-2 Tracks.
+        Bevorzugt Tracks mit vielen Plays (Markus kennt sie).
+        """
+        if not self._track_index:
+            return []
+        all_artists = list(self._track_index.keys())
+        if not all_artists:
+            return []
+        random.shuffle(all_artists)
+        uris = []
+        for artist_key in all_artists[:count * 2]:
+            tracks = self._track_index[artist_key]
+            if tracks:
+                # Gewichteter Pick: mehr Plays = hoehere Chance
+                weighted = sorted(tracks, key=lambda t: t.get("plays", 0), reverse=True)
+                pick = weighted[0] if random.random() < 0.6 else random.choice(tracks)
+                uris.append(pick["uri"])
+                if len(uris) >= count:
+                    break
+        return uris
+
     def _refresh_device(self):
         """Device-ID auffrischen: sucht neu wenn verloren, checkt spotifyd."""
         if not self._device_id:
@@ -599,6 +631,7 @@ class SpotifyController:
         """Suche im lokalen Index und spiele.
 
         Sucht in Artist-Namen und Track-Namen. KEINE Spotify-API-Suche.
+        Filtert kuerzlich gespielte Tracks raus (Abwechslung).
         """
         if not self._ensure_auth():
             return False
@@ -628,12 +661,18 @@ class SpotifyController:
                     break
 
         if not uris:
+            # 3. Fallback: Playlist-Suche
+            if self.play_playlist(query):
+                return True
             logger.warning(f"[SPOTIFY] Nichts im Index fuer: {query}")
             return False
 
+        uris = self._filter_recent(uris)
         random.shuffle(uris)
-        logger.info(f"[SPOTIFY] {len(uris)} Tracks aus Index fuer '{query}'")
-        return self.play(uri=uris[:20])
+        play_uris = uris[:20]
+        self._mark_played(play_uris)
+        logger.info(f"[SPOTIFY] {len(play_uris)} Tracks aus Index fuer '{query}'")
+        return self.play(uri=play_uris)
 
     def play_artist(self, artist_name: str) -> bool:
         """Spiele Tracks eines Artists aus dem lokalen Index.
@@ -661,6 +700,7 @@ class SpotifyController:
 
         Alle Tracks kommen aus Markus' Streaming History (lokaler Index).
         KEINE Spotify-Suche, KEINE Recommendations API.
+        Filtert kuerzlich gespielte raus + mischt Ueberraschungen bei.
         """
         if not self._ensure_auth():
             return False
@@ -679,7 +719,7 @@ class SpotifyController:
             logger.info(f"[SPOTIFY] Zone '{zone}' zu intensiv fuer {time_zone}, "
                         f"verwende 'guardian'")
 
-        # URIs aus dem lokalen Index holen
+        # URIs aus Zone-Artists (Kern-Auswahl)
         uris = self._get_zone_uris(effective_zone, count=30)
 
         # Zeitbasierte Beimischung
@@ -690,14 +730,23 @@ class SpotifyController:
             shadow_uris = self._get_zone_uris("shadow", count=10)
             uris = uris + shadow_uris[:5]
 
+        # Kreativitaet: 5 zufaellige Tracks aus dem GESAMTEN Index beimischen
+        # (Ueberraschungseffekt — nicht immer nur die selben Zone-Artists)
+        surprise_uris = self._get_random_index_tracks(count=8)
+        uris.extend(surprise_uris)
+
         if not uris:
             logger.warning(f"[SPOTIFY] Keine Tracks im Index fuer Zone '{zone}'")
             return False
 
+        # Kuerzlich gespielte rausfiltern
+        uris = self._filter_recent(uris)
         random.shuffle(uris)
-        uris = uris[:20]
-        logger.info(f"[SPOTIFY] Mood '{effective_zone}' ({time_zone}): {len(uris)} Tracks aus Index")
-        return self.play(uri=uris)
+        play_uris = uris[:20]
+        self._mark_played(play_uris)
+        logger.info(f"[SPOTIFY] Mood '{effective_zone}' ({time_zone}): "
+                    f"{len(play_uris)} Tracks (inkl. Ueberraschungen)")
+        return self.play(uri=play_uris)
 
     def get_recommendations_for_zone(self, zone: str, limit: int = 10) -> List[str]:
         """Empfehlungen aus dem lokalen Index (KEINE Spotify Recommendations API)."""
@@ -827,6 +876,156 @@ class SpotifyController:
         """Kann ohne Jahr-Info im Index nicht filtern — spielt stattdessen Top Tracks."""
         logger.info(f"[SPOTIFY] Jahr-Filter nicht verfuegbar im Index, spiele Top Tracks")
         return self.play_top_tracks()
+
+    # =========================================================================
+    # PLAYLISTS: Lesen + Fuzzy-Match + Abspielen
+    # =========================================================================
+
+    def get_playlists(self, force_reload: bool = False) -> List[Dict]:
+        """Alle Playlists des Users laden (cached).
+
+        Returns: [{name, id, uri, track_count, owner}]
+        """
+        if self._playlists_loaded and not force_reload:
+            return self._playlists
+
+        if not self._ensure_auth():
+            return []
+
+        try:
+            playlists = []
+            offset = 0
+            while True:
+                result = self._api_call(
+                    self._sp.current_user_playlists, limit=50, offset=offset
+                )
+                if not result or not result.get("items"):
+                    break
+                for pl in result["items"]:
+                    playlists.append({
+                        "name": pl["name"],
+                        "id": pl["id"],
+                        "uri": pl["uri"],
+                        "track_count": pl["tracks"]["total"],
+                        "owner": pl["owner"]["display_name"],
+                    })
+                if not result.get("next"):
+                    break
+                offset += 50
+
+            self._playlists = playlists
+            self._playlists_loaded = True
+            logger.info(f"[SPOTIFY] {len(playlists)} Playlists geladen")
+            return playlists
+        except Exception as e:
+            logger.error(f"[SPOTIFY] Playlists laden fehlgeschlagen: {e}")
+            return []
+
+    def play_playlist(self, query: str) -> bool:
+        """Playlist per Name suchen (Fuzzy-Match) und abspielen.
+
+        Sucht in allen Playlists nach bestem Match.
+        "tanzen tanzen tanzen" findet "Tanzen, Tanzen, Tanzen!" etc.
+        """
+        if not self._ensure_auth():
+            return False
+
+        playlists = self.get_playlists()
+        if not playlists:
+            logger.warning("[SPOTIFY] Keine Playlists verfuegbar")
+            return False
+
+        query_lower = query.lower().strip()
+        # Satzzeichen entfernen fuer besseren Match
+        import re
+        query_clean = re.sub(r'[^\w\s]', '', query_lower)
+
+        best_match = None
+        best_score = 0
+
+        for pl in playlists:
+            pl_lower = pl["name"].lower()
+            pl_clean = re.sub(r'[^\w\s]', '', pl_lower)
+
+            # Exakter Match (ohne Satzzeichen)
+            if query_clean == pl_clean:
+                best_match = pl
+                best_score = 100
+                break
+
+            # Teilstring Match
+            if query_clean in pl_clean or pl_clean in query_clean:
+                score = 80
+                if score > best_score:
+                    best_match = pl
+                    best_score = score
+                continue
+
+            # Wort-Match: wie viele Woerter stimmen ueberein?
+            q_words = set(query_clean.split())
+            p_words = set(pl_clean.split())
+            common = q_words & p_words
+            if common:
+                score = int(len(common) / max(len(q_words), 1) * 60)
+                if score > best_score:
+                    best_match = pl
+                    best_score = score
+
+        if best_match and best_score >= 30:
+            logger.info(f"[SPOTIFY] Playlist Match: '{best_match['name']}' "
+                       f"(Score={best_score}, {best_match['track_count']} Tracks)")
+            try:
+                self._refresh_device()
+                kwargs = {"context_uri": best_match["uri"]}
+                if self._device_id:
+                    kwargs["device_id"] = self._device_id
+                # Shuffle an fuer Playlists
+                self._api_call(self._sp.start_playback, **kwargs)
+                time.sleep(0.3)
+                self.shuffle(True)
+                return True
+            except Exception as e:
+                logger.error(f"[SPOTIFY] Playlist abspielen fehlgeschlagen: {e}")
+                return False
+
+        logger.warning(f"[SPOTIFY] Keine Playlist fuer '{query}' gefunden")
+        # Verfuegbare Playlists loggen
+        names = [p["name"] for p in playlists[:10]]
+        logger.info(f"[SPOTIFY] Verfuegbar: {names}")
+        return False
+
+    def list_playlists(self) -> str:
+        """Playlist-Namen als String (fuer Sprachausgabe)."""
+        playlists = self.get_playlists()
+        if not playlists:
+            return "Keine Playlists gefunden."
+        names = [f"{p['name']} ({p['track_count']})" for p in playlists[:15]]
+        return "Deine Playlists: " + ", ".join(names)
+
+    # =========================================================================
+    # KUERZLICH-GESPIELT: Ausschluss fuer mehr Abwechslung
+    # =========================================================================
+
+    def _filter_recent(self, uris: List[str]) -> List[str]:
+        """Entferne kuerzlich gespielte Tracks aus der URI-Liste.
+
+        Wenn nach dem Filtern zu wenig uebrig bleibt (<5),
+        werden alle URIs zurueckgegeben (lieber Wiederholung als Stille).
+        """
+        if not self._recently_played:
+            return uris
+        recent_set = set(self._recently_played)
+        filtered = [u for u in uris if u not in recent_set]
+        if len(filtered) < 5:
+            return uris  # Lieber Wiederholung als Stille
+        return filtered
+
+    def _mark_played(self, uris: List[str]):
+        """URIs als kuerzlich gespielt markieren."""
+        self._recently_played.extend(uris)
+        # Max-Groesse einhalten
+        if len(self._recently_played) > self._RECENT_MAX:
+            self._recently_played = self._recently_played[-self._RECENT_MAX:]
 
     # =========================================================================
     # AUTO-DJ: Automatischer Zone-Wechsel
