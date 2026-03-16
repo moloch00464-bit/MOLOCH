@@ -97,44 +97,123 @@ def _load_api_key() -> Optional[str]:
 
 
 def _detect_search_intent(text: str) -> Optional[str]:
-    """Pruefen ob Markus eine Websuche will. Gibt Suchbegriff zurueck oder None.
+    """Pruefen ob eine Websuche sinnvoll ist. Gibt optimierten Suchbegriff zurueck oder None.
 
-    Trigger-Phrases (deutsch, Whisper-robust):
-      "such im internet ...", "google mal ...", "was weißt du über ..."
-      "such mal nach ...", "suche nach ...", "kannst du googeln ..."
+    Zwei Stufen:
+    1. Explizite Trigger (such, google, etc.) → direkter Match
+    2. Implizite Fragen (was kostet, wer ist, aktuelle News) → Suche empfohlen
+
+    Returns: Suchbegriff (bereinigt) oder None wenn keine Suche noetig.
     """
     import re as _re
-    text_l = text.lower().strip()
+    t = text.strip()
+    tl = t.lower()
 
-    # Muster: "such [mal] [im internet] nach X"
+    # --- STUFE 1: Explizite Suchanfragen ---
+
+    # "such [mal] [im internet] [nach] X"
     m = _re.search(
         r"such\s+(?:mal\s+)?(?:im\s+internet\s+)?(?:nach\s+)?(.+?)[\?\.\!]*$",
-        text_l,
+        tl,
     )
     if m:
-        return m.group(1).strip()
+        return _clean_query(m.group(1))
 
-    # Muster: "google [mal] X"
-    m = _re.search(r"googl[e]?\s+(?:mal\s+)?(.+?)[\?\.\!]*$", text_l)
+    # "google [mal] X" / "googel mal X"
+    m = _re.search(r"googl?e?\s+(?:mal\s+)?(.+?)[\?\.\!]*$", tl)
     if m:
-        return m.group(1).strip()
+        return _clean_query(m.group(1))
 
-    # Muster: "was weißt du über X"
-    m = _re.search(r"was\s+(?:weit|wei[sß]t)\s+du\s+(?:über|uber)\s+(.+?)[\?\.\!]*$", text_l)
+    # "suche [nach] X"
+    m = _re.search(r"^suche\s+(?:nach\s+)?(.+?)[\?\.\!]*$", tl)
     if m:
-        return m.group(1).strip()
+        return _clean_query(m.group(1))
 
-    # Muster: "suche [nach] X"
-    m = _re.search(r"suche\s+(?:nach\s+)?(.+?)[\?\.\!]*$", text_l)
-    if m:
-        return m.group(1).strip()
+    # "kannst du [mal] [im internet] [nach] X [suchen/googeln/schauen]"
+    m = _re.search(
+        r"kannst\s+du\s+(?:mal\s+)?(?:im\s+internet\s+)?(?:nach\s+)?(.+?)"
+        r"(?:\s+(?:suchen|googeln|nachschauen|schauen))?[\?\.\!]*$",
+        tl,
+    )
+    if m and len(m.group(1).split()) <= 8:
+        return _clean_query(m.group(1))
 
-    # Muster: "kannst du googeln / im internet suchen"
-    m = _re.search(r"kannst\s+du\s+(?:googeln|im\s+internet\s+suchen)\s+(.+?)[\?\.\!]*$", text_l)
+    # "schau [mal] [nach] X" / "schlag X nach"
+    m = _re.search(r"schau\s+(?:mal\s+)?(?:nach\s+)?(.+?)[\?\.\!]*$", tl)
     if m:
-        return m.group(1).strip()
+        return _clean_query(m.group(1))
+    m = _re.search(r"schlag\s+(.+?)\s+nach[\?\.\!]*$", tl)
+    if m:
+        return _clean_query(m.group(1))
+
+    # --- STUFE 2: Implizite Fragen die Aktualitaet oder Fakten brauchen ---
+
+    # "was kostet [ein] X" / "wie viel kostet X"
+    m = _re.search(r"(?:was|wie\s+viel)\s+kostet\s+(?:ein\s+|eine\s+)?(.+?)[\?\.\!]*$", tl)
+    if m:
+        return _clean_query(m.group(1) + " Preis")
+
+    # "wer ist X" / "wer war X"
+    m = _re.search(r"wer\s+(?:ist|war|sind)\s+(.+?)[\?\.\!]*$", tl)
+    if m:
+        return _clean_query(m.group(1))
+
+    # "was ist [ein] X" / "was sind X" — nur wenn X vermutlich unbekannt
+    m = _re.search(r"was\s+(?:ist|sind|war|waren)\s+(?:ein\s+|eine\s+)?(.+?)[\?\.\!]*$", tl)
+    if m:
+        q = m.group(1).strip()
+        # Nicht suchen fuer Alltagsfragen ("was ist los", "was ist mit dir")
+        skip = ["los", "mit dir", "passiert", "falsch", "das", "hier", "das problem",
+                "dein problem", "das ziel", "das plan", "plan"]
+        if not any(q.startswith(s) for s in skip) and len(q.split()) >= 2:
+            return _clean_query(q)
+
+    # "was weißt du über X"
+    m = _re.search(r"was\s+(?:weit|wei[sß]t)\s+du\s+(?:über|uber)\s+(.+?)[\?\.\!]*$", tl)
+    if m:
+        return _clean_query(m.group(1))
+
+    # "was gibt es [Neues] über / zu X"
+    m = _re.search(r"was\s+gibt\s+es\s+(?:neues?\s+)?(?:über|uber|zu|von)\s+(.+?)[\?\.\!]*$", tl)
+    if m:
+        return _clean_query(m.group(1) + " aktuell")
+
+    # "wie war / wie ist [das Wetter / der Stand / die News] bei/in X"
+    m = _re.search(r"wie\s+(?:ist|war|sieht)\s+(?:das\s+)?(?:wetter|stand|lage|situation)\s+(?:in|bei|von)\s+(.+?)[\?\.\!]*$", tl)
+    if m:
+        return _clean_query(m.group(1) + " aktuell")
+
+    # "aktuelle News / Nachrichten über X"
+    m = _re.search(r"(?:aktuelle[ns]?\s+)?(?:news|nachrichten|infos|informationen)\s+(?:über|uber|zu|von)\s+(.+?)[\?\.\!]*$", tl)
+    if m:
+        return _clean_query(m.group(1))
+
+    # "was läuft / gibt es heute [Abend] im TV / Kino"
+    m = _re.search(r"was\s+(?:laeuft|läuft|gibt\s+es)\s+(?:heute|jetzt|gerade)?\s*(?:abend|nacht|im)?\s*(?:im\s+)?(?:tv|fernsehen|kino|theater)[\?\.\!]*$", tl)
+    if m:
+        return "TV Programm heute Abend"
+
+    # "wie ist der [aktuelle] Preis / Kurs von X"
+    m = _re.search(r"(?:wie\s+ist\s+(?:der|die|das)\s+)?(?:aktuell[er]?\s+)?(?:preis|kurs|wert|wechselkurs)\s+(?:von|des|der)\s+(.+?)[\?\.\!]*$", tl)
+    if m:
+        return _clean_query(m.group(1) + " aktueller Preis")
 
     return None
+
+
+def _clean_query(raw: str) -> str:
+    """Suchbegriff bereinigen: Fuellwoerter weg, Laenge begrenzen."""
+    import re as _re
+    # Fuellwoerter am Anfang entfernen
+    raw = _re.sub(
+        r"^(?:mal|doch|bitte|mir|uns|das|die|der|ein|eine|einen|dem|den)\s+",
+        "", raw.strip(), flags=_re.IGNORECASE
+    ).strip()
+    # Max 60 Zeichen / 8 Woerter
+    words = raw.split()
+    if len(words) > 8:
+        raw = " ".join(words[:8])
+    return raw[:60].strip() or raw
 
 
 def _perception_to_text() -> str:
@@ -1501,15 +1580,25 @@ class VoicePipeline:
                         self._emit_message("System", f"Suche: {search_query}")
                         results = bridge.search_web(search_query)
                         if results:
-                            search_block = f"\n\n[SUCHERGEBNISSE fuer: {search_query}]\n"
+                            search_block = (
+                                f"\n\n[SUCHERGEBNISSE fuer: {search_query}]\n"
+                                f"(Nutze diese Infos. Nenne die Quelle z.B. 'Laut Wikipedia...')\n"
+                            )
                             for i, r in enumerate(results, 1):
-                                search_block += f"{i}. {r['title']}: {r['text']}\n"
-                            search_block += "[Nutze diese Infos fuer deine Antwort!]"
+                                src = r.get("source", "Web")
+                                search_block += f"{i}. [{src}] {r['title']}: {r['text']}\n"
+                            search_block += "[Ende Suchergebnisse]"
                             text = text + search_block
                         else:
-                            text = text + "\n\n[SUCHE: Keine Ergebnisse gefunden. Antworte aus deinem Wissen.]"
+                            text = text + (
+                                "\n\n[SUCHE: Keine Ergebnisse gefunden. "
+                                "Antworte aus deinem Wissen und sag dass du nichts gefunden hast.]"
+                            )
                     else:
-                        text = text + "\n\n[SUCHE: Aktuell offline, kein Internetzugang.]"
+                        text = text + (
+                            "\n\n[SUCHE: Aktuell offline. Sag Markus dass du offline bist "
+                            "und antworte trotzdem aus deinem Wissen.]"
+                        )
                     self._whisper_status = "Denke..."
                 except Exception as e:
                     logger.error(f"[VOICE] Internet-Suche fehlgeschlagen: {e}")
