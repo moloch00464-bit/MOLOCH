@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-M.O.L.O.C.H. Snapshot Galerie Popup — v3.0
+M.O.L.O.C.H. Snapshot Galerie Popup — v4.0
 ============================================
 
-3 Tabs:
+4 Tabs:
   Tab 1: Personen  — ~/moloch/media/snapshots/ (Person-Unterordner: markus, franzi, ...)
-  Tab 2: Enrollment — ~/moloch/media/faces/ (Teachen/Enrollment Bilder)
-  Tab 3: Captures  — ~/moloch/media/captures/ (manuelle SNAP-Button Fotos)
+  Tab 2: Enrollment — ~/moloch/media/faces/ (Training/Embedding Bilder)
+  Tab 3: Captures  — ~/moloch/media/snapshots/ (manuell + Auto-Crops)
+  Tab 4: Teach     — ~/moloch/media/teach/ (Teach-Bilder)
 
 Features:
 - Thumbnails 100x100px, 4 Spalten
@@ -41,10 +42,14 @@ from core.gui.panel_styles import (
 logger = logging.getLogger("moloch.popup_gallery")
 
 # Zentrale Bildpfade
-MEDIA_DIR    = os.path.expanduser("~/moloch/media")
-SNAPSHOTS_DIR = os.path.join(MEDIA_DIR, "snapshots")   # Person-Unterordner
-FACES_DIR    = os.path.join(MEDIA_DIR, "faces")         # Enrollment
-CAPTURES_DIR = os.path.join(MEDIA_DIR, "captures")      # Manuell SNAP
+MEDIA_DIR     = os.path.expanduser("~/moloch/media")
+SNAPSHOTS_DIR = os.path.join(MEDIA_DIR, "snapshots")   # Person-Unterordner (symlink → ~/moloch/snapshots/)
+FACES_DIR     = os.path.join(MEDIA_DIR, "faces")        # Enrollment-Bilder
+TEACH_DIR     = os.path.join(MEDIA_DIR, "teach")        # Teach-Bilder (neu)
+
+# Tab-Verzeichnisse in Reihenfolge
+TAB_DIRS  = [SNAPSHOTS_DIR, FACES_DIR, SNAPSHOTS_DIR, TEACH_DIR]
+TAB_NAMES = ["Personen", "Enrollment", "Captures", "Teach"]
 
 THUMB_W  = 100
 THUMB_H  = 100
@@ -115,16 +120,19 @@ def _collect_images(base_dir, query=None):
 
 
 class SnapshotGallery:
-    """Galerie-Popup mit 3 Tabs: Personen, Enrollment, Captures."""
+    """Galerie-Popup mit 4 Tabs: Personen, Enrollment, Captures, Teach."""
 
     def __init__(self, parent):
         self._parent = parent
         self._search_timer = None
 
-        # Seitenzähler pro Tab [personen, enrollment, captures]
-        self._pages = [0, 0, 0]
-        # Gesamtliste pro Tab (gecacht nach Load)
-        self._all_files = [[], [], []]
+        # Alle Verzeichnisse anlegen falls nicht vorhanden
+        for d in set(TAB_DIRS):
+            os.makedirs(d, exist_ok=True)
+
+        # Seitenzähler + Dateiliste pro Tab (4 Tabs)
+        self._pages = [0, 0, 0, 0]
+        self._all_files = [[], [], [], []]
 
         # Toplevel
         self.win = tk.Toplevel(parent)
@@ -170,7 +178,7 @@ class SnapshotGallery:
         self._grids = []
         self._pagers = []  # (prev_btn, next_btn, page_lbl) pro Tab
 
-        for tab_name in ("Personen", "Enrollment", "Captures"):
+        for tab_name in TAB_NAMES:
             frame = tk.Frame(self._notebook, bg=BG_DARK)
             self._notebook.add(frame, text=tab_name)
             self._tab_frames.append(frame)
@@ -181,8 +189,8 @@ class SnapshotGallery:
         self.win.bind("<Button-4>", self._scroll_up)
         self.win.bind("<Button-5>", self._scroll_down)
 
-        # Initialer Load aller 3 Tabs im Background
-        for i in range(3):
+        # Initialer Load aller 4 Tabs im Background
+        for i in range(len(TAB_NAMES)):
             self._load_tab(i)
 
     # =========================================================================
@@ -190,10 +198,9 @@ class SnapshotGallery:
     # =========================================================================
 
     def _build_tab_ui(self):
-        """Header + Grid + Pager für alle 3 Tabs bauen."""
-        tab_dirs = [SNAPSHOTS_DIR, FACES_DIR, CAPTURES_DIR]
-        refresh_cbs = [lambda: self._refresh(0), lambda: self._refresh(1),
-                       lambda: self._refresh(2)]
+        """Header + Grid + Pager für alle 4 Tabs bauen."""
+        tab_dirs = TAB_DIRS
+        refresh_cbs = [lambda i=i: self._refresh(i) for i in range(len(TAB_NAMES))]
 
         for i, (frame, base_dir, cb) in enumerate(zip(self._tab_frames, tab_dirs, refresh_cbs)):
             # Header
@@ -233,8 +240,7 @@ class SnapshotGallery:
 
     def _load_tab(self, tab_idx, query=None):
         """Tab im Background laden."""
-        dirs = [SNAPSHOTS_DIR, FACES_DIR, CAPTURES_DIR]
-        base_dir = dirs[tab_idx]
+        base_dir = TAB_DIRS[tab_idx]
 
         def _bg():
             # Verzeichnis anlegen falls nicht vorhanden
@@ -282,10 +288,9 @@ class SnapshotGallery:
         grid.clear()
 
         total = len(files)
-        tab_names = ["Personen", "Enrollment", "Captures"]
-        # Tab-Titel aktualisieren
+        # Tab-Titel mit Bildanzahl aktualisieren
         try:
-            self._notebook.tab(tab_idx, text=f"{tab_names[tab_idx]} ({total})")
+            self._notebook.tab(tab_idx, text=f"{TAB_NAMES[tab_idx]} ({total})")
         except Exception:
             pass
 

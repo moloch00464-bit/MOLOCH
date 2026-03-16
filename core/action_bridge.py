@@ -406,6 +406,20 @@ class ActionBridge:
         """Letzte N Decisions fuer Debug/Panel."""
         return self._decision_log[-count:]
 
+    def force_detach(self):
+        """Manueller Detach vom aktuellen Track → zurueck zu SEARCHING."""
+        with self._lock:
+            self._context.face_confirmed = False
+            self._context.owner_detected = False
+        if self._state in (BridgeState.TRACKING, BridgeState.INTERACTION):
+            self._transition(
+                BridgeState.SEARCHING,
+                thought="Manueller Detach vom Track (GUI)",
+                intent="search",
+                action_topic="action.detach",
+                action_data={"reason": "manual_detach"},
+            )
+
 
 # ============================================================
 # SINGLETON

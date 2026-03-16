@@ -971,7 +971,7 @@ class CameraManager:
             logger.info(f"[CLOUD] Sync: nightVision={nv} led_level={self._cloud_state.get('led_level')}")
 
     def take_snapshot(self):
-        """Snapshot vom aktuellen Frame speichern."""
+        """Snapshot vom aktuellen Frame → media/snapshots/ (Galerie Captures-Tab)."""
         import cv2
         frame = None
         with self._annotated_lock:
@@ -984,12 +984,55 @@ class CameraManager:
         if frame is None:
             logger.warning("[SNAPSHOT] Kein Frame verfuegbar")
             return None
-        snap_dir = os.path.expanduser("~/moloch/media/captures")
+        snap_dir = os.path.expanduser("~/moloch/media/snapshots")
         os.makedirs(snap_dir, exist_ok=True)
         ts = time.strftime("%Y%m%d_%H%M%S")
-        path = os.path.join(snap_dir, f"moloch_{ts}.jpg")
+        path = os.path.join(snap_dir, f"snap_{ts}.jpg")
         cv2.imwrite(path, frame)
         logger.info(f"[SNAPSHOT] Gespeichert: {path}")
+        return path
+
+    def take_detach_snapshot(self):
+        """Frame beim Detach speichern → galerie/detach/."""
+        import cv2
+        frame = None
+        with self._annotated_lock:
+            if self._annotated_frame is not None:
+                frame = self._annotated_frame.copy()
+        if frame is None:
+            with self._frame_lock:
+                if self._latest_frame is not None:
+                    frame = self._latest_frame.copy()
+        if frame is None:
+            return None
+        detach_dir = os.path.expanduser("~/moloch/galerie/detach")
+        os.makedirs(detach_dir, exist_ok=True)
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        path = os.path.join(detach_dir, f"detach_{ts}.jpg")
+        cv2.imwrite(path, frame)
+        logger.info(f"[DETACH] Bild gespeichert: {path}")
+        return path
+
+    def take_teach_snapshot(self):
+        """Teach-Foto speichern → media/teach/ (Galerie Teach-Tab)."""
+        import cv2
+        frame = None
+        with self._annotated_lock:
+            if self._annotated_frame is not None:
+                frame = self._annotated_frame.copy()
+        if frame is None:
+            with self._frame_lock:
+                if self._latest_frame is not None:
+                    frame = self._latest_frame.copy()
+        if frame is None:
+            logger.warning("[TEACH] Kein Frame verfuegbar")
+            return None
+        teach_dir = os.path.expanduser("~/moloch/media/teach")
+        os.makedirs(teach_dir, exist_ok=True)
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        path = os.path.join(teach_dir, f"teach_{ts}.jpg")
+        cv2.imwrite(path, frame)
+        logger.info(f"[TEACH] Foto gespeichert: {path}")
         return path
 
     def stop_tracker(self):

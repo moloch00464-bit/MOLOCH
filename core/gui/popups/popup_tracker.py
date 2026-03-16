@@ -113,16 +113,24 @@ class TrackerPopup:
         self._vars = {}
         self._labels = {}
 
+        # Poll-Timer
+        self._poll_after_id = None
+
         # GUI-Sektionen
         self._build_deadzone_section()
         self._build_tracking_section()
         self._build_limits_section()
         self._build_search_section()
         self._build_home_section()
+        self._build_recognition_section()
+        self._build_detach_section()
         self._build_buttons()
 
         # Werte laden
         self._load_current_values()
+
+        # Status-Poll starten
+        self._start_poll()
 
         # Scroll-Region
         self._inner.update_idletasks()
@@ -249,6 +257,76 @@ class TrackerPopup:
             activebackground="#00bbdd",
             command=self._set_home_position,
         ).pack(side=tk.RIGHT, padx=5)
+
+    # =========================================================================
+    # Erkennen — Face Recognition Anzeige
+    # =========================================================================
+
+    def _build_recognition_section(self):
+        """Face Recognition Ergebnis leserlich anzeigen."""
+        section = tk.LabelFrame(
+            self._inner, text="Erkennen",
+            bg=BG_FRAME, fg=FG_LABEL, font=FONT_LABEL,
+        )
+        section.pack(fill=tk.X, padx=10, pady=5)
+
+        row = tk.Frame(section, bg=BG_FRAME)
+        row.pack(fill=tk.X, padx=8, pady=6)
+
+        self._lbl_recognition = tk.Label(
+            row, text="---",
+            bg=BG_FRAME, fg=FG_DIM, font=FONT_LABEL,
+            anchor=tk.W,
+        )
+        self._lbl_recognition.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+    @staticmethod
+    def _format_recognition(face_id: str, sim: float) -> tuple:
+        """Gibt (text, farbe) zurueck basierend auf ArcFace Similarity."""
+        name = face_id if face_id else "Markus"
+        pct = int(sim * 100)
+        if sim > 0.65:
+            return f"{name} ({pct}%)", ACCENT_GREEN
+        elif sim > 0.40:
+            return f"Ähnlich: {name} ({pct}%)", STATUS_YELLOW
+        else:
+            return "Unbekannt", FG_DIM
+
+    # =========================================================================
+    # Detach — Track loesen, zurueck zu SEARCHING
+    # =========================================================================
+
+    def _build_detach_section(self):
+        """Detach Button + Tracker-Status anzeigen."""
+        section = tk.LabelFrame(
+            self._inner, text="Track Control",
+            bg=BG_FRAME, fg=FG_LABEL, font=FONT_LABEL,
+        )
+        section.pack(fill=tk.X, padx=10, pady=5)
+
+        row = tk.Frame(section, bg=BG_FRAME)
+        row.pack(fill=tk.X, padx=8, pady=6)
+
+        self._lbl_detach_state = tk.Label(
+            row, text="---",
+            bg=BG_FRAME, fg=FG_DIM, font=FONT_LABEL,
+            width=12, anchor=tk.W,
+        )
+        self._lbl_detach_state.pack(side=tk.LEFT)
+
+        tk.Button(
+            row, text="DETACH",
+            bg=ACCENT_RED, fg=FG_WHITE, font=FONT_BUTTON,
+            activebackground="#cc0000",
+            command=self._do_detach,
+        ).pack(side=tk.RIGHT, padx=5)
+
+    def _do_detach(self):
+        """Detach ausfuehren: Track loesen → SEARCHING."""
+        self.service._write_command("detach_tracker")
+        self._lbl_detach_state.config(text="Detached", fg=STATUS_YELLOW)
+        self._lbl_feedback.config(text="Detached!", fg=STATUS_YELLOW)
+        self.win.after(2000, lambda: self._lbl_feedback.config(text="", fg=FG_DIM))
 
     # =========================================================================
     # Buttons
@@ -497,6 +575,51 @@ class TrackerPopup:
         self.win.after(2000, lambda: self._lbl_feedback.config(text="", fg=FG_DIM))
 
     # =========================================================================
+    # Status-Poll (Erkennen + Detach State)
+    # =========================================================================
+
+    def _start_poll(self):
+        """Status-Poll alle 2s starten."""
+        self._do_poll()
+
+    def _do_poll(self):
+        """Service-Status abfragen und Erkennen/Detach aktualisieren."""
+        try:
+            status = self.service.read_status()
+            if status and isinstance(status, dict):
+                # Erkennen aktualisieren
+                face_id = status.get("face_id", "")
+                face_sim = float(status.get("face_similarity", 0.0))
+                face_detected = status.get("face_detected", False)
+                if face_detected:
+                    text, color = self._format_recognition(face_id, face_sim)
+                else:
+                    text, color = "---", FG_DIM
+                if hasattr(self, '_lbl_recognition'):
+                    self._lbl_recognition.config(text=text, fg=color)
+
+                # Detach State aktualisieren
+                bridge = status.get("bridge", {})
+                bridge_state = bridge.get("state", "idle") if isinstance(bridge, dict) else "idle"
+                state_map = {
+                    "tracking": ("Tracking", ACCENT_GREEN),
+                    "interaction": ("Tracking", ACCENT_GREEN),
+                    "searching": ("Searching...", STATUS_YELLOW),
+                    "idle": ("Idle", FG_DIM),
+                    "manual_override": ("Manuell", STATUS_YELLOW),
+                }
+                state_text, state_color = state_map.get(bridge_state, (bridge_state, FG_DIM))
+                if hasattr(self, '_lbl_detach_state'):
+                    self._lbl_detach_state.config(text=state_text, fg=state_color)
+        except Exception:
+            pass
+
+        try:
+            self._poll_after_id = self.win.after(2000, self._do_poll)
+        except Exception:
+            pass
+
+    # =========================================================================
     # Schliessen
     # =========================================================================
 
@@ -508,6 +631,13 @@ class TrackerPopup:
             self._canvas.unbind_all("<Button-5>")
         except Exception:
             pass
+
+        if self._poll_after_id is not None:
+            try:
+                self.win.after_cancel(self._poll_after_id)
+            except Exception:
+                pass
+            self._poll_after_id = None
 
         if self._save_after_id is not None:
             self.win.after_cancel(self._save_after_id)
