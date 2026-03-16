@@ -85,12 +85,12 @@ def _filter_hallucinations(text: str, wav_path: str) -> str:
 
 
 def _load_api_key() -> Optional[str]:
-    """Anthropic API Key aus config laden."""
+    """DeepSeek API Key aus config laden (Primary). Fallback: Anthropic."""
     if API_KEYS_PATH.exists():
         try:
             with open(API_KEYS_PATH, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                return data.get("anthropic", {}).get("api_key")
+                return data.get("deepseek", {}).get("api_key")
         except Exception:
             pass
     return None
@@ -512,9 +512,11 @@ class VoicePipeline:
         # Whisper STT (MolochWhisper: NPU-only, bleibt permanent geladen)
         self._whisper = None
 
-        # Claude API
-        self._claude_client = None
-        self._claude_available = False
+        # DeepSeek API (Primary)
+        self._deepseek_key = None
+        self._deepseek_url = "https://api.deepseek.com/chat/completions"
+        self._deepseek_model = "deepseek-chat"  # DeepSeek-V3 (671B MoE)
+        self._claude_available = False  # Wiederverwendet fuer "API verfuegbar"
         self._conversation: List[Dict[str, str]] = []
         self._system_prompt = _build_system_prompt()
 
@@ -564,23 +566,22 @@ class VoicePipeline:
         self._spontaneous_running = False
 
         # Init
-        self._init_claude()
-        logger.info(f"[VOICE] Pipeline init: claude={self._claude_available}, "
+        self._init_deepseek()
+        logger.info(f"[VOICE] Pipeline init: deepseek={self._claude_available}, "
                     f"piper={self._piper_available}, voice={self._current_voice}")
 
-    def _init_claude(self):
-        """Claude API Client initialisieren."""
+    def _init_deepseek(self):
+        """DeepSeek API initialisieren."""
         try:
-            import anthropic
             api_key = _load_api_key()
             if api_key:
-                self._claude_client = anthropic.Anthropic(api_key=api_key)
-                self._claude_available = True
-                logger.info("[VOICE] Claude API bereit")
-        except ImportError:
-            logger.warning("[VOICE] anthropic nicht installiert")
+                self._deepseek_key = api_key
+                self._claude_available = True  # Flag: API verfuegbar
+                logger.info("[VOICE] DeepSeek API bereit (deepseek-chat / V3)")
+            else:
+                logger.warning("[VOICE] Kein DeepSeek API Key in config/api_keys.json")
         except Exception as e:
-            logger.error(f"[VOICE] Claude init fehlgeschlagen: {e}")
+            logger.error(f"[VOICE] DeepSeek init fehlgeschlagen: {e}")
 
     def _init_whisper(self):
         """MolochWhisper lazy-laden (NPU-only, bleibt permanent im Speicher)."""
@@ -1119,8 +1120,8 @@ class VoicePipeline:
         SDK retried 529 intern 2x. Wir machen KEINEN Extra-Retry mehr.
         Laeuft in separatem Thread (_api_and_respond), blockiert nicht die Pipeline.
         """
-        if not self._claude_available or not self._claude_client:
-            logger.warning("[VOICE] Claude API nicht verfuegbar")
+        if not self._claude_available or not self._deepseek_key:
+            logger.warning("[VOICE] DeepSeek API nicht verfuegbar")
             return None
 
         # Surrogates entfernen (Whisper/Bluetooth liefert manchmal kaputte Umlaute)
@@ -1175,17 +1176,26 @@ class VoicePipeline:
         except Exception as e:
             logger.debug(f"[VOICE] Personality-Zone nicht verfuegbar: {e}")
 
-        # API Call — SDK retried 529 intern 2x, wir machen KEINEN Extra-Retry
-        # Timeout 15s statt 30s: Fail fast, nicht ewig blockieren
+        # DeepSeek API Call — Timeout 15s, kein Retry
         try:
-            response = self._claude_client.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=512,
-                system=system,
-                messages=msgs,
+            import requests
+            api_msgs = [{"role": "system", "content": system}] + msgs
+            r = requests.post(
+                self._deepseek_url,
+                headers={
+                    "Authorization": f"Bearer {self._deepseek_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": self._deepseek_model,
+                    "messages": api_msgs,
+                    "max_tokens": 512,
+                    "temperature": 0.8,
+                },
                 timeout=15.0,
             )
-            text = response.content[0].text
+            r.raise_for_status()
+            text = r.json()["choices"][0]["message"]["content"].strip()
 
             try:
                 text = get_memory().extract_and_learn(text)
@@ -1202,7 +1212,7 @@ class VoicePipeline:
             return text
 
         except Exception as e:
-            logger.error(f"[VOICE] Claude API Fehler: {e}")
+            logger.error(f"[VOICE] DeepSeek API Fehler: {e}")
             with self._lock:
                 if self._conversation and self._conversation[-1].get("role") == "user":
                     self._conversation.pop()
@@ -1855,7 +1865,7 @@ class VoicePipeline:
             "current_voice": self._current_voice,
             "recording": self._recording,
             "speaking": self._speaking,
-            "claude_available": self._claude_available,
+            "deepseek_available": self._claude_available,
             "piper_available": self._piper_available,
             "voices": self.list_voices(),
             "messages": messages,
@@ -1949,13 +1959,13 @@ class VoicePipeline:
         if hour >= 22 or hour < 6:
             return
 
-        # Claude API fuer spontanen Kommentar nutzen
+        # DeepSeek API fuer spontanen Kommentar nutzen
         logger.info(f"[SPONTAN] Bedingungen erfuellt: spontaneous={spontaneous:.2f} tension={tension:.2f}")
         self._generate_spontaneous_comment(state)
 
     def _generate_spontaneous_comment(self, integrator_state: dict):
-        """Spontanen Kommentar via Claude API generieren und sprechen."""
-        if not self._claude_available or not self._claude_client:
+        """Spontanen Kommentar via DeepSeek API generieren und sprechen."""
+        if not self._claude_available or not self._deepseek_key:
             return
 
         self._last_spontaneous = time.time()
@@ -1999,13 +2009,26 @@ Sei natuerlich. Kein erzwungener Humor. Situationsbezogen."""
             pass
 
         try:
-            response = self._claude_client.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=80,
-                system=system,
-                messages=[{"role": "user", "content": "Spontaner Kommentar jetzt."}],
+            import requests
+            r = requests.post(
+                self._deepseek_url,
+                headers={
+                    "Authorization": f"Bearer {self._deepseek_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": self._deepseek_model,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": "Spontaner Kommentar jetzt."},
+                    ],
+                    "max_tokens": 80,
+                    "temperature": 0.9,
+                },
+                timeout=10.0,
             )
-            text = response.content[0].text.strip()
+            r.raise_for_status()
+            text = r.json()["choices"][0]["message"]["content"].strip()
             if text:
                 logger.info(f"[SPONTAN] Kommentar: {text}")
                 self._emit_message("MOLOCH", f"[spontan] {text}")
@@ -2018,7 +2041,7 @@ Sei natuerlich. Kein erzwungener Humor. Situationsbezogen."""
                 if self._voice_enabled:
                     self._speak(text)
         except Exception as e:
-            logger.error(f"[SPONTAN] Claude API Fehler: {e}")
+            logger.error(f"[SPONTAN] DeepSeek API Fehler: {e}")
 
     def test_voice(self, text: str = "Moloch ist online. Sprach-Pipeline funktioniert."):
         """Voice Test — spricht Text direkt aus."""

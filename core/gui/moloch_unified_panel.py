@@ -1675,35 +1675,20 @@ class MolochUnifiedPanel:
     # =========================================================================
 
     def _load_chat_deps(self):
-        """Load Claude API, Memory, TTS in background."""
-        # Claude API
+        """Load DeepSeek API, Memory, TTS in background."""
+        # DeepSeek API
         try:
-            import anthropic
-            api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-            if not api_key:
-                # Fallback 1: api_keys.json
-                try:
-                    keys_file = os.path.expanduser("~/moloch/config/api_keys.json")
-                    if os.path.exists(keys_file):
-                        with open(keys_file) as f:
-                            keys = json.load(f)
-                        api_key = keys.get("anthropic", {}).get("api_key", "")
-                except Exception:
-                    pass
-            if not api_key:
-                # Fallback 2: api_key.txt
-                try:
-                    key_file = os.path.expanduser("~/moloch/config/api_key.txt")
-                    if os.path.exists(key_file):
-                        with open(key_file) as f:
-                            api_key = f.read().strip()
-                except Exception:
-                    pass
-            if api_key:
-                self.claude_client = anthropic.Anthropic(api_key=api_key)
-                logger.info("[CHAT] Claude API ready")
+            keys_file = os.path.expanduser("~/moloch/config/api_keys.json")
+            if os.path.exists(keys_file):
+                with open(keys_file) as f:
+                    keys = json.load(f)
+                api_key = keys.get("deepseek", {}).get("api_key", "")
+                if api_key:
+                    self._deepseek_key = api_key
+                    self.claude_client = True  # Flag: API verfuegbar
+                    logger.info("[CHAT] DeepSeek API ready (deepseek-chat / V3)")
         except Exception as e:
-            logger.error(f"[CHAT] Claude init failed: {e}")
+            logger.error(f"[CHAT] DeepSeek init failed: {e}")
 
         # System prompt
         try:
@@ -2431,14 +2416,24 @@ class MolochUnifiedPanel:
                 "role": "user", "content": message_content
             })
 
-            response = self.claude_client.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=min(500, max(50, len(user_text) * 3)),
-                system=self.system_prompt,
-                messages=self.conversation_history
+            import requests
+            api_msgs = [{"role": "system", "content": self.system_prompt}] + self.conversation_history
+            r = requests.post(
+                "https://api.deepseek.com/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self._deepseek_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "deepseek-chat",
+                    "messages": api_msgs,
+                    "max_tokens": min(500, max(50, len(user_text) * 3)),
+                    "temperature": 0.8,
+                },
+                timeout=15.0,
             )
-
-            text = response.content[0].text
+            r.raise_for_status()
+            text = r.json()["choices"][0]["message"]["content"].strip()
 
             # Extract [REMEMBER:] tags
             display_text = text
@@ -2457,7 +2452,7 @@ class MolochUnifiedPanel:
             return display_text
 
         except Exception as e:
-            logger.error(f"Claude error: {e}")
+            logger.error(f"DeepSeek error: {e}")
             return f"Fehler: {e}"
 
     def _append_chat(self, text, tag=None):

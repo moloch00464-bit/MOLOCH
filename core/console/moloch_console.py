@@ -37,12 +37,10 @@ from core.timeline import get_timeline, describe_last_offline_duration, get_offl
 # Langzeitgedaechtnis
 from core.longterm_memory import get_memory
 
-# Claude API
-try:
-    import anthropic
-    CLAUDE_AVAILABLE = True
-except ImportError:
-    CLAUDE_AVAILABLE = False
+# DeepSeek API (Primary)
+import requests
+DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
+DEEPSEEK_MODEL = "deepseek-chat"  # DeepSeek-V3 (671B MoE)
 
 # Setup logging with UTF-8
 LOG_DIR = Path.home() / "moloch" / "logs"
@@ -69,13 +67,13 @@ CONSOLE_CONFIG = {
 
 
 def load_api_key() -> Optional[str]:
-    """Load Anthropic API key from config."""
+    """DeepSeek API Key aus config laden."""
     config_path = Path.home() / "moloch" / "config" / "api_keys.json"
     if config_path.exists():
         try:
             with open(config_path, 'r', encoding='utf-8') as f:
                 config = json.load(f)
-                return config.get("anthropic", {}).get("api_key")
+                return config.get("deepseek", {}).get("api_key")
         except (json.JSONDecodeError, IOError):
             pass
     return None
@@ -610,18 +608,14 @@ class MolochConsole:
         # Build system prompt with brain context
         self.system_prompt = build_system_prompt()
 
-        # Initialize Claude client
-        self.claude_client = None
-        self.claude_available = False
-        if CLAUDE_AVAILABLE:
-            api_key = load_api_key()
-            if api_key:
-                try:
-                    self.claude_client = anthropic.Anthropic(api_key=api_key)
-                    self.claude_available = True
-                    logger.info("Claude API initialized")
-                except Exception as e:
-                    logger.error(f"Failed to initialize Claude: {e}")
+        # Initialize DeepSeek client
+        self._deepseek_key = None
+        self.claude_available = False  # Flag: API verfuegbar
+        api_key = load_api_key()
+        if api_key:
+            self._deepseek_key = api_key
+            self.claude_available = True
+            logger.info("DeepSeek API initialized (deepseek-chat / V3)")
 
         # Initialize TTS
         self.tts = get_tts()
@@ -1077,12 +1071,12 @@ class MolochConsole:
             self.command_handlers[cmd](args)
             return
 
-        # Process via Claude API
-        if self.claude_available and self.claude_client:
+        # Process via DeepSeek API
+        if self.claude_available and self._deepseek_key:
             self._chat_with_claude(user_input)
         else:
             self._print_line("")
-            self._print_line("[Oida!] Claude API nicht verfuegbar.")
+            self._print_line("[Oida!] DeepSeek API nicht verfuegbar.")
             self._print_line("Check: ~/moloch/config/api_keys.json")
             self._print_line("")
 
@@ -1313,15 +1307,23 @@ class MolochConsole:
             except Exception:
                 pass
 
-            response = self.claude_client.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=1024,
-                system=system,
-                messages=self.conversation_history
+            api_msgs = [{"role": "system", "content": system}] + self.conversation_history
+            r = requests.post(
+                DEEPSEEK_URL,
+                headers={
+                    "Authorization": f"Bearer {self._deepseek_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": DEEPSEEK_MODEL,
+                    "messages": api_msgs,
+                    "max_tokens": 1024,
+                    "temperature": 0.8,
+                },
+                timeout=15.0,
             )
-
-            # Extract response text
-            assistant_message = response.content[0].text
+            r.raise_for_status()
+            assistant_message = r.json()["choices"][0]["message"]["content"].strip()
 
             # REMEMBER-Tags extrahieren und lernen (persistiert in beide Systeme)
             try:
@@ -1363,7 +1365,7 @@ class MolochConsole:
             self.status = "Active"
 
         except Exception as e:
-            logger.error(f"Claude API error: {e}")
+            logger.error(f"DeepSeek API error: {e}")
             self._print_line(f"[Fehler] {e}")
             self._print_line("")
             self.status = "Error"
@@ -1375,7 +1377,7 @@ class MolochConsole:
 
         self._print_line("M.O.L.O.C.H. ist wach!")
         if self.claude_available:
-            self._print_line("Claude API verbunden. Brain-Kontext geladen!")
+            self._print_line("DeepSeek API verbunden. Brain-Kontext geladen!")
             self._print_line("Ich erinnere mich an dich, Markus!")
         else:
             self._print_line("[Warnung] Claude API nicht verfuegbar.")
