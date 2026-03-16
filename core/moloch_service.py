@@ -1393,6 +1393,10 @@ class MolochService:
                     try:
                         self._inference.start()
                         logger.info("[START] TAPPAS Pipeline gestartet")
+                        # Teach-Modus: Scheduler nochmal erzwingen NACH Pipeline-Start
+                        if self._teach_mode_enabled:
+                            self._inference.force_all_active(True)
+                            logger.info("[START] Teach-Modus AN → SCRFD/ArcFace erzwungen")
                         break
                     except Exception as e:
                         logger.error(f"[START] TAPPAS Pipeline Versuch {attempt}/{max_retries} fehlgeschlagen: {e}")

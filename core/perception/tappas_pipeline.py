@@ -225,17 +225,14 @@ class TappasPipeline:
         self._scrfd_valve = self._pipeline.get_by_name("scrfd_valve")
         self._scrfd_selector = self._pipeline.get_by_name("scrfd_sel")
         if self._scrfd_valve and self._scrfd_selector:
-            # Initial-State VOR PLAYING setzen: Valve zu, Bypass aktiv
-            # (input-selector default-active-pad waere sink_0=SCRFD, aber Valve ist zu → kein Frame)
+            # Initial-State VOR PLAYING: Valve zu, Bypass aktiv (sicherer Startzustand)
             self._scrfd_valve.set_property("drop", True)
             sink1 = self._scrfd_selector.get_static_pad("sink_1")
             if sink1:
                 self._scrfd_selector.set_property("active-pad", sink1)
-                logger.info("[SCRFD-GATE] Initial: Valve=drop, Selector=sink_1(bypass) — echtes NPU-Gating aktiv")
-            else:
-                # Pad noch nicht verhandelt → GLib-Timeout als Fallback
-                logger.info("[SCRFD-GATE] sink_1 noch nicht bereit, Fallback via GLib-Timeout")
-                GLib.timeout_add(200, self._init_scrfd_gate)
+            logger.info("[SCRFD-GATE] Initial: Valve=drop (sicherer Start)")
+            # NACH PLAYING (200ms): Scheduler-Modus anwenden (z.B. Teach → Valve auf)
+            GLib.timeout_add(200, self._init_scrfd_gate)
         else:
             logger.warning("[SCRFD-GATE] Valve oder Selector NICHT gefunden — kein Gating!")
 
@@ -380,13 +377,17 @@ class TappasPipeline:
             logger.info("[NPU-SCHED] Force ALL_ACTIVE aufgehoben")
 
     def _init_scrfd_gate(self) -> bool:
-        """GLib-Timeout-Callback: Initalen Gate-State nach Pipeline-Start setzen.
+        """GLib-Timeout-Callback: Gate-State nach Pipeline-Start setzen.
 
         Wird 300ms nach set_state(PLAYING) aufgerufen, damit Pads verhandelt sind.
-        Startet in YOLO_ONLY → Valve zu, Selector auf Bypass (sink_1).
+        Respektiert den aktuellen Scheduler-Modus (z.B. force_all fuer Teach).
         """
-        self._apply_scrfd_gate(enabled=False)
-        logger.info("[SCRFD-GATE] Initial-State gesetzt: YOLO_ONLY (Valve zu, Bypass aktiv)")
+        with self._sched_lock:
+            current_mode = self._sched_mode
+        scrfd_needed = (current_mode in (SCHED_YOLO_SCRFD, SCHED_ALL_ACTIVE))
+        self._apply_scrfd_gate(enabled=scrfd_needed)
+        logger.info(f"[SCRFD-GATE] Initial-State: {current_mode} "
+                    f"(Valve {'auf' if scrfd_needed else 'zu'})")
         return False  # Nicht wiederholen
 
     def _apply_scrfd_gate(self, enabled: bool):
