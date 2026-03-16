@@ -551,9 +551,13 @@ class MolochService:
         cfg.pan_limit_max = getattr(self, '_ptz_pan_limit_max', cfg.pan_limit_max)
         cfg.tilt_limit_min = getattr(self, '_ptz_tilt_limit_min', cfg.tilt_limit_min)
         cfg.tilt_limit_max = getattr(self, '_ptz_tilt_limit_max', cfg.tilt_limit_max)
+        # Home-Position fuer Park-Verhalten (statt hardcoded 0,0)
+        cfg.home_pan = getattr(self, '_ptz_home_pan', 0.0)
+        cfg.home_tilt = getattr(self, '_ptz_home_tilt', 0.0)
         # Basis-Werte fuer dynamische Anpassung aktualisieren
         tracker._base_tracking_speed = cfg.tracking_speed
         logger.info(f"[PTZ] Tracker updated: speed={cfg.tracking_speed:.2f} "
+                    f"home=({cfg.home_pan:+.1f},{cfg.home_tilt:+.1f}) "
                     f"limits=[{cfg.pan_limit_min:.1f},{cfg.pan_limit_max:.1f}]")
 
     # =========================================================================

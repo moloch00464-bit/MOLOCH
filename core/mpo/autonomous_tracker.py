@@ -1022,24 +1022,38 @@ class AutonomousTracker:
             self._do_coast()
             return
 
-        # Phase 2: 5-30s -> langsam Home fahren
-        if time_since_detection <= self.config.home_return_timeout:
-            if self.state != TrackerState.SEARCHING:
-                # Einmalig Home anfahren
-                if not getattr(self, '_returning_home', False):
-                    self._returning_home = True
-                    logger.info(f"[CYCLE] Phase 2: Home fahren ({time_since_detection:.1f}s)")
-                    if self.camera and self.camera.is_connected:
-                        self.camera.move_absolute(0.0, 0.0, speed=0.15)
-            if debug_log:
-                logger.info(f"[CYCLE] Phase 2: Warte auf Home ({time_since_detection:.1f}s)")
-            return
+        # Phase 2: 5s+ -> Home fahren und dort warten (kein Patrol)
+        # Gespeicherte Home-Position nutzen (Panel-Setting, nicht hardcoded)
+        home_pan = getattr(self.config, 'home_pan', 0.0)
+        home_tilt = getattr(self.config, 'home_tilt', 0.0)
 
-        # Phase 3: >30s -> Idle-Suche (langsames Patrol)
-        self._returning_home = False
-        if debug_log:
-            logger.info(f"[CYCLE] Phase 3: SEARCH ({time_since_detection:.1f}s)")
-        self._do_search()
+        if not getattr(self, '_returning_home', False):
+            self._returning_home = True
+            logger.info(f"[CYCLE] Phase 2: Home fahren ({home_pan:+.1f},{home_tilt:+.1f}) "
+                       f"nach {time_since_detection:.1f}s ohne Detection")
+            if self.camera and self.camera.is_connected:
+                self.camera.move_absolute(home_pan, home_tilt, speed=0.15)
+
+        # Phase 3: >30s -> PARK auf Home (NPU IDLE, kein Patrol)
+        if time_since_detection > self.config.home_return_timeout:
+            if self.state != TrackerState.PARKED:
+                logger.info(f"[PARK] Geparkt auf Home ({home_pan:+.1f},{home_tilt:+.1f}) "
+                           f"— warte auf Besucher")
+                self._park_time = time.time()
+                self._set_state(TrackerState.PARKED)
+                if self.on_park_change:
+                    try:
+                        self.on_park_change(True)
+                    except Exception as e:
+                        logger.error(f"[PARK] on_park_change(True) Fehler: {e}")
+                if self._core_integrator:
+                    try:
+                        self._core_integrator.update_input("tracker", "user_proximity", 0.0)
+                        self._core_integrator.update_input("tracker", "time_since_interaction", 1.0)
+                    except Exception:
+                        pass
+        elif debug_log:
+            logger.info(f"[CYCLE] Phase 2: Warte auf Home ({time_since_detection:.1f}s)")
 
     # =========================================================================
     # Tracking (AbsoluteMove-based)
