@@ -330,7 +330,7 @@ class MolochService:
 
         # Teach-Qualitaet: Lieber ein mittleres Bild als gar keins
         MAX_RETRIES = 3
-        MIN_CONF = 0.65       # SCRFD Confidence (war 0.80)
+        MIN_CONF = 0.50       # SCRFD Confidence (war 0.80, dann 0.65 — SCRFD@50% ist valide)
         MIN_FACE_PX = 60      # Gesicht Mindestgroesse in Pixel (war 80)
         MIN_BRIGHTNESS = 25
         MAX_BRIGHTNESS = 230
