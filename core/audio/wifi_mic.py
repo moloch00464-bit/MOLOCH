@@ -9,14 +9,14 @@ Features:
 - Dual-Stream: Port 12345 (16kHz, 324B/Paket) + Port 12346 (48kHz, 964B/Paket)
 - 4-Byte Sequenznummer-Header pro Paket (Paketverlust-Erkennung)
 - Jitter-Buffer: 100ms, sortiert nach Sequenznummer, Stille bei Luecken
-- Ringpuffer 2s je Stream
+- Grosser UDP-Recv-Buffer (1MB) gegen Kernel-Drops
+- Schneller Chunk-basierter Ringpuffer (bytearray, nicht deque)
 - get_audio_chunk(rate) → bytes fuer Whisper/Biometrie
 - Health-Monitor: connected=True wenn Pakete innerhalb 2s empfangen
-- Event audio.mic_source_changed bei Verbindungsaufbau
 - Fallback auf USB-Soundkarte nach 10s ohne UDP-Daten
 
 Author: M.O.L.O.C.H. System
-v2.1 — Sequenznummern + Jitter-Buffer gegen Wortverschlucker
+v3.0 — Komplett optimiert: schneller Buffer + grosser UDP-Socket + chunk I/O
 """
 
 import socket
@@ -24,7 +24,7 @@ import struct
 import threading
 import time
 import logging
-from collections import deque
+import math
 from typing import Optional
 
 logger = logging.getLogger("WiFiMic")
@@ -44,29 +44,34 @@ class WiFiMic:
     JITTER_BUF_SIZE = 10  # Max Pakete im Jitter-Buffer
     JITTER_TIMEOUT_MS = 100  # Max Wartezeit bevor Ausspielen
 
+    # UDP Socket Empfangspuffer: 1MB (default 208KB reicht nicht bei CPU-Last)
+    UDP_RECV_BUF = 1048576
+
+    # Ringpuffer Groesse (Bytes)
+    RING_16K_SIZE = 128000   # 4 Sekunden bei 16kHz Mono 16-bit (32KB/s)
+    RING_48K_SIZE = 768000   # 4 Sekunden bei 48kHz Stereo 16-bit (192KB/s)
+
     # Timeout: Kein Paket seit X Sekunden → disconnected
     HEALTH_TIMEOUT = 2.0
 
     def __init__(self, esp_ip: str = "10.42.0.2",
                  port_16k: int = 12345, port_48k: int = 12346,
                  event_bus=None):
-        """
-        Args:
-            esp_ip: IP-Adresse des ESP32-S3 (fuer Status-Anzeige)
-            port_16k: UDP-Port fuer 16kHz Stream (bind lokal)
-            port_48k: UDP-Port fuer 48kHz Stream (bind lokal)
-            event_bus: Optionaler Event-Bus fuer mic_source_changed
-        """
         self.esp_ip = esp_ip
         self.port_16k = port_16k
         self.port_48k = port_48k
         self.event_bus = event_bus
 
-        # Ringpuffer: 2 Sekunden Audio
-        # 16kHz Mono 16-bit = 32.000 Bytes/s → 64.000 Bytes fuer 2s
-        # 48kHz Stereo 16-bit = 192.000 Bytes/s → 384.000 Bytes fuer 2s
-        self._buf_16k = deque(maxlen=64000)
-        self._buf_48k = deque(maxlen=384000)
+        # Schnelle Ringpuffer: bytearray + read/write Position
+        self._ring_16k = bytearray(self.RING_16K_SIZE)
+        self._ring_16k_wr = 0   # Schreibposition
+        self._ring_16k_rd = 0   # Leseposition
+        self._ring_16k_avail = 0  # Verfuegbare Bytes
+
+        self._ring_48k = bytearray(self.RING_48K_SIZE)
+        self._ring_48k_wr = 0
+        self._ring_48k_rd = 0
+        self._ring_48k_avail = 0
 
         # Sockets
         self._sock_16k: Optional[socket.socket] = None
@@ -83,20 +88,20 @@ class WiFiMic:
         # Paket-Statistiken
         self._packets_recv_16k = 0
         self._packets_recv_48k = 0
-        self._recv_start_16k = 0.0  # Zeitpunkt erster Empfang
+        self._recv_start_16k = 0.0
 
         # Sequenznummer-Tracking (Paketverlust-Erkennung)
-        self._last_seq_16k = -1     # Letzte empfangene Sequenznummer
+        self._last_seq_16k = -1
         self._last_seq_48k = -1
-        self._packets_lost_16k = 0  # Zaehler verlorene Pakete
+        self._packets_lost_16k = 0
         self._packets_lost_48k = 0
-        self._packets_total_16k = 0  # Zaehler gesamte Pakete (fuer Verlustrate)
+        self._packets_total_16k = 0
         self._packets_total_48k = 0
-        self._packets_ooo_16k = 0   # Out-of-Order Pakete
+        self._packets_ooo_16k = 0
 
         # Jitter-Buffer: dict[seq_num] = (audio_data, recv_timestamp)
         self._jitter_buf_16k: dict = {}
-        self._jitter_next_seq_16k = -1  # Naechste erwartete Sequenznummer
+        self._jitter_next_seq_16k = -1
         self._jitter_lock_16k = threading.Lock()
 
         # Software Gain (Multiplikator fuer WiFi-Audio, 0.0 - 3.0)
@@ -105,7 +110,7 @@ class WiFiMic:
         # Quellen-Erzwingung: "auto" (Default), "wifi", "usb"
         self._force_source = "auto"
 
-        # Locks
+        # Locks (ein Lock pro Stream, chunk-basiert = kurze Lock-Zeiten)
         self._lock_16k = threading.Lock()
         self._lock_48k = threading.Lock()
 
@@ -124,7 +129,6 @@ class WiFiMic:
             return
         self._running = True
 
-        # UDP-Sockets erstellen und binden
         self._sock_16k = self._create_udp_socket(self.port_16k)
         self._sock_48k = self._create_udp_socket(self.port_48k)
 
@@ -142,7 +146,9 @@ class WiFiMic:
         self._thread_48k.start()
         self._thread_health.start()
 
-        logger.info(f"WiFiMic gestartet, UDP Ports {self.port_16k}/{self.port_48k}")
+        logger.info(f"WiFiMic v3.0 gestartet, UDP {self.port_16k}/{self.port_48k} "
+                    f"(RecvBuf={self.UDP_RECV_BUF // 1024}KB, "
+                    f"Jitter={self.JITTER_TIMEOUT_MS}ms)")
 
     def stop(self):
         """Stoppt alle Threads und schliesst Sockets."""
@@ -151,66 +157,23 @@ class WiFiMic:
         logger.info("WiFiMic gestoppt")
 
     def get_audio_chunk(self, rate: int = 16000, duration_ms: int = 100) -> bytes:
-        """
-        Gibt Audio-Chunk zurueck.
-
-        Args:
-            rate: 16000 oder 48000
-            duration_ms: Laenge in Millisekunden
-
-        Returns:
-            bytes: PCM 16-bit Audio (Mono bei 16k, Stereo bei 48k)
-        """
+        """Gibt Audio-Chunk zurueck — schnelles memoryview-basiertes I/O."""
         if rate == 16000:
-            # 16kHz Mono 16-bit: 32 Bytes pro ms
-            num_bytes = (rate * 2 * duration_ms) // 1000
-            buf = self._buf_16k
-            lock = self._lock_16k
+            num_bytes = (rate * 2 * duration_ms) // 1000  # 32 Bytes/ms
+            return self._ring_read_16k(num_bytes)
         elif rate == 48000:
-            # 48kHz Stereo 16-bit: 192 Bytes pro ms
-            num_bytes = (rate * 2 * 2 * duration_ms) // 1000
-            buf = self._buf_48k
-            lock = self._lock_48k
+            num_bytes = (rate * 2 * 2 * duration_ms) // 1000  # 192 Bytes/ms
+            return self._ring_read_48k(num_bytes)
         else:
-            logger.error(f"Ungueltge Sample-Rate: {rate}")
             return b''
-
-        with lock:
-            available = len(buf)
-            if available < num_bytes:
-                # Nicht genug Daten, gib was da ist (oder leer)
-                chunk = bytes(buf)
-                buf.clear()
-                return chunk
-
-            # Aelteste Daten aus dem Ringpuffer holen
-            chunk = bytes(buf.popleft() for _ in range(num_bytes))
-
-            # Software Gain anwenden (nur wenn != 1.0)
-            if self._software_gain != 1.0 and len(chunk) >= 2:
-                import struct as _struct
-                n = len(chunk) // 2
-                samples = _struct.unpack(f"<{n}h", chunk[:n * 2])
-                gained = _struct.pack(f"<{n}h", *(
-                    max(-32768, min(32767, int(s * self._software_gain)))
-                    for s in samples
-                ))
-                return gained
-
-            return chunk
 
     @property
     def connected(self) -> bool:
-        """True wenn 16kHz Stream verbunden UND nicht auf USB erzwungen.
-
-        force_source='wifi' → immer True (WiFi erzwungen, health-check ignoriert).
-        force_source='usb'  → immer False (USB erzwungen).
-        force_source='auto' → basiert auf health-check (_connected_16k).
-        """
+        """True wenn 16kHz Stream verbunden."""
         if self._force_source == "usb":
             return False
         if self._force_source == "wifi":
-            return True  # WiFi erzwungen → immer connected
+            return True
         return self._connected_16k
 
     @property
@@ -220,7 +183,6 @@ class WiFiMic:
 
     def get_status(self) -> dict:
         """Status-Dict fuer IPC/Panel."""
-        # Verlustrate aus Sequenznummer-Tracking (exakt, nicht geschaetzt)
         total = self._packets_total_16k
         lost = self._packets_lost_16k
         loss_pct = (lost / total * 100) if total > 10 else 0.0
@@ -230,8 +192,8 @@ class WiFiMic:
             "connected_16k": self._connected_16k,
             "connected_48k": self._connected_48k,
             "esp_ip": self.esp_ip,
-            "buf_16k_bytes": len(self._buf_16k),
-            "buf_48k_bytes": len(self._buf_48k),
+            "buf_16k_bytes": self._ring_16k_avail,
+            "buf_48k_bytes": self._ring_48k_avail,
             "jitter_buf_16k": len(self._jitter_buf_16k),
             "packets_recv_16k": self._packets_recv_16k,
             "packets_recv_48k": self._packets_recv_48k,
@@ -244,74 +206,172 @@ class WiFiMic:
         }
 
     def peek_rms(self, num_samples: int = 160) -> float:
-        """RMS-Pegel aus den neuesten Samples OHNE Buffer zu leeren.
-
-        Args:
-            num_samples: Anzahl 16-bit Samples (160 = 10ms bei 16kHz)
-
-        Returns:
-            RMS in dB (0 = Vollaussteuerung, -80 = Stille)
-        """
-        import math
+        """RMS-Pegel OHNE Buffer zu leeren (160 Samples = 10ms bei 16kHz)."""
         with self._lock_16k:
-            buf_len = len(self._buf_16k)
-            if buf_len < 4:
+            avail = self._ring_16k_avail
+            if avail < 4:
                 return -80.0
-            # Letzte N Bytes lesen (2 Bytes pro Sample)
-            num_bytes = min(num_samples * 2, buf_len)
-            # Aus deque hinten lesen ohne zu entfernen
-            start = buf_len - num_bytes
-            raw = bytes(self._buf_16k[i] for i in range(start, buf_len))
+            num_bytes = min(num_samples * 2, avail)
+            # Letzte N Bytes lesen (Ring-Ende) ohne zu konsumieren
+            ring = self._ring_16k
+            size = self.RING_16K_SIZE
+            end = self._ring_16k_wr
+            start = (end - num_bytes) % size
+            if start < end:
+                raw = bytes(ring[start:end])
+            else:
+                raw = bytes(ring[start:]) + bytes(ring[:end])
 
-        import struct as _struct
         n = len(raw) // 2
         if n < 2:
             return -80.0
-        samples = _struct.unpack(f"<{n}h", raw[:n * 2])
+        samples = struct.unpack(f"<{n}h", raw[:n * 2])
         rms = math.sqrt(sum(s * s for s in samples) / n)
         return 20 * math.log10(max(rms, 1) / 32768.0)
 
     @property
     def software_gain(self) -> float:
-        """Aktueller Software-Gain Multiplikator."""
         return self._software_gain
 
     @software_gain.setter
     def software_gain(self, value: float):
-        """Software-Gain setzen (0.0 - 3.0)."""
         self._software_gain = max(0.0, min(3.0, float(value)))
 
     def set_force_source(self, mode: str):
-        """Audio-Quelle erzwingen: 'auto', 'wifi', oder 'usb'.
-
-        'usb' macht connected=False → VoicePipeline nutzt arecord Fallback.
-        """
+        """Audio-Quelle erzwingen: 'auto', 'wifi', oder 'usb'."""
         if mode in ("auto", "wifi", "usb"):
             self._force_source = mode
             logger.info(f"Audio-Quelle erzwungen: {mode}")
 
     # =========================================================================
-    # Interne Methoden
+    # Ringpuffer — schnelles chunk-basiertes I/O (kein Byte-fuer-Byte)
+    # =========================================================================
+
+    def _ring_write_16k(self, data: bytes):
+        """Schreibt Audio-Daten in den 16kHz Ringpuffer (chunk-basiert)."""
+        n = len(data)
+        if n == 0:
+            return
+        size = self.RING_16K_SIZE
+
+        with self._lock_16k:
+            wr = self._ring_16k_wr
+            # Pruefen ob Daten in einem Stueck passen
+            end = wr + n
+            if end <= size:
+                self._ring_16k[wr:end] = data
+            else:
+                # Wrap: zwei Teile schreiben
+                first = size - wr
+                self._ring_16k[wr:size] = data[:first]
+                self._ring_16k[0:n - first] = data[first:]
+            self._ring_16k_wr = end % size
+            self._ring_16k_avail = min(self._ring_16k_avail + n, size)
+
+    def _ring_read_16k(self, num_bytes: int) -> bytes:
+        """Liest Audio-Daten aus dem 16kHz Ringpuffer."""
+        with self._lock_16k:
+            avail = self._ring_16k_avail
+            if avail == 0:
+                return b''
+            n = min(num_bytes, avail)
+            size = self.RING_16K_SIZE
+            rd = self._ring_16k_rd
+            end = rd + n
+            if end <= size:
+                chunk = bytes(self._ring_16k[rd:end])
+            else:
+                first = size - rd
+                chunk = bytes(self._ring_16k[rd:size]) + bytes(self._ring_16k[0:n - first])
+            self._ring_16k_rd = end % size
+            self._ring_16k_avail -= n
+
+        # Software Gain (ausserhalb Lock)
+        if self._software_gain != 1.0 and len(chunk) >= 2:
+            ns = len(chunk) // 2
+            samples = struct.unpack(f"<{ns}h", chunk[:ns * 2])
+            g = self._software_gain
+            chunk = struct.pack(f"<{ns}h", *(
+                max(-32768, min(32767, int(s * g))) for s in samples
+            ))
+        return chunk
+
+    def _ring_write_48k(self, data: bytes):
+        """Schreibt Audio-Daten in den 48kHz Ringpuffer."""
+        n = len(data)
+        if n == 0:
+            return
+        size = self.RING_48K_SIZE
+
+        with self._lock_48k:
+            wr = self._ring_48k_wr
+            end = wr + n
+            if end <= size:
+                self._ring_48k[wr:end] = data
+            else:
+                first = size - wr
+                self._ring_48k[wr:size] = data[:first]
+                self._ring_48k[0:n - first] = data[first:]
+            self._ring_48k_wr = end % size
+            self._ring_48k_avail = min(self._ring_48k_avail + n, size)
+
+    def _ring_read_48k(self, num_bytes: int) -> bytes:
+        """Liest Audio-Daten aus dem 48kHz Ringpuffer."""
+        with self._lock_48k:
+            avail = self._ring_48k_avail
+            if avail == 0:
+                return b''
+            n = min(num_bytes, avail)
+            size = self.RING_48K_SIZE
+            rd = self._ring_48k_rd
+            end = rd + n
+            if end <= size:
+                chunk = bytes(self._ring_48k[rd:end])
+            else:
+                first = size - rd
+                chunk = bytes(self._ring_48k[rd:size]) + bytes(self._ring_48k[0:n - first])
+            self._ring_48k_rd = end % size
+            self._ring_48k_avail -= n
+        return chunk
+
+    def _ring_clear_16k(self):
+        """16kHz Ringpuffer leeren."""
+        with self._lock_16k:
+            self._ring_16k_rd = 0
+            self._ring_16k_wr = 0
+            self._ring_16k_avail = 0
+
+    # =========================================================================
+    # UDP Empfang + Jitter-Buffer
     # =========================================================================
 
     def _create_udp_socket(self, port: int) -> socket.socket:
-        """Erstellt und bindet einen UDP-Socket."""
+        """Erstellt UDP-Socket mit grossem Empfangspuffer."""
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        # Grosser Kernel-Puffer: 1MB statt default 208KB
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, self.UDP_RECV_BUF)
+            actual = sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
+            logger.info(f"UDP Port {port}: RecvBuf angefordert={self.UDP_RECV_BUF // 1024}KB "
+                        f"tatsaechlich={actual // 1024}KB")
+        except Exception as e:
+            logger.warning(f"UDP RecvBuf setzen fehlgeschlagen: {e}")
         sock.settimeout(1.0)
         sock.bind(("0.0.0.0", port))
-        logger.info(f"UDP-Socket gebunden auf Port {port}")
         return sock
 
     def _recv_loop(self, rate: int):
         """Empfaengt Audio-Daten per UDP mit Sequenznummer-Header + Jitter-Buffer."""
         sock = self._sock_16k if rate == 16000 else self._sock_48k
-        chunk_size = self.PACKET_16K if rate == 16000 else self.PACKET_48K
         label = f"{rate // 1000}kHz"
+
+        # Groesserer recvfrom Buffer: bis zu 10 Pakete auf einmal
+        recv_buf_size = (self.PACKET_16K if rate == 16000 else self.PACKET_48K) * 10
 
         while self._running:
             try:
-                data, addr = sock.recvfrom(chunk_size * 4)  # Puffer grosszuegig
+                data, addr = sock.recvfrom(recv_buf_size)
                 if not data or len(data) < self.SEQ_HEADER_SIZE + 2:
                     continue
 
@@ -319,7 +379,6 @@ class WiFiMic:
                 seq_num = struct.unpack('<I', data[:self.SEQ_HEADER_SIZE])[0]
                 audio_data = data[self.SEQ_HEADER_SIZE:]
 
-                # Zeitstempel fuer Health-Monitor
                 now = time.monotonic()
 
                 if rate == 16000:
@@ -329,40 +388,33 @@ class WiFiMic:
                     if self._recv_start_16k == 0.0:
                         self._recv_start_16k = now
 
-                    # Paketverlust erkennen
+                    # Paketverlust erkennen (nur Statistik)
                     if self._last_seq_16k >= 0:
                         expected = (self._last_seq_16k + 1) & 0xFFFFFFFF
                         if seq_num != expected:
                             if seq_num > expected:
                                 gap = seq_num - expected
-                                if gap < 1000:  # Normaler Verlust (kein Wrap)
+                                if gap < 1000:
                                     self._packets_lost_16k += gap
-                                    logger.warning(
-                                        f"[16kHz] PACKET LOSS: {gap} Pakete verloren "
-                                        f"(seq {expected}-{seq_num - 1}), "
-                                        f"gesamt: {self._packets_lost_16k}")
-                            elif seq_num < self._last_seq_16k:
-                                # Out-of-Order oder Wrap
-                                if self._last_seq_16k - seq_num > 0xFFFFF000:
-                                    # uint32 Wrap → OK
-                                    pass
-                                else:
-                                    self._packets_ooo_16k += 1
+                                    # Nur alle 100 Verluste loggen (nicht spammen)
+                                    if self._packets_lost_16k % 100 < gap:
+                                        logger.warning(
+                                            f"[16kHz] LOSS: {gap} Pakete "
+                                            f"(gesamt: {self._packets_lost_16k}/"
+                                            f"{self._packets_total_16k})")
+                            elif self._last_seq_16k - seq_num < 0xFFFFF000:
+                                self._packets_ooo_16k += 1
                     self._last_seq_16k = seq_num
 
                     # In Jitter-Buffer einfuegen
                     with self._jitter_lock_16k:
                         self._jitter_buf_16k[seq_num] = (audio_data, now)
-
-                        # Erste Sequenznummer initialisieren
                         if self._jitter_next_seq_16k < 0:
                             self._jitter_next_seq_16k = seq_num
-
-                        # Jitter-Buffer ausspielen wenn voll oder aeltestes Paket > 100ms
                         self._flush_jitter_buffer_16k(now)
 
                 else:
-                    # 48kHz: Einfach durchreichen (kein Jitter-Buffer noetig fuer Biometrie)
+                    # 48kHz: direkt in Ringpuffer (kein Jitter-Buffer)
                     self._last_recv_48k = now
                     self._packets_recv_48k += 1
                     self._packets_total_48k += 1
@@ -370,26 +422,24 @@ class WiFiMic:
                     if self._last_seq_48k >= 0:
                         expected = (self._last_seq_48k + 1) & 0xFFFFFFFF
                         if seq_num > expected and (seq_num - expected) < 1000:
-                            gap = seq_num - expected
-                            self._packets_lost_48k += gap
+                            self._packets_lost_48k += (seq_num - expected)
                     self._last_seq_48k = seq_num
 
-                    with self._lock_48k:
-                        self._buf_48k.extend(audio_data)
+                    self._ring_write_48k(audio_data)
 
-                # Erster Empfang → connected melden
+                # Erster Empfang → connected
                 if rate == 16000 and not self._connected_16k:
                     self._connected_16k = True
                     self._source = "wifi"
-                    logger.info(f"[{label}] UDP empfange von {addr[0]}:{addr[1]} "
-                                f"(mit Seq-Header, Jitter-Buffer {self.JITTER_TIMEOUT_MS}ms)")
+                    logger.info(f"[{label}] UDP von {addr[0]}:{addr[1]} "
+                                f"(Seq-Header, Jitter={self.JITTER_TIMEOUT_MS}ms, "
+                                f"RecvBuf={self.UDP_RECV_BUF // 1024}KB)")
                     self._fire_source_event("wifi", rate)
                 elif rate == 48000 and not self._connected_48k:
                     self._connected_48k = True
-                    logger.info(f"[{label}] UDP empfange von {addr[0]}:{addr[1]}")
+                    logger.info(f"[{label}] UDP von {addr[0]}:{addr[1]}")
 
             except socket.timeout:
-                # Auch bei Timeout den Jitter-Buffer flushen (keine neuen Pakete)
                 if rate == 16000:
                     now = time.monotonic()
                     with self._jitter_lock_16k:
@@ -397,22 +447,20 @@ class WiFiMic:
                 continue
             except OSError as e:
                 if self._running:
-                    logger.warning(f"[{label}] UDP Recv-Fehler: {e}")
-                    time.sleep(1)
+                    logger.warning(f"[{label}] UDP Fehler: {e}")
+                    time.sleep(0.5)
 
     def _flush_jitter_buffer_16k(self, now: float):
         """Spielt Pakete aus dem Jitter-Buffer in den Ringpuffer.
 
-        Aufgerufen mit _jitter_lock_16k gehalten.
-        Regeln:
-        - Pakete in Sequenz-Reihenfolge ausspielen
-        - Bei Luecke: Stille einfuegen (damit kein Wort verschluckt wird)
-        - Bei Buffer voll (>JITTER_BUF_SIZE) oder aeltestes Paket >100ms: sofort raus
+        MUSS mit _jitter_lock_16k gehalten aufgerufen werden.
+        - Pakete in Sequenz-Reihenfolge
+        - Luecken → Stille (kein Wort verschlucken!)
+        - Buffer voll oder aeltestes Paket >100ms → sofort raus
         """
         if not self._jitter_buf_16k:
             return
 
-        # Aeltestes Paket finden
         oldest_seq = min(self._jitter_buf_16k.keys())
         oldest_time = self._jitter_buf_16k[oldest_seq][1]
         age_ms = (now - oldest_time) * 1000
@@ -421,68 +469,70 @@ class WiFiMic:
         timeout = age_ms >= self.JITTER_TIMEOUT_MS
 
         if not buf_full and not timeout:
-            return  # Noch warten — Buffer nicht voll und nicht alt genug
+            return
 
-        # Ausspielen: vom erwarteten Seq bis zum aktuell verfuegbaren
         next_seq = self._jitter_next_seq_16k
         if next_seq < 0:
             next_seq = oldest_seq
 
-        # Alle aufeinanderfolgenden Pakete (+ Luecken mit Stille) ausspielen
         max_seq = max(self._jitter_buf_16k.keys())
         silence = bytes(self.CHUNK_16K)  # 320 Bytes Stille
 
+        # Batch: alle Chunks sammeln, dann EIN write
+        chunks = []
         while next_seq <= max_seq:
             if next_seq in self._jitter_buf_16k:
                 audio, _ = self._jitter_buf_16k.pop(next_seq)
-                with self._lock_16k:
-                    self._buf_16k.extend(audio)
+                chunks.append(audio)
             else:
-                # Luecke → Stille einfuegen statt nichts (Wort-Schutz!)
-                with self._lock_16k:
-                    self._buf_16k.extend(silence)
+                chunks.append(silence)
             next_seq = (next_seq + 1) & 0xFFFFFFFF
-
-            # Abbruch wenn Buffer leer
             if not self._jitter_buf_16k:
                 break
 
         self._jitter_next_seq_16k = next_seq
 
+        # EIN Ringpuffer-Write fuer alle Chunks (minimale Lock-Zeit)
+        if chunks:
+            combined = b''.join(chunks)
+            self._ring_write_16k(combined)
+
+    # =========================================================================
+    # Health Monitor
+    # =========================================================================
+
     def _health_loop(self):
-        """Prueft ob UDP-Pakete noch ankommen, meldet Fallback auf USB."""
-        initial_deadline = time.time() + 10  # 10s Timeout fuer Fallback
+        """Prueft ob UDP-Pakete noch ankommen."""
+        initial_deadline = time.time() + 10
 
         while self._running:
             time.sleep(2)
             now = time.monotonic()
 
-            # 16kHz Health-Check
             if self._connected_16k:
                 if now - self._last_recv_16k > self.HEALTH_TIMEOUT:
                     self._connected_16k = False
-                    logger.warning("[16kHz] Keine UDP-Pakete seit 2s")
+                    logger.warning("[16kHz] Keine Pakete seit 2s")
 
             if self._connected_48k:
                 if now - self._last_recv_48k > self.HEALTH_TIMEOUT:
                     self._connected_48k = False
-                    logger.warning("[48kHz] Keine UDP-Pakete seit 2s")
+                    logger.warning("[48kHz] Keine Pakete seit 2s")
 
-            # Fallback auf USB wenn 16kHz weg
+            # Fallback auf USB
             if not self._connected_16k and time.time() > initial_deadline:
                 if self._source != "usb":
                     self._source = "usb"
-                    logger.info("WiFi-Mic keine Daten, Fallback auf USB")
+                    logger.info("WiFi-Mic weg, Fallback USB")
                     self._fire_source_event("usb", 16000)
 
-            # Wieder connected → zurueck auf WiFi
+            # Wieder connected → WiFi
             if self._connected_16k and self._source != "wifi":
                 self._source = "wifi"
                 logger.info("WiFi-Mic wieder aktiv")
                 self._fire_source_event("wifi", 16000)
 
     def _close_sockets(self):
-        """Schliesst beide UDP-Sockets."""
         for sock in (self._sock_16k, self._sock_48k):
             if sock:
                 try:
@@ -495,7 +545,6 @@ class WiFiMic:
         self._connected_48k = False
 
     def _fire_source_event(self, source: str, rate: int):
-        """Event auf Event-Bus feuern wenn vorhanden."""
         if self.event_bus and hasattr(self.event_bus, 'emit'):
             try:
                 self.event_bus.emit("audio.mic_source_changed", {
@@ -532,24 +581,25 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG,
                         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
 
-    # ESP-IP als Argument oder Default
     esp_ip = sys.argv[1] if len(sys.argv) > 1 else "10.42.0.2"
 
     mic = WiFiMic(esp_ip=esp_ip)
     mic.start()
 
-    print(f"WiFiMic laeuft, verbinde zu {esp_ip}...")
-    print("Druecke Ctrl+C zum Beenden")
+    print(f"WiFiMic v3.0 laeuft, ESP32 @ {esp_ip}...")
+    print("Ctrl+C zum Beenden")
 
     try:
         while True:
             time.sleep(1)
             status = mic.get_status()
+            rms = mic.peek_rms()
             chunk = mic.get_audio_chunk(rate=16000, duration_ms=100)
-            print(f"Source={status['source']} | "
-                  f"16k={'OK' if status['connected_16k'] else '--'} "
-                  f"48k={'OK' if status['connected_48k'] else '--'} | "
-                  f"Buf16k={status['buf_16k_bytes']}B | "
+            print(f"Src={status['source']} | "
+                  f"16k={'OK' if status['connected_16k'] else '--'} | "
+                  f"Buf={status['buf_16k_bytes']}B | "
+                  f"Loss={status['loss_pct_16k']:.1f}% | "
+                  f"RMS={rms:.0f}dB | "
                   f"Chunk={len(chunk)}B")
     except KeyboardInterrupt:
         mic.stop()

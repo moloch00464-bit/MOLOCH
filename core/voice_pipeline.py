@@ -754,7 +754,7 @@ class VoicePipeline:
             f"connected={self._wifi_mic.connected}, "
             f"connected_16k={self._wifi_mic._connected_16k}, "
             f"force={self._wifi_mic._force_source}, "
-            f"buf={len(self._wifi_mic._buf_16k)}B")
+            f"buf={self._wifi_mic._ring_16k_avail}B")
         logger.warning(f"[VOICE] WiFi-Mic nicht nutzbar ({wifi_status}), USB-Fallback")
         self._use_wifi_mic = False
         try:
