@@ -64,8 +64,8 @@
     "search_speed": 0.8,
     "search_home_timeout": 20.0,
     "target_lost_timeout": 8.5,
-    "home_pan": 24.3,
-    "home_tilt": 8.1
+    "home_pan": 26.5,
+    "home_tilt": 10.4
   },
   "profiler": {
     "enabled": true,
@@ -82,7 +82,7 @@
     "tilt_limit_max": 78.8
   },
   "teach": {
-    "mode_enabled": false,
+    "mode_enabled": true,
     "cooldown": 30.0
   }
 }
