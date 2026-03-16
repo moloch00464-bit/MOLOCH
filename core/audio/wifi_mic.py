@@ -6,7 +6,9 @@ Empfaengt Audio-Streams per UDP vom ESP32-S3
 in 16kHz (Whisper) und 48kHz (Stimmbiometrie).
 
 Features:
-- Dual-Stream: Port 12345 (16kHz, 320B/Paket) + Port 12346 (48kHz, 960B/Paket)
+- Dual-Stream: Port 12345 (16kHz, 324B/Paket) + Port 12346 (48kHz, 964B/Paket)
+- 4-Byte Sequenznummer-Header pro Paket (Paketverlust-Erkennung)
+- Jitter-Buffer: 100ms, sortiert nach Sequenznummer, Stille bei Luecken
 - Ringpuffer 2s je Stream
 - get_audio_chunk(rate) → bytes fuer Whisper/Biometrie
 - Health-Monitor: connected=True wenn Pakete innerhalb 2s empfangen
@@ -14,9 +16,11 @@ Features:
 - Fallback auf USB-Soundkarte nach 10s ohne UDP-Daten
 
 Author: M.O.L.O.C.H. System
+v2.1 — Sequenznummern + Jitter-Buffer gegen Wortverschlucker
 """
 
 import socket
+import struct
 import threading
 import time
 import logging
@@ -29,9 +33,16 @@ logger = logging.getLogger("WiFiMic")
 class WiFiMic:
     """UDP-Client fuer ESP32-S3 WiFi-Mikrofon."""
 
-    # UDP Paketgroessen (ESP32 sendet genau diese Chunks)
-    CHUNK_16K = 320   # 16kHz Mono 16-bit: 10ms = 320 Bytes
-    CHUNK_48K = 960   # 48kHz Stereo 16-bit: 5ms = 960 Bytes
+    # UDP Paketgroessen (ESP32 sendet: 4B Header + Audio)
+    SEQ_HEADER_SIZE = 4   # uint32_t Sequenznummer (Little-Endian)
+    CHUNK_16K = 320       # 16kHz Mono 16-bit: 10ms = 320 Bytes Audio
+    CHUNK_48K = 960       # 48kHz Stereo 16-bit: 5ms = 960 Bytes Audio
+    PACKET_16K = SEQ_HEADER_SIZE + CHUNK_16K  # 324 Bytes total
+    PACKET_48K = SEQ_HEADER_SIZE + CHUNK_48K  # 964 Bytes total
+
+    # Jitter-Buffer: 100ms = 10 Pakete bei 16kHz (10ms pro Paket)
+    JITTER_BUF_SIZE = 10  # Max Pakete im Jitter-Buffer
+    JITTER_TIMEOUT_MS = 100  # Max Wartezeit bevor Ausspielen
 
     # Timeout: Kein Paket seit X Sekunden → disconnected
     HEALTH_TIMEOUT = 2.0
@@ -73,6 +84,20 @@ class WiFiMic:
         self._packets_recv_16k = 0
         self._packets_recv_48k = 0
         self._recv_start_16k = 0.0  # Zeitpunkt erster Empfang
+
+        # Sequenznummer-Tracking (Paketverlust-Erkennung)
+        self._last_seq_16k = -1     # Letzte empfangene Sequenznummer
+        self._last_seq_48k = -1
+        self._packets_lost_16k = 0  # Zaehler verlorene Pakete
+        self._packets_lost_48k = 0
+        self._packets_total_16k = 0  # Zaehler gesamte Pakete (fuer Verlustrate)
+        self._packets_total_48k = 0
+        self._packets_ooo_16k = 0   # Out-of-Order Pakete
+
+        # Jitter-Buffer: dict[seq_num] = (audio_data, recv_timestamp)
+        self._jitter_buf_16k: dict = {}
+        self._jitter_next_seq_16k = -1  # Naechste erwartete Sequenznummer
+        self._jitter_lock_16k = threading.Lock()
 
         # Software Gain (Multiplikator fuer WiFi-Audio, 0.0 - 3.0)
         self._software_gain = 1.0
@@ -195,10 +220,10 @@ class WiFiMic:
 
     def get_status(self) -> dict:
         """Status-Dict fuer IPC/Panel."""
-        # Paket-Verlust schaetzen (16kHz: 100 Pakete/s erwartet)
-        elapsed = time.monotonic() - self._recv_start_16k if self._recv_start_16k else 0
-        expected = int(elapsed * 100) if elapsed > 1 else self._packets_recv_16k
-        lost = max(0, expected - self._packets_recv_16k)
+        # Verlustrate aus Sequenznummer-Tracking (exakt, nicht geschaetzt)
+        total = self._packets_total_16k
+        lost = self._packets_lost_16k
+        loss_pct = (lost / total * 100) if total > 10 else 0.0
 
         return {
             "source": self._source,
@@ -207,9 +232,13 @@ class WiFiMic:
             "esp_ip": self.esp_ip,
             "buf_16k_bytes": len(self._buf_16k),
             "buf_48k_bytes": len(self._buf_48k),
+            "jitter_buf_16k": len(self._jitter_buf_16k),
             "packets_recv_16k": self._packets_recv_16k,
             "packets_recv_48k": self._packets_recv_48k,
+            "packets_total_16k": total,
             "packets_lost_16k": lost,
+            "packets_ooo_16k": self._packets_ooo_16k,
+            "loss_pct_16k": round(loss_pct, 2),
             "software_gain": self._software_gain,
             "force_source": self._force_source,
         }
@@ -275,48 +304,150 @@ class WiFiMic:
         return sock
 
     def _recv_loop(self, rate: int):
-        """Empfaengt Audio-Daten per UDP."""
+        """Empfaengt Audio-Daten per UDP mit Sequenznummer-Header + Jitter-Buffer."""
         sock = self._sock_16k if rate == 16000 else self._sock_48k
-        chunk_size = self.CHUNK_16K if rate == 16000 else self.CHUNK_48K
+        chunk_size = self.PACKET_16K if rate == 16000 else self.PACKET_48K
         label = f"{rate // 1000}kHz"
 
         while self._running:
             try:
                 data, addr = sock.recvfrom(chunk_size * 4)  # Puffer grosszuegig
-                if not data:
+                if not data or len(data) < self.SEQ_HEADER_SIZE + 2:
                     continue
+
+                # Sequenznummer extrahieren (4 Byte Little-Endian Header)
+                seq_num = struct.unpack('<I', data[:self.SEQ_HEADER_SIZE])[0]
+                audio_data = data[self.SEQ_HEADER_SIZE:]
 
                 # Zeitstempel fuer Health-Monitor
                 now = time.monotonic()
+
                 if rate == 16000:
                     self._last_recv_16k = now
                     self._packets_recv_16k += 1
+                    self._packets_total_16k += 1
                     if self._recv_start_16k == 0.0:
                         self._recv_start_16k = now
-                    with self._lock_16k:
-                        self._buf_16k.extend(data)
+
+                    # Paketverlust erkennen
+                    if self._last_seq_16k >= 0:
+                        expected = (self._last_seq_16k + 1) & 0xFFFFFFFF
+                        if seq_num != expected:
+                            if seq_num > expected:
+                                gap = seq_num - expected
+                                if gap < 1000:  # Normaler Verlust (kein Wrap)
+                                    self._packets_lost_16k += gap
+                                    logger.warning(
+                                        f"[16kHz] PACKET LOSS: {gap} Pakete verloren "
+                                        f"(seq {expected}-{seq_num - 1}), "
+                                        f"gesamt: {self._packets_lost_16k}")
+                            elif seq_num < self._last_seq_16k:
+                                # Out-of-Order oder Wrap
+                                if self._last_seq_16k - seq_num > 0xFFFFF000:
+                                    # uint32 Wrap → OK
+                                    pass
+                                else:
+                                    self._packets_ooo_16k += 1
+                    self._last_seq_16k = seq_num
+
+                    # In Jitter-Buffer einfuegen
+                    with self._jitter_lock_16k:
+                        self._jitter_buf_16k[seq_num] = (audio_data, now)
+
+                        # Erste Sequenznummer initialisieren
+                        if self._jitter_next_seq_16k < 0:
+                            self._jitter_next_seq_16k = seq_num
+
+                        # Jitter-Buffer ausspielen wenn voll oder aeltestes Paket > 100ms
+                        self._flush_jitter_buffer_16k(now)
+
                 else:
+                    # 48kHz: Einfach durchreichen (kein Jitter-Buffer noetig fuer Biometrie)
                     self._last_recv_48k = now
                     self._packets_recv_48k += 1
+                    self._packets_total_48k += 1
+
+                    if self._last_seq_48k >= 0:
+                        expected = (self._last_seq_48k + 1) & 0xFFFFFFFF
+                        if seq_num > expected and (seq_num - expected) < 1000:
+                            gap = seq_num - expected
+                            self._packets_lost_48k += gap
+                    self._last_seq_48k = seq_num
+
                     with self._lock_48k:
-                        self._buf_48k.extend(data)
+                        self._buf_48k.extend(audio_data)
 
                 # Erster Empfang → connected melden
                 if rate == 16000 and not self._connected_16k:
                     self._connected_16k = True
                     self._source = "wifi"
-                    logger.info(f"[{label}] UDP empfange von {addr[0]}:{addr[1]}")
+                    logger.info(f"[{label}] UDP empfange von {addr[0]}:{addr[1]} "
+                                f"(mit Seq-Header, Jitter-Buffer {self.JITTER_TIMEOUT_MS}ms)")
                     self._fire_source_event("wifi", rate)
                 elif rate == 48000 and not self._connected_48k:
                     self._connected_48k = True
                     logger.info(f"[{label}] UDP empfange von {addr[0]}:{addr[1]}")
 
             except socket.timeout:
+                # Auch bei Timeout den Jitter-Buffer flushen (keine neuen Pakete)
+                if rate == 16000:
+                    now = time.monotonic()
+                    with self._jitter_lock_16k:
+                        self._flush_jitter_buffer_16k(now)
                 continue
             except OSError as e:
                 if self._running:
                     logger.warning(f"[{label}] UDP Recv-Fehler: {e}")
                     time.sleep(1)
+
+    def _flush_jitter_buffer_16k(self, now: float):
+        """Spielt Pakete aus dem Jitter-Buffer in den Ringpuffer.
+
+        Aufgerufen mit _jitter_lock_16k gehalten.
+        Regeln:
+        - Pakete in Sequenz-Reihenfolge ausspielen
+        - Bei Luecke: Stille einfuegen (damit kein Wort verschluckt wird)
+        - Bei Buffer voll (>JITTER_BUF_SIZE) oder aeltestes Paket >100ms: sofort raus
+        """
+        if not self._jitter_buf_16k:
+            return
+
+        # Aeltestes Paket finden
+        oldest_seq = min(self._jitter_buf_16k.keys())
+        oldest_time = self._jitter_buf_16k[oldest_seq][1]
+        age_ms = (now - oldest_time) * 1000
+
+        buf_full = len(self._jitter_buf_16k) >= self.JITTER_BUF_SIZE
+        timeout = age_ms >= self.JITTER_TIMEOUT_MS
+
+        if not buf_full and not timeout:
+            return  # Noch warten — Buffer nicht voll und nicht alt genug
+
+        # Ausspielen: vom erwarteten Seq bis zum aktuell verfuegbaren
+        next_seq = self._jitter_next_seq_16k
+        if next_seq < 0:
+            next_seq = oldest_seq
+
+        # Alle aufeinanderfolgenden Pakete (+ Luecken mit Stille) ausspielen
+        max_seq = max(self._jitter_buf_16k.keys())
+        silence = bytes(self.CHUNK_16K)  # 320 Bytes Stille
+
+        while next_seq <= max_seq:
+            if next_seq in self._jitter_buf_16k:
+                audio, _ = self._jitter_buf_16k.pop(next_seq)
+                with self._lock_16k:
+                    self._buf_16k.extend(audio)
+            else:
+                # Luecke → Stille einfuegen statt nichts (Wort-Schutz!)
+                with self._lock_16k:
+                    self._buf_16k.extend(silence)
+            next_seq = (next_seq + 1) & 0xFFFFFFFF
+
+            # Abbruch wenn Buffer leer
+            if not self._jitter_buf_16k:
+                break
+
+        self._jitter_next_seq_16k = next_seq
 
     def _health_loop(self):
         """Prueft ob UDP-Pakete noch ankommen, meldet Fallback auf USB."""

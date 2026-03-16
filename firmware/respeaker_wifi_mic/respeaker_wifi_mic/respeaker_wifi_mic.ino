@@ -1,5 +1,5 @@
 /*
- * M.O.L.O.C.H. — ReSpeaker Lite WiFi-Mic Firmware v2.0
+ * M.O.L.O.C.H. — ReSpeaker Lite WiFi-Mic Firmware v2.1
  * =====================================================
  * Arduino/ESP-IDF Firmware fuer ESP32-S3 auf ReSpeaker Lite Board.
  * Ersetzt MicroPython — loest I2S Slave + MCLK Problem.
@@ -48,6 +48,9 @@ static unsigned long wifi_last_check = 0;
 
 // Audio-Task Handle
 static TaskHandle_t audio_task_handle = NULL;
+
+// Sequenznummer fuer UDP-Pakete (Paketverlust-Erkennung auf Pi-Seite)
+static uint32_t udp_seq_num = 0;
 
 // DMA-Puffer: 480 Frames * 2 Kanaele * 4 Bytes (32-bit) = 3840 Bytes
 static uint8_t dma_buf[I2S_DMA_FRAMES * 2 * 4];
@@ -209,17 +212,20 @@ static void audio_task(void* param) {
         // Nicht senden wenn WiFi weg
         if (!WiFi.isConnected()) continue;
 
-        // Verarbeiten + per UDP senden
+        // Verarbeiten + per UDP senden (mit 4-Byte Sequenznummer-Header)
         if (audio_mode == 0) {
-            // 16kHz Mono — ein Paket pro DMA-Puffer (320 Bytes)
+            // 16kHz Mono — ein Paket pro DMA-Puffer: [4B seq][320B Audio] = 324 Bytes
             int n = process_to_16k(dma_buf, bytes_read, out_16k);
             if (n > 0) {
+                int audio_bytes = n * sizeof(int16_t);
                 udp_audio.beginPacket(PI_IP, UDP_PORT_16K);
-                udp_audio.write((uint8_t*)out_16k, n * sizeof(int16_t));
+                udp_audio.write((uint8_t*)&udp_seq_num, 4);  // Sequenznummer (LE)
+                udp_audio.write((uint8_t*)out_16k, audio_bytes);
                 udp_audio.endPacket();
+                udp_seq_num++;
             }
         } else {
-            // 48kHz Stereo — in 960-Byte Chunks (unter MTU bleiben)
+            // 48kHz Stereo — in Chunks: [4B seq][960B Audio] = 964 Bytes pro Paket
             int n = process_to_48k(dma_buf, bytes_read, out_48k);
             int total_bytes = n * sizeof(int16_t);
             const int chunk = 960;
@@ -227,8 +233,10 @@ static void audio_task(void* param) {
                 int send_bytes = total_bytes - off;
                 if (send_bytes > chunk) send_bytes = chunk;
                 udp_audio.beginPacket(PI_IP, UDP_PORT_48K);
+                udp_audio.write((uint8_t*)&udp_seq_num, 4);  // Sequenznummer (LE)
                 udp_audio.write((uint8_t*)out_48k + off, send_bytes);
                 udp_audio.endPacket();
+                udp_seq_num++;
             }
         }
     }
@@ -253,6 +261,9 @@ static void wifi_connect() {
     WiFi.config(ip, gw, sn, dns);
 
     WiFi.begin(WIFI_SSID, WIFI_PASS);
+
+    // Audio braucht konstante Verbindung — kein PowerSave
+    WiFi.setSleep(false);
 
     unsigned long start = millis();
     while (!WiFi.isConnected() && (millis() - start) < WIFI_TIMEOUT_MS) {
@@ -288,7 +299,7 @@ static void http_setup() {
         snprintf(buf, sizeof(buf),
             "{\"streaming\":%s,\"mode\":\"%s\",\"rate\":%d,"
             "\"wifi_rssi\":%d,\"ip\":\"%s\",\"uptime_s\":%lu,"
-            "\"free_heap\":%u,\"mclk_mhz\":%.3f,\"fw_version\":\"2.0\"}",
+            "\"free_heap\":%u,\"mclk_mhz\":%.3f,\"udp_seq\":%lu,\"fw_version\":\"2.1\"}",
             streaming ? "true" : "false",
             audio_mode == 0 ? "16k_mono" : "48k_stereo",
             audio_mode == 0 ? 16000 : 48000,
@@ -296,7 +307,8 @@ static void http_setup() {
             WiFi.localIP().toString().c_str(),
             millis() / 1000,
             ESP.getFreeHeap(),
-            (float)(I2S_SAMPLE_RATE * I2S_MCLK_MULT) / 1000000.0f
+            (float)(I2S_SAMPLE_RATE * I2S_MCLK_MULT) / 1000000.0f,
+            (unsigned long)udp_seq_num
         );
         http_server.send(200, "application/json", buf);
     });
@@ -467,7 +479,7 @@ void setup() {
     delay(500);
 
     Serial.println("==================================================");
-    Serial.println("M.O.L.O.C.H. ReSpeaker WiFi-Mic v2.0 (Arduino)");
+    Serial.println("M.O.L.O.C.H. ReSpeaker WiFi-Mic v2.1 (Arduino)");
     Serial.println("ESP32-S3 + XMOS XU316 I2S Slave Bridge");
     Serial.println("Arduino Core 2.0.14 / ESP-IDF 4.4 / Legacy I2S");
     Serial.println("==================================================");

@@ -643,7 +643,7 @@ class VoicePipeline:
                         chunk = self._wifi_mic.get_audio_chunk(rate=16000, duration_ms=50)
                         if chunk:
                             rec_buf.extend(chunk)
-                        time.sleep(0.04)
+                        time.sleep(0.01)
                     pcm_data = bytes(rec_buf)
                     duration_actual = len(pcm_data) / (16000 * 2)
                     logger.info(f"[WHISPER-TEST] WiFi-Mic: {len(pcm_data)} Bytes, "
@@ -786,7 +786,7 @@ class VoicePipeline:
                     self._wifi_rec_buf.extend(chunk)
             except Exception as e:
                 logger.warning(f"[VOICE] WiFi-Mic drain error: {e}")
-            time.sleep(0.04)  # ~25 Hz Drain-Rate, schneller als Buffer-Fuellrate
+            time.sleep(0.01)  # ~100 Hz Drain-Rate, lueckenlos mit Jitter-Buffer
 
     def _write_pcm_as_wav(self, pcm_data: bytes, wav_path: str,
                           rate: int = 16000, channels: int = 1,

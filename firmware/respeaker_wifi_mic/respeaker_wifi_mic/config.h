@@ -38,7 +38,7 @@
 #define I2S_MCLK_MULT      256   // MCLK = 48000 * 256 = 12.288 MHz
 #define I2S_BIT_DEPTH       32    // XMOS liefert 32-bit I2S
 #define I2S_DMA_FRAMES     480   // 10ms bei 48kHz (sauber teilbar durch 3)
-#define I2S_DMA_COUNT        4    // 4 DMA-Puffer = 40ms Latenz
+#define I2S_DMA_COUNT        8    // 8 DMA-Puffer = 80ms Latenz (weniger Underruns)
 
 // =====================================================================
 // UDP Audio-Streaming — ESP32 sendet an Pi
