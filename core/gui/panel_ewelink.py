@@ -9,6 +9,7 @@ Bekommt parent_frame (LabelFrame) und ServiceProxy von panel_main.
 - FLUTLICHT: Toggle weisse LEDs (Panel: 0=aus/IR, 2=an/Farb-Nacht)
 - ERKANNT: Status-Indikator blaue LED (sledOnline, vom Service gesteuert)
 - ALARM (rot toggle), SNAP (cyan einmal)
+- DEACH: Status-Spiegel des Teach-Prozesses (kein Klick, nur Anzeige)
 - EINPRÄGEN Button: Batch-Analyse aller Snapshots (Face + Pose Enrollment)
 
 Alle Commands via ServiceProxy._write_command().
@@ -19,7 +20,7 @@ import tkinter as tk
 
 from core.gui.panel_styles import (
     BG_FRAME, BG_BUTTON,
-    BTN_ALARM_RED, BTN_OFF_DARK, BTN_SNAP_CYAN, BTN_ON_GREEN,
+    BTN_ALARM_RED, BTN_OFF_DARK, BTN_SNAP_CYAN,
     ACCENT_CYAN, ACCENT_GREEN,
     FG_WHITE, FG_LABEL, FG_DIM,
     FONT_BUTTON, FONT_LABEL, FONT_SMALL,
@@ -53,11 +54,11 @@ class EwelinkModule:
         self._build_action_buttons()
 
     # =========================================================================
-    # Buttons: ALARM, SNAP, FLUTLICHT, ERKANNT, EINPRÄGEN
+    # Buttons: ALARM, SNAP, DEACH, FLUTLICHT, ERKANNT, EINPRÄGEN, GALERIE
     # =========================================================================
 
     def _build_action_buttons(self):
-        """ALARM, SNAP, FLUTLICHT, ERKANNT, EINPRÄGEN, GALERIE Buttons."""
+        """ALARM, SNAP, DEACH, FLUTLICHT, ERKANNT, EINPRÄGEN, GALERIE Buttons."""
         section = tk.LabelFrame(
             self._parent,
             text="Aktionen",
@@ -70,7 +71,7 @@ class EwelinkModule:
         row = tk.Frame(section, bg=BG_FRAME)
         row.pack(pady=5, padx=5)
 
-        # ALARM (rot toggle)
+        # col 0: ALARM (rot toggle)
         self._btn_alarm = tk.Button(
             row, text="ALARM", width=8,
             bg=BTN_OFF_DARK, fg=FG_WHITE, font=FONT_BUTTON,
@@ -79,7 +80,7 @@ class EwelinkModule:
         )
         self._btn_alarm.grid(row=0, column=0, padx=3, pady=2)
 
-        # SNAP (cyan, einmal-klick) → speichert in media/snapshots/
+        # col 1: SNAP (cyan, einmal-klick) → speichert in media/snapshots/
         tk.Button(
             row, text="SNAP", width=8,
             bg=BTN_SNAP_CYAN, fg=FG_WHITE, font=FONT_BUTTON,
@@ -87,34 +88,25 @@ class EwelinkModule:
             command=self._take_snapshot,
         ).grid(row=0, column=1, padx=3, pady=2)
 
-        # TEACH (Toggle: Lernmodus AN/AUS im Service)
-        self._btn_teach = tk.Button(
-            row, text="TEACH", width=6,
-            bg=BTN_OFF_DARK, fg=FG_WHITE, font=FONT_BUTTON,
-            activebackground=BG_FRAME,
-            command=self._toggle_teach_mode,
+        # col 2: DEACH (Status-Spiegel, kein Klick — zeigt Teach-Prozess)
+        self._btn_deach = tk.Button(
+            row, text="DEACH", width=8,
+            bg=BTN_OFF_DARK, fg=FG_DIM, font=FONT_BUTTON,
+            state="disabled",
+            disabledforeground=FG_DIM,
         )
-        self._btn_teach.grid(row=0, column=2, padx=2, pady=2)
+        self._btn_deach.grid(row=0, column=2, padx=3, pady=2)
 
-        # FOTO (manueller Teach-Trigger, sofort, kein Cooldown)
-        self._btn_foto = tk.Button(
-            row, text="FOTO", width=5,
-            bg="#9933cc", fg=FG_WHITE, font=FONT_BUTTON,
-            activebackground="#7722aa",
-            command=self._trigger_teach_foto,
-        )
-        self._btn_foto.grid(row=0, column=3, padx=2, pady=2)
-
-        # FLUTLICHT (weisse LEDs toggle, nightVision 0=aus / 2=an)
+        # col 3: FLUTLICHT (weisse LEDs toggle, nightVision 0=aus / 2=an)
         self._btn_flutlicht = tk.Button(
             row, text="FLUTLICHT", width=8,
             bg=BTN_OFF_DARK, fg=FG_WHITE, font=FONT_BUTTON,
             activebackground=BG_FRAME,
             command=self._toggle_flutlicht,
         )
-        self._btn_flutlicht.grid(row=0, column=4, padx=3, pady=2)
+        self._btn_flutlicht.grid(row=0, column=3, padx=3, pady=2)
 
-        # ERKANNT (Status-Indikator, wird vom Service gesteuert)
+        # col 4: ERKANNT (Status-Indikator, wird vom Service gesteuert)
         self._btn_erkannt = tk.Button(
             row, text="ERKANNT", width=8,
             bg=BTN_OFF_DARK, fg=FG_WHITE, font=FONT_BUTTON,
@@ -122,24 +114,24 @@ class EwelinkModule:
             state="disabled",
             disabledforeground=FG_WHITE,
         )
-        self._btn_erkannt.grid(row=0, column=5, padx=3, pady=2)
+        self._btn_erkannt.grid(row=0, column=4, padx=3, pady=2)
 
-        # EINPRÄGEN Button
+        # col 5: EINPRÄGEN Button
         self._btn_einpraegen = tk.Button(
             row, text="EINPRÄGEN", width=10,
             bg=BG_BUTTON, fg=FG_LABEL, font=FONT_BUTTON,
             activebackground=BG_FRAME,
             command=self._start_einpraegen,
         )
-        self._btn_einpraegen.grid(row=0, column=6, padx=3, pady=2)
+        self._btn_einpraegen.grid(row=0, column=5, padx=3, pady=2)
 
-        # GALERIE Button
+        # col 6: GALERIE Button
         tk.Button(
             row, text="GALERIE", width=8,
             bg=BG_BUTTON, fg=FG_LABEL, font=FONT_BUTTON,
             activebackground=BG_FRAME,
             command=self._open_gallery,
-        ).grid(row=0, column=7, padx=3, pady=2)
+        ).grid(row=0, column=6, padx=3, pady=2)
 
         # Status-Labels (Zeile 1 unter den Buttons)
         self._lbl_alarm = tk.Label(
@@ -152,25 +144,25 @@ class EwelinkModule:
         )
         self._lbl_snap.grid(row=1, column=1, pady=(0, 5))
 
-        self._lbl_teach = tk.Label(
-            row, text="AUS", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
+        self._lbl_deach = tk.Label(
+            row, text="", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
         )
-        self._lbl_teach.grid(row=1, column=2, columnspan=2, pady=(0, 5))
+        self._lbl_deach.grid(row=1, column=2, pady=(0, 5))
 
         self._lbl_flutlicht = tk.Label(
             row, text="AUS", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
         )
-        self._lbl_flutlicht.grid(row=1, column=4, pady=(0, 5))
+        self._lbl_flutlicht.grid(row=1, column=3, pady=(0, 5))
 
         self._lbl_erkannt = tk.Label(
             row, text="AUS", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
         )
-        self._lbl_erkannt.grid(row=1, column=5, pady=(0, 5))
+        self._lbl_erkannt.grid(row=1, column=4, pady=(0, 5))
 
         self._lbl_einpraegen = tk.Label(
             row, text="", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
         )
-        self._lbl_einpraegen.grid(row=1, column=6, pady=(0, 5))
+        self._lbl_einpraegen.grid(row=1, column=5, pady=(0, 5))
 
         # Einpraegen Poll-State
         self._einpraegen_polling = False
@@ -197,15 +189,6 @@ class EwelinkModule:
         self._parent.after(2000, lambda: self._lbl_snap.config(
             text="bereit", fg=FG_DIM
         ))
-
-    def _toggle_teach_mode(self):
-        """Teach-Modus AN/AUS im Service umschalten."""
-        self._service._write_command("teach_mode_toggle")
-
-    def _trigger_teach_foto(self):
-        """Manueller Teach-Trigger — sofort, ohne Cooldown."""
-        self._service._write_command("teach_trigger")
-        self._lbl_teach.config(text="\u23f3 Foto...", fg="#cc88ff")
 
     def _toggle_flutlicht(self):
         """Weisse LEDs an/aus (nightVision 0=day/aus, 2=night/an)."""
@@ -290,7 +273,7 @@ class EwelinkModule:
         """Vom panel_main Poll aufgerufen: Status-Indikatoren aktualisieren.
 
         - ERKANNT: LED-State + personality_mode + Face-ID
-        - TEACH Button: Modus (gruen/grau) + Prozess-Status (pulsierend/gruen/rot)
+        - DEACH: Status-Spiegel des Teach-Prozesses (pulsierend/gruen/rot)
         """
         led_on = status.get("led_markus_on", False)
         led_mode = status.get("led_personality_mode", "guardian")
@@ -316,41 +299,42 @@ class EwelinkModule:
         elif not self._erkannt_led_on:
             self._lbl_erkannt.config(text="---", fg=FG_DIM)
 
-        # --- TEACH Modus Button (gruen=AN, grau=AUS) ---
-        teach_on = status.get("teach_mode_enabled", False)
-        if teach_on:
-            self._btn_teach.config(bg=BTN_ON_GREEN, text="TEACH AN")
-        else:
-            self._btn_teach.config(bg=BTN_OFF_DARK, text="TEACH")
-
-        # --- TEACH Prozess-Status (Label = Spiegel vom Service) ---
+        # --- DEACH: Teach-Prozess Status-Spiegel ---
         teach = status.get("teach_result", {})
         teach_st = teach.get("status", "")
 
         if teach_st in ("running", "starting"):
+            # Moloch macht gerade Teach-Foto → orange pulsieren
             attempt = teach.get("attempt", 0)
             if attempt > 0:
-                self._lbl_teach.config(
-                    text=f"\u23f3 Versuch {attempt}/3...", fg="#ffaa00"
+                self._btn_deach.config(bg="#cc6600", disabledforeground=FG_WHITE)
+                self._lbl_deach.config(
+                    text=f"\U0001f4f8 Versuch {attempt}/3", fg="#ffaa00"
                 )
             else:
-                self._lbl_teach.config(text="\u23f3 Verarbeite...", fg="#ffaa00")
+                self._btn_deach.config(bg="#cc6600", disabledforeground=FG_WHITE)
+                self._lbl_deach.config(text="\U0001f4f8 Verarbeite...", fg="#ffaa00")
         elif teach_st == "retry":
             reason = teach.get("reason", "")
-            self._lbl_teach.config(text=reason, fg="#ff6666")
+            self._btn_deach.config(bg="#cc6600", disabledforeground=FG_WHITE)
+            self._lbl_deach.config(text=reason, fg="#ff6666")
         elif teach_st == "success":
+            # Erfolg → gruen aufblitzen
             sim = teach.get("similarity", 0)
             sim_pct = int(sim * 100)
-            self._lbl_teach.config(
-                text=f"\u2713 Sim: {sim_pct}%", fg=ACCENT_GREEN
+            self._btn_deach.config(bg=ACCENT_GREEN, disabledforeground=FG_WHITE)
+            self._lbl_deach.config(
+                text=f"\u2713 Gespeichert ({sim_pct}%)", fg=ACCENT_GREEN
             )
         elif teach_st == "failed":
-            reason = teach.get("reason", "Fehlgeschlagen")
-            self._lbl_teach.config(text=f"\u2717 {reason}", fg="#ff4444")
-        elif teach_on:
-            self._lbl_teach.config(text="AN", fg=ACCENT_GREEN)
+            # Fehler → rot aufblitzen
+            reason = teach.get("reason", "Verworfen")
+            self._btn_deach.config(bg="#cc2200", disabledforeground=FG_WHITE)
+            self._lbl_deach.config(text=f"\u2717 {reason}", fg="#ff4444")
         else:
-            self._lbl_teach.config(text="AUS", fg=FG_DIM)
+            # Idle — normales graues Aussehen
+            self._btn_deach.config(bg=BTN_OFF_DARK, disabledforeground=FG_DIM)
+            self._lbl_deach.config(text="", fg=FG_DIM)
 
     def _open_gallery(self):
         """Snapshot Galerie Popup oeffnen."""

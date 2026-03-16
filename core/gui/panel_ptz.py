@@ -334,8 +334,8 @@ class PtzModule:
         self._service.toggle_autonomous()
 
     def _toggle_daily_learner(self):
-        """Daily Learner umschalten."""
-        self._service.toggle_daily_learner()
+        """Teach-Modus AN/AUS im Service umschalten (persistent)."""
+        self._service._write_command("teach_mode_toggle")
 
     # =========================================================================
     # Status-Polling
@@ -358,15 +358,15 @@ class PtzModule:
                     fg=BTN_ON_GREEN if auto else FG_DIM,
                 )
 
-            # Daily Learner
-            dl = status.get("daily_learner_enabled", False)
+            # Teach-Modus (persistent, ersetzt Daily Learner Toggle)
+            dl = status.get("teach_mode_enabled", False)
             if dl != self._daily_learner:
                 self._daily_learner = dl
                 self._btn_alltag.config(
                     bg=BTN_ON_GREEN if dl else BTN_OFF_DARK
                 )
                 self._lbl_alltag.config(
-                    text="Lernt..." if dl else "Bereit",
+                    text="Teach AN" if dl else "Teach AUS",
                     fg=BTN_ON_GREEN if dl else FG_DIM,
                 )
 
@@ -439,7 +439,7 @@ class PtzModule:
             return
 
         self._autonomous = not status.get("manual_mode", True)
-        self._daily_learner = status.get("daily_learner_enabled", False)
+        self._daily_learner = status.get("teach_mode_enabled", False)
 
         self._btn_autonom.config(
             bg=BTN_ON_GREEN if self._autonomous else BTN_OFF_RED
@@ -453,6 +453,6 @@ class PtzModule:
             bg=BTN_ON_GREEN if self._daily_learner else BTN_OFF_DARK
         )
         self._lbl_alltag.config(
-            text="Lernt..." if self._daily_learner else "Bereit",
+            text="Teach AN" if self._daily_learner else "Teach AUS",
             fg=BTN_ON_GREEN if self._daily_learner else FG_DIM,
         )
