@@ -195,44 +195,43 @@ class MolochWhisper:
     def transcribe(self, audio_path: str, language: str = "de",
                    timeout_ms: int = 0, **kwargs) -> str:
         """
-        On-Demand Transkription: faster-whisper Medium (CPU) als Primary.
+        On-Demand Transkription: Hailo NPU Base als Primary.
 
         Strategie:
-        1. faster-whisper Medium auf CPU (besseres Deutsch, ~5s fuer 10s Audio)
-        2. Fallback: Hailo NPU Base (schneller aber schlechter)
+        1. Hailo NPU Base (schnell, CPU-sparend, <1s Latenz)
+        2. Fallback: faster-whisper Small auf CPU (~5s fuer 10s Audio)
 
         Args:
             audio_path: Pfad zur WAV-Datei
-            language: Sprache (de, en, etc.)
-            timeout_ms: Timeout (unused fuer CPU)
+            language: Sprache (de, en, etc.) — IMMER explizit angeben!
+            timeout_ms: Timeout in ms (0 = automatisch)
 
         Returns:
             Transkribierter Text
         """
-        # Primary: faster-whisper Medium auf CPU
-        text = self._transcribe_faster_whisper(audio_path, language)
-        if text:
-            return text
-
-        # Fallback: NPU Whisper Base
-        logger.warning("[Whisper] faster-whisper fehlgeschlagen — Fallback auf NPU Base")
+        # Primary: NPU Whisper Base (schnell, kein CPU-Load)
         with self._load_lock:
             t_load = time.perf_counter()
-            if not self._load_npu():
-                logger.error("NPU init fehlgeschlagen — kein Whisper verfuegbar")
-                return ""
-            dt_load = (time.perf_counter() - t_load) * 1000
-            logger.info(f"[Whisper] NPU geladen in {dt_load:.0f}ms")
+            if self._load_npu():
+                dt_load = (time.perf_counter() - t_load) * 1000
+                logger.info(f"[Whisper] NPU geladen in {dt_load:.0f}ms")
+                try:
+                    if self._npu_processor:
+                        text = self._transcribe_npu(audio_path, language, timeout_ms)
+                        if text:
+                            return text
+                        logger.warning("[Whisper] NPU: kein Ergebnis — Fallback auf CPU")
+                finally:
+                    self._unload_npu()
+            else:
+                logger.warning("[Whisper] NPU init fehlgeschlagen — Fallback auf CPU")
 
-            try:
-                if self._npu_processor:
-                    return self._transcribe_npu(audio_path, language, timeout_ms)
-                return ""
-            finally:
-                self._unload_npu()
+        # Fallback: faster-whisper Small auf CPU
+        logger.warning("[Whisper] Fallback: faster-whisper Small auf CPU")
+        return self._transcribe_faster_whisper(audio_path, language)
 
     def _transcribe_faster_whisper(self, audio_path: str, language: str) -> str:
-        """Transkription mit faster-whisper Small auf CPU (On-Demand).
+        """Transkription mit faster-whisper Small auf CPU (Fallback wenn NPU fehlschlaegt).
 
         Modell wird geladen, transkribiert, und sofort wieder entladen (RAM sparen).
         ~626MB RAM waehrend Transkription, danach wieder frei.
@@ -256,8 +255,10 @@ class MolochWhisper:
                 initial_prompt="Ich spreche Deutsch mit fraenkischem Dialekt.",
                 vad_filter=True,
                 vad_parameters=dict(
-                    min_silence_duration_ms=500,
-                    speech_pad_ms=300,
+                    # 1200ms: nicht bei Atempausen oder kurzen Pausen abschneiden
+                    min_silence_duration_ms=1200,
+                    # 400ms Padding: Wortanfaenge/-enden nicht abschneiden
+                    speech_pad_ms=400,
                 ),
             )
             text = "".join(seg.text for seg in segments).strip()
@@ -273,7 +274,7 @@ class MolochWhisper:
                         f"Sprache={info.language} ({info.language_probability:.0%})")
 
             if text:
-                logger.info(f"NPU transcribed: {text}")
+                logger.info(f"[Whisper] faster-whisper transcribed: {text}")
             return text
 
         except ImportError:
@@ -305,18 +306,20 @@ class MolochWhisper:
 
             logger.info(f"NPU transcribing {audio_duration_s:.1f}s audio (timeout={timeout_ms}ms)...")
 
-            # Hailo API aufrufen — initial_prompt als optionaler Kwarg
+            # Hailo API aufrufen — optionale Parameter per try/except absichern
             try:
+                # Vollstaendiger Aufruf: language=de, vad_filter=False (kein internes Cutting)
                 segments = self._npu_processor.generate_all_segments(
                     audio_data=audio_data,
                     task=Speech2TextTask.TRANSCRIBE,
                     language=language,
                     timeout_ms=timeout_ms,
                     initial_prompt="Ich spreche Deutsch. Fränkischer Dialekt möglich.",
+                    vad_filter=False,  # VAD=0: kein internes Segmentschneiden
                 )
             except TypeError:
-                # Hailo API-Version unterstuetzt initial_prompt nicht → ohne Prompt
-                logger.debug("Hailo API: initial_prompt nicht unterstuetzt — ohne Prompt")
+                # Aeltere Hailo API-Version: ohne optionale Parameter
+                logger.debug("Hailo API: optionale Parameter nicht unterstuetzt — Basis-Aufruf")
                 segments = self._npu_processor.generate_all_segments(
                     audio_data=audio_data,
                     task=Speech2TextTask.TRANSCRIBE,
