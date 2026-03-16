@@ -313,58 +313,74 @@ class MolochService:
     # Teach Smart Snapshot — Qualitaetspruefung via NPU
     # =========================================================================
 
-    def _teach_smart_snapshot(self):
+    def _teach_smart_snapshot(self, pre_frame=None, pre_detections=None):
         """Teach-Foto mit NPU-Qualitaetspruefung (3 Versuche).
+
+        Args:
+            pre_frame: Vorbereiteter Frame aus Perception Loop (optional)
+            pre_detections: Vorbereitete Detections aus Perception Loop (optional)
 
         Prueft: SCRFD-Confidence, Face-Groesse, Helligkeit, Embedding.
         LED-Feedback: weiss=gut, rot=schlecht, gelb=aufgegeben.
-        Speichert Ergebnis in self._teach_result fuer GUI-Polling.
         """
         import cv2
         import numpy as np
         import json
         import os
 
+        # FIX 3: Lockere Thresholds fuer Teach
         MAX_RETRIES = 3
-        MIN_CONF = 0.80
-        MIN_FACE_PX = 80
-        MIN_BRIGHTNESS = 30
-        MAX_BRIGHTNESS = 220
-        MIN_EMB_NORM = 10.0
+        MIN_CONF = 0.65       # war 0.80 — besser ein Bild als keins
+        MIN_FACE_PX = 60      # war 80 — Gesicht muss nicht riesig sein
+        MIN_BRIGHTNESS = 25
+        MAX_BRIGHTNESS = 230
+        MIN_EMB_NORM = 5.0    # war 10.0 — ArcFace liefert oft kleine Normen
 
         self._teach_busy = True
-        # Status fuer GUI-Polling initialisieren
         self._teach_result = {"status": "running", "attempt": 0, "detail": ""}
         try:
-            self._teach_smart_snapshot_inner(
+            self._teach_inner(
                 cv2, np, json, os,
                 MAX_RETRIES, MIN_CONF, MIN_FACE_PX,
-                MIN_BRIGHTNESS, MAX_BRIGHTNESS, MIN_EMB_NORM
+                MIN_BRIGHTNESS, MAX_BRIGHTNESS, MIN_EMB_NORM,
+                pre_frame, pre_detections
             )
         except Exception as e:
             logger.error(f"[TEACH] Unerwarteter Fehler: {e}")
             self._teach_result = {"status": "failed", "detail": str(e), "reason": str(e)}
         finally:
             self._teach_busy = False
+            # Scheduler zuruecksetzen wenn Teach-Modus AUS (manueller Trigger)
+            if not self._teach_mode_enabled and hasattr(self._inference, 'force_all_active'):
+                self._inference.force_all_active(False)
 
-    def _teach_smart_snapshot_inner(self, cv2, np, json, os,
-                                     MAX_RETRIES, MIN_CONF, MIN_FACE_PX,
-                                     MIN_BRIGHTNESS, MAX_BRIGHTNESS, MIN_EMB_NORM):
-        """Innere Logik fuer _teach_smart_snapshot (try/finally-sicher)."""
+    def _teach_inner(self, cv2, np, json, os,
+                     MAX_RETRIES, MIN_CONF, MIN_FACE_PX,
+                     MIN_BRIGHTNESS, MAX_BRIGHTNESS, MIN_EMB_NORM,
+                     pre_frame, pre_detections):
+        """Innere Teach-Logik (try/finally-gesichert durch Wrapper)."""
 
         for attempt in range(1, MAX_RETRIES + 1):
             self._teach_result["attempt"] = attempt
+            self._teach_result["status"] = "running"
             self._teach_result["detail"] = f"Versuch {attempt}/{MAX_RETRIES}..."
             logger.info(f"[TEACH] Versuch {attempt}/{MAX_RETRIES}")
 
-            # --- Frame + Detections holen ---
-            detections = []
-            frame = None
-            try:
-                detections = self._inference.get_detections() if self._inference else []
-                frame = self._inference.get_annotated_frame() if self._inference else None
-            except Exception as e:
-                logger.warning(f"[TEACH] Frame/Detection Fehler: {e}")
+            # --- FIX 2: Frame + Detections holen ---
+            # Versuch 1: vorbereitete Daten aus Perception Loop nutzen
+            # Versuch 2+: frisch aus Pipeline holen
+            if attempt == 1 and pre_frame is not None and pre_detections is not None:
+                frame = pre_frame
+                detections = pre_detections
+                logger.info("[TEACH] Nutze vorbereiteten Frame aus Perception Loop")
+            else:
+                detections = []
+                frame = None
+                try:
+                    detections = self._inference.get_detections() if self._inference else []
+                    frame = self._inference.get_annotated_frame() if self._inference else None
+                except Exception as e:
+                    logger.warning(f"[TEACH] Frame/Detection Fehler: {e}")
 
             if frame is None:
                 self._teach_result["detail"] = "Kein Kamerabild verfuegbar"
@@ -385,7 +401,7 @@ class MolochService:
                 self._teach_result["detail"] = "Kein Gesicht erkannt"
                 self._teach_result["status"] = "retry"
                 self._led_flash("rot", 0.5)
-                logger.info("[TEACH] Kein Gesicht im Frame")
+                logger.info(f"[TEACH] Kein Gesicht — {len(detections)} Detections vorhanden")
                 if attempt < MAX_RETRIES:
                     time.sleep(1.0)
                 continue
@@ -395,7 +411,6 @@ class MolochService:
             face_bbox = best_face.get("bbox", [0, 0, 0, 0])
             embedding = best_face.get("embedding", None)
 
-            # Frame-Dimensionen fuer BBox-Pixel-Berechnung
             h, w = frame.shape[:2]
             x1_px = int(face_bbox[0] * w)
             y1_px = int(face_bbox[1] * h)
@@ -404,8 +419,8 @@ class MolochService:
             face_w = x2_px - x1_px
             face_h = y2_px - y1_px
 
-            # Helligkeit im Face-Bereich pruefen
-            brightness = 128  # Default
+            # Helligkeit im Face-Bereich
+            brightness = 128
             try:
                 face_crop = frame[max(0, y1_px):max(1, y2_px), max(0, x1_px):max(1, x2_px)]
                 if face_crop.size > 0:
@@ -414,61 +429,43 @@ class MolochService:
             except Exception:
                 pass
 
-            # Embedding-Norm pruefen
+            # Embedding-Norm
             emb_norm = 0.0
             if embedding is not None and len(embedding) > 0:
                 emb_norm = float(np.linalg.norm(embedding))
 
-            # Detail-String fuer GUI
+            # Qualitaets-Flags
             conf_ok = face_conf >= MIN_CONF
             size_ok = face_w >= MIN_FACE_PX and face_h >= MIN_FACE_PX
             bright_ok = MIN_BRIGHTNESS <= brightness <= MAX_BRIGHTNESS
             emb_ok = embedding is not None and emb_norm >= MIN_EMB_NORM
 
-            detail_parts = []
-            detail_parts.append(f"Conf: {int(face_conf * 100)}%" + (" \u2713" if conf_ok else " \u2717"))
-            detail_parts.append(f"Groesse: {face_w}x{face_h}" + (" \u2713" if size_ok else " \u2717"))
-            detail_parts.append(f"Helligkeit: {brightness}" + (" \u2713" if bright_ok else " \u2717"))
-            detail_parts.append(f"Embedding: {'OK' if emb_ok else 'FEHLT'}")
-            detail_str = " — ".join(detail_parts)
+            detail_parts = [
+                f"Conf: {int(face_conf * 100)}%" + (" \u2713" if conf_ok else " \u2717"),
+                f"Gr: {face_w}x{face_h}" + (" \u2713" if size_ok else " \u2717"),
+                f"Hell: {brightness}" + (" \u2713" if bright_ok else " \u2717"),
+                f"Emb: {'OK' if emb_ok else 'FEHLT'}",
+            ]
+            detail_str = " | ".join(detail_parts)
             self._teach_result["detail"] = detail_str
-
             logger.info(f"[TEACH] Qualitaet: {detail_str}")
 
             # --- Fehlgrund bestimmen ---
+            fail_reason = None
             if not conf_ok:
-                self._teach_result["status"] = "retry"
-                self._teach_result["reason"] = "Gesicht nicht klar erkannt"
-                self._led_flash("rot", 0.5)
-                logger.info(f"[TEACH] FAIL: Confidence {face_conf:.2f} < {MIN_CONF}")
-                if attempt < MAX_RETRIES:
-                    time.sleep(1.0)
-                continue
+                fail_reason = f"Gesicht unscharf ({int(face_conf*100)}%)"
+            elif not size_ok:
+                fail_reason = f"Gesicht zu klein ({face_w}x{face_h}px)"
+            elif not bright_ok:
+                fail_reason = "Zu dunkel" if brightness < MIN_BRIGHTNESS else "Zu hell"
+            elif not emb_ok:
+                fail_reason = f"Kein Embedding (norm={emb_norm:.1f})"
 
-            if not size_ok:
+            if fail_reason:
                 self._teach_result["status"] = "retry"
-                self._teach_result["reason"] = "Bitte naeher zur Kamera"
+                self._teach_result["reason"] = fail_reason
                 self._led_flash("rot", 0.5)
-                logger.info(f"[TEACH] FAIL: Face {face_w}x{face_h} < {MIN_FACE_PX}px")
-                if attempt < MAX_RETRIES:
-                    time.sleep(1.0)
-                continue
-
-            if not bright_ok:
-                reason = "Zu dunkel — besseres Licht" if brightness < MIN_BRIGHTNESS else "Zu hell — weniger Licht"
-                self._teach_result["status"] = "retry"
-                self._teach_result["reason"] = reason
-                self._led_flash("rot", 0.5)
-                logger.info(f"[TEACH] FAIL: Helligkeit {brightness}")
-                if attempt < MAX_RETRIES:
-                    time.sleep(1.0)
-                continue
-
-            if not emb_ok:
-                self._teach_result["status"] = "retry"
-                self._teach_result["reason"] = "NPU konnte Gesicht nicht verarbeiten"
-                self._led_flash("rot", 0.5)
-                logger.info(f"[TEACH] FAIL: Embedding norm={emb_norm:.1f}")
+                logger.info(f"[TEACH] FAIL: {fail_reason}")
                 if attempt < MAX_RETRIES:
                     time.sleep(1.0)
                 continue
@@ -486,7 +483,7 @@ class MolochService:
             try:
                 emb_normalized = embedding / np.linalg.norm(embedding)
 
-                # Similarity gegen vorhandene Markus-Embeddings testen
+                # Similarity gegen vorhandene Embeddings testen
                 matched_name, matched_sim = self._inference._match_face(embedding)
                 sim_score = matched_sim
 
@@ -528,9 +525,10 @@ class MolochService:
 
         # --- Alle 3 Versuche fehlgeschlagen ---
         logger.warning("[TEACH] Alle 3 Versuche fehlgeschlagen")
-        self._led_flash("gelb", 1.0)  # Orange/Gelb = aufgegeben
+        self._led_flash("gelb", 1.0)
         self._teach_result["status"] = "failed"
-        self._teach_result["detail"] = f"3 Versuche fehlgeschlagen: {self._teach_result.get('reason', 'unbekannt')}"
+        self._teach_result["reason"] = self._teach_result.get("reason", "unbekannt")
+        self._teach_result["detail"] = f"3x fehlgeschlagen: {self._teach_result['reason']}"
 
         # TTS-Meldung
         if self._voice_pipeline and hasattr(self._voice_pipeline, '_speak'):
@@ -716,14 +714,19 @@ class MolochService:
                         _t_conf = getattr(pframe, 'face_confidence', 0.0)
                         _t_now = time.time()
                         _t_cooldown_ok = (_t_now - self._teach_last_trigger) >= self._teach_cooldown
-                        if _t_face and _t_conf >= 0.60 and _t_cooldown_ok:
-                            self._teach_busy = True
-                            self._teach_last_trigger = _t_now
-                            self._teach_result = {"status": "starting", "attempt": 0, "detail": ""}
-                            threading.Thread(
-                                target=self._teach_smart_snapshot,
-                                daemon=True, name="TeachAuto"
-                            ).start()
+                        if _t_face and _t_conf >= 0.50 and _t_cooldown_ok:
+                            # Frame + Detections JETZT holen (gleicher Moment wie PFrame)
+                            _t_frame = self._inference.get_annotated_frame() if self._inference else None
+                            _t_dets = self._inference.get_detections() if self._inference else []
+                            if _t_frame is not None:
+                                self._teach_busy = True
+                                self._teach_last_trigger = _t_now
+                                self._teach_result = {"status": "starting", "attempt": 0, "detail": ""}
+                                threading.Thread(
+                                    target=self._teach_smart_snapshot,
+                                    args=(_t_frame, _t_dets),
+                                    daemon=True, name="TeachAuto"
+                                ).start()
                     except Exception as e:
                         logger.debug(f"[TAPPAS-PERC] Teach auto: {e}")
 
@@ -2197,17 +2200,24 @@ class MolochService:
             # Teach-Modus AN/AUS umschalten (persistent)
             self._teach_mode_enabled = not self._teach_mode_enabled
             logger.info(f"[TEACH] Modus: {'AN' if self._teach_mode_enabled else 'AUS'}")
+            # Scheduler erzwingen (FIX 1)
+            if hasattr(self._inference, 'force_all_active'):
+                self._inference.force_all_active(self._teach_mode_enabled)
             self._save_settings()
             if not self._teach_mode_enabled:
                 # Modus ausgeschaltet — Result zuruecksetzen
                 self._teach_result = {}
-        elif action == 'teach_snapshot':
-            # Manueller Smart Teach (Fallback fuer direkte Aufrufe)
+        elif action == 'teach_trigger':
+            # Manueller Teach-Trigger (FIX 4: sofort, kein Cooldown)
             if not self._teach_busy:
+                logger.info("[TEACH] Manueller Trigger via Panel")
+                # Scheduler temporaer erzwingen
+                if hasattr(self._inference, 'force_all_active'):
+                    self._inference.force_all_active(True)
                 self._teach_result = {"status": "starting", "attempt": 0, "detail": ""}
                 threading.Thread(
                     target=self._teach_smart_snapshot,
-                    daemon=True, name="TeachSmart"
+                    daemon=True, name="TeachManual"
                 ).start()
         elif action == 'cloud_status_led':
             self._cam.cloud_toggle_status_led()
@@ -2475,6 +2485,9 @@ class MolochService:
             if "mode_enabled" in teach:
                 self._teach_mode_enabled = bool(teach["mode_enabled"])
                 logger.info(f"[SETTINGS] Teach-Modus: {'AN' if self._teach_mode_enabled else 'AUS'}")
+                # Scheduler erzwingen wenn Teach-Modus persistent AN war
+                if self._teach_mode_enabled and hasattr(self._inference, 'force_all_active'):
+                    self._inference.force_all_active(True)
             if "cooldown" in teach:
                 self._teach_cooldown = float(teach["cooldown"])
         except Exception as e:

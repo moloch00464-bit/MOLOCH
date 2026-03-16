@@ -188,6 +188,7 @@ class TappasPipeline:
         self._sched_person_last_seen = 0.0
         self._sched_face_last_seen = 0.0
         self._sched_lock = threading.Lock()
+        self._sched_force_all = False  # Teach-Modus: Scheduler auf ALL_ACTIVE erzwingen
 
         # --- SCRFD Valve-Gating (echtes NPU-Gating via GStreamer valve) ---
         self._scrfd_valve = None       # valve element: drop=True = SCRFD aus
@@ -364,6 +365,20 @@ class TappasPipeline:
         with self._sched_lock:
             return self._sched_mode
 
+    def force_all_active(self, enabled: bool):
+        """Scheduler auf ALL_ACTIVE erzwingen (Teach-Modus).
+
+        enabled=True:  SCRFD + ArcFace bleiben immer aktiv
+        enabled=False: Scheduler kehrt zu normalem adaptiven Betrieb zurueck
+        """
+        self._sched_force_all = enabled
+        if enabled:
+            # Sofort auf ALL_ACTIVE hochschalten
+            self._update_npu_scheduler(has_person=True, has_face=True)
+            logger.info("[NPU-SCHED] Force ALL_ACTIVE fuer Teach-Modus")
+        else:
+            logger.info("[NPU-SCHED] Force ALL_ACTIVE aufgehoben")
+
     def _init_scrfd_gate(self) -> bool:
         """GLib-Timeout-Callback: Initalen Gate-State nach Pipeline-Start setzen.
 
@@ -412,7 +427,10 @@ class TappasPipeline:
         person_recent = (now - self._sched_person_last_seen) < SCHED_COOLDOWN_DOWN
         face_recent = (now - self._sched_face_last_seen) < SCHED_COOLDOWN_DOWN
 
-        if face_recent:
+        # Teach-Modus erzwingt ALL_ACTIVE (SCRFD + ArcFace immer an)
+        if self._sched_force_all:
+            new_mode = SCHED_ALL_ACTIVE
+        elif face_recent:
             new_mode = SCHED_ALL_ACTIVE
         elif person_recent:
             new_mode = SCHED_YOLO_SCRFD

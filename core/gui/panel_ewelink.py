@@ -89,12 +89,21 @@ class EwelinkModule:
 
         # TEACH (Toggle: Lernmodus AN/AUS im Service)
         self._btn_teach = tk.Button(
-            row, text="TEACH", width=8,
+            row, text="TEACH", width=6,
             bg=BTN_OFF_DARK, fg=FG_WHITE, font=FONT_BUTTON,
             activebackground=BG_FRAME,
             command=self._toggle_teach_mode,
         )
-        self._btn_teach.grid(row=0, column=2, padx=3, pady=2)
+        self._btn_teach.grid(row=0, column=2, padx=2, pady=2)
+
+        # FOTO (manueller Teach-Trigger, sofort, kein Cooldown)
+        self._btn_foto = tk.Button(
+            row, text="FOTO", width=5,
+            bg="#9933cc", fg=FG_WHITE, font=FONT_BUTTON,
+            activebackground="#7722aa",
+            command=self._trigger_teach_foto,
+        )
+        self._btn_foto.grid(row=0, column=3, padx=2, pady=2)
 
         # FLUTLICHT (weisse LEDs toggle, nightVision 0=aus / 2=an)
         self._btn_flutlicht = tk.Button(
@@ -103,7 +112,7 @@ class EwelinkModule:
             activebackground=BG_FRAME,
             command=self._toggle_flutlicht,
         )
-        self._btn_flutlicht.grid(row=0, column=3, padx=3, pady=2)
+        self._btn_flutlicht.grid(row=0, column=4, padx=3, pady=2)
 
         # ERKANNT (Status-Indikator, wird vom Service gesteuert)
         self._btn_erkannt = tk.Button(
@@ -113,7 +122,7 @@ class EwelinkModule:
             state="disabled",
             disabledforeground=FG_WHITE,
         )
-        self._btn_erkannt.grid(row=0, column=4, padx=3, pady=2)
+        self._btn_erkannt.grid(row=0, column=5, padx=3, pady=2)
 
         # EINPRÄGEN Button
         self._btn_einpraegen = tk.Button(
@@ -122,7 +131,7 @@ class EwelinkModule:
             activebackground=BG_FRAME,
             command=self._start_einpraegen,
         )
-        self._btn_einpraegen.grid(row=0, column=5, padx=3, pady=2)
+        self._btn_einpraegen.grid(row=0, column=6, padx=3, pady=2)
 
         # GALERIE Button
         tk.Button(
@@ -130,7 +139,7 @@ class EwelinkModule:
             bg=BG_BUTTON, fg=FG_LABEL, font=FONT_BUTTON,
             activebackground=BG_FRAME,
             command=self._open_gallery,
-        ).grid(row=0, column=6, padx=3, pady=2)
+        ).grid(row=0, column=7, padx=3, pady=2)
 
         # Status-Labels (Zeile 1 unter den Buttons)
         self._lbl_alarm = tk.Label(
@@ -144,24 +153,24 @@ class EwelinkModule:
         self._lbl_snap.grid(row=1, column=1, pady=(0, 5))
 
         self._lbl_teach = tk.Label(
-            row, text="bereit", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
+            row, text="AUS", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
         )
-        self._lbl_teach.grid(row=1, column=2, pady=(0, 5))
+        self._lbl_teach.grid(row=1, column=2, columnspan=2, pady=(0, 5))
 
         self._lbl_flutlicht = tk.Label(
             row, text="AUS", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
         )
-        self._lbl_flutlicht.grid(row=1, column=3, pady=(0, 5))
+        self._lbl_flutlicht.grid(row=1, column=4, pady=(0, 5))
 
         self._lbl_erkannt = tk.Label(
             row, text="AUS", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
         )
-        self._lbl_erkannt.grid(row=1, column=4, pady=(0, 5))
+        self._lbl_erkannt.grid(row=1, column=5, pady=(0, 5))
 
         self._lbl_einpraegen = tk.Label(
             row, text="", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
         )
-        self._lbl_einpraegen.grid(row=1, column=5, pady=(0, 5))
+        self._lbl_einpraegen.grid(row=1, column=6, pady=(0, 5))
 
         # Einpraegen Poll-State
         self._einpraegen_polling = False
@@ -192,6 +201,11 @@ class EwelinkModule:
     def _toggle_teach_mode(self):
         """Teach-Modus AN/AUS im Service umschalten."""
         self._service._write_command("teach_mode_toggle")
+
+    def _trigger_teach_foto(self):
+        """Manueller Teach-Trigger — sofort, ohne Cooldown."""
+        self._service._write_command("teach_trigger")
+        self._lbl_teach.config(text="\u23f3 Foto...", fg="#cc88ff")
 
     def _toggle_flutlicht(self):
         """Weisse LEDs an/aus (nightVision 0=day/aus, 2=night/an)."""
