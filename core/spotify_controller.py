@@ -35,7 +35,7 @@ import subprocess
 import threading
 import time
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 
 logger = logging.getLogger("MolochSpotify")
@@ -45,6 +45,7 @@ _ENV_PATH = os.path.expanduser("~/moloch/.env.spotify")
 _TOKEN_CACHE = os.path.expanduser("~/.cache/spotipy/.cache")
 _PROFILE_PATH = "/mnt/moloch-data/memory/spotify/spotify_profile.json"
 _TRACK_INDEX_PATH = "/mnt/moloch-data/memory/spotify/track_index.json"
+_RECENTLY_PLAYED_PATH = "/mnt/moloch-data/memory/spotify/recently_played.json"
 
 # =========================================================================
 # Zone-Kuenstler Mapping (aus Markus' Spotify-Profil, 6833 Stunden)
@@ -194,8 +195,11 @@ class SpotifyController:
         self._playlists_loaded = False
 
         # Kuerzlich gespielt — Ausschluss (keine Wiederholung)
-        self._recently_played: List[str] = []   # URIs der letzten ~50 gespielten Tracks
-        self._RECENT_MAX = 50
+        # Persistent auf Disk, mit Timestamp pro Track, 7 Tage Ablauf
+        self._recently_played: List[Dict] = []  # [{"uri": "...", "played_at": "ISO-Timestamp"}]
+        self._RECENT_MAX = 200
+        self._RECENT_EXPIRY_DAYS = 7
+        self._load_recently_played()
 
         # Cached Status — wird vom Status-Thread aktualisiert, nicht von der Pipeline
         self._cached_status: Dict[str, Any] = {}
@@ -454,7 +458,8 @@ class SpotifyController:
         """Zufaellige Tracks aus dem GESAMTEN Index (Ueberraschungs-Mix).
 
         Waehlt zufaellige Artists und jeweils 1-2 Tracks.
-        Bevorzugt Tracks mit vielen Plays (Markus kennt sie).
+        Entdecker-Modus: wenige Plays = hoehere Chance (aber mindestens 1 Play).
+        So kommen selten gehoerte Tracks oefter dran.
         """
         if not self._track_index:
             return []
@@ -463,12 +468,17 @@ class SpotifyController:
             return []
         random.shuffle(all_artists)
         uris = []
-        for artist_key in all_artists[:count * 2]:
+        for artist_key in all_artists[:count * 3]:
             tracks = self._track_index[artist_key]
             if tracks:
-                # Gewichteter Pick: mehr Plays = hoehere Chance
-                weighted = sorted(tracks, key=lambda t: t.get("plays", 0), reverse=True)
-                pick = weighted[0] if random.random() < 0.6 else random.choice(tracks)
+                # Entdecker-Modus: wenige Plays = hoehere Chance
+                # Nur Tracks mit mindestens 1 Play (nicht komplett ungehoert)
+                eligible = [t for t in tracks if t.get("plays", 0) >= 1]
+                if not eligible:
+                    continue
+                # Gewichtung umkehren: 1/plays als Gewicht (selten = bevorzugt)
+                weights = [1.0 / max(t.get("plays", 1), 1) for t in eligible]
+                pick = random.choices(eligible, weights=weights, k=1)[0]
                 uris.append(pick["uri"])
                 if len(uris) >= count:
                     break
@@ -643,9 +653,12 @@ class SpotifyController:
         uris = []
 
         # 1. Artist-Match: Suche im Index nach Artist-Namen
+        #    Shuffle Tracks VOR Top-N Auswahl (nicht immer die gleichen)
         for artist_key, tracks in self._track_index.items():
             if query_lower in artist_key or artist_key in query_lower:
-                uris.extend(t["uri"] for t in tracks[:15])
+                shuffled = list(tracks)
+                random.shuffle(shuffled)
+                uris.extend(t["uri"] for t in shuffled[:15])
                 if len(uris) >= 20:
                     break
 
@@ -732,7 +745,7 @@ class SpotifyController:
 
         # Kreativitaet: 5 zufaellige Tracks aus dem GESAMTEN Index beimischen
         # (Ueberraschungseffekt — nicht immer nur die selben Zone-Artists)
-        surprise_uris = self._get_random_index_tracks(count=8)
+        surprise_uris = self._get_random_index_tracks(count=12)
         uris.extend(surprise_uris)
 
         if not uris:
@@ -1003,8 +1016,37 @@ class SpotifyController:
         return "Deine Playlists: " + ", ".join(names)
 
     # =========================================================================
-    # KUERZLICH-GESPIELT: Ausschluss fuer mehr Abwechslung
+    # KUERZLICH-GESPIELT: Persistenter Ausschluss fuer mehr Abwechslung
     # =========================================================================
+
+    def _load_recently_played(self):
+        """Lade kuerzlich gespielte Tracks von Disk. Entferne abgelaufene (>7 Tage)."""
+        try:
+            if os.path.exists(_RECENTLY_PLAYED_PATH):
+                with open(_RECENTLY_PLAYED_PATH, "r") as f:
+                    data = json.load(f)
+                # Abgelaufene Tracks entfernen
+                cutoff = (datetime.now() - timedelta(days=self._RECENT_EXPIRY_DAYS)).isoformat()
+                self._recently_played = [
+                    entry for entry in data
+                    if entry.get("played_at", "") > cutoff
+                ]
+                logger.info(f"[SPOTIFY] {len(self._recently_played)} kuerzlich gespielte Tracks geladen "
+                            f"(von {len(data)} gesamt, {len(data) - len(self._recently_played)} abgelaufen)")
+            else:
+                self._recently_played = []
+        except Exception as e:
+            logger.warning(f"[SPOTIFY] recently_played laden fehlgeschlagen: {e}")
+            self._recently_played = []
+
+    def _save_recently_played(self):
+        """Speichere kuerzlich gespielte Tracks auf Disk."""
+        try:
+            os.makedirs(os.path.dirname(_RECENTLY_PLAYED_PATH), exist_ok=True)
+            with open(_RECENTLY_PLAYED_PATH, "w") as f:
+                json.dump(self._recently_played, f, indent=1)
+        except Exception as e:
+            logger.warning(f"[SPOTIFY] recently_played speichern fehlgeschlagen: {e}")
 
     def _filter_recent(self, uris: List[str]) -> List[str]:
         """Entferne kuerzlich gespielte Tracks aus der URI-Liste.
@@ -1014,18 +1056,22 @@ class SpotifyController:
         """
         if not self._recently_played:
             return uris
-        recent_set = set(self._recently_played)
+        recent_set = set(entry["uri"] for entry in self._recently_played)
         filtered = [u for u in uris if u not in recent_set]
         if len(filtered) < 5:
             return uris  # Lieber Wiederholung als Stille
         return filtered
 
     def _mark_played(self, uris: List[str]):
-        """URIs als kuerzlich gespielt markieren."""
-        self._recently_played.extend(uris)
-        # Max-Groesse einhalten
+        """URIs als kuerzlich gespielt markieren und persistent speichern."""
+        now = datetime.now().isoformat()
+        for uri in uris:
+            self._recently_played.append({"uri": uri, "played_at": now})
+        # Max-Groesse einhalten (aelteste raus)
         if len(self._recently_played) > self._RECENT_MAX:
             self._recently_played = self._recently_played[-self._RECENT_MAX:]
+        # Persistent speichern
+        self._save_recently_played()
 
     # =========================================================================
     # AUTO-DJ: Automatischer Zone-Wechsel
