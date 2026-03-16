@@ -96,6 +96,47 @@ def _load_api_key() -> Optional[str]:
     return None
 
 
+def _detect_search_intent(text: str) -> Optional[str]:
+    """Pruefen ob Markus eine Websuche will. Gibt Suchbegriff zurueck oder None.
+
+    Trigger-Phrases (deutsch, Whisper-robust):
+      "such im internet ...", "google mal ...", "was weißt du über ..."
+      "such mal nach ...", "suche nach ...", "kannst du googeln ..."
+    """
+    import re as _re
+    text_l = text.lower().strip()
+
+    # Muster: "such [mal] [im internet] nach X"
+    m = _re.search(
+        r"such\s+(?:mal\s+)?(?:im\s+internet\s+)?(?:nach\s+)?(.+?)[\?\.\!]*$",
+        text_l,
+    )
+    if m:
+        return m.group(1).strip()
+
+    # Muster: "google [mal] X"
+    m = _re.search(r"googl[e]?\s+(?:mal\s+)?(.+?)[\?\.\!]*$", text_l)
+    if m:
+        return m.group(1).strip()
+
+    # Muster: "was weißt du über X"
+    m = _re.search(r"was\s+(?:weit|wei[sß]t)\s+du\s+(?:über|uber)\s+(.+?)[\?\.\!]*$", text_l)
+    if m:
+        return m.group(1).strip()
+
+    # Muster: "suche [nach] X"
+    m = _re.search(r"suche\s+(?:nach\s+)?(.+?)[\?\.\!]*$", text_l)
+    if m:
+        return m.group(1).strip()
+
+    # Muster: "kannst du googeln / im internet suchen"
+    m = _re.search(r"kannst\s+du\s+(?:googeln|im\s+internet\s+suchen)\s+(.+?)[\?\.\!]*$", text_l)
+    if m:
+        return m.group(1).strip()
+
+    return None
+
+
 def _perception_to_text() -> str:
     """Aktuellen Wahrnehmungs-Kontext als Text fuer System-Prompt."""
     try:
@@ -1028,6 +1069,17 @@ class VoicePipeline:
         if hw_status:
             system = system + "\n" + _sanitize_text(hw_status)
 
+        # Internet-Status
+        try:
+            from core.net.internet_bridge import get_internet_bridge
+            bridge = get_internet_bridge()
+            if bridge.online:
+                system = system + f"\nINTERNET: ONLINE ({bridge.latency_ms}ms Latenz)"
+            else:
+                system = system + "\nINTERNET: OFFLINE (kein Internetzugang gerade)"
+        except Exception:
+            pass  # Internet-Bridge optional
+
         try:
             from core.personality.personality_engine import get_personality_engine
             pe = get_personality_engine()
@@ -1437,6 +1489,31 @@ class VoicePipeline:
 
         try:
             self._whisper_status = "Denke..."
+
+            # Internet-Suche pruefen (VOR Claude API)
+            search_query = _detect_search_intent(text)
+            if search_query:
+                try:
+                    from core.net.internet_bridge import get_internet_bridge
+                    bridge = get_internet_bridge()
+                    if bridge.online:
+                        self._whisper_status = "Suche im Netz..."
+                        self._emit_message("System", f"Suche: {search_query}")
+                        results = bridge.search_web(search_query)
+                        if results:
+                            search_block = f"\n\n[SUCHERGEBNISSE fuer: {search_query}]\n"
+                            for i, r in enumerate(results, 1):
+                                search_block += f"{i}. {r['title']}: {r['text']}\n"
+                            search_block += "[Nutze diese Infos fuer deine Antwort!]"
+                            text = text + search_block
+                        else:
+                            text = text + "\n\n[SUCHE: Keine Ergebnisse gefunden. Antworte aus deinem Wissen.]"
+                    else:
+                        text = text + "\n\n[SUCHE: Aktuell offline, kein Internetzugang.]"
+                    self._whisper_status = "Denke..."
+                except Exception as e:
+                    logger.error(f"[VOICE] Internet-Suche fehlgeschlagen: {e}")
+
             response = self._chat(text)
 
             if not response:
