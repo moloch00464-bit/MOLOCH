@@ -79,13 +79,21 @@ class EwelinkModule:
         )
         self._btn_alarm.grid(row=0, column=0, padx=3, pady=2)
 
-        # SNAP (cyan, einmal-klick)
+        # SNAP (cyan, einmal-klick) → speichert in media/snapshots/
         tk.Button(
             row, text="SNAP", width=8,
             bg=BTN_SNAP_CYAN, fg=FG_WHITE, font=FONT_BUTTON,
             activebackground=BG_FRAME,
             command=self._take_snapshot,
         ).grid(row=0, column=1, padx=3, pady=2)
+
+        # TEACH (lila, einmal-klick) → speichert in media/teach/ + LED weiss
+        tk.Button(
+            row, text="TEACH", width=8,
+            bg="#9933cc", fg=FG_WHITE, font=FONT_BUTTON,
+            activebackground="#7722aa",
+            command=self._take_teach_photo,
+        ).grid(row=0, column=2, padx=3, pady=2)
 
         # FLUTLICHT (weisse LEDs toggle, nightVision 0=aus / 2=an)
         self._btn_flutlicht = tk.Button(
@@ -94,7 +102,7 @@ class EwelinkModule:
             activebackground=BG_FRAME,
             command=self._toggle_flutlicht,
         )
-        self._btn_flutlicht.grid(row=0, column=2, padx=3, pady=2)
+        self._btn_flutlicht.grid(row=0, column=3, padx=3, pady=2)
 
         # ERKANNT (Status-Indikator, wird vom Service gesteuert)
         self._btn_erkannt = tk.Button(
@@ -104,7 +112,7 @@ class EwelinkModule:
             state="disabled",
             disabledforeground=FG_WHITE,
         )
-        self._btn_erkannt.grid(row=0, column=3, padx=3, pady=2)
+        self._btn_erkannt.grid(row=0, column=4, padx=3, pady=2)
 
         # EINPRÄGEN Button
         self._btn_einpraegen = tk.Button(
@@ -113,7 +121,7 @@ class EwelinkModule:
             activebackground=BG_FRAME,
             command=self._start_einpraegen,
         )
-        self._btn_einpraegen.grid(row=0, column=4, padx=3, pady=2)
+        self._btn_einpraegen.grid(row=0, column=5, padx=3, pady=2)
 
         # GALERIE Button
         tk.Button(
@@ -121,9 +129,9 @@ class EwelinkModule:
             bg=BG_BUTTON, fg=FG_LABEL, font=FONT_BUTTON,
             activebackground=BG_FRAME,
             command=self._open_gallery,
-        ).grid(row=0, column=5, padx=3, pady=2)
+        ).grid(row=0, column=6, padx=3, pady=2)
 
-        # Status-Labels
+        # Status-Labels (Zeile 1 unter den Buttons)
         self._lbl_alarm = tk.Label(
             row, text="AUS", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
         )
@@ -134,23 +142,30 @@ class EwelinkModule:
         )
         self._lbl_snap.grid(row=1, column=1, pady=(0, 5))
 
+        self._lbl_teach = tk.Label(
+            row, text="bereit", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
+        )
+        self._lbl_teach.grid(row=1, column=2, pady=(0, 5))
+
         self._lbl_flutlicht = tk.Label(
             row, text="AUS", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
         )
-        self._lbl_flutlicht.grid(row=1, column=2, pady=(0, 5))
+        self._lbl_flutlicht.grid(row=1, column=3, pady=(0, 5))
 
         self._lbl_erkannt = tk.Label(
             row, text="AUS", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
         )
-        self._lbl_erkannt.grid(row=1, column=3, pady=(0, 5))
+        self._lbl_erkannt.grid(row=1, column=4, pady=(0, 5))
 
         self._lbl_einpraegen = tk.Label(
             row, text="", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
         )
-        self._lbl_einpraegen.grid(row=1, column=4, pady=(0, 5))
+        self._lbl_einpraegen.grid(row=1, column=5, pady=(0, 5))
 
         # Einpraegen Poll-State
         self._einpraegen_polling = False
+        # Teach Smart Poll-State
+        self._teach_polling = False
 
     def _toggle_alarm(self):
         """Alarm an/aus."""
@@ -168,13 +183,74 @@ class EwelinkModule:
             self._lbl_alarm.config(text="AUS", fg=FG_DIM)
 
     def _take_snapshot(self):
-        """Snapshot ausloesen."""
+        """Snapshot ausloesen → media/snapshots/."""
         self._service._write_command("snapshot")
         self._lbl_snap.config(text="gespeichert", fg=BTN_SNAP_CYAN)
-        # Nach 2 Sekunden zuruecksetzen
         self._parent.after(2000, lambda: self._lbl_snap.config(
             text="bereit", fg=FG_DIM
         ))
+
+    def _take_teach_photo(self):
+        """Teach-Foto schiessen — Smart Qualitaetspruefung via NPU."""
+        self._service._write_command("teach_snapshot")
+        self._lbl_teach.config(text="Pruefe...", fg="#cc88ff")
+        self._teach_polling = True
+        self._parent.after(500, self._poll_teach_result)
+
+    def _poll_teach_result(self):
+        """Pollt teach_result vom Service (alle 500ms bis fertig)."""
+        if not self._teach_polling:
+            return
+        try:
+            status = self._service.read_status()
+            teach = status.get("teach_result", {})
+            st = teach.get("status", "")
+
+            if st == "running" or st == "starting":
+                attempt = teach.get("attempt", 0)
+                detail = teach.get("detail", "")
+                if attempt > 0:
+                    self._lbl_teach.config(
+                        text=f"Versuch {attempt}/3...", fg="#cc88ff"
+                    )
+                self._parent.after(500, self._poll_teach_result)
+
+            elif st == "retry":
+                reason = teach.get("reason", "")
+                self._lbl_teach.config(text=reason, fg="#ff6666")
+                self._parent.after(500, self._poll_teach_result)
+
+            elif st == "success":
+                self._teach_polling = False
+                sim = teach.get("similarity", 0)
+                detail = teach.get("detail", "")
+                # Kurze Zusammenfassung: Confidence + Similarity
+                sim_pct = int(sim * 100)
+                self._lbl_teach.config(
+                    text=f"\u2713 Gespeichert — Sim: {sim_pct}%",
+                    fg="#66ff66",
+                )
+                self._parent.after(5000, lambda: self._lbl_teach.config(
+                    text="bereit", fg=FG_DIM
+                ))
+
+            elif st == "failed":
+                self._teach_polling = False
+                reason = teach.get("reason", "Fehlgeschlagen")
+                self._lbl_teach.config(text=reason, fg="#ff4444")
+                self._parent.after(5000, lambda: self._lbl_teach.config(
+                    text="bereit", fg=FG_DIM
+                ))
+            else:
+                # Unbekannter Status — weiter pollen
+                self._parent.after(500, self._poll_teach_result)
+
+        except Exception:
+            self._teach_polling = False
+            self._lbl_teach.config(text="Fehler", fg="#ff4444")
+            self._parent.after(3000, lambda: self._lbl_teach.config(
+                text="bereit", fg=FG_DIM
+            ))
 
     def _toggle_flutlicht(self):
         """Weisse LEDs an/aus (nightVision 0=day/aus, 2=night/an)."""

@@ -174,6 +174,9 @@ class MolochService:
         # RGB-LED Controller (ESP32 WS2812 via UDP)
         self._rgb_led = None
 
+        # Teach Smart Snapshot Status (fuer GUI-Polling)
+        self._teach_result = {}
+
         # CameraManager (RTSP + Cloud + Tentakel + Autonomer Modus, Phase 4)
         self._cam = CameraManager(
             model_orchestrator=self._orchestrator,
@@ -280,6 +283,242 @@ class MolochService:
     def toggle_autonomous_manual(self):
         """Thin Wrapper -> CameraManager.toggle_autonomous_manual()."""
         self._cam.toggle_autonomous_manual()
+
+    def _led_flash(self, farbe: str = "weiss", duration: float = 1.0):
+        """ReSpeaker LED kurz aufblitzen, dann vorherigen Zustand restaurieren."""
+        if not self._rgb_led:
+            return
+        prev_state = self._rgb_led._current_state
+        self._rgb_led.send_command(f"LED:{farbe} statisch")
+
+        def _restore():
+            time.sleep(duration)
+            # Vorherigen Zustand wiederherstellen
+            from core.hardware.rgb_led_controller import ZUSTAND_LED_MAP
+            self._rgb_led._current_state = ""   # Reset → set_state skipped nicht
+            cmd = ZUSTAND_LED_MAP.get(prev_state, "LED:blau pulsierend langsam")
+            self._rgb_led.send_command(cmd)
+            self._rgb_led._current_state = prev_state
+        threading.Thread(target=_restore, daemon=True, name="LedFlash").start()
+
+    def _led_flash_white(self, duration: float = 1.0):
+        """Rueckwaerts-Kompatibilitaet."""
+        self._led_flash("weiss", duration)
+
+    # =========================================================================
+    # Teach Smart Snapshot — Qualitaetspruefung via NPU
+    # =========================================================================
+
+    def _teach_smart_snapshot(self):
+        """Teach-Foto mit NPU-Qualitaetspruefung (3 Versuche).
+
+        Prueft: SCRFD-Confidence, Face-Groesse, Helligkeit, Embedding.
+        LED-Feedback: weiss=gut, rot=schlecht, gelb=aufgegeben.
+        Speichert Ergebnis in self._teach_result fuer GUI-Polling.
+        """
+        import cv2
+        import numpy as np
+        import json
+        import os
+
+        MAX_RETRIES = 3
+        MIN_CONF = 0.80
+        MIN_FACE_PX = 80
+        MIN_BRIGHTNESS = 30
+        MAX_BRIGHTNESS = 220
+        MIN_EMB_NORM = 10.0
+
+        # Status fuer GUI-Polling initialisieren
+        self._teach_result = {"status": "running", "attempt": 0, "detail": ""}
+
+        for attempt in range(1, MAX_RETRIES + 1):
+            self._teach_result["attempt"] = attempt
+            self._teach_result["detail"] = f"Versuch {attempt}/{MAX_RETRIES}..."
+            logger.info(f"[TEACH] Versuch {attempt}/{MAX_RETRIES}")
+
+            # --- Frame + Detections holen ---
+            detections = []
+            frame = None
+            try:
+                detections = self._inference.get_detections() if self._inference else []
+                frame = self._inference.get_annotated_frame() if self._inference else None
+            except Exception as e:
+                logger.warning(f"[TEACH] Frame/Detection Fehler: {e}")
+
+            if frame is None:
+                self._teach_result["detail"] = "Kein Kamerabild verfuegbar"
+                self._led_flash("rot", 0.5)
+                logger.warning("[TEACH] Kein Frame")
+                if attempt < MAX_RETRIES:
+                    time.sleep(1.0)
+                continue
+
+            # --- Beste Face-Detection finden ---
+            best_face = None
+            for det in detections:
+                if det.get("class") == "face":
+                    if best_face is None or det.get("confidence", 0) > best_face.get("confidence", 0):
+                        best_face = det
+
+            if best_face is None:
+                self._teach_result["detail"] = "Kein Gesicht erkannt"
+                self._teach_result["status"] = "retry"
+                self._led_flash("rot", 0.5)
+                logger.info("[TEACH] Kein Gesicht im Frame")
+                if attempt < MAX_RETRIES:
+                    time.sleep(1.0)
+                continue
+
+            # --- Qualitaetspruefungen ---
+            face_conf = best_face.get("confidence", 0.0)
+            face_bbox = best_face.get("bbox", [0, 0, 0, 0])
+            embedding = best_face.get("embedding", None)
+
+            # Frame-Dimensionen fuer BBox-Pixel-Berechnung
+            h, w = frame.shape[:2]
+            x1_px = int(face_bbox[0] * w)
+            y1_px = int(face_bbox[1] * h)
+            x2_px = int(face_bbox[2] * w)
+            y2_px = int(face_bbox[3] * h)
+            face_w = x2_px - x1_px
+            face_h = y2_px - y1_px
+
+            # Helligkeit im Face-Bereich pruefen
+            brightness = 128  # Default
+            try:
+                face_crop = frame[max(0, y1_px):max(1, y2_px), max(0, x1_px):max(1, x2_px)]
+                if face_crop.size > 0:
+                    gray = cv2.cvtColor(face_crop, cv2.COLOR_BGR2GRAY) if len(face_crop.shape) == 3 else face_crop
+                    brightness = int(np.mean(gray))
+            except Exception:
+                pass
+
+            # Embedding-Norm pruefen
+            emb_norm = 0.0
+            if embedding is not None and len(embedding) > 0:
+                emb_norm = float(np.linalg.norm(embedding))
+
+            # Detail-String fuer GUI
+            conf_ok = face_conf >= MIN_CONF
+            size_ok = face_w >= MIN_FACE_PX and face_h >= MIN_FACE_PX
+            bright_ok = MIN_BRIGHTNESS <= brightness <= MAX_BRIGHTNESS
+            emb_ok = embedding is not None and emb_norm >= MIN_EMB_NORM
+
+            detail_parts = []
+            detail_parts.append(f"Conf: {int(face_conf * 100)}%" + (" \u2713" if conf_ok else " \u2717"))
+            detail_parts.append(f"Groesse: {face_w}x{face_h}" + (" \u2713" if size_ok else " \u2717"))
+            detail_parts.append(f"Helligkeit: {brightness}" + (" \u2713" if bright_ok else " \u2717"))
+            detail_parts.append(f"Embedding: {'OK' if emb_ok else 'FEHLT'}")
+            detail_str = " — ".join(detail_parts)
+            self._teach_result["detail"] = detail_str
+
+            logger.info(f"[TEACH] Qualitaet: {detail_str}")
+
+            # --- Fehlgrund bestimmen ---
+            if not conf_ok:
+                self._teach_result["status"] = "retry"
+                self._teach_result["reason"] = "Gesicht nicht klar erkannt"
+                self._led_flash("rot", 0.5)
+                logger.info(f"[TEACH] FAIL: Confidence {face_conf:.2f} < {MIN_CONF}")
+                if attempt < MAX_RETRIES:
+                    time.sleep(1.0)
+                continue
+
+            if not size_ok:
+                self._teach_result["status"] = "retry"
+                self._teach_result["reason"] = "Bitte naeher zur Kamera"
+                self._led_flash("rot", 0.5)
+                logger.info(f"[TEACH] FAIL: Face {face_w}x{face_h} < {MIN_FACE_PX}px")
+                if attempt < MAX_RETRIES:
+                    time.sleep(1.0)
+                continue
+
+            if not bright_ok:
+                reason = "Zu dunkel — besseres Licht" if brightness < MIN_BRIGHTNESS else "Zu hell — weniger Licht"
+                self._teach_result["status"] = "retry"
+                self._teach_result["reason"] = reason
+                self._led_flash("rot", 0.5)
+                logger.info(f"[TEACH] FAIL: Helligkeit {brightness}")
+                if attempt < MAX_RETRIES:
+                    time.sleep(1.0)
+                continue
+
+            if not emb_ok:
+                self._teach_result["status"] = "retry"
+                self._teach_result["reason"] = "NPU konnte Gesicht nicht verarbeiten"
+                self._led_flash("rot", 0.5)
+                logger.info(f"[TEACH] FAIL: Embedding norm={emb_norm:.1f}")
+                if attempt < MAX_RETRIES:
+                    time.sleep(1.0)
+                continue
+
+            # --- ALLE CHECKS BESTANDEN — Bild speichern ---
+            teach_dir = os.path.expanduser("~/moloch/media/teach")
+            os.makedirs(teach_dir, exist_ok=True)
+            ts = time.strftime("%Y%m%d_%H%M%S")
+            path = os.path.join(teach_dir, f"teach_{ts}.jpg")
+            cv2.imwrite(path, frame)
+            logger.info(f"[TEACH] Foto gespeichert: {path}")
+
+            # --- Embedding in face_embeddings.json speichern ---
+            sim_score = 0.0
+            try:
+                emb_normalized = embedding / np.linalg.norm(embedding)
+
+                # Similarity gegen vorhandene Markus-Embeddings testen
+                matched_name, matched_sim = self._inference._match_face(embedding)
+                sim_score = matched_sim
+
+                # Embedding zu DB hinzufuegen
+                emb_path = os.path.join(
+                    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                    "data", "face_embeddings.json"
+                )
+                emb_key = f"Markus#teach_{ts}"
+                if os.path.exists(emb_path):
+                    with open(emb_path, 'r') as f:
+                        db = json.load(f)
+                else:
+                    db = {}
+                db[emb_key] = emb_normalized.tolist()
+                with open(emb_path, 'w') as f:
+                    json.dump(db, f, indent=2)
+                logger.info(f"[TEACH] Embedding gespeichert: {emb_key} (sim={sim_score:.3f})")
+
+                # Face-DB im RAM neu laden
+                if hasattr(self._inference, '_load_face_db_from_disk'):
+                    self._inference._face_db = self._inference._load_face_db_from_disk()
+                    logger.info("[TEACH] Face-DB im RAM aktualisiert")
+
+            except Exception as e:
+                logger.warning(f"[TEACH] Embedding-Speicherung fehlgeschlagen: {e}")
+
+            # --- LED weiss + Erfolg melden ---
+            self._led_flash("weiss", 1.0)
+            self._teach_result = {
+                "status": "success",
+                "attempt": attempt,
+                "detail": detail_str,
+                "similarity": round(sim_score, 3),
+                "path": path,
+                "reason": "",
+            }
+            return  # Fertig!
+
+        # --- Alle 3 Versuche fehlgeschlagen ---
+        logger.warning("[TEACH] Alle 3 Versuche fehlgeschlagen")
+        self._led_flash("gelb", 1.0)  # Orange/Gelb = aufgegeben
+        self._teach_result["status"] = "failed"
+        self._teach_result["detail"] = f"3 Versuche fehlgeschlagen: {self._teach_result.get('reason', 'unbekannt')}"
+
+        # TTS-Meldung
+        if self._voice_pipeline and hasattr(self._voice_pipeline, '_speak'):
+            try:
+                self._voice_pipeline._speak(
+                    "Ich konnte kein gutes Foto machen. Bitte vor die Kamera stellen."
+                )
+            except Exception as e:
+                logger.debug(f"[TEACH] TTS fehlgeschlagen: {e}")
 
     def _apply_ptz_to_tracker(self):
         """PTZ-Settings live auf den AutonomousTracker anwenden."""
@@ -1481,6 +1720,11 @@ class MolochService:
                 status["einpraegen_running"] = self._einpraegen.is_running
                 status["einpraegen_progress"] = self._einpraegen.progress
                 status["einpraegen_done"] = self._einpraegen.is_done
+
+            # Teach Smart Snapshot Status (Qualitaetspruefung)
+            if hasattr(self, '_teach_result') and self._teach_result:
+                status["teach_result"] = self._teach_result
+
             if self._perception:
                 status["perception"] = self._perception.get_state()
                 status["npu_stage"] = self._perception.npu_stage
@@ -1876,6 +2120,15 @@ class MolochService:
             self._apply_ptz_to_tracker()
             logger.info(f"[PTZ] Settings: Home=({self._ptz_home_pan:.1f},{self._ptz_home_tilt:.1f}) "
                         f"Speed={self._ptz_tracking_speed:.2f} Search={self._ptz_search_speed:.2f}")
+        elif action == 'detach_tracker':
+            # Manueller Detach vom Track → SEARCHING + Bild in galerie/detach/
+            if hasattr(self, '_action_bridge') and self._action_bridge:
+                self._action_bridge.force_detach()
+                logger.info("[IPC] Detach: Bridge zurueck zu SEARCHING")
+            try:
+                self._cam.take_detach_snapshot()
+            except Exception as e:
+                logger.warning(f"[IPC] Detach-Snapshot fehlgeschlagen: {e}")
         elif action == 'set_ptz_home':
             # Aktuelle Position als Home speichern
             try:
@@ -1900,6 +2153,13 @@ class MolochService:
             self._cam.cloud_toggle_alarm()
         elif action == 'snapshot':
             self._cam.take_snapshot()
+        elif action == 'teach_snapshot':
+            # Smart Teach: Qualitaetspruefung via NPU, 3 Retries, LED-Feedback
+            self._teach_result = {"status": "starting", "attempt": 0, "detail": ""}
+            threading.Thread(
+                target=self._teach_smart_snapshot,
+                daemon=True, name="TeachSmart"
+            ).start()
         elif action == 'cloud_status_led':
             self._cam.cloud_toggle_status_led()
         elif action == 'cloud_sync':
