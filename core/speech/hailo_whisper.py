@@ -268,7 +268,7 @@ class MolochWhisper:
             gc.collect()
             self.backend = "on-demand"
 
-            logger.info(f"[Whisper] faster-whisper Medium: "
+            logger.info(f"[Whisper] faster-whisper Small: "
                         f"Laden={dt_load:.0f}ms, Transkription={dt_trans:.0f}ms, "
                         f"Sprache={info.language} ({info.language_probability:.0%})")
 
