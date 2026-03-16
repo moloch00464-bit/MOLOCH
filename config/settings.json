@@ -82,7 +82,7 @@
     "tilt_limit_max": 78.8
   },
   "teach": {
-    "mode_enabled": true,
+    "mode_enabled": false,
     "cooldown": 30.0
   }
 }
