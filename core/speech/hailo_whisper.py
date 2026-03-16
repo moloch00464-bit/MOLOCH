@@ -232,19 +232,19 @@ class MolochWhisper:
                 self._unload_npu()
 
     def _transcribe_faster_whisper(self, audio_path: str, language: str) -> str:
-        """Transkription mit faster-whisper Medium auf CPU (On-Demand).
+        """Transkription mit faster-whisper Small auf CPU (On-Demand).
 
         Modell wird geladen, transkribiert, und sofort wieder entladen (RAM sparen).
-        ~1.1GB RAM waehrend Transkription, danach wieder frei.
+        ~626MB RAM waehrend Transkription, danach wieder frei.
         """
         try:
             from faster_whisper import WhisperModel
 
             t0 = time.perf_counter()
-            # On-Demand laden (int8 = halber RAM, schneller)
-            model = WhisperModel("medium", device="cpu", compute_type="int8")
+            # Small statt Medium: halb so viel RAM, doppelt so schnell
+            model = WhisperModel("small", device="cpu", compute_type="int8")
             dt_load = (time.perf_counter() - t0) * 1000
-            self.backend = "faster-whisper-medium"
+            self.backend = "faster-whisper-small"
 
             t1 = time.perf_counter()
             segments, info = model.transcribe(
