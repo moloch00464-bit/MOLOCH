@@ -195,21 +195,28 @@ class MolochWhisper:
     def transcribe(self, audio_path: str, language: str = "de",
                    timeout_ms: int = 0, **kwargs) -> str:
         """
-        On-Demand Transkription: Whisper laden -> transkribieren -> entladen.
+        On-Demand Transkription: faster-whisper Medium (CPU) als Primary.
 
-        Vision-Pipeline hat volle NPU-Bandbreite ausser waehrend Transkription.
-        Ladezeit ~1-2s ist akzeptabel fuer PTT-Workflow.
+        Strategie:
+        1. faster-whisper Medium auf CPU (besseres Deutsch, ~5s fuer 10s Audio)
+        2. Fallback: Hailo NPU Base (schneller aber schlechter)
 
         Args:
             audio_path: Pfad zur WAV-Datei
             language: Sprache (de, en, etc.)
-            timeout_ms: Timeout in Millisekunden (0 = auto: 4s pro Sekunde Audio, min 30s)
+            timeout_ms: Timeout (unused fuer CPU)
 
         Returns:
             Transkribierter Text
         """
+        # Primary: faster-whisper Medium auf CPU
+        text = self._transcribe_faster_whisper(audio_path, language)
+        if text:
+            return text
+
+        # Fallback: NPU Whisper Base
+        logger.warning("[Whisper] faster-whisper fehlgeschlagen — Fallback auf NPU Base")
         with self._load_lock:
-            # On-Demand: Whisper auf NPU laden
             t_load = time.perf_counter()
             if not self._load_npu():
                 logger.error("NPU init fehlgeschlagen — kein Whisper verfuegbar")
@@ -222,8 +229,65 @@ class MolochWhisper:
                     return self._transcribe_npu(audio_path, language, timeout_ms)
                 return ""
             finally:
-                # IMMER entladen — auch bei Exception
                 self._unload_npu()
+
+    def _transcribe_faster_whisper(self, audio_path: str, language: str) -> str:
+        """Transkription mit faster-whisper Medium auf CPU (On-Demand).
+
+        Modell wird geladen, transkribiert, und sofort wieder entladen (RAM sparen).
+        ~1.1GB RAM waehrend Transkription, danach wieder frei.
+        """
+        try:
+            from faster_whisper import WhisperModel
+
+            t0 = time.perf_counter()
+            # On-Demand laden (int8 = halber RAM, schneller)
+            model = WhisperModel("medium", device="cpu", compute_type="int8")
+            dt_load = (time.perf_counter() - t0) * 1000
+            self.backend = "faster-whisper-medium"
+
+            t1 = time.perf_counter()
+            segments, info = model.transcribe(
+                audio_path,
+                language=language,
+                beam_size=1,
+                temperature=0.0,
+                condition_on_previous_text=True,
+                initial_prompt="Ich spreche Deutsch mit fraenkischem Dialekt.",
+                vad_filter=True,
+                vad_parameters=dict(
+                    min_silence_duration_ms=500,
+                    speech_pad_ms=300,
+                ),
+            )
+            text = "".join(seg.text for seg in segments).strip()
+            dt_trans = (time.perf_counter() - t1) * 1000
+
+            # Modell sofort entladen (RAM freigeben)
+            del model
+            gc.collect()
+            self.backend = "on-demand"
+
+            logger.info(f"[Whisper] faster-whisper Medium: "
+                        f"Laden={dt_load:.0f}ms, Transkription={dt_trans:.0f}ms, "
+                        f"Sprache={info.language} ({info.language_probability:.0%})")
+
+            if text:
+                logger.info(f"NPU transcribed: {text}")
+            return text
+
+        except ImportError:
+            logger.warning("[Whisper] faster-whisper nicht installiert")
+            return ""
+        except Exception as e:
+            logger.error(f"[Whisper] faster-whisper Fehler: {e}")
+            try:
+                del model
+            except NameError:
+                pass
+            gc.collect()
+            self.backend = "on-demand"
+            return ""
 
     def _transcribe_npu(self, audio_path: str, language: str, timeout_ms: int) -> str:
         """Transcribe using Hailo NPU."""
