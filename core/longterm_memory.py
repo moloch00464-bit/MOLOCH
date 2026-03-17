@@ -46,17 +46,28 @@ MOLOCH_IDENTITY_PATH = os.path.join(_MOLOCH_HOME, "config", "moloch_identity.jso
 
 
 def _safe_write_json(path: str, data: Any):
-    """Atomares JSON-Schreiben: erst .tmp, dann rename. Kein Datenverlust."""
+    """JSON schreiben: erst .tmp, dann rename.
+    NTFS-Fix: rename() schlaegt auf MFT-resident Dateien (< ~200 Bytes) fehl.
+    Fallback: shutil.copy2 (oeffnet Zieldatei direkt und schreibt Inhalt).
+    """
+    import shutil
     tmp_path = path + ".tmp"
     try:
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp_path, path)
+        try:
+            os.replace(tmp_path, path)
+        except OSError:
+            # NTFS Fallback: rename ueber bestehende MFT-resident Datei schlaegt fehl
+            shutil.copy2(tmp_path, path)
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
     except Exception as e:
         logger.error(f"[MEMORY] Schreiben fehlgeschlagen: {path}: {e}")
-        # tmp aufraumen falls vorhanden
         try:
             os.unlink(tmp_path)
         except FileNotFoundError:

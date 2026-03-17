@@ -587,6 +587,9 @@ class CameraManager:
                 and (time.time() - getattr(self, "_autonomous_enabled_at", 0)) > self.STARTUP_GRACE):
             logger.warning("[SAFETY] Orphaned autonomous mode detected - disabling")
             self.disable_autonomous()
+            # Cooldown: verhindert sofortiges Re-Enable durch Retry-Logik (Z. 670)
+            # Ohne Cooldown: Retry nach 10s -> Orphan nach 60s -> endloser Warn-Cycle
+            self._auto_retry_time = time.time() + 120
             return
         if not self._moloch_has_control:
             return
