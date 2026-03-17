@@ -638,8 +638,8 @@ class InferenceEngine:
                                         full_frame=frame,
                                         embedding=embedding,
                                     )
-                                    # LED-Blitz bei erfolgreichem Snapshot
-                                    if _saved and self._learner_flash:
+                                    # LED-Blitz immer bei erfolgreichem Snapshot
+                                    if _saved:
                                         threading.Thread(
                                             target=self._led.flash_white,
                                             daemon=True

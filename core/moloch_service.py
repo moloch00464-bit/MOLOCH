@@ -709,8 +709,8 @@ class MolochService:
                                     name=_tc_name,
                                     confidence=_tc_conf,
                                 )
-                                # BLITZ: weisse LED kurz aufblitzen wenn Snapshot gespeichert
-                                if _saved and self._inference._learner_flash and self._led:
+                                # BLITZ: weisse LED immer aufblitzen wenn Teachen Snapshot gespeichert
+                                if _saved and self._led:
                                     import threading as _t
                                     _t.Thread(target=self._led.flash_white, daemon=True).start()
                     except Exception as e:
@@ -1725,7 +1725,6 @@ class MolochService:
                 "moloch_has_control": self._cam._moloch_has_control,
                 "tentakel_enabled": self._cam._tentakel_enabled,
                 "teachen_enabled": self._teachen.enabled if self._teachen else False,
-                "learner_flash": getattr(_inf, '_learner_flash', False),
                 "frame_age": round(time.time() - self._cam._last_frame_write, 1) if self._cam._last_frame_write else -1,
                 "frozen_restarts": self._cam._frozen_restart_count,
                 "fps": {k: round(v, 1) for k, v in fps_snapshot.items()},
@@ -2084,10 +2083,6 @@ class MolochService:
             if self._teachen:
                 enabled = self._teachen.toggle()
                 logger.info(f"[IPC] Teachen: {'AN' if enabled else 'AUS'}")
-
-        elif action == 'toggle_learner_flash':
-            self._inference._learner_flash = bool(cmd.get('on', not self._inference._learner_flash))
-            logger.info(f"[IPC] Learner Flash: {'AN' if self._inference._learner_flash else 'AUS'}")
 
         elif action == 'set_mpo_param':
             # MPO Slider live anwenden (Popup sendet param + value)
