@@ -214,10 +214,10 @@ class Teachen:
             timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
             filename = f"{timestamp}_c{int(confidence*100)}_a{angle}_l{light}_d{distance}.jpg"
             filepath = person_dir / filename
-            cv2.imwrite(str(filepath), face_crop, [cv2.IMWRITE_JPEG_QUALITY, 95])
+            cv2.imwrite(str(filepath), cv2.cvtColor(face_crop, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 95])
             if full_frame is not None:
                 full_filename = f"{timestamp}_c{int(confidence*100)}_a{angle}_l{light}_d{distance}_full.jpg"
-                cv2.imwrite(str(person_dir / full_filename), full_frame,
+                cv2.imwrite(str(person_dir / full_filename), cv2.cvtColor(full_frame, cv2.COLOR_RGB2BGR),
                             [cv2.IMWRITE_JPEG_QUALITY, 95])
             if embedding is not None:
                 learned = self._learn_embedding(name, embedding, angle, light, distance, confidence)
