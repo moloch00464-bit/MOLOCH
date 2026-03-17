@@ -513,6 +513,9 @@ class MolochService:
 
             # --- LED weiss + Erfolg melden ---
             self._led_flash("weiss", 1.0)
+            # Kamera-Flutlicht (weisse LED) kurz aufblitzen — sichtbarer Feedback
+            if self._led:
+                threading.Thread(target=self._led.flash_white, daemon=True).start()
             self._teach_result = {
                 "status": "success",
                 "attempt": attempt,
@@ -2478,15 +2481,6 @@ class MolochService:
         except Exception as e:
             logger.warning(f"[SETTINGS] PTZ-Fehler: {e}")
 
-        # Learner Flash (auf InferenceEngine)
-        try:
-            learner = data.get("learner", {})
-            if "flash_enabled" in learner:
-                self._inference._learner_flash = bool(learner["flash_enabled"])
-                logger.info(f"[SETTINGS] Learner Flash: {self._inference._learner_flash}")
-        except Exception as e:
-            logger.warning(f"[SETTINGS] Learner-Fehler: {e}")
-
         # Teach-Modus (persistent)
         try:
             teach = data.get("teach", {})
@@ -2620,11 +2614,6 @@ class MolochService:
             "pan_limit_max": round(getattr(self, '_ptz_pan_limit_max', 170.0), 1),
             "tilt_limit_min": round(getattr(self, '_ptz_tilt_limit_min', -78.0), 1),
             "tilt_limit_max": round(getattr(self, '_ptz_tilt_limit_max', 78.8), 1),
-        }
-
-        # Learner (von InferenceEngine)
-        data["learner"] = {
-            "flash_enabled": _inf._learner_flash,
         }
 
         # Teach-Modus (persistent)

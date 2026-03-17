@@ -166,9 +166,6 @@ class InferenceEngine:
         self.pose_conf_val = 0.50
         self.hand_conf_val = 0.65
 
-        # Learner Flash
-        self._learner_flash = False
-
         # Gate0 Phase 8: Name-Hysterese (OSD stimmt mit Panel ueberein)
         self._sticky_name = "Unbekannt"
         self._sticky_sim = 0.0
