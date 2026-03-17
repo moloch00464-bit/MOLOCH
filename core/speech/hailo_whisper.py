@@ -48,31 +48,33 @@ class MolochWhisper:
     """
 
     def __init__(self):
-        self.backend = "on-demand"
+        self.backend = "npu-whisper-base"
         self._npu_processor = None
-        self._vdevice = None        # Aktives VDevice (nur waehrend Transkription)
+        self._vdevice = None        # VDevice — wird einmal erstellt, bleibt permanent
         self._shared_vdevice = None  # Referenz auf Service-VDevice (nicht freigeben!)
         self._npu_initialized = False
         self._load_lock = threading.Lock()  # Schutz gegen parallele Load/Unload
 
-        logger.info("Whisper: On-Demand Modus (wird bei PTT geladen)")
+        logger.info("Whisper: NPU-Permanent Modus (wird beim ersten Aufruf geladen, danach behalten)")
 
     def set_vdevice(self, vdevice):
-        """Shared VDevice vom Service speichern. Whisper wird NICHT geladen.
+        """Shared VDevice vom Service speichern.
 
-        Das VDevice wird nur gespeichert und bei Bedarf (Push-to-Talk)
-        fuer das Laden von Whisper verwendet.
+        Wird in nicht-TAPPAS-Mode vom Service aufgerufen.
+        In TAPPAS-Mode erstellt Whisper sein eigenes VDevice mit SHARED group_id.
         """
         self._shared_vdevice = vdevice
-        logger.info("[Whisper] VDevice gespeichert — On-Demand (kein permanentes Laden)")
+        logger.info("[Whisper] VDevice gespeichert")
 
     def _load_npu(self) -> bool:
-        """Whisper Speech2Text auf NPU laden (On-Demand).
+        """Whisper Speech2Text auf NPU laden — permanent (kein Unload nach Transkription).
 
-        Nutzt shared VDevice vom Service. Wird nach Transkription entladen.
+        Strategie: Einmal laden, fuer immer behalten.
+        VDevice wird ebenfalls einmal erstellt und bleibt aktiv.
+        In TAPPAS-Mode: eigenes VDevice mit vdevice-group-id=SHARED (teilt NPU mit GStreamer).
         """
         if self._npu_initialized and self._npu_processor:
-            return True
+            return True  # Bereits geladen, sofort verfuegbar
 
         try:
             from hailo_platform.genai import Speech2Text
@@ -82,19 +84,22 @@ class MolochWhisper:
             from hailo_apps.python.core.common.core import resolve_hef_path
             from hailo_apps.python.core.common.defines import HAILO10H_ARCH, WHISPER_CHAT_APP
 
-            # Shared VDevice vom Service nutzen
-            if self._shared_vdevice:
-                self._vdevice = self._shared_vdevice
-            else:
-                # Standalone-Fallback: eigenes VDevice (nur fuer Tests)
-                from hailo_platform import VDevice
-                from hailo_apps.python.core.common.defines import SHARED_VDEVICE_GROUP_ID
-                logger.warning("[Whisper] Kein shared VDevice — erstelle eigenes (Standalone-Modus)")
-                params = VDevice.create_params()
-                params.group_id = SHARED_VDEVICE_GROUP_ID
-                self._vdevice = VDevice(params)
+            # VDevice: einmal erstellen und permanent behalten
+            if self._vdevice is None:
+                if self._shared_vdevice:
+                    # Nicht-TAPPAS-Mode: shared VDevice vom Service
+                    self._vdevice = self._shared_vdevice
+                else:
+                    # TAPPAS-Mode: eigenes VDevice mit SHARED group_id
+                    # (teilt NPU-Hardware mit GStreamer-TAPPAS-Pipeline)
+                    from hailo_platform import VDevice
+                    from hailo_apps.python.core.common.defines import SHARED_VDEVICE_GROUP_ID
+                    logger.info("[Whisper] TAPPAS-Mode: erstelle VDevice mit group_id=SHARED")
+                    params = VDevice.create_params()
+                    params.group_id = SHARED_VDEVICE_GROUP_ID
+                    self._vdevice = VDevice(params)
 
-            # Whisper HEF finden
+            # Whisper HEF finden und laden
             hef_path = resolve_hef_path(
                 hef_path=None,
                 app_name=WHISPER_CHAT_APP,
@@ -105,13 +110,11 @@ class MolochWhisper:
                 logger.error("Whisper HEF not found. Run: hailo-download-resources --group whisper_chat")
                 return False
 
-            logger.info(f"[Whisper] On-Demand: Lade {hef_path}...")
-
-            # Speech2Text auf shared VDevice laden
+            logger.info(f"[Whisper] Lade NPU: {hef_path}...")
             self._npu_processor = Speech2Text(self._vdevice, str(hef_path))
-
             self.backend = "npu-whisper-base"
             self._npu_initialized = True
+            logger.info("[Whisper] NPU geladen und permanent aktiv")
             return True
 
         except ImportError as e:
@@ -122,20 +125,22 @@ class MolochWhisper:
             return False
 
     def _unload_npu(self):
-        """Whisper von NPU entladen — gibt Ressourcen fuer Vision frei."""
+        """Whisper von NPU entladen — NUR bei explizitem release() Aufruf.
+
+        Im Normalbetrieb bleibt Whisper permanent geladen (kein Unload nach PTT).
+        VDevice bleibt immer aktiv — wird NIE freigegeben.
+        """
         try:
             if self._npu_processor:
                 self._npu_processor = None
-            # VDevice-Referenz freigeben (shared VDevice bleibt beim Service)
-            self._vdevice = None
+            # VDevice NICHT freigeben — einmal erstellt, permanent aktiv
             gc.collect()
             self._npu_initialized = False
-            self.backend = "on-demand"
-            logger.info("[Whisper] NPU entladen — Vision hat volle Bandbreite")
+            self.backend = "npu-whisper-base"
+            logger.info("[Whisper] NPU entladen (VDevice bleibt aktiv)")
         except Exception as e:
             logger.error(f"[Whisper] Entladen fehlgeschlagen: {e}")
             self._npu_initialized = False
-            self.backend = "on-demand"
 
     def _load_wav_as_numpy(self, audio_path: str) -> Optional[np.ndarray]:
         """Load WAV file and convert to float32 numpy array."""
@@ -209,20 +214,18 @@ class MolochWhisper:
         Returns:
             Transkribierter Text
         """
-        # Primary: NPU Whisper Base (schnell, kein CPU-Load)
+        # Primary: NPU Whisper Base (permanent geladen — kein Lade-Overhead nach erstem Aufruf)
         with self._load_lock:
             t_load = time.perf_counter()
             if self._load_npu():
                 dt_load = (time.perf_counter() - t_load) * 1000
-                logger.info(f"[Whisper] NPU geladen in {dt_load:.0f}ms")
-                try:
-                    if self._npu_processor:
-                        text = self._transcribe_npu(audio_path, language, timeout_ms)
-                        if text:
-                            return text
-                        logger.warning("[Whisper] NPU: kein Ergebnis — Fallback auf CPU")
-                finally:
-                    self._unload_npu()
+                if dt_load > 100:
+                    logger.info(f"[Whisper] NPU geladen in {dt_load:.0f}ms")
+                if self._npu_processor:
+                    text = self._transcribe_npu(audio_path, language, timeout_ms)
+                    if text:
+                        return text
+                    logger.warning("[Whisper] NPU: kein Ergebnis — Fallback auf CPU")
             else:
                 logger.warning("[Whisper] NPU init fehlgeschlagen — Fallback auf CPU")
 
@@ -255,10 +258,10 @@ class MolochWhisper:
                 initial_prompt="Ich spreche Deutsch mit fraenkischem Dialekt.",
                 vad_filter=True,
                 vad_parameters=dict(
-                    # 1200ms: nicht bei Atempausen oder kurzen Pausen abschneiden
-                    min_silence_duration_ms=1200,
-                    # 400ms Padding: Wortanfaenge/-enden nicht abschneiden
-                    speech_pad_ms=400,
+                    # 1500ms: auch bei laengeren Denkpausen oder Fraenkischen Sprechpausen
+                    min_silence_duration_ms=1500,
+                    # 500ms Padding: Wortanfaenge/-enden grosszuegig behalten
+                    speech_pad_ms=500,
                 ),
             )
             text = "".join(seg.text for seg in segments).strip()

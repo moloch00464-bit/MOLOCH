@@ -553,6 +553,11 @@ class VoicePipeline:
         except Exception as e:
             logger.warning(f"[VOICE] WiFi-Mic init fehlgeschlagen: {e}")
 
+        # Whisper NPU vorladen im Hintergrund (15s Verzoegerung: TAPPAS muss zuerst starten)
+        # Ziel: erste PTT startet sofort ohne 2.5s Lade-Overhead
+        threading.Thread(target=self._preload_whisper_bg, daemon=True,
+                         name="WhisperPreload").start()
+
         # Whisper-Ergebnisse fuer Popup (Ringpuffer, max 10)
         self._whisper_results: List[Dict] = []
         self._whisper_result_counter = 0
@@ -595,6 +600,20 @@ class VoicePipeline:
         except Exception as e:
             logger.error(f"[VOICE] MolochWhisper laden fehlgeschlagen: {e}")
             return False
+
+    def _preload_whisper_bg(self):
+        """Whisper NPU im Hintergrund vorladen — erste PTT ohne Lade-Overhead.
+
+        15s Verzoegerung: TAPPAS-Pipeline muss zuerst starten und NPU-VDevice
+        mit group_id=SHARED registrieren, dann kann Whisper VDevice teilen.
+        """
+        time.sleep(15)
+        try:
+            if self._init_whisper() and self._whisper:
+                self._whisper._load_npu()
+                logger.info("[VOICE] Whisper NPU vorgeladen — erste PTT sofort bereit")
+        except Exception as e:
+            logger.warning(f"[VOICE] Whisper Pre-Load fehlgeschlagen: {e}")
 
     def _emit_message(self, sender: str, text: str):
         """Nachricht in Queue legen und optionalen Callback aufrufen."""
@@ -740,8 +759,9 @@ class VoicePipeline:
             self._use_wifi_mic = True
             self._wifi_rec_buf = bytearray()
             self._wifi_rec_active = True
-            # Ringpuffer vorher leeren (alte Daten vor PTT-Press)
-            old_data = self._wifi_mic.get_audio_chunk(rate=16000, duration_ms=2000)
+            # Ringpuffer vorher leeren: nur 500ms verwerfen (nicht 2000ms)
+            # Jitter-Buffer hat max 100ms Verzoegerung — 500ms reicht sicher
+            old_data = self._wifi_mic.get_audio_chunk(rate=16000, duration_ms=500)
             logger.info(f"[VOICE] WiFi-Mic Ringpuffer geleert: {len(old_data)} Bytes verworfen")
             self._wifi_rec_thread = threading.Thread(
                 target=self._wifi_drain_loop, daemon=True,
@@ -831,9 +851,9 @@ class VoicePipeline:
                 self._wifi_rec_thread.join(timeout=1)
                 self._wifi_rec_thread = None
 
-            # Letzte Daten noch drainen
+            # Letzte Daten noch drainen (400ms: Jitter-Buffer + Satzende-Padding)
             try:
-                final_chunk = self._wifi_mic.get_audio_chunk(rate=16000, duration_ms=200)
+                final_chunk = self._wifi_mic.get_audio_chunk(rate=16000, duration_ms=400)
                 if final_chunk:
                     self._wifi_rec_buf.extend(final_chunk)
             except Exception:
@@ -929,9 +949,9 @@ class VoicePipeline:
                 logger.info("[VAD] Keine Sprache erkannt — nur Stille")
                 return False
 
-            # 13 Frames (~400ms) Padding vor/nach Sprache behalten
-            # (grosszuegiger, damit Wortanfaenge/-enden erhalten bleiben)
-            pad = frame_bytes * 13
+            # 17 Frames (~510ms) Padding vor/nach Sprache behalten
+            # (grosszuegiger: 800ms Pausen zwischen Woertern, Satzenden nicht abschneiden)
+            pad = frame_bytes * 17
             trim_start = max(0, first_voice - pad)
             trim_end = min(len(raw), last_voice + pad)
             trimmed = raw[trim_start:trim_end]
