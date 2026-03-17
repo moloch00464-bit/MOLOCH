@@ -352,7 +352,7 @@ class ServiceProxy:
                     pass
         self._moloch_has_control = s.get('moloch_has_control', False)
         self._tentakel_enabled = s.get('tentakel_enabled', False)
-        self._daily_learner_enabled = s.get('daily_learner_enabled', False)
+        self._teachen_enabled = s.get('teachen_enabled', False)
 
         self._active_ctx = {m: True for m in s.get('active_models', [])}
 
@@ -590,9 +590,9 @@ class MolochUnifiedPanel:
         tk.Button(brow, text="CAL", bg="#ff8800", fg="white", width=5,
                   font=("Helvetica", 11, "bold"),
                   command=self._trigger_calibration).pack(side=tk.LEFT, padx=1)
-        self.daily_btn = tk.Button(brow, text="ALLTAG", bg="#1a1a3e", fg="white", width=7,
+        self.daily_btn = tk.Button(brow, text="TEACHEN", bg="#1a1a3e", fg="white", width=7,
                                    font=("Helvetica", 11, "bold"),
-                                   command=self._toggle_daily_learner)
+                                   command=self._toggle_teachen)
         self.daily_btn.pack(side=tk.LEFT, padx=1)
 
         # --- eWeLink controls (right) ---
@@ -1117,14 +1117,14 @@ class MolochUnifiedPanel:
         except Exception:
             pass
 
-        # Daily Learner Button Update
+        # Teachen Button Update
         if hasattr(self, "daily_btn"):
             try:
-                dl_on = getattr(self.service, '_daily_learner_enabled', False)
+                dl_on = getattr(self.service, '_teachen_enabled', False)
                 if dl_on:
-                    self.daily_btn.config(bg="#006622", text="ALLTAG AN")
+                    self.daily_btn.config(bg="#006622", text="TEACHEN AN")
                 else:
-                    self.daily_btn.config(bg="#1a1a3e", text="ALLTAG")
+                    self.daily_btn.config(bg="#1a1a3e", text="TEACHEN")
             except Exception:
                 pass
 
@@ -1324,23 +1324,23 @@ class MolochUnifiedPanel:
         if self.service:
             self.service.toggle_autonomous_manual()
 
-    def _toggle_daily_learner(self):
-        """Toggle Daily Learner (Alltag-Modus) via IPC."""
+    def _toggle_teachen(self):
+        """Toggle Teachen via IPC."""
         if not self.service:
             return
 
         # Sofortiges visuelles Feedback
         cur = self.daily_btn.cget("bg")
         if cur == "#006622":
-            self.daily_btn.config(bg="#1a1a3e", text="ALLTAG")
+            self.daily_btn.config(bg="#1a1a3e", text="TEACHEN")
         else:
-            self.daily_btn.config(bg="#006622", text="ALLTAG AN")
+            self.daily_btn.config(bg="#006622", text="TEACHEN AN")
 
         if isinstance(self.service, ServiceProxy):
-            self.service._send_cmd({"action": "toggle_daily_learner"})
+            self.service._send_cmd({"action": "toggle_teachen"})
         else:
-            if hasattr(self.service, '_daily_learner') and self.service._daily_learner:
-                self.service._daily_learner.toggle()
+            if hasattr(self.service, '_teachen') and self.service._teachen:
+                self.service._teachen.toggle()
 
     def _set_status_led(self):
         """Set camera status LED via cloud."""

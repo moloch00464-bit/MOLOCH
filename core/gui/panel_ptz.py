@@ -49,7 +49,7 @@ class PtzModule:
 
         # Toggle-Zustaende (vom Service-Status aktualisiert)
         self._autonomous = False
-        self._daily_learner = False
+        self._teachen = False
         self._active_position = None
 
         # Restless-Score Cache
@@ -305,12 +305,12 @@ class PtzModule:
         )
         self._btn_autonom.grid(row=0, column=0, padx=3, pady=2)
 
-        # TEACHEN (Daily Learner)
+        # TEACHEN
         self._btn_alltag = tk.Button(
             grid, text="TEACHEN", width=10,
             bg=BTN_OFF_DARK, fg=FG_WHITE, font=FONT_BUTTON,
             activebackground=BG_FRAME,
-            command=self._toggle_daily_learner,
+            command=self._toggle_teachen,
         )
         self._btn_alltag.grid(row=0, column=1, padx=3, pady=2)
 
@@ -333,8 +333,8 @@ class PtzModule:
         """Autonomen Modus umschalten."""
         self._service.toggle_autonomous()
 
-    def _toggle_daily_learner(self):
-        """Teach-Modus AN/AUS im Service umschalten (persistent)."""
+    def _toggle_teachen(self):
+        """Teachen AN/AUS im Service umschalten (persistent)."""
         self._service._write_command("teach_mode_toggle")
 
     # =========================================================================
@@ -358,10 +358,10 @@ class PtzModule:
                     fg=BTN_ON_GREEN if auto else FG_DIM,
                 )
 
-            # Teach-Modus (persistent, ersetzt Daily Learner Toggle)
+            # Teach-Modus (persistent)
             dl = status.get("teach_mode_enabled", False)
-            if dl != self._daily_learner:
-                self._daily_learner = dl
+            if dl != self._teachen:
+                self._teachen = dl
                 self._btn_alltag.config(
                     bg=BTN_ON_GREEN if dl else BTN_OFF_DARK
                 )
@@ -439,7 +439,7 @@ class PtzModule:
             return
 
         self._autonomous = not status.get("manual_mode", True)
-        self._daily_learner = status.get("teach_mode_enabled", False)
+        self._teachen = status.get("teach_mode_enabled", False)
 
         self._btn_autonom.config(
             bg=BTN_ON_GREEN if self._autonomous else BTN_OFF_RED
@@ -450,9 +450,9 @@ class PtzModule:
         )
 
         self._btn_alltag.config(
-            bg=BTN_ON_GREEN if self._daily_learner else BTN_OFF_DARK
+            bg=BTN_ON_GREEN if self._teachen else BTN_OFF_DARK
         )
         self._lbl_alltag.config(
-            text="Teach AN" if self._daily_learner else "Teach AUS",
-            fg=BTN_ON_GREEN if self._daily_learner else FG_DIM,
+            text="Teach AN" if self._teachen else "Teach AUS",
+            fg=BTN_ON_GREEN if self._teachen else FG_DIM,
         )

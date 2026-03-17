@@ -122,14 +122,14 @@ class MolochService:
         except Exception as e:
             logger.warning(f"[INIT] Perception Engine nicht verfuegbar: {e}")
 
-        # Daily Learner
-        self._daily_learner = None
+        # Teachen (ehemals Daily Learner)
+        self._teachen = None
         try:
-            from core.daily_learner import get_daily_learner
-            self._daily_learner = get_daily_learner()
-            logger.info("[INIT] DailyLearner bereit")
+            from core.teachen import get_teachen
+            self._teachen = get_teachen()
+            logger.info("[INIT] Teachen bereit")
         except Exception as e:
-            logger.warning(f"[INIT] DailyLearner nicht verfuegbar: {e}")
+            logger.warning(f"[INIT] Teachen nicht verfuegbar: {e}")
 
         # Einpraegen (Batch Face+Pose Enrollment)
         self._einpraegen = None
@@ -159,7 +159,7 @@ class MolochService:
         self._orchestrator = ModelOrchestrator(
             perception_engine=self._perception,
             core_integrator=self._core_integrator,
-            daily_learner=self._daily_learner,
+            teachen=self._teachen,
             model_health=self._model_health,
             notify_callback=self._notify,
         )
@@ -209,7 +209,7 @@ class MolochService:
                 ipc=self._ipc,
                 perception=self._perception,
                 core_integrator=self._core_integrator,
-                daily_learner=self._daily_learner,
+                teachen=self._teachen,
                 perception_buffer=self._perception_buffer,
                 model_health=self._model_health,
                 notify_callback=self._notify,
@@ -561,7 +561,7 @@ class MolochService:
                     f"limits=[{cfg.pan_limit_min:.1f},{cfg.pan_limit_max:.1f}]")
 
     # =========================================================================
-    # TAPPAS → Perception Loop (PFrame → PerceptionEngine/CoreIntegrator/LED/DailyLearner)
+    # TAPPAS → Perception Loop (PFrame → PerceptionEngine/CoreIntegrator/LED/Teachen)
     # =========================================================================
 
     def _tappas_perception_loop(self):
@@ -693,23 +693,28 @@ class MolochService:
                     except Exception as e:
                         logger.debug(f"[TAPPAS-PERC] LED update: {e}")
 
-                # --- DailyLearner: Snapshot-Triggers ---
-                if self._daily_learner and self._daily_learner.enabled:
+                # --- Teachen: Snapshot-Trigger bei Gesichtserkennung ---
+                if self._teachen and self._teachen.enabled:
                     try:
-                        face_detected = getattr(pframe, 'face_detected', False)
-                        face_id = getattr(pframe, 'face_id', None)
-                        confidence = getattr(pframe, 'face_confidence', 0.0)
-                        if face_detected and confidence > 0.5:
-                            frame = self._inference.get_annotated_frame()
-                            if frame is not None:
-                                self._daily_learner.check_snapshot(
-                                    face_detected=True,
-                                    face_id=face_id,
-                                    confidence=confidence,
-                                    frame=frame,
+                        _tc_face = getattr(pframe, 'face_detected', False)
+                        _tc_bbox = getattr(pframe, 'face_bbox', None)
+                        _tc_name = getattr(pframe, 'face_id', None)
+                        _tc_conf = getattr(pframe, 'face_confidence', 0.0)
+                        if _tc_face and _tc_bbox and _tc_conf > 0.3:
+                            _tc_frame = self._inference.get_annotated_frame()
+                            if _tc_frame is not None:
+                                _saved = self._teachen.maybe_snapshot_tappas(
+                                    frame=_tc_frame,
+                                    face_bbox_px=_tc_bbox,
+                                    name=_tc_name,
+                                    confidence=_tc_conf,
                                 )
+                                # BLITZ: weisse LED kurz aufblitzen wenn Snapshot gespeichert
+                                if _saved and self._inference._learner_flash and self._led:
+                                    import threading as _t
+                                    _t.Thread(target=self._led.flash_white, daemon=True).start()
                     except Exception as e:
-                        logger.debug(f"[TAPPAS-PERC] DailyLearner: {e}")
+                        logger.debug(f"[TAPPAS-PERC] Teachen: {e}")
 
                 # --- Teach-Modus: Auto-Trigger bei Gesichtserkennung ---
                 if self._teach_mode_enabled and not self._teach_busy:
@@ -1456,7 +1461,7 @@ class MolochService:
                 threading.Thread(target=self._tappas_tracker_feed_loop, daemon=True,
                                  name="TappasTrackerFeed").start()
                 logger.info("[START] TAPPAS Tracker-Feed Loop gestartet")
-                # Perception-Loop: PFrame → PerceptionEngine/CoreIntegrator/LED/DailyLearner
+                # Perception-Loop: PFrame → PerceptionEngine/CoreIntegrator/LED/Teachen
                 threading.Thread(target=self._tappas_perception_loop, daemon=True,
                                  name="TappasPerceptionLoop").start()
                 logger.info("[START] TAPPAS Perception-Loop gestartet (5 Hz)")
@@ -1719,7 +1724,7 @@ class MolochService:
                 "manual_mode": self._cam._manual_mode,
                 "moloch_has_control": self._cam._moloch_has_control,
                 "tentakel_enabled": self._cam._tentakel_enabled,
-                "daily_learner_enabled": self._daily_learner.enabled if self._daily_learner else False,
+                "teachen_enabled": self._teachen.enabled if self._teachen else False,
                 "learner_flash": getattr(_inf, '_learner_flash', False),
                 "frame_age": round(time.time() - self._cam._last_frame_write, 1) if self._cam._last_frame_write else -1,
                 "frozen_restarts": self._cam._frozen_restart_count,
@@ -2075,10 +2080,10 @@ class MolochService:
             get_event_bus().set_silence_level(level)
             logger.info(f"[IPC] Silence-Level: {level}")
 
-        elif action == 'toggle_daily_learner':
-            if self._daily_learner:
-                enabled = self._daily_learner.toggle()
-                logger.info(f"[IPC] DailyLearner: {'AN' if enabled else 'AUS'}")
+        elif action == 'toggle_teachen':
+            if self._teachen:
+                enabled = self._teachen.toggle()
+                logger.info(f"[IPC] Teachen: {'AN' if enabled else 'AUS'}")
 
         elif action == 'toggle_learner_flash':
             self._inference._learner_flash = bool(cmd.get('on', not self._inference._learner_flash))

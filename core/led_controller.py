@@ -8,7 +8,7 @@ Steuert blaue Status-LED + weisse Flutlicht-LED der Sonoff CAM-PT2.
 Verantwortlichkeiten:
   - LED on/off/blink (Status-LED)
   - Markus-Standlicht (LED an wenn Markus erkannt, Hysterese gegen Flackern)
-  - Flash (weisse LED kurz an fuer DailyLearner Snapshot)
+  - Flash (weisse LED kurz an fuer Teachen Snapshot)
   - CoreIntegrator-Integration (Berserker-Zone -> blinken statt Standlicht)
 """
 
@@ -242,10 +242,10 @@ class LEDController:
             self._cloud.run(self._cloud.bridge.set_night('night'))
             time.sleep(0.2)
         except Exception as e:
-            logger.warning(f"[LEARNER] Flash-LED AN Fehler: {e}")
+            logger.warning(f"[TEACHEN] Flash-LED AN Fehler: {e}")
         finally:
             try:
                 self._cloud.run(self._cloud.bridge.set_night('day'))
             except Exception as e2:
-                logger.error(f"[LEARNER] Flash-LED AUS Fehler (LED koennte haengen!): {e2}")
-        logger.info("[LEARNER] Flash-LED Blitz")
+                logger.error(f"[TEACHEN] Flash-LED AUS Fehler (LED koennte haengen!): {e2}")
+        logger.info("[TEACHEN] Flash-LED Blitz")

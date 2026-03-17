@@ -46,21 +46,21 @@ class ModelOrchestrator:
     """NPU Pipeline + Modell-Lifecycle + Attention-Level Orchestrierung."""
 
     def __init__(self, hailo_manager=None, perception_engine=None,
-                 core_integrator=None, daily_learner=None,
+                 core_integrator=None, teachen=None,
                  model_health=None, notify_callback=None):
         """
         Args:
             hailo_manager: HailoManager fuer Device-Zugriff
             perception_engine: PerceptionEngine fuer Slot-Rotation
             core_integrator: CoreIntegrator fuer Attention-Level
-            daily_learner: DailyLearner fuer Teach-Mode Detection
+            teachen: Teachen fuer Teach-Mode Detection
             model_health: ModelHealth fuer Inference-Stats
             notify_callback: Callback(event, data) fuer UI-Notifications
         """
         self._hailo_manager = hailo_manager
         self._perception = perception_engine
         self._core_integrator = core_integrator
-        self._daily_learner = daily_learner
+        self._teachen = teachen
         self._model_health = model_health
         self._notify = notify_callback or (lambda e, d: None)
 
@@ -546,7 +546,7 @@ class ModelOrchestrator:
         if self._orchestration_mode == "always_on":
             return "high"
 
-        if self._daily_learner and self._daily_learner.enabled:
+        if self._teachen and self._teachen.enabled:
             return "teach"
 
         # Forced models: Stage-Machine laeuft nicht → immer "high"

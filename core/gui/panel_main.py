@@ -190,9 +190,9 @@ class ServiceProxy:
         """Aktuelle Settings speichern."""
         self._write_command("save_settings")
 
-    def toggle_daily_learner(self):
-        """Daily Learner an/aus."""
-        self._write_command("toggle_daily_learner")
+    def toggle_teachen(self):
+        """Teachen an/aus."""
+        self._write_command("toggle_teachen")
 
     # ----- Spotify Commands -----
 

@@ -74,7 +74,7 @@ class InferenceEngine:
 
     def __init__(self, orchestrator, camera, led, ipc,
                  perception=None, core_integrator=None,
-                 daily_learner=None, perception_buffer=None,
+                 teachen=None, perception_buffer=None,
                  model_health=None, notify_callback=None,
                  write_status_callback=None, update_status_callback=None):
         """
@@ -85,7 +85,7 @@ class InferenceEngine:
             ipc: IPCRouter (SHM Frame/Status Write)
             perception: PerceptionEngine (Slot-Rotation)
             core_integrator: CoreIntegrator (Tension/Attention)
-            daily_learner: DailyLearner (Snapshot-Logik)
+            teachen: Teachen (Snapshot-Logik)
             perception_buffer: PerceptionBuffer (Ring-Buffer)
             model_health: ModelHealth (Inference-Stats)
             notify_callback: callback(event, data) fuer UI
@@ -99,7 +99,7 @@ class InferenceEngine:
         self._ipc = ipc
         self._perception = perception
         self._core_integrator = core_integrator
-        self._daily_learner = daily_learner
+        self._teachen = teachen
         self._perception_buffer = perception_buffer
         self._model_health = model_health
         self._notify = notify_callback or (lambda e, d=None: None)
@@ -226,8 +226,8 @@ class InferenceEngine:
         msg = f"Face-DB: {len(base_names)} Personen, {learned} gelernt ({', '.join(base_names)})"
         logger.info(msg)
         self._update_status_cb(msg)
-        if self._daily_learner:
-            self._daily_learner.set_face_db(self._face_db, FACE_DB_PATH)
+        if self._teachen:
+            self._teachen.set_face_db(self._face_db, FACE_DB_PATH)
 
     def get_fps(self) -> dict:
         """FPS-Snapshot zurueckgeben."""
@@ -608,9 +608,9 @@ class InferenceEngine:
                                                        head_pose=_head_pose if '_head_pose' in dir() else None,
                                                        detected_objects=_detected_objects if '_detected_objects' in dir() else [])
 
-                            # DailyLearner: Snapshot NUR bei echtem Gesicht (hoher SCRFD Score)
+                            # Teachen: Snapshot NUR bei echtem Gesicht (hoher SCRFD Score)
                             # score >= 0.65 filtert Falsch-Positive (Moebel, Kissen etc.)
-                            if (self._daily_learner and self._daily_learner.enabled
+                            if (self._teachen and self._teachen.enabled
                                     and name != "Keine DB" and float(score) >= 0.65):
                                 try:
                                     _hp = None
@@ -628,7 +628,7 @@ class InferenceEngine:
                                     _lx2 = min(fw, _lx2 + _lmx)
                                     _ly2 = min(fh, _ly2 + _lmy)
                                     learner_crop = frame[_ly1:_ly2, _lx1:_lx2]
-                                    _saved = self._daily_learner.maybe_snapshot(
+                                    _saved = self._teachen.maybe_snapshot(
                                         face_crop=learner_crop,
                                         name=name,
                                         confidence=sim,
@@ -645,7 +645,7 @@ class InferenceEngine:
                                             daemon=True
                                         ).start()
                                 except Exception as e:
-                                    logger.debug(f"DailyLearner: {e}")
+                                    logger.debug(f"Teachen: {e}")
 
                             # TTS Ansage (60s Cooldown pro Person)
                             if name != "Unbekannt" and name != "Keine DB":

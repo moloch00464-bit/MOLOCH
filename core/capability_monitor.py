@@ -37,7 +37,7 @@ MODULE_PACKAGES = {
         "perception_engine", "ptz_tracker", "ptz_arbiter", "arbitration",
         "camera_manager", "led_controller", "spotify_controller",
         "voice_pipeline", "tts", "moloch_sprache", "keyword_handler",
-        "daily_learner", "longterm_memory", "ipc_router", "status",
+        "teachen", "longterm_memory", "ipc_router", "status",
         "inference_engine", "model_orchestrator", "calibration_engine",
         "dashboard", "timeline", "eye_viewer", "einpraegen",
         "environment_watcher", "cloud_controller", "capability_monitor",
