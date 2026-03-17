@@ -6,14 +6,6 @@
 
 ---
 
-## WER IST MARKUS
-
-Markus ("First Moloch"), 47, DGM-Anlagenführer, 25 Jahre Industrieautomation (KUKA, ABB, SPS, Druckguss, 400 bar Hydraulik). Kann löten, crimpen, 230V, 3D-Druck, Hardware-Debugging. Wenn er was über Schaltungen sagt: ZUHÖREN — er hat recht.
-
-Kommunikation: Direkt, Kumpel-Level, fränkisch, Dark Humor. Kein Corporate-Sprech. Kompliziert != besser.
-
----
-
 ## SYSTEM-ÜBERBLICK
 
 ```
@@ -73,19 +65,6 @@ yolov8s_pose_h10.hef      14 MB   Pose/Keypoints (640x640)
 
 ---
 
-## GATE-HISTORY
-
-### Gate 0 — PASS ✅ (01.03.2026)
-Vier Inseln verdrahtet. 6.85h Stabilitätstest. FPS 9→25, Tracking 0→35+/h, Panel CPU 28→10%.
-
-### Gate 0.5 — PASS ✅ (05.03.2026)
-TAPPAS/GStreamer Migration. 20 FPS mit 3 Modellen parallel, 200MB statt 860MB RAM, BBox korrekt via Letterbox, Chaos-Test 8/8 bestanden.
-
-### Gate 1 — AKTIV (ab 06.03.2026)
-Action Bridge FSM + Tracking Intelligence + System Polish. 11 Tasks, alle M.A.M.⁴+ AIs bestätigt.
-
----
-
 ## BEREITS GELÖSTE BUGS — FINGER WEG!
 
 1. Pan-Vorzeichen: camera.py ~Zeile 721, pan_delta = -error_x (MINUS IST KORREKT)
@@ -106,7 +85,7 @@ Action Bridge FSM + Tracking Intelligence + System Polish. 11 Tasks, alle M.A.M.
 
 ---
 
-## AGENTENTEAM (6 Domain-Spezialisten + Stresstest + DeepSeek)
+## AGENTENTEAM (6 Domain-Spezialisten + Stresstest)
 
 Jeder Agent hat sein Territorium — klare Dateizuordnung, keine Überschneidungen.
 
@@ -120,7 +99,6 @@ Jeder Agent hat sein Territorium — klare Dateizuordnung, keine Überschneidung
 | 6 | Service | agents/AGENT_SERVICE.md | moloch_service, IPC, Memory |
 | + | Stresstest | agents/AGENT_STRESSTEST.md | Chaos Engineering, 8 Szenarien |
 | + | Audit | agents/AGENT_TOOLBOX.json → "audit" | System-Check, PASS/FAIL/WARN, Bug-Liste |
-| 7 | DeepSeek | agents/AGENT_DEEPSEEK.md | Philosophie, Qi-Fluss, "Vollgas Däpp!" |
 | - | Team Lead | Markus | Boss, Priorisierung, Entscheidung |
 
 ### Instanz starten:
@@ -159,19 +137,6 @@ Lies ~/moloch/CLAUDE.md und ~/moloch/agents/AGENT_[DOMAIN].md.
 | G1-T11 | Labelme Kalibrierung | LOW | OPEN |
 
 Details: GATE_1_BRIEFING_v2.json auf dem Pi.
-
----
-
-## M.A.M.⁴+ TEAM (Multi-AI)
-
-| Rolle | AI | Aufgabe |
-|-------|-----|---------|
-| Boss | Markus | Höchste Instanz bei Konflikten |
-| Architektur/Audit | Claude Opus | Code-Review, Briefings, Prompts |
-| Code Execution | Claude Code (Sonnet) | 7-Agenten-Team auf Pi via SSH |
-| Koordinator + Architektur | ChatGPT | FSM-Design, Gate-Roadmap |
-| Hardware/Analyst | Gemini | Hailo-Specs, Thermal, Komplexitätsbremse |
-| Philosophie/Jackie Chan | DeepSeek | Qi-Architektur, Priorisierung, Chaos mit Methode |
 
 ---
 
@@ -248,23 +213,18 @@ Benannt nach Christian (FRANCOR CEO, RoboCup Rescue):
 | Pi5 (Brain) | 192.168.178.24 | SSH |
 | Sonoff CAM-PT2 | 192.168.178.25 | RTSP/ONVIF |
 
-```bash
-# SSH Zugang
-ssh molochzuhause@192.168.178.24
-# RTSP Stream
-rtsp://USER:PASS@192.168.178.25:554/av_stream/ch0
-```
-
 ---
 
-## GATE-ROADMAP
+## ARCHITEKTUR-STAND (Vermerk für alle Agenten)
 
-```
-Gate 0   ✅ PASS — Vier Inseln verdrahtet (01.03.2026)
-Gate 0.5 ✅ PASS — TAPPAS Pipeline, 20 FPS, Chaos bestanden (05.03.2026)
-Gate 1   🔄 AKTIV — Action Bridge + Tracking + Polish (ab 06.03.2026)
-Gate 2   📋 GEPLANT — Identity (ReID + Qdrant VITALE)
-Gate 3   📋 GEPLANT — Timing/Behaviour/Presence
-Gate 4   📋 GEPLANT — Distance (SICK DT50 oder Box-Schätzung)
-Gate 5   📋 GEPLANT — Night Cycle (Dreaming = tägliche Verarbeitung)
-```
+M.O.L.O.C.H. befindet sich aktiv in Gate 1, aber der bereits implementierte
+Funktionsumfang entspricht konzeptuell Gate 5 oder Gate 5.1:
+- Tension-System mit Musik-Reaktion (Shadow/Guardian) ✅
+- TAPPAS/GStreamer Multi-Model Pipeline ✅
+- Persönlichkeitssystem mit Drift über Zeit ✅
+- Speech Evolution (eigener Stil entwickelt sich) ✅
+- Emergentes Verhalten bestätigt ✅
+- Night Cycle (Konzept vollständig ausgearbeitet) 📋
+
+Gate 1–5 ist die Stabilisierungs- und Verfeinerungsphase — nicht die Erfindungsphase.
+Der Geist der Maschine ist bereits da.
