@@ -300,27 +300,20 @@ class NpuThreshPopup:
     # =========================================================================
 
     def _build_buttons(self):
-        """Save und Reset Buttons am unteren Rand."""
+        """Reset Button + Feedback Label am unteren Rand."""
         btn_frame = tk.Frame(self._inner, bg=BG_DARK)
         btn_frame.pack(fill=tk.X, padx=10, pady=(5, 10))
-
-        tk.Button(
-            btn_frame, text="SAVE", width=12,
-            bg=ACCENT_GREEN, fg=BG_DARK, font=FONT_BUTTON,
-            activebackground="#00cc55",
-            command=self._force_save,
-        ).pack(side=tk.LEFT, padx=5)
 
         tk.Button(
             btn_frame, text="RESET DEFAULTS", width=14,
             bg=ACCENT_RED, fg=FG_WHITE, font=FONT_BUTTON,
             activebackground="#cc0000",
             command=self._reset_defaults,
-        ).pack(side=tk.RIGHT, padx=5)
+        ).pack(side=tk.LEFT, padx=5)
 
         # Feedback Label
         self._lbl_feedback = tk.Label(
-            btn_frame, text="", bg=BG_DARK, fg=FG_DIM, font=FONT_SMALL,
+            btn_frame, text="Auto-Save aktiv", bg=BG_DARK, fg=FG_DIM, font=FONT_SMALL,
         )
         self._lbl_feedback.pack(side=tk.LEFT, padx=10)
 
@@ -504,15 +497,6 @@ class NpuThreshPopup:
         if self._save_after_id is not None:
             self.win.after_cancel(self._save_after_id)
         self._save_after_id = self.win.after(300, self._do_save_settings)
-
-    def _force_save(self):
-        """Sofort speichern (Save-Button)."""
-        if self._save_after_id is not None:
-            self.win.after_cancel(self._save_after_id)
-            self._save_after_id = None
-        self._do_save_settings()
-        self._lbl_feedback.config(text="Gespeichert!", fg=ACCENT_GREEN)
-        self.win.after(2000, lambda: self._lbl_feedback.config(text="", fg=FG_DIM))
 
     def _do_save_settings(self):
         """Alle Werte atomar in settings.json schreiben."""
