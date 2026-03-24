@@ -475,7 +475,7 @@ class MolochService:
             os.makedirs(teach_dir, exist_ok=True)
             ts = time.strftime("%Y%m%d_%H%M%S")
             path = os.path.join(teach_dir, f"teach_{ts}.jpg")
-            cv2.imwrite(path, frame)
+            cv2.imwrite(path, cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
             logger.info(f"[TEACH] Foto gespeichert: {path}")
 
             # --- Embedding in face_embeddings.json speichern ---
