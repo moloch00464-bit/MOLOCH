@@ -96,12 +96,10 @@ class CameraManager:
         self._manual_mode = False
         self._tracker = None
 
-        # Guardian/Tentakel Mode
-        # Bei TAPPAS: Guardian deaktivieren — MOLOCH ist selbst das Detektionssystem,
-        # kein Smart Tracking zum "zurückgeben". Sonst killt Orphan-Check den Tracker nach 60s.
-        _use_tappas = os.environ.get("MOLOCH_USE_TAPPAS", "0") == "1"
-        self._guardian_mode = not _use_tappas
-        self._tentakel_enabled = not _use_tappas
+        # Guardian/Tentakel Mode — IMMER aktiv (auch bei TAPPAS)
+        # Guardian wartet auf Bewegung, Tentakel steuert Smart Tracking ↔ MOLOCH Handoff
+        self._guardian_mode = True
+        self._tentakel_enabled = True
         self._moloch_has_control = False
         self._takeover_reason = ""
         self._takeover_time = 0
@@ -588,6 +586,9 @@ class CameraManager:
         if (self._autonomous_mode and not self._moloch_has_control
                 and not self._manual_autonomous
                 and (time.time() - getattr(self, "_autonomous_enabled_at", 0)) > self.STARTUP_GRACE):
+            # Tracker nicht killen wenn er aktiv arbeitet (tracking/searching/locked/coast)
+            if self._tracker and self._tracker.state not in (TrackerState.IDLE, TrackerState.PARKED):
+                return
             logger.warning("[SAFETY] Orphaned autonomous mode detected - disabling")
             self.disable_autonomous()
             # Cooldown: verhindert sofortiges Re-Enable durch Retry-Logik (Z. 670)

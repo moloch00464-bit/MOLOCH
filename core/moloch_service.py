@@ -1479,8 +1479,9 @@ class MolochService:
         threading.Thread(target=self._poll_panel_cmds, daemon=True, name="PanelCmdPoll").start()
 
         # Autonomous Mode + Watchdog (via CameraManager)
-        self._cam.enable_autonomous()
-        logger.info("[START] Autonomous Mode aktiviert (Default nach Boot)")
+        # Tentakel-Modus: Smart Tracking AN, Guardian wartet auf Bewegung
+        # NICHT enable_autonomous() beim Boot — Tracker startet erst bei Takeover
+        logger.info("[START] Tentakel-Modus: Smart Tracking aktiv, Guardian wartet")
 
         # PTZ-Settings auf Tracker anwenden (nach enable_autonomous)
         def _apply_ptz_delayed():
