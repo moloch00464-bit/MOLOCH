@@ -526,6 +526,7 @@ class HardwarePopup:
         "pose": "yolov8s_pose_h10.hef",
         "hand_landmark": "hand_landmark_lite.hef",
         "face_attr": "face_attr_resnet_v1_18.hef",
+        "person_reid": "resnet_v1_50_h10.hef",
     }
     _HEF_DIR = "/mnt/moloch-data/hailo/models"
     _hef_size_cache = {}  # Einmal lesen, dann cachen
@@ -545,7 +546,8 @@ class HardwarePopup:
                 pass
         # Fallback-Schaetzung
         fallback = {"scrfd": 6, "arcface": 3, "yolov8m": 21,
-                     "pose": 14, "hand_landmark": 1, "face_attr": 7}
+                     "pose": 14, "hand_landmark": 1, "face_attr": 7,
+                     "person_reid": 23}
         return fallback.get(model_name, 5)
 
     def _read_npu_temperature(self):

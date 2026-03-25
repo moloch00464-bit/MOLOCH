@@ -92,10 +92,11 @@ class ModelsModule:
         ("YOLOv8m", "yolov8m"),
     ]
 
-    # Zusaetzliche Modelle (HEFs vorhanden, noch nicht in Pipeline)
+    # Zusaetzliche Modelle (HEFs vorhanden, togglebar)
     EXTRA_MODELS = [
         ("Pose", "pose"),
         ("Hand LM", "hand_landmark"),
+        ("Person-ReID", "person_reid"),
     ]
 
     # Alle Modelle zusammen (fuer Kompatibilitaet)
