@@ -586,8 +586,12 @@ class CameraManager:
         if (self._autonomous_mode and not self._moloch_has_control
                 and not self._manual_autonomous
                 and (time.time() - getattr(self, "_autonomous_enabled_at", 0)) > self.STARTUP_GRACE):
-            # Tracker nicht killen wenn er aktiv arbeitet (tracking/searching/locked/coast)
-            if self._tracker and self._tracker.state not in (TrackerState.IDLE, TrackerState.PARKED):
+            # Bei TAPPAS: Tracker ist NIE orphaned — TAPPAS ist das Detektionssystem
+            _use_tappas = os.environ.get("MOLOCH_USE_TAPPAS", "0") == "1"
+            if _use_tappas:
+                return
+            # Ohne TAPPAS: Tracker nicht killen wenn er aktiv arbeitet
+            if self._tracker and self._tracker.state not in (TrackerState.IDLE,):
                 return
             logger.warning("[SAFETY] Orphaned autonomous mode detected - disabling")
             self.disable_autonomous()
