@@ -24,6 +24,7 @@ import logging
 import os
 import shutil
 import subprocess
+import threading
 import time
 import tkinter as tk
 
@@ -548,65 +549,79 @@ class HardwarePopup:
         return fallback.get(model_name, 5)
 
     def _read_npu_temperature(self):
-        """NPU-Temperatur via HailoRT Python API (shared VDevice).
+        """NPU-Temperatur aus Service Status-JSON lesen.
 
-        Liest ts0 + ts1 Sensoren. Gibt Durchschnitt zurueck.
-        Funktioniert AUCH wenn GStreamer die NPU nutzt (shared device).
+        NICHT via HailoRT VDevice — das erzeugt HAILO_OUT_OF_PHYSICAL_DEVICES(74)
+        weil die TAPPAS-Pipeline das einzige VDevice haelt.
+        Der Service schreibt die NPU-Temp bereits in den Status-JSON.
 
         Returns:
             float oder None bei Fehler.
         """
         try:
-            import hailo_platform as hp
-            params = hp.VDevice.create_params()
-            vd = hp.VDevice(params)
-            for d in vd.get_physical_devices():
-                temp_info = d.control.get_chip_temperature()
-                ts0 = temp_info.ts0_temperature
-                ts1 = temp_info.ts1_temperature
-                vd.release()
-                # Durchschnitt beider Sensoren
-                return (ts0 + ts1) / 2.0
-            vd.release()
+            status = self.service.read_status()
+            if status and isinstance(status, dict):
+                npu = status.get("npu", {})
+                if isinstance(npu, dict):
+                    temp = npu.get("temperature")
+                    if temp is not None:
+                        return float(temp)
         except Exception as e:
             logger.debug(f"NPU Temperatur nicht lesbar: {e}")
         return None
 
+    _cached_service_pid = None
+
     def _read_service_rss(self):
         """MOLOCH Service RSS + Thread-Count aus /proc.
 
-        Sucht den moloch_service.py Prozess (oder python3 mit moloch).
-
+        Cached PID — iteriert /proc nur beim ersten Aufruf oder wenn PID ungueltig.
         Returns:
             (rss_mb, thread_count) oder (None, None)
         """
+        # Schneller Pfad: gecachte PID pruefen
+        pid = self._cached_service_pid
+        if pid is not None:
+            try:
+                rss_kb, threads = self._read_pid_stats(pid)
+                if rss_kb > 0:
+                    return rss_kb / 1024, threads
+            except (OSError, ValueError):
+                pass
+            # PID ungueltig — Cache loeschen
+            self._cached_service_pid = None
+
+        # Langsamer Pfad: PID suchen (einmalig)
         try:
-            # Suche Service-PID via pidof oder /proc
             for pid_str in os.listdir("/proc"):
                 if not pid_str.isdigit():
                     continue
                 try:
-                    cmdline_path = f"/proc/{pid_str}/cmdline"
-                    with open(cmdline_path, "rb") as f:
+                    with open(f"/proc/{pid_str}/cmdline", "rb") as f:
                         cmdline = f.read().decode("utf-8", errors="replace")
-                    # Suche nach moloch_service oder MolochService
-                    if "moloch_service" not in cmdline and "moloch.service" not in cmdline:
+                    if "moloch_service" not in cmdline and "MolochService" not in cmdline:
                         continue
-                    # RSS + Threads lesen
-                    rss_kb = 0
-                    threads = 0
-                    with open(f"/proc/{pid_str}/status") as f:
-                        for line in f:
-                            if line.startswith("VmRSS:"):
-                                rss_kb = int(line.split()[1])
-                            elif line.startswith("Threads:"):
-                                threads = int(line.split()[1])
+                    pid = int(pid_str)
+                    self._cached_service_pid = pid
+                    rss_kb, threads = self._read_pid_stats(pid)
                     return rss_kb / 1024, threads
                 except (OSError, ValueError, IndexError):
                     continue
         except Exception:
             pass
         return None, None
+
+    def _read_pid_stats(self, pid):
+        """RSS + Thread-Count fuer eine PID lesen."""
+        rss_kb = 0
+        threads = 0
+        with open(f"/proc/{pid}/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    rss_kb = int(line.split()[1])
+                elif line.startswith("Threads:"):
+                    threads = int(line.split()[1])
+        return rss_kb, threads
 
     def _read_npu_status(self):
         """NPU-Status: status, models + FPS + RAM, Gesamt-RAM.
@@ -714,21 +729,52 @@ class HardwarePopup:
     # =========================================================================
 
     def _update_all(self):
-        """Alle Hardware-Werte aktualisieren."""
+        """Daten im Background-Thread sammeln, UI im Main-Thread updaten.
+
+        WICHTIG: Alle blocking I/O (subprocess, /proc-Iteration, HailoRT)
+        laufen im Thread. Tkinter-Widgets werden NUR via win.after(0, ...)
+        im Main-Thread aktualisiert. So blockiert nichts das Preview-Video.
+        """
+        def _collect():
+            """Alle Hardware-Werte sammeln (laeuft im Thread)."""
+            data = {}
+            data["temp"] = self._read_cpu_temp()
+            data["cpu_pct"] = self._read_cpu_percent()
+            data["freq"] = self._read_cpu_freq()
+            data["noctua"] = self._read_noctua_pwm()
+            data["fan"] = self._read_fan_state()
+            data["ram"] = self._read_ram()
+            data["svc_rss"] = self._read_service_rss()
+            data["npu"] = self._read_npu_status()
+            data["npu_temp"] = self._read_npu_temperature()
+            data["ssd1"] = self._read_disk("/")
+            data["ssd2"] = self._read_disk("/mnt/moloch-data")
+            data["uptime"] = self._read_uptime()
+            # UI-Update im Main-Thread einplanen
+            try:
+                self.win.after(0, self._apply_update, data)
+            except Exception:
+                pass  # Fenster bereits geschlossen
+
+        threading.Thread(target=_collect, daemon=True).start()
+        # Naechsten Zyklus planen (unabhaengig vom Thread)
+        self._after_id = self.win.after(UPDATE_MS, self._update_all)
+
+    def _apply_update(self, data):
+        """UI-Widgets aktualisieren (laeuft im Tkinter Main-Thread)."""
         # CPU Temperatur + Balken
-        temp = self._read_cpu_temp()
+        temp = data.get("temp")
         if temp is not None:
             color = STATUS_GREEN if temp < 60 else (
                 STATUS_YELLOW if temp < 75 else STATUS_RED)
             self._lbl_temp.config(text=f"{temp:.1f}\u00b0C", fg=color)
-            # Temp-Balken: 30-90C -> 0-100%
             temp_pct = max(0, min(100, (temp - 30) / 60 * 100))
             self._draw_bar(self._canvas_temp, temp_pct)
         else:
             self._lbl_temp.config(text="n/a", fg=FG_DIM)
 
         # CPU Last
-        cpu_pct = self._read_cpu_percent()
+        cpu_pct = data.get("cpu_pct")
         if cpu_pct is not None:
             color = _bar_color(cpu_pct)
             self._lbl_cpu.config(text=f"{cpu_pct:.0f}%", fg=color)
@@ -736,14 +782,14 @@ class HardwarePopup:
             self._lbl_cpu.config(text="n/a", fg=FG_DIM)
 
         # CPU Frequenz
-        freq = self._read_cpu_freq()
+        freq = data.get("freq")
         if freq is not None:
             self._lbl_freq.config(text=f"{freq:.0f} MHz")
         else:
             self._lbl_freq.config(text="n/a", fg=FG_DIM)
 
         # Noctua NF-A4x20 (GPIO18 PWM-PIO)
-        noctua_pct = self._read_noctua_pwm()
+        noctua_pct = data.get("noctua")
         if noctua_pct is not None:
             if noctua_pct <= 30:
                 n_color = STATUS_GREEN
@@ -757,8 +803,9 @@ class HardwarePopup:
             self._lbl_noctua.config(text="n/a", fg=FG_DIM)
             self._draw_bar(self._canvas_noctua, 0)
 
-        # Pi5 CPU-Kühler
-        cur_st, max_st, pwm_pct = self._read_fan_state()
+        # Pi5 CPU-Kuehler
+        fan_data = data.get("fan", (None, None, None))
+        cur_st, max_st, pwm_pct = fan_data
         if cur_st is not None:
             label, color = self._FAN_STAGES.get(cur_st, (f"Stufe {cur_st}", FG_WHITE))
             max_str = str(max_st) if max_st is not None else "?"
@@ -772,7 +819,7 @@ class HardwarePopup:
             self._draw_bar(self._canvas_cpufan, 0)
 
         # RAM (System)
-        ram_used, ram_total = self._read_ram()
+        ram_used, ram_total = data.get("ram", (None, None))
         if ram_used is not None and ram_total is not None and ram_total > 0:
             pct = (ram_used / ram_total) * 100
             color = _bar_color(pct)
@@ -783,9 +830,8 @@ class HardwarePopup:
             self._lbl_ram.config(text="n/a", fg=FG_DIM)
 
         # MOLOCH Service RSS + Threads
-        svc_rss, svc_threads = self._read_service_rss()
+        svc_rss, svc_threads = data.get("svc_rss", (None, None))
         if svc_rss is not None:
-            # RSS Farbe: gruen <300, gelb 300-800, rot >800 (Pi5 hat 4 GB)
             if svc_rss < 300:
                 rss_color = STATUS_GREEN
             elif svc_rss < 800:
@@ -799,24 +845,23 @@ class HardwarePopup:
             self._lbl_threads.config(text="--", fg=FG_DIM)
 
         # NPU Status + Modelle
-        npu_status, npu_color, npu_models, npu_ram = self._read_npu_status()
+        npu_status, npu_color, npu_models, npu_ram = data.get("npu", ("--", FG_DIM, "--", 0))
         self._lbl_npu_status.config(text=npu_status, fg=npu_color)
         self._lbl_npu_models.config(text=npu_models, fg=npu_color)
 
         # NPU Temperatur
-        npu_temp = self._read_npu_temperature()
+        npu_temp = data.get("npu_temp")
         if npu_temp is not None:
             t_color = STATUS_GREEN if npu_temp < 60 else (
                 STATUS_YELLOW if npu_temp < 75 else STATUS_RED)
             self._lbl_npu_temp.config(text=f"{npu_temp:.1f}\u00b0C", fg=t_color)
-            # Temp-Balken: 20-90C -> 0-100%
             t_pct = max(0, min(100, (npu_temp - 20) / 70 * 100))
             self._draw_bar(self._canvas_npu_temp, t_pct)
         else:
             self._lbl_npu_temp.config(text="n/a (belegt)", fg=FG_DIM)
             self._draw_bar(self._canvas_npu_temp, 0)
 
-        # NPU RAM Balken (echte HEF-Groessen)
+        # NPU RAM Balken
         npu_total_mb = 8192
         if npu_ram > 0:
             npu_pct = (npu_ram / npu_total_mb) * 100
@@ -829,7 +874,7 @@ class HardwarePopup:
             self._draw_bar(self._canvas_npu_ram, 0)
 
         # SSD 1
-        ssd1_used, ssd1_total = self._read_disk("/")
+        ssd1_used, ssd1_total = data.get("ssd1", (None, None))
         if ssd1_used is not None and ssd1_total is not None and ssd1_total > 0:
             pct = (ssd1_used / ssd1_total) * 100
             color = _bar_color(pct)
@@ -840,7 +885,7 @@ class HardwarePopup:
             self._lbl_ssd1.config(text="n/a", fg=FG_DIM)
 
         # SSD 2
-        ssd2_used, ssd2_total = self._read_disk("/mnt/moloch-data")
+        ssd2_used, ssd2_total = data.get("ssd2", (None, None))
         if ssd2_used is not None and ssd2_total is not None and ssd2_total > 0:
             pct = (ssd2_used / ssd2_total) * 100
             color = _bar_color(pct)
@@ -851,14 +896,11 @@ class HardwarePopup:
             self._lbl_ssd2.config(text="nicht gemountet", fg=STATUS_RED)
 
         # Uptime
-        uptime = self._read_uptime()
+        uptime = data.get("uptime")
         if uptime:
             self._lbl_uptime.config(text=uptime)
         else:
             self._lbl_uptime.config(text="n/a", fg=FG_DIM)
-
-        # Naechster Update
-        self._after_id = self.win.after(UPDATE_MS, self._update_all)
 
     # =========================================================================
     # Schliessen

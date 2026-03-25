@@ -19,6 +19,7 @@ import tkinter as tk
 import struct
 import time
 import os
+import mmap
 import logging
 
 import numpy as np
@@ -84,9 +85,9 @@ class PreviewModule:
         # Watchdog: Letzter erfolgreicher Render (Gate0 Phase 9)
         self.last_render_time = 0.0
 
-        # SHM File-Descriptor + Inode-Tracking (os.rename aendert Inode!)
-        self._shm_fd = None
-        self._shm_inode = 0
+        # SHM mmap-basiert (kein Inode-Tracking noetig)
+        self._shm_mmap = None
+        self._shm_fd_raw = -1
 
         # Lag-Diagnostik: 30s Logging, alle 2s ein Eintrag
         self._lag_log_start = 0.0
@@ -148,59 +149,85 @@ class PreviewModule:
             font=FONT_MONO,
         )
 
-    def _read_shm_frame(self):
+    def _ensure_shm_mmap(self):
+        """SHM mmap oeffnen (lazy, einmalig). Return True wenn bereit."""
+        if self._shm_mmap is not None:
+            return True
+        try:
+            if not os.path.exists(SHM_FRAME):
+                return False
+            fd = os.open(SHM_FRAME, os.O_RDONLY)
+            size = os.fstat(fd).st_size
+            if size < 24:
+                os.close(fd)
+                return False
+            self._shm_mmap = mmap.mmap(fd, size, access=mmap.ACCESS_READ)
+            self._shm_fd_raw = fd
+            self._logger.info(f"[SHM] mmap Reader bereit: {size} Bytes")
+            return True
+        except Exception as e:
+            self._logger.warning(f"[SHM] mmap open: {e}")
+            return False
+
+    def _close_shm_mmap(self):
+        """SHM mmap schliessen (fuer Reconnect oder Cleanup)."""
+        if self._shm_mmap is not None:
+            try:
+                self._shm_mmap.close()
+            except Exception:
+                pass
+            self._shm_mmap = None
+        if self._shm_fd_raw >= 0:
+            try:
+                os.close(self._shm_fd_raw)
+            except Exception:
+                pass
+            self._shm_fd_raw = -1
+
+    def _read_shm_seq(self):
+        """Nur Seq-Nummer lesen (4 Bytes ab Offset 12) — schneller Check ob neuer Frame.
+
+        Returns:
+            seq (int) oder -1 bei Fehler
         """
-        Frame direkt aus SHM lesen mit korrektem Header-Parsing.
+        try:
+            if not self._ensure_shm_mmap():
+                return -1
+            self._shm_mmap.seek(12)
+            data = self._shm_mmap.read(4)
+            if len(data) < 4:
+                return -1
+            return struct.unpack("<I", data)[0]
+        except (ValueError, OSError):
+            # mmap invalid (Datei geloescht/neu erstellt) → reconnect
+            self._close_shm_mmap()
+            return -1
 
-        SHM-Format (geschrieben von tappas_pipeline._write_shm_frame):
-          24 Byte Header:
-            h   (uint32 LE) = Bildhoehe (numpy rows)
-            w   (uint32 LE) = Bildbreite (numpy cols)
-            c   (uint32 LE) = Kanaele (3 = RGB)
-            seq (uint32 LE) = Sequenznummer
-            ts  (float64 LE) = time.monotonic() Zeitstempel
-          Danach: h * w * c Bytes RGB Pixeldaten
+    def _read_shm_frame(self):
+        """Frame per mmap aus SHM lesen — kein stat/open/close pro Frame.
 
+        SHM-Format: 24 Byte Header + h*w*c Pixeldaten (RGB).
         Returns:
             (width, height, seq, ts, raw_bytes) oder None bei Fehler
         """
         try:
-            # SHM-Datei oeffnen/re-oeffnen wenn Inode sich geaendert hat.
-            # TAPPAS schreibt per os.rename(tmp, SHM_FRAME) — das erzeugt
-            # einen neuen Inode. Ein offener FD zeigt auf den ALTEN Inode
-            # und liest ewig denselben Frame (= Standbild-Bug).
-            try:
-                current_inode = os.stat(SHM_FRAME).st_ino
-            except OSError:
+            if not self._ensure_shm_mmap():
                 return None
-            if self._shm_fd is None or current_inode != self._shm_inode:
-                if self._shm_fd is not None:
-                    try:
-                        self._shm_fd.close()
-                    except Exception:
-                        pass
-                self._shm_fd = open(SHM_FRAME, "rb")
-                self._shm_inode = current_inode
-            f = self._shm_fd
-            f.seek(0)
-            header = f.read(24)
-            if len(header) >= 24:
-                h, w, c, seq, ts = struct.unpack("<IIIId", header)
-            elif len(header) >= 16:
-                h, w, c, seq = struct.unpack("<IIII", header[:16])
-                ts = 0.0
-            else:
+            self._shm_mmap.seek(0)
+            header = self._shm_mmap.read(24)
+            if len(header) < 24:
                 return None
+            h, w, c, seq, ts = struct.unpack("<IIIId", header)
             expected = w * h * c
             if expected == 0 or expected > 10_000_000:
                 return None
-            raw = f.read(expected)
+            raw = self._shm_mmap.read(expected)
             if len(raw) < expected:
                 return None
             return (w, h, seq, ts, raw)
-        except OSError:
-            # Datei geloescht/renamed → FD neu oeffnen beim naechsten Tick
-            self._shm_fd = None
+        except (ValueError, OSError):
+            # mmap invalid → reconnect beim naechsten Tick
+            self._close_shm_mmap()
             return None
 
     def _on_resolution_changed(self, selection):
@@ -248,15 +275,16 @@ class PreviewModule:
 
             self._last_update_start = now_start
 
+            # Schneller Seq-Check: nur 4 Bytes lesen statt ganzen Frame
+            quick_seq = self._read_shm_seq()
+            if quick_seq == self._last_seq:
+                self._after_id = self._parent.after(UPDATE_INTERVAL_MS, self._update)
+                return
+
             result = self._read_shm_frame()
 
             if result is not None:
                 shm_w, shm_h, seq, shm_ts, raw = result
-
-                # Gleicher Frame wie letztes Mal — kein Neuzeichnen noetig
-                if seq == self._last_seq:
-                    self._after_id = self._parent.after(UPDATE_INTERVAL_MS, self._update)
-                    return
                 self._last_seq = seq
 
                 # Lag-Diagnostik: Latenz SHM-Write → Preview-Read
@@ -342,8 +370,9 @@ class PreviewModule:
         self._update()
 
     def stop(self):
-        """Preview-Loop stoppen."""
+        """Preview-Loop stoppen und mmap schliessen."""
         self._running = False
         if self._after_id is not None:
             self._parent.after_cancel(self._after_id)
             self._after_id = None
+        self._close_shm_mmap()

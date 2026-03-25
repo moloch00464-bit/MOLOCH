@@ -77,10 +77,13 @@ SCHED_YOLO_SCRFD = "YOLO_SCRFD"  # Person erkannt → YOLO + SCRFD
 SCHED_ALL_ACTIVE = "ALL_ACTIVE"   # Gesicht sichtbar → alle Modelle
 SCHED_COOLDOWN_DOWN = 3.0         # Sekunden ohne Daten bis Downgrade
 
-# IPC: Frame-Preview fuer Panel (gleicher Weg wie InferenceEngine → IPCRouter)
+# IPC: Frame-Preview fuer Panel (mmap-basiert, kein file-rename mehr)
 SHM_FRAME_PATH = "/dev/shm/moloch_frame"
 SHM_PREVIEW_W = 640
 SHM_PREVIEW_H = 360
+SHM_HEADER_SIZE = 24   # h(4) + w(4) + c(4) + seq(4) + ts(8)
+SHM_DATA_SIZE = SHM_PREVIEW_W * SHM_PREVIEW_H * 3
+SHM_TOTAL_SIZE = SHM_HEADER_SIZE + SHM_DATA_SIZE  # 691224 Bytes
 
 
 def _build_rtsp_url() -> str:
@@ -1510,8 +1513,36 @@ class TappasPipeline:
     # SHM IPC (Panel Preview)
     # =====================================================================
 
+    def _init_shm_mmap(self):
+        """SHM mmap initialisieren — einmal allozieren, danach nur noch schreiben."""
+        import mmap
+        try:
+            fd = os.open(SHM_FRAME_PATH, os.O_CREAT | os.O_RDWR, 0o666)
+            os.ftruncate(fd, SHM_TOTAL_SIZE)
+            self._shm_mmap = mmap.mmap(fd, SHM_TOTAL_SIZE)
+            self._shm_fd_raw = fd
+            logger.info(f"[SHM] mmap initialisiert: {SHM_TOTAL_SIZE} Bytes")
+        except Exception as e:
+            logger.error(f"[SHM] mmap init fehlgeschlagen: {e}")
+            self._shm_mmap = None
+            self._shm_fd_raw = -1
+
     def _cleanup_shm(self):
         """SHM-Frame loeschen damit Panel sofort 'Kein Signal' zeigt."""
+        # mmap schliessen
+        if hasattr(self, '_shm_mmap') and self._shm_mmap:
+            try:
+                self._shm_mmap.close()
+            except Exception:
+                pass
+            self._shm_mmap = None
+        if hasattr(self, '_shm_fd_raw') and self._shm_fd_raw >= 0:
+            try:
+                os.close(self._shm_fd_raw)
+            except Exception:
+                pass
+            self._shm_fd_raw = -1
+        # Datei loeschen damit Panel "Kein Signal" zeigt
         for path in [SHM_FRAME_PATH, SHM_FRAME_PATH + '.tmp']:
             try:
                 if os.path.exists(path):
@@ -1520,12 +1551,18 @@ class TappasPipeline:
                 pass
 
     def _write_shm_frame(self, frame: np.ndarray):
-        """Frame nach /dev/shm/moloch_frame schreiben (RGB direkt, kein BGR-Umweg).
+        """Frame per mmap nach /dev/shm/moloch_frame schreiben.
 
-        GStreamer liefert RGB, resize auf Preview-Groesse hier in Python.
+        Kein open/close/rename pro Frame — nur memcpy in bestehenden mmap-Buffer.
         24-Byte Header: h, w, c, seq (uint32 LE) + timestamp (float64 LE).
         """
         try:
+            # Lazy init: mmap beim ersten Frame anlegen
+            if not hasattr(self, '_shm_mmap') or self._shm_mmap is None:
+                self._init_shm_mmap()
+                if self._shm_mmap is None:
+                    return
+
             h, w = frame.shape[:2]
             if h != SHM_PREVIEW_H or w != SHM_PREVIEW_W:
                 frame = cv2.resize(frame, (SHM_PREVIEW_W, SHM_PREVIEW_H))
@@ -1534,9 +1571,9 @@ class TappasPipeline:
             self._shm_seq = (self._shm_seq + 1) & 0xFFFFFFFF
             ts = time.monotonic()
             header = struct.pack('<IIIId', h, w, c, self._shm_seq, ts)
-            with open(SHM_FRAME_PATH + '.tmp', 'wb') as f:
-                f.write(header)
-                f.write(frame.tobytes())
-            os.rename(SHM_FRAME_PATH + '.tmp', SHM_FRAME_PATH)
-        except Exception:
-            pass
+            # Direkt in mmap schreiben — kein Syscall ausser memcpy
+            self._shm_mmap.seek(0)
+            self._shm_mmap.write(header)
+            self._shm_mmap.write(frame.tobytes())
+        except Exception as e:
+            logger.warning(f"[SHM] Write-Fehler: {e}")
