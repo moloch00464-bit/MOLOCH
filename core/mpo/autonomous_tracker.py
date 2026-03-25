@@ -186,8 +186,8 @@ class TrackingConfig:
     # tilt_boost_threshold_px: Tilt-Verstaerkung ab diesem Pixel-Error
     # tilt_boost_factor:   Multiplikator fuer Tilt-Delta bei grossem Error
     frozen_threshold_px: float = 30.0      # < 30px -> FROZEN
-    coast_threshold_px: float = 50.0       # COAST nur wenn tilt_error < 50px
-    coast_resume_px: float = 50.0          # COAST aufwachen bei > 50px
+    coast_threshold_px: float = 40.0       # COAST nur wenn error_magnitude < 40px (war 50, tilt-only)
+    coast_resume_px: float = 35.0          # COAST aufwachen bei > 35px (war 50 — zu traege)
     tilt_boost_threshold_px: float = 80.0  # Tilt-Boost ab 80px tilt-Error
     tilt_boost_factor: float = 2.0         # Tilt-Delta verdoppeln bei grossem Error
 
@@ -772,13 +772,13 @@ class AutonomousTracker:
                 if nose and nose[1] > 0:
                     track_x, track_y = nose
                 else:
-                    # Prioritaet 3: Oberstes Fuenftel der Person-Box (Kopfhoehe)
+                    # Prioritaet 3: Kopfbereich der Person-Box (~8% von oben)
                     bbox_center_x = (bbox[0] + bbox[2]) / 2 / frame_width
                     bbox_top_y = bbox[1] / frame_height
                     bbox_bottom_y = bbox[3] / frame_height
                     bbox_height = bbox_bottom_y - bbox_top_y
                     track_x = bbox_center_x
-                    track_y = bbox_top_y + bbox_height * 0.15
+                    track_y = bbox_top_y + bbox_height * 0.08
 
             if self.current_target_id == 0:
                 self.current_target_id = self._next_target_id
@@ -1139,21 +1139,21 @@ class AutonomousTracker:
                     f"FROZEN error={error_magnitude:.0f}px < {self.config.frozen_threshold_px:.0f}px"
                 )
 
-            # Coast nur aktivieren wenn KEIN grosser Tilt-Error (kein Einfrieren bei Tilt-Drift)
-            if abs(error_y) < self.config.coast_threshold_px:
+            # Coast nur aktivieren wenn GESAMTER Error klein (nicht nur Tilt!)
+            if error_magnitude < self.config.coast_threshold_px:
                 if self._stable_start_time is None:
                     self._stable_start_time = now
                 elif (now - self._stable_start_time) >= self.config.coast_stable_time:
                     self._set_state(TrackerState.COAST)
                     logger.info(
                         f"[COAST] Aktiviert - stabil {self.config.coast_stable_time:.0f}s, "
-                        f"tilt_err={abs(error_y):.0f}px < {self.config.coast_threshold_px:.0f}px"
+                        f"error={error_magnitude:.0f}px < {self.config.coast_threshold_px:.0f}px"
                     )
             else:
-                # Grosser Tilt-Error -> kein Coast, Timer zurueck
+                # Grosser Error -> kein Coast, Timer zurueck
                 self._stable_start_time = None
                 ptz_debug.debug(
-                    f"COAST_BLOCKED: tilt_err={abs(error_y):.0f}px > {self.config.coast_threshold_px:.0f}px"
+                    f"COAST_BLOCKED: error={error_magnitude:.0f}px > {self.config.coast_threshold_px:.0f}px"
                 )
             return
 
