@@ -868,14 +868,16 @@ class HardwarePopup:
             self._lbl_npu_temp.config(text="n/a (belegt)", fg=FG_DIM)
             self._draw_bar(self._canvas_npu_temp, 0)
 
-        # NPU RAM Balken
+        # NPU RAM Balken (8GB NPU-RAM, Modelle belegen nur ~36MB)
         npu_total_mb = 8192
         if npu_ram > 0:
             npu_pct = (npu_ram / npu_total_mb) * 100
-            color = _bar_color(npu_pct)
             self._lbl_npu_ram.config(
-                text=f"{npu_ram:.0f} / {npu_total_mb} MB ({npu_pct:.1f}%)", fg=color)
-            self._draw_bar(self._canvas_npu_ram, npu_pct)
+                text=f"{npu_ram:.0f} / {npu_total_mb} MB ({npu_pct:.1f}%)",
+                fg=STATUS_GREEN)
+            # Mindestbreite 3% damit der Balken sichtbar ist
+            bar_pct = max(3.0, npu_pct)
+            self._draw_bar(self._canvas_npu_ram, bar_pct)
         else:
             self._lbl_npu_ram.config(text=f"-- / {npu_total_mb} MB", fg=FG_DIM)
             self._draw_bar(self._canvas_npu_ram, 0)
