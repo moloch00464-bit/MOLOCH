@@ -505,10 +505,23 @@ class ModelsModule:
                 "yolov8m": "yolo_active",
                 "hand_landmark": "hand_active",
                 "pose": "pose_active",
+                "person_reid": "person_reid_active",
             }
-            for _, key in self.MODELS:
+
+            # TAPPAS-Modelle: aktiv wenn in active_models Liste
+            for _, key in self.TAPPAS_MODELS:
                 try:
-                    status_key = status_key_map.get(key, key)
+                    active = key in active_models or \
+                             bool(status.get(status_key_map.get(key, key), False))
+                    if self._model_vars[key].get() != active:
+                        self._model_vars[key].set(active)
+                except (TypeError, ValueError):
+                    pass
+
+            # Extra-Modelle: aus Status-Keys
+            for _, key in self.EXTRA_MODELS:
+                try:
+                    status_key = status_key_map.get(key, f"{key}_active")
                     active = bool(status.get(status_key, False))
                     if self._model_vars[key].get() != active:
                         self._model_vars[key].set(active)
