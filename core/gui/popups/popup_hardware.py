@@ -79,12 +79,13 @@ class HardwarePopup:
         self.win.transient(parent)
         self.win.title("Hardware Monitor \u2014 Pi5 + Hailo-10H")
         self.win.configure(bg=BG_DARK)
-        self.win.geometry("400x620")
+        self.win.geometry("400x720")
         self.win.resizable(False, False)
         self.win.protocol("WM_DELETE_WINDOW", self._on_close)
 
         # GUI aufbauen
         self._build_cpu_section()
+        self._build_fans_section()
         self._build_ram_section()
         self._build_npu_section()
         self._build_ssd_section()
@@ -131,21 +132,63 @@ class HardwarePopup:
 
         # Frequenz
         row_freq = tk.Frame(section, bg=BG_FRAME)
-        row_freq.pack(fill=tk.X, padx=8, pady=2)
+        row_freq.pack(fill=tk.X, padx=8, pady=(2, 5))
         tk.Label(row_freq, text="Frequenz:", bg=BG_FRAME, fg=FG_LABEL,
                  font=FONT_LABEL).pack(side=tk.LEFT)
         self._lbl_freq = tk.Label(row_freq, text="--", bg=BG_FRAME,
                                   fg=FG_WHITE, font=FONT_MONO)
         self._lbl_freq.pack(side=tk.RIGHT)
 
-        # Luefter
-        row_fan = tk.Frame(section, bg=BG_FRAME)
-        row_fan.pack(fill=tk.X, padx=8, pady=(2, 5))
-        tk.Label(row_fan, text="L\u00fcfter:", bg=BG_FRAME, fg=FG_LABEL,
+
+    # =========================================================================
+    # Kühlung Section (Noctua + CPU-Kühler)
+    # =========================================================================
+
+    def _build_fans_section(self):
+        """Noctua NF-A4x20 (GPIO18 PWM) + Pi5 CPU-Kühler."""
+        section = tk.LabelFrame(
+            self.win, text="K\u00fchlung",
+            bg=BG_FRAME, fg=FG_LABEL, font=FONT_LABEL,
+        )
+        section.pack(fill=tk.X, padx=10, pady=5)
+
+        # --- Noctua NF-A4x20 ---
+        tk.Label(section, text="Noctua NF-A4x20  (GPIO18 PWM-PIO)",
+                 bg=BG_FRAME, fg=FG_WHITE, font=FONT_SMALL).pack(
+                 anchor=tk.W, padx=8, pady=(5, 0))
+
+        row_noctua = tk.Frame(section, bg=BG_FRAME)
+        row_noctua.pack(fill=tk.X, padx=8, pady=(2, 0))
+        tk.Label(row_noctua, text="PWM:", bg=BG_FRAME, fg=FG_LABEL,
                  font=FONT_LABEL).pack(side=tk.LEFT)
-        self._lbl_fan = tk.Label(row_fan, text="---", bg=BG_FRAME,
-                                 fg=FG_WHITE, font=FONT_MONO)
-        self._lbl_fan.pack(side=tk.RIGHT)
+        self._lbl_noctua = tk.Label(row_noctua, text="-- %", bg=BG_FRAME,
+                                    fg=STATUS_GREEN, font=FONT_MONO)
+        self._lbl_noctua.pack(side=tk.RIGHT)
+
+        self._canvas_noctua = tk.Canvas(
+            section, width=BAR_WIDTH, height=BAR_HEIGHT,
+            bg=BG_INPUT, highlightthickness=1, highlightbackground=FG_DIM,
+        )
+        self._canvas_noctua.pack(padx=8, pady=(0, 4))
+
+        # --- Pi5 CPU-Kühler ---
+        tk.Label(section, text="CPU-K\u00fchler  (Pi5 built-in)",
+                 bg=BG_FRAME, fg=FG_WHITE, font=FONT_SMALL).pack(
+                 anchor=tk.W, padx=8)
+
+        row_cpufan = tk.Frame(section, bg=BG_FRAME)
+        row_cpufan.pack(fill=tk.X, padx=8, pady=(2, 0))
+        tk.Label(row_cpufan, text="Status:", bg=BG_FRAME, fg=FG_LABEL,
+                 font=FONT_LABEL).pack(side=tk.LEFT)
+        self._lbl_cpufan = tk.Label(row_cpufan, text="---", bg=BG_FRAME,
+                                    fg=FG_DIM, font=FONT_MONO)
+        self._lbl_cpufan.pack(side=tk.RIGHT)
+
+        self._canvas_cpufan = tk.Canvas(
+            section, width=BAR_WIDTH, height=BAR_HEIGHT,
+            bg=BG_INPUT, highlightthickness=1, highlightbackground=FG_DIM,
+        )
+        self._canvas_cpufan.pack(padx=8, pady=(0, 5))
 
     # =========================================================================
     # RAM Section
@@ -335,6 +378,34 @@ class HardwarePopup:
             with open(path, "r") as f:
                 khz = int(f.read().strip())
             return khz / 1000
+        except Exception:
+            pass
+        return None
+
+    def _read_noctua_pwm(self):
+        """Noctua PWM-Prozent aus /sys/class/pwm lesen.
+        Sucht den Chip mit npwm != 4 (nicht den Pi5 Built-in mit npwm=4)."""
+        try:
+            pwm_basis = "/sys/class/pwm"
+            chips = sorted(os.listdir(pwm_basis))
+            for chip in chips:
+                chip_pfad = f"{pwm_basis}/{chip}"
+                try:
+                    with open(f"{chip_pfad}/npwm") as f:
+                        if int(f.read().strip()) == 4:
+                            continue  # Pi5 Built-in ueberspringen
+                except OSError:
+                    continue
+                # Dieser Chip ist der Noctua-Chip (pwm-pio)
+                duty_path = f"{chip_pfad}/pwm0/duty_cycle"
+                period_path = f"{chip_pfad}/pwm0/period"
+                if os.path.exists(duty_path) and os.path.exists(period_path):
+                    with open(duty_path) as f:
+                        duty = int(f.read().strip())
+                    with open(period_path) as f:
+                        period = int(f.read().strip())
+                    if period > 0:
+                        return round(duty / period * 100)
         except Exception:
             pass
         return None
@@ -537,16 +608,34 @@ class HardwarePopup:
         else:
             self._lbl_freq.config(text="n/a", fg=FG_DIM)
 
-        # Luefter
+        # Noctua NF-A4x20 (GPIO18 PWM-PIO)
+        noctua_pct = self._read_noctua_pwm()
+        if noctua_pct is not None:
+            if noctua_pct <= 30:
+                n_color = STATUS_GREEN
+            elif noctua_pct <= 75:
+                n_color = STATUS_YELLOW
+            else:
+                n_color = STATUS_RED
+            self._lbl_noctua.config(text=f"{noctua_pct} %", fg=n_color)
+            self._draw_bar(self._canvas_noctua, noctua_pct)
+        else:
+            self._lbl_noctua.config(text="n/a", fg=FG_DIM)
+            self._draw_bar(self._canvas_noctua, 0)
+
+        # Pi5 CPU-Kühler
         cur_st, max_st, pwm_pct = self._read_fan_state()
         if cur_st is not None:
             label, color = self._FAN_STAGES.get(cur_st, (f"Stufe {cur_st}", FG_WHITE))
             max_str = str(max_st) if max_st is not None else "?"
-            pct_str = f" ({pwm_pct}%)" if pwm_pct is not None else ""
-            self._lbl_fan.config(
-                text=f"Stufe {cur_st}/{max_str}{pct_str} {label}", fg=color)
+            pct_str = f"  {pwm_pct}%" if pwm_pct is not None else ""
+            self._lbl_cpufan.config(
+                text=f"Stufe {cur_st}/{max_str}{pct_str}  {label}", fg=color)
+            bar_pct = pwm_pct if pwm_pct is not None else (cur_st / (max_st or 4) * 100)
+            self._draw_bar(self._canvas_cpufan, bar_pct)
         else:
-            self._lbl_fan.config(text="---", fg=FG_DIM)
+            self._lbl_cpufan.config(text="---", fg=FG_DIM)
+            self._draw_bar(self._canvas_cpufan, 0)
 
         # RAM
         ram_used, ram_total = self._read_ram()
