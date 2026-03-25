@@ -70,19 +70,16 @@ class VectorMemory:
             return False
 
     def _ensure_embedder(self) -> bool:
-        """Lazy-load sentence-transformers Modell (~2s auf Pi5)."""
+        """Lazy-load sentence-transformers Modell (~2s auf Pi5).
+
+        DEAKTIVIERT: SentenceTransformer laed PyTorch + all-MiniLM-L6-v2 = 500-800 MB Pi-RAM.
+        Pi5 hat nur 4 GB — damit bleibt nichts fuer TAPPAS + Service uebrig.
+        TODO: Auf leichtgewichtiges Embedding umstellen (z.B. ONNX-only ohne PyTorch).
+        """
         if self._embedder is not None:
             return True
-
-        try:
-            from sentence_transformers import SentenceTransformer
-            logger.info(f"[VectorMemory] Lade Embedding-Modell {EMBED_MODEL}...")
-            self._embedder = SentenceTransformer(EMBED_MODEL)
-            logger.info(f"[VectorMemory] Embedding-Modell geladen")
-            return True
-        except Exception as e:
-            logger.warning(f"[VectorMemory] sentence-transformers nicht verfuegbar: {e}")
-            return False
+        logger.warning("[VectorMemory] SentenceTransformer DEAKTIVIERT (RAM-Schutz: PyTorch braucht 500-800 MB)")
+        return False
 
     def _embed(self, text: str) -> Optional[List[float]]:
         """Text -> 384-dim Embedding-Vektor."""

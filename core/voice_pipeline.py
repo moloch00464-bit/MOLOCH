@@ -553,10 +553,11 @@ class VoicePipeline:
         except Exception as e:
             logger.warning(f"[VOICE] WiFi-Mic init fehlgeschlagen: {e}")
 
-        # Whisper NPU vorladen im Hintergrund (15s Verzoegerung: TAPPAS muss zuerst starten)
-        # Ziel: erste PTT startet sofort ohne 2.5s Lade-Overhead
-        threading.Thread(target=self._preload_whisper_bg, daemon=True,
-                         name="WhisperPreload").start()
+        # Whisper NPU NICHT vorladen — Speech2Text Decoder frisst ~2.5 GB Pi-RAM!
+        # Pi5 hat nur 4 GB → System wird unbenutzbar.
+        # Whisper wird stattdessen on-demand bei erstem PTT geladen (2-3s Overhead).
+        # TODO: Whisper-Decoder auf NPU portieren wenn Hailo GenAI das unterstuetzt.
+        logger.info("[VOICE] Whisper-Preload DEAKTIVIERT (RAM-Schutz: Speech2Text braucht 2.5+ GB)")
 
         # Whisper-Ergebnisse fuer Popup (Ringpuffer, max 10)
         self._whisper_results: List[Dict] = []

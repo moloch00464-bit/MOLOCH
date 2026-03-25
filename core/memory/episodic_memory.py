@@ -48,7 +48,15 @@ class EpisodicMemory:
         self._init_qdrant()
 
     def _init_qdrant(self):
-        """Qdrant Client im embedded Modus starten + Collection anlegen."""
+        """Qdrant Client im embedded Modus starten + Collection anlegen.
+
+        DEAKTIVIERT: Qdrant embedded (in-process) allokiert via Rust/RocksDB/MMAP
+        hunderte MB bis GB im Pi-RAM. Pi5 hat nur 4 GB → System wird unbenutzbar.
+        TODO: Auf Qdrant-Client (Docker, port 6333) umstellen wenn Docker-Qdrant
+        repariert ist (aktuell Crash-Loop wegen NTFS Stale file handle).
+        """
+        logger.warning("[EPISODIC] Qdrant embedded DEAKTIVIERT (RAM-Schutz: Pi5 hat nur 4 GB)")
+        return
         try:
             from qdrant_client import QdrantClient
             from qdrant_client.models import (

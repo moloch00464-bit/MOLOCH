@@ -7,8 +7,8 @@ Eigenstaendiges Toplevel-Fenster fuer Hardware-Monitoring.
 
 Sektionen:
 - CPU: Temperatur (Balken + Wert), Last (%), Frequenz, Luefter
-- RAM: Benutzt/Gesamt MB + Balken (farbkodiert)
-- NPU RAM: Hailo-10H Speicher (MB von 8 GB) + aktive Modelle mit FPS
+- RAM: System + MOLOCH Service RSS (mit Balken)
+- NPU: Hailo-10H Temperatur, RAM pro Modell (echte HEF-Groessen), FPS
 - Storage: SSD1 (/) + SSD2 (/mnt/moloch-data) mit Balken
 - Uptime: System-Laufzeit
 
@@ -79,7 +79,7 @@ class HardwarePopup:
         self.win.transient(parent)
         self.win.title("Hardware Monitor \u2014 Pi5 + Hailo-10H")
         self.win.configure(bg=BG_DARK)
-        self.win.geometry("400x720")
+        self.win.geometry("400x860")
         self.win.resizable(False, False)
         self.win.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -195,16 +195,17 @@ class HardwarePopup:
     # =========================================================================
 
     def _build_ram_section(self):
-        """RAM: Benutzt/Gesamt MB mit Balken."""
+        """RAM: System + MOLOCH Service RSS."""
         section = tk.LabelFrame(
-            self.win, text="RAM",
+            self.win, text="RAM \u2014 Pi5 (4 GB)",
             bg=BG_FRAME, fg=FG_LABEL, font=FONT_LABEL,
         )
         section.pack(fill=tk.X, padx=10, pady=5)
 
+        # System-RAM
         row = tk.Frame(section, bg=BG_FRAME)
         row.pack(fill=tk.X, padx=8, pady=(5, 2))
-        tk.Label(row, text="Benutzt:", bg=BG_FRAME, fg=FG_LABEL,
+        tk.Label(row, text="System:", bg=BG_FRAME, fg=FG_LABEL,
                  font=FONT_LABEL).pack(side=tk.LEFT)
         self._lbl_ram = tk.Label(row, text="-- / -- MB", bg=BG_FRAME,
                                  fg=STATUS_YELLOW, font=FONT_MONO)
@@ -214,21 +215,39 @@ class HardwarePopup:
             section, width=BAR_WIDTH, height=BAR_HEIGHT,
             bg=BG_INPUT, highlightthickness=1, highlightbackground=FG_DIM,
         )
-        self._canvas_ram.pack(padx=8, pady=(0, 5))
+        self._canvas_ram.pack(padx=8, pady=(0, 3))
+
+        # MOLOCH Service RSS
+        row_svc = tk.Frame(section, bg=BG_FRAME)
+        row_svc.pack(fill=tk.X, padx=8, pady=2)
+        tk.Label(row_svc, text="MOLOCH:", bg=BG_FRAME, fg=FG_LABEL,
+                 font=FONT_LABEL).pack(side=tk.LEFT)
+        self._lbl_service_rss = tk.Label(row_svc, text="-- MB", bg=BG_FRAME,
+                                         fg=FG_DIM, font=FONT_MONO)
+        self._lbl_service_rss.pack(side=tk.RIGHT)
+
+        # Threads
+        row_thr = tk.Frame(section, bg=BG_FRAME)
+        row_thr.pack(fill=tk.X, padx=8, pady=(0, 5))
+        tk.Label(row_thr, text="Threads:", bg=BG_FRAME, fg=FG_LABEL,
+                 font=FONT_LABEL).pack(side=tk.LEFT)
+        self._lbl_threads = tk.Label(row_thr, text="--", bg=BG_FRAME,
+                                     fg=FG_DIM, font=FONT_MONO)
+        self._lbl_threads.pack(side=tk.RIGHT)
 
     # =========================================================================
     # NPU Section (erweitert mit RAM + Modell-FPS)
     # =========================================================================
 
     def _build_npu_section(self):
-        """NPU: Status, RAM-Nutzung, aktive Modelle mit FPS."""
+        """NPU: Temperatur, Status, RAM pro Modell, FPS."""
         section = tk.LabelFrame(
-            self.win, text="NPU \u2014 Hailo-10H (8 GB)",
+            self.win, text="NPU \u2014 Hailo-10H (8 GB LPDDR4)",
             bg=BG_FRAME, fg=FG_LABEL, font=FONT_LABEL,
         )
         section.pack(fill=tk.X, padx=10, pady=5)
 
-        # Status
+        # Status + Temperatur auf einer Zeile
         row_status = tk.Frame(section, bg=BG_FRAME)
         row_status.pack(fill=tk.X, padx=8, pady=(5, 2))
         tk.Label(row_status, text="Status:", bg=BG_FRAME, fg=FG_LABEL,
@@ -237,7 +256,22 @@ class HardwarePopup:
                                         fg=FG_DIM, font=FONT_MONO)
         self._lbl_npu_status.pack(side=tk.RIGHT)
 
-        # NPU RAM (geschaetzt)
+        # NPU Temperatur
+        row_npu_temp = tk.Frame(section, bg=BG_FRAME)
+        row_npu_temp.pack(fill=tk.X, padx=8, pady=2)
+        tk.Label(row_npu_temp, text="NPU Temp:", bg=BG_FRAME, fg=FG_LABEL,
+                 font=FONT_LABEL).pack(side=tk.LEFT)
+        self._lbl_npu_temp = tk.Label(row_npu_temp, text="--", bg=BG_FRAME,
+                                      fg=FG_DIM, font=FONT_MONO)
+        self._lbl_npu_temp.pack(side=tk.RIGHT)
+
+        self._canvas_npu_temp = tk.Canvas(
+            section, width=BAR_WIDTH, height=BAR_HEIGHT,
+            bg=BG_INPUT, highlightthickness=1, highlightbackground=FG_DIM,
+        )
+        self._canvas_npu_temp.pack(padx=8, pady=(0, 3))
+
+        # NPU RAM (echte HEF-Groessen)
         row_npu_ram = tk.Frame(section, bg=BG_FRAME)
         row_npu_ram.pack(fill=tk.X, padx=8, pady=2)
         tk.Label(row_npu_ram, text="NPU RAM:", bg=BG_FRAME, fg=FG_LABEL,
@@ -252,7 +286,7 @@ class HardwarePopup:
         )
         self._canvas_npu_ram.pack(padx=8, pady=(0, 3))
 
-        # Modelle + FPS (mehrzeilig)
+        # Modelle + FPS + RAM (mehrzeilig, tabellarisch)
         row_models = tk.Frame(section, bg=BG_FRAME)
         row_models.pack(fill=tk.X, padx=8, pady=(2, 5))
         tk.Label(row_models, text="Modelle:", bg=BG_FRAME, fg=FG_LABEL,
@@ -260,7 +294,7 @@ class HardwarePopup:
         self._lbl_npu_models = tk.Label(
             row_models, text="--", bg=BG_FRAME,
             fg=FG_DIM, font=FONT_MONO,
-            wraplength=240, justify=tk.LEFT, anchor=tk.W,
+            wraplength=280, justify=tk.LEFT, anchor=tk.W,
         )
         self._lbl_npu_models.pack(side=tk.LEFT, padx=(10, 0))
 
@@ -482,18 +516,104 @@ class HardwarePopup:
             pass
         return None, None
 
+    # Echte HEF-Groessen (MB, berechnet aus Dateigroesse auf Disk)
+    # Dateien auf /mnt/moloch-data/hailo/models/
+    _HEF_FILES = {
+        "scrfd": "scrfd_10g.hef",
+        "arcface": "arcface_mobilefacenet.hef",
+        "yolov8m": "yolov8m_h10.hef",
+        "pose": "yolov8s_pose_h10.hef",
+        "hand_landmark": "hand_landmark_lite.hef",
+        "face_attr": "face_attr_resnet_v1_18.hef",
+    }
+    _HEF_DIR = "/mnt/moloch-data/hailo/models"
+    _hef_size_cache = {}  # Einmal lesen, dann cachen
+
+    def _get_hef_size_mb(self, model_name):
+        """Echte HEF-Dateigroesse in MB (gecached)."""
+        if model_name in self._hef_size_cache:
+            return self._hef_size_cache[model_name]
+        hef_file = self._HEF_FILES.get(model_name)
+        if hef_file:
+            path = os.path.join(self._HEF_DIR, hef_file)
+            try:
+                size_mb = os.path.getsize(path) / (1024 * 1024)
+                self._hef_size_cache[model_name] = round(size_mb, 1)
+                return self._hef_size_cache[model_name]
+            except OSError:
+                pass
+        # Fallback-Schaetzung
+        fallback = {"scrfd": 6, "arcface": 3, "yolov8m": 21,
+                     "pose": 14, "hand_landmark": 1, "face_attr": 7}
+        return fallback.get(model_name, 5)
+
+    def _read_npu_temperature(self):
+        """NPU-Temperatur via HailoRT Python API (shared VDevice).
+
+        Liest ts0 + ts1 Sensoren. Gibt Durchschnitt zurueck.
+        Funktioniert AUCH wenn GStreamer die NPU nutzt (shared device).
+
+        Returns:
+            float oder None bei Fehler.
+        """
+        try:
+            import hailo_platform as hp
+            params = hp.VDevice.create_params()
+            vd = hp.VDevice(params)
+            for d in vd.get_physical_devices():
+                temp_info = d.control.get_chip_temperature()
+                ts0 = temp_info.ts0_temperature
+                ts1 = temp_info.ts1_temperature
+                vd.release()
+                # Durchschnitt beider Sensoren
+                return (ts0 + ts1) / 2.0
+            vd.release()
+        except Exception as e:
+            logger.debug(f"NPU Temperatur nicht lesbar: {e}")
+        return None
+
+    def _read_service_rss(self):
+        """MOLOCH Service RSS + Thread-Count aus /proc.
+
+        Sucht den moloch_service.py Prozess (oder python3 mit moloch).
+
+        Returns:
+            (rss_mb, thread_count) oder (None, None)
+        """
+        try:
+            # Suche Service-PID via pidof oder /proc
+            for pid_str in os.listdir("/proc"):
+                if not pid_str.isdigit():
+                    continue
+                try:
+                    cmdline_path = f"/proc/{pid_str}/cmdline"
+                    with open(cmdline_path, "rb") as f:
+                        cmdline = f.read().decode("utf-8", errors="replace")
+                    # Suche nach moloch_service oder MolochService
+                    if "moloch_service" not in cmdline and "moloch.service" not in cmdline:
+                        continue
+                    # RSS + Threads lesen
+                    rss_kb = 0
+                    threads = 0
+                    with open(f"/proc/{pid_str}/status") as f:
+                        for line in f:
+                            if line.startswith("VmRSS:"):
+                                rss_kb = int(line.split()[1])
+                            elif line.startswith("Threads:"):
+                                threads = int(line.split()[1])
+                    return rss_kb / 1024, threads
+                except (OSError, ValueError, IndexError):
+                    continue
+        except Exception:
+            pass
+        return None, None
+
     def _read_npu_status(self):
-        """NPU-Status: status, models + FPS, geschaetzter RAM.
+        """NPU-Status: status, models + FPS + RAM, Gesamt-RAM.
 
         Returns:
             (status_text, status_color, models_text, npu_ram_mb)
         """
-        # Modell-Groessen (MB, geschaetzt aus HEF-Dateien)
-        MODEL_RAM_MB = {
-            "scrfd": 6, "arcface": 3, "yolov8m": 21,
-            "pose": 14, "hand_landmark": 4, "whisper": 130,
-        }
-
         status = self.service.read_status()
         if status and isinstance(status, dict):
             npu = status.get("npu")
@@ -506,19 +626,33 @@ class HardwarePopup:
                 if not isinstance(fps_dict, dict):
                     fps_dict = {}
 
-                # Modelle + FPS formatiert
+                # Modelle + FPS + RAM tabellarisch
                 model_lines = []
-                npu_ram = 0
+                npu_ram = 0.0
                 if isinstance(active, list) and active:
                     for m in active:
                         m_str = str(m)
                         fps_val = fps_dict.get(m_str, 0)
-                        ram = MODEL_RAM_MB.get(m_str, 5)
+                        ram = self._get_hef_size_mb(m_str)
                         npu_ram += ram
                         if fps_val:
-                            model_lines.append(f"{m_str}: {fps_val:.0f} FPS")
+                            model_lines.append(
+                                f"{m_str:<12} {ram:5.1f} MB  {fps_val:4.0f} FPS")
                         else:
-                            model_lines.append(f"{m_str}: geladen")
+                            model_lines.append(
+                                f"{m_str:<12} {ram:5.1f} MB  geladen")
+
+                # TAPPAS-Modelle die nicht in active_models stehen
+                # (face_attr laeuft mit, wird aber oft nicht gelistet)
+                tappas_extra = {"face_attr"}
+                use_tappas = os.environ.get("MOLOCH_USE_TAPPAS", "0") == "1"
+                if use_tappas and active:
+                    for extra in tappas_extra:
+                        if extra not in [str(m) for m in active]:
+                            ram = self._get_hef_size_mb(extra)
+                            npu_ram += ram
+                            model_lines.append(
+                                f"{extra:<12} {ram:5.1f} MB  (TAPPAS)")
 
                 if not model_lines:
                     model_lines = ["keine"]
@@ -637,7 +771,7 @@ class HardwarePopup:
             self._lbl_cpufan.config(text="---", fg=FG_DIM)
             self._draw_bar(self._canvas_cpufan, 0)
 
-        # RAM
+        # RAM (System)
         ram_used, ram_total = self._read_ram()
         if ram_used is not None and ram_total is not None and ram_total > 0:
             pct = (ram_used / ram_total) * 100
@@ -648,18 +782,47 @@ class HardwarePopup:
         else:
             self._lbl_ram.config(text="n/a", fg=FG_DIM)
 
-        # NPU
+        # MOLOCH Service RSS + Threads
+        svc_rss, svc_threads = self._read_service_rss()
+        if svc_rss is not None:
+            # RSS Farbe: gruen <300, gelb 300-800, rot >800 (Pi5 hat 4 GB)
+            if svc_rss < 300:
+                rss_color = STATUS_GREEN
+            elif svc_rss < 800:
+                rss_color = STATUS_YELLOW
+            else:
+                rss_color = STATUS_RED
+            self._lbl_service_rss.config(text=f"{svc_rss:.0f} MB", fg=rss_color)
+            self._lbl_threads.config(text=str(svc_threads), fg=FG_WHITE)
+        else:
+            self._lbl_service_rss.config(text="Service nicht aktiv", fg=FG_DIM)
+            self._lbl_threads.config(text="--", fg=FG_DIM)
+
+        # NPU Status + Modelle
         npu_status, npu_color, npu_models, npu_ram = self._read_npu_status()
         self._lbl_npu_status.config(text=npu_status, fg=npu_color)
         self._lbl_npu_models.config(text=npu_models, fg=npu_color)
 
-        # NPU RAM Balken
+        # NPU Temperatur
+        npu_temp = self._read_npu_temperature()
+        if npu_temp is not None:
+            t_color = STATUS_GREEN if npu_temp < 60 else (
+                STATUS_YELLOW if npu_temp < 75 else STATUS_RED)
+            self._lbl_npu_temp.config(text=f"{npu_temp:.1f}\u00b0C", fg=t_color)
+            # Temp-Balken: 20-90C -> 0-100%
+            t_pct = max(0, min(100, (npu_temp - 20) / 70 * 100))
+            self._draw_bar(self._canvas_npu_temp, t_pct)
+        else:
+            self._lbl_npu_temp.config(text="n/a (belegt)", fg=FG_DIM)
+            self._draw_bar(self._canvas_npu_temp, 0)
+
+        # NPU RAM Balken (echte HEF-Groessen)
         npu_total_mb = 8192
         if npu_ram > 0:
             npu_pct = (npu_ram / npu_total_mb) * 100
             color = _bar_color(npu_pct)
             self._lbl_npu_ram.config(
-                text=f"~{npu_ram} / {npu_total_mb} MB ({npu_pct:.1f}%)", fg=color)
+                text=f"{npu_ram:.0f} / {npu_total_mb} MB ({npu_pct:.1f}%)", fg=color)
             self._draw_bar(self._canvas_npu_ram, npu_pct)
         else:
             self._lbl_npu_ram.config(text=f"-- / {npu_total_mb} MB", fg=FG_DIM)
