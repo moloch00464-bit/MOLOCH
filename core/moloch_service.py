@@ -225,7 +225,7 @@ class MolochService:
 
         # PTZ-Defaults
         self._ptz_home_pan = 0.0
-        self._ptz_home_tilt = -15.0
+        self._ptz_home_tilt = 0.0
         self._ptz_tracking_speed = 0.7
         self._ptz_search_speed = 0.15
         self._ptz_pan_limit_min = -168.4
@@ -1790,7 +1790,7 @@ class MolochService:
             # PTZ-Settings + Tracker-State + restless_score fuer Panel
             ptz_status = {
                 "home_pan": round(getattr(self, '_ptz_home_pan', 0.0), 1),
-                "home_tilt": round(getattr(self, '_ptz_home_tilt', -15.0), 1),
+                "home_tilt": round(getattr(self, '_ptz_home_tilt', 0.0), 1),
                 "tracking_speed": round(getattr(self, '_ptz_tracking_speed', 0.7), 2),
                 "search_speed": round(getattr(self, '_ptz_search_speed', 0.15), 2),
             }
@@ -2158,18 +2158,24 @@ class MolochService:
         elif action == 'set_ptz_settings':
             # PTZ-Settings vom Panel: Home, Speed, Limits
             self._ptz_home_pan = float(cmd.get('home_pan', getattr(self, '_ptz_home_pan', 0.0)))
-            self._ptz_home_tilt = float(cmd.get('home_tilt', getattr(self, '_ptz_home_tilt', -15.0)))
+            self._ptz_home_tilt = float(cmd.get('home_tilt', getattr(self, '_ptz_home_tilt', 0.0)))
             self._ptz_tracking_speed = float(cmd.get('tracking_speed', getattr(self, '_ptz_tracking_speed', 0.7)))
             self._ptz_search_speed = float(cmd.get('search_speed', getattr(self, '_ptz_search_speed', 0.15)))
             self._ptz_pan_limit_min = float(cmd.get('pan_limit_min', getattr(self, '_ptz_pan_limit_min', -168.4)))
             self._ptz_pan_limit_max = float(cmd.get('pan_limit_max', getattr(self, '_ptz_pan_limit_max', 170.0)))
             self._ptz_tilt_limit_min = float(cmd.get('tilt_limit_min', getattr(self, '_ptz_tilt_limit_min', -78.0)))
             self._ptz_tilt_limit_max = float(cmd.get('tilt_limit_max', getattr(self, '_ptz_tilt_limit_max', 78.8)))
-            # Home-Position in CameraManager setzen
+            # Home-Position in CameraManager + Camera-Controller setzen
             self._cam._home_position = {
                 "pan": self._ptz_home_pan,
                 "tilt": self._ptz_home_tilt
             }
+            try:
+                from core.hardware.camera import get_camera_controller
+                cam_ctrl = get_camera_controller()
+                cam_ctrl.set_home_position(self._ptz_home_pan, self._ptz_home_tilt)
+            except Exception:
+                pass
             # Tracker-Config live updaten
             self._apply_ptz_to_tracker()
             logger.info(f"[PTZ] Settings: Home=({self._ptz_home_pan:.1f},{self._ptz_home_tilt:.1f}) "
@@ -2184,17 +2190,26 @@ class MolochService:
             except Exception as e:
                 logger.warning(f"[IPC] Detach-Snapshot fehlgeschlagen: {e}")
         elif action == 'set_ptz_home':
-            # Aktuelle Position als Home speichern
+            # Pan/Tilt aus IPC-Message lesen (GUI sendet Werte mit)
+            home_pan = float(cmd.get('pan', self._ptz_home_pan))
+            home_tilt = float(cmd.get('tilt', self._ptz_home_tilt))
+            self._ptz_home_pan = home_pan
+            self._ptz_home_tilt = home_tilt
+            self._cam._home_position = {"pan": home_pan, "tilt": home_tilt}
+            # SonoffCameraController updaten
             try:
                 from core.hardware.camera import get_camera_controller
-                cam = get_camera_controller()
-                pos = cam.get_position()
-                self._ptz_home_pan = pos.pan
-                self._ptz_home_tilt = pos.tilt
-                self._cam._home_position = {"pan": pos.pan, "tilt": pos.tilt}
-                logger.info(f"[PTZ] Home gesetzt: Pan={pos.pan:.1f}, Tilt={pos.tilt:.1f}")
-            except Exception as e:
-                logger.warning(f"[PTZ] Home setzen fehlgeschlagen: {e}")
+                cam_ctrl = get_camera_controller()
+                cam_ctrl.set_home_position(home_pan, home_tilt)
+            except Exception:
+                pass
+            # Tracker-Config live updaten
+            if hasattr(self, '_autonomous_tracker') and self._autonomous_tracker:
+                self._autonomous_tracker.config.home_pan = home_pan
+                self._autonomous_tracker.config.home_tilt = home_tilt
+            # Persistieren in settings.json
+            self._save_settings()
+            logger.info(f"[PTZ] Home gesetzt: Pan={home_pan:.1f}, Tilt={home_tilt:.1f}")
         elif action == 'ptz_move':
             self._cam.ptz_move(cmd.get('direction', ''), cmd.get('speed', 0.3))
         elif action == 'ptz_goto':
@@ -2464,7 +2479,7 @@ class MolochService:
             ptz = data.get("ptz", {})
             if ptz:
                 self._ptz_home_pan = float(ptz.get("home_pan", 0.0))
-                self._ptz_home_tilt = float(ptz.get("home_tilt", -15.0))
+                self._ptz_home_tilt = float(ptz.get("home_tilt", 0.0))
                 self._ptz_tracking_speed = float(ptz.get("tracking_speed", 0.7))
                 self._ptz_search_speed = float(ptz.get("search_speed", 0.15))
                 self._ptz_pan_limit_min = float(ptz.get("pan_limit_min", -168.4))
@@ -2476,6 +2491,13 @@ class MolochService:
                     "pan": self._ptz_home_pan,
                     "tilt": self._ptz_home_tilt
                 }
+                # Home-Position auch in SonoffCameraController setzen
+                try:
+                    from core.hardware.camera import get_camera_controller
+                    cam_ctrl = get_camera_controller()
+                    cam_ctrl.set_home_position(self._ptz_home_pan, self._ptz_home_tilt)
+                except Exception:
+                    pass
                 logger.info(f"[PTZ] Home: Pan={self._ptz_home_pan:.1f}, Tilt={self._ptz_home_tilt:.1f}, "
                             f"Speed={self._ptz_tracking_speed:.2f}")
         except Exception as e:
@@ -2607,7 +2629,7 @@ class MolochService:
         # PTZ-Settings (Home, Limits, Speed)
         data["ptz"] = {
             "home_pan": round(getattr(self, '_ptz_home_pan', 0.0), 1),
-            "home_tilt": round(getattr(self, '_ptz_home_tilt', -15.0), 1),
+            "home_tilt": round(getattr(self, '_ptz_home_tilt', 0.0), 1),
             "tracking_speed": round(getattr(self, '_ptz_tracking_speed', 0.7), 2),
             "search_speed": round(getattr(self, '_ptz_search_speed', 0.15), 2),
             "pan_limit_min": round(getattr(self, '_ptz_pan_limit_min', -168.4), 1),

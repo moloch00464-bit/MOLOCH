@@ -73,7 +73,7 @@
   },
   "ptz": {
     "home_pan": 0.0,
-    "home_tilt": -15.0,
+    "home_tilt": 0.0,
     "tracking_speed": 0.7,
     "search_speed": 0.15,
     "pan_limit_min": -168.4,

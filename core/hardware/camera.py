@@ -311,6 +311,9 @@ class SonoffCameraController:
         self.last_move_time: float = 0
         self.patrol_index: int = 0
 
+        # Home-Position (wird von Service/GUI gesetzt)
+        self._home_position = {"pan": 0.0, "tilt": 0.0}
+
         # Vision integration (from orchestrator)
         self._tracking_mode = TrackingMode.DISABLED
         self._last_vision_time: float = 0
@@ -645,8 +648,14 @@ class SonoffCameraController:
             return False
 
     def goto_home(self) -> bool:
-        """Move to home position (0, 0)."""
-        return self.move_absolute(0.0, 0.0, speed=0.5)
+        """Zur gespeicherten Home-Position fahren."""
+        pan = self._home_position.get("pan", 0.0)
+        tilt = self._home_position.get("tilt", 0.0)
+        return self.move_absolute(pan, tilt, speed=0.5)
+
+    def set_home_position(self, pan: float, tilt: float):
+        """Home-Position von aussen setzen (Service/GUI)."""
+        self._home_position = {"pan": pan, "tilt": tilt}
 
     def center(self) -> bool:
         """Alias for goto_home."""

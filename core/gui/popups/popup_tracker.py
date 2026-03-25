@@ -444,19 +444,19 @@ class TrackerPopup:
             text=f"Home: Pan {home_pan:.1f} / Tilt {home_tilt:.1f}",
             fg=STATUS_GREEN)
 
-        # Service-Command: set_ptz_home speichert aktuelle Position
-        self.service._write_command("set_ptz_home")
+        # Service-Command: set_ptz_home mit Pan/Tilt-Werten mitsenden
+        self.service._write_command("set_ptz_home", {"pan": round(home_pan, 1), "tilt": round(home_tilt, 1)})
 
-        # In settings.json speichern
+        # In settings.json unter ptz.* speichern (EINE Quelle)
         try:
             data = {}
             if os.path.exists(SETTINGS_PATH):
                 with open(SETTINGS_PATH, "r") as f:
                     data = json.load(f)
-            tracker = data.get("tracker", {})
-            tracker["home_pan"] = round(home_pan, 1)
-            tracker["home_tilt"] = round(home_tilt, 1)
-            data["tracker"] = tracker
+            ptz = data.get("ptz", {})
+            ptz["home_pan"] = round(home_pan, 1)
+            ptz["home_tilt"] = round(home_tilt, 1)
+            data["ptz"] = ptz
             self._atomic_write(data)
         except Exception:
             pass
