@@ -84,8 +84,9 @@ class PreviewModule:
         # Watchdog: Letzter erfolgreicher Render (Gate0 Phase 9)
         self.last_render_time = 0.0
 
-        # Persistent SHM File-Descriptor (spart open/close pro Tick)
+        # SHM File-Descriptor + Inode-Tracking (os.rename aendert Inode!)
         self._shm_fd = None
+        self._shm_inode = 0
 
         # Lag-Diagnostik: 30s Logging, alle 2s ein Eintrag
         self._lag_log_start = 0.0
@@ -164,11 +165,22 @@ class PreviewModule:
             (width, height, seq, ts, raw_bytes) oder None bei Fehler
         """
         try:
-            # Persistent FD: einmal oeffnen, dann seek+read (spart 30x/s open/close)
-            if self._shm_fd is None:
-                if not os.path.exists(SHM_FRAME):
-                    return None
+            # SHM-Datei oeffnen/re-oeffnen wenn Inode sich geaendert hat.
+            # TAPPAS schreibt per os.rename(tmp, SHM_FRAME) — das erzeugt
+            # einen neuen Inode. Ein offener FD zeigt auf den ALTEN Inode
+            # und liest ewig denselben Frame (= Standbild-Bug).
+            try:
+                current_inode = os.stat(SHM_FRAME).st_ino
+            except OSError:
+                return None
+            if self._shm_fd is None or current_inode != self._shm_inode:
+                if self._shm_fd is not None:
+                    try:
+                        self._shm_fd.close()
+                    except Exception:
+                        pass
                 self._shm_fd = open(SHM_FRAME, "rb")
+                self._shm_inode = current_inode
             f = self._shm_fd
             f.seek(0)
             header = f.read(24)
