@@ -230,6 +230,26 @@ def test_fps():
 
 @auto_test("Frame nicht eingefroren", "kamera")
 def test_frame_age():
+    # Primaer: Echte SHM-Datei pruefen (TAPPAS schreibt per mmap direkt)
+    # Die Status-JSON "frame_age" ist bei TAPPAS falsch (camera._last_frame_write
+    # wird nur von InferenceEngine gesetzt, nicht von TappasPipeline).
+    import struct
+    shm_path = "/dev/shm/moloch_frame"
+    try:
+        with open(shm_path, "rb") as f:
+            header = f.read(24)
+        if len(header) >= 24:
+            _h, _w, _c, seq, ts = struct.unpack("<IIIId", header)
+            # ts ist time.monotonic() — vergleiche mit aktuellem monotonic
+            import time as _time
+            mono_age = _time.monotonic() - ts
+            if mono_age <= LIMITS["max_frame_age"]:
+                return True, f"{mono_age:.1f}s (seq={seq})"
+            # Monotonic-Age zu hoch — Frame ist echt eingefroren
+            return False, f"Frozen: {mono_age:.1f}s"
+    except Exception:
+        pass
+    # Fallback: Status-JSON (alter Pfad)
     data = read_status()
     if not data:
         return False, "Kein Status"
