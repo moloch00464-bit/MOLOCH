@@ -549,23 +549,23 @@ class HardwarePopup:
         return fallback.get(model_name, 5)
 
     def _read_npu_temperature(self):
-        """NPU-Temperatur aus Service Status-JSON lesen.
+        """NPU-Temperatur via HailoRT Device (NICHT VDevice!).
 
-        NICHT via HailoRT VDevice — das erzeugt HAILO_OUT_OF_PHYSICAL_DEVICES(74)
-        weil die TAPPAS-Pipeline das einzige VDevice haelt.
-        Der Service schreibt die NPU-Temp bereits in den Status-JSON.
+        Device.control.get_chip_temperature() funktioniert parallel zur
+        TAPPAS-Pipeline — kein VDevice noetig, kein Error 74.
+        Laeuft im Background-Thread, blockiert nicht den Main-Loop.
 
         Returns:
             float oder None bei Fehler.
         """
         try:
-            status = self.service.read_status()
-            if status and isinstance(status, dict):
-                npu = status.get("npu", {})
-                if isinstance(npu, dict):
-                    temp = npu.get("temperature")
-                    if temp is not None:
-                        return float(temp)
+            from hailo_platform import Device
+            d = Device()
+            temp_info = d.control.get_chip_temperature()
+            ts0 = temp_info.ts0_temperature
+            ts1 = temp_info.ts1_temperature
+            d.release()
+            return round(max(ts0, ts1), 1)
         except Exception as e:
             logger.debug(f"NPU Temperatur nicht lesbar: {e}")
         return None
@@ -626,55 +626,62 @@ class HardwarePopup:
     def _read_npu_status(self):
         """NPU-Status: status, models + FPS + RAM, Gesamt-RAM.
 
+        WICHTIG: active_models und npu_stage liegen auf TOP-LEVEL im Status-JSON,
+        NICHT unter einem 'npu'-Subkey!
+
         Returns:
             (status_text, status_color, models_text, npu_ram_mb)
         """
         status = self.service.read_status()
         if status and isinstance(status, dict):
-            npu = status.get("npu")
-            if isinstance(npu, dict):
-                npu_state = npu.get("status", "unbekannt")
-                active = npu.get("active_models", [])
+            # Top-Level Keys (so schreibt der Service den Status)
+            npu_state = status.get("npu_stage",
+                        status.get("npu_sched_mode", "unbekannt"))
+            active = status.get("active_models", [])
 
-                # FPS pro Modell
-                fps_dict = status.get("fps", {})
-                if not isinstance(fps_dict, dict):
-                    fps_dict = {}
+            # FPS pro Modell
+            fps_dict = status.get("fps", {})
+            if not isinstance(fps_dict, dict):
+                fps_dict = {}
 
-                # Modelle + FPS + RAM tabellarisch
-                model_lines = []
-                npu_ram = 0.0
-                if isinstance(active, list) and active:
-                    for m in active:
-                        m_str = str(m)
-                        fps_val = fps_dict.get(m_str, 0)
-                        ram = self._get_hef_size_mb(m_str)
+            # Modelle + FPS + RAM tabellarisch
+            model_lines = []
+            npu_ram = 0.0
+            if isinstance(active, list) and active:
+                for m in active:
+                    m_str = str(m)
+                    fps_val = fps_dict.get(m_str, 0)
+                    ram = self._get_hef_size_mb(m_str)
+                    npu_ram += ram
+                    if fps_val:
+                        model_lines.append(
+                            f"{m_str:<12} {ram:5.1f} MB  {fps_val:4.0f} FPS")
+                    else:
+                        model_lines.append(
+                            f"{m_str:<12} {ram:5.1f} MB  geladen")
+
+            # TAPPAS-Modelle die nicht in active_models stehen
+            # (face_attr laeuft mit, wird aber oft nicht gelistet)
+            tappas_extra = {"face_attr"}
+            use_tappas = os.environ.get("MOLOCH_USE_TAPPAS", "0") == "1"
+            if use_tappas and active:
+                for extra in tappas_extra:
+                    if extra not in [str(m) for m in active]:
+                        ram = self._get_hef_size_mb(extra)
                         npu_ram += ram
-                        if fps_val:
-                            model_lines.append(
-                                f"{m_str:<12} {ram:5.1f} MB  {fps_val:4.0f} FPS")
-                        else:
-                            model_lines.append(
-                                f"{m_str:<12} {ram:5.1f} MB  geladen")
+                        model_lines.append(
+                            f"{extra:<12} {ram:5.1f} MB  (TAPPAS)")
 
-                # TAPPAS-Modelle die nicht in active_models stehen
-                # (face_attr laeuft mit, wird aber oft nicht gelistet)
-                tappas_extra = {"face_attr"}
-                use_tappas = os.environ.get("MOLOCH_USE_TAPPAS", "0") == "1"
-                if use_tappas and active:
-                    for extra in tappas_extra:
-                        if extra not in [str(m) for m in active]:
-                            ram = self._get_hef_size_mb(extra)
-                            npu_ram += ram
-                            model_lines.append(
-                                f"{extra:<12} {ram:5.1f} MB  (TAPPAS)")
+            if not model_lines:
+                model_lines = ["keine"]
 
-                if not model_lines:
-                    model_lines = ["keine"]
-
-                models_text = "\n".join(model_lines)
-                color = STATUS_GREEN if npu_state in ("vision", "voice", "active") else FG_DIM
-                return npu_state, color, models_text, npu_ram
+            models_text = "\n".join(model_lines)
+            # Status-Farbe: gruen wenn Modelle aktiv
+            if active:
+                color = STATUS_GREEN
+            else:
+                color = FG_DIM
+            return npu_state, color, models_text, npu_ram
 
         # Fallback: /dev/hailo0
         if os.path.exists("/dev/hailo0"):
