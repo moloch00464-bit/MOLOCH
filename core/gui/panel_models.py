@@ -75,6 +75,12 @@ try:
 except ImportError:
     SupervisorPopup = None
 
+# PiPower5 Popup importieren (optional)
+try:
+    from core.gui.popups.popup_pipower5 import PiPower5Popup
+except ImportError:
+    PiPower5Popup = None
+
 
 class ModelsModule:
     """Model Controls und Popup-Buttons im uebergebenen LabelFrame."""
@@ -119,6 +125,7 @@ class ModelsModule:
         self.on_popup_dashboard = self._open_dashboard_popup
         self.on_popup_whisper = self._open_whisper_popup
         self.on_popup_supervisor = self._open_supervisor_popup
+        self.on_popup_pipower5 = self._open_pipower5_popup
 
         # GUI aufbauen
         self._build_pipeline_status()
@@ -202,6 +209,13 @@ class ModelsModule:
             SupervisorPopup(self._parent, self._service)
         else:
             print("FEHLER: popup_supervisor.py konnte nicht importiert werden")
+
+    def _open_pipower5_popup(self):
+        """PiPower5 HAT+ Monitor Popup oeffnen."""
+        if PiPower5Popup is not None:
+            PiPower5Popup(self._parent)
+        else:
+            print("FEHLER: popup_pipower5.py konnte nicht importiert werden")
 
     # =========================================================================
     # Pipeline Status (TAPPAS/Legacy Anzeige)
@@ -436,6 +450,7 @@ class ModelsModule:
             ("WHISPER", lambda: self.on_popup_whisper()),
             ("DASHBOARD", lambda: self.on_popup_dashboard()),
             ("SUPERVISOR", lambda: self.on_popup_supervisor()),
+            ("PIPOWER5", lambda: self.on_popup_pipower5()),
             ("SETTINGS", lambda: self.on_popup_settings()),
         ]
 
