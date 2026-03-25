@@ -53,7 +53,7 @@ MAX_VISUAL_AMP = 0.15
 AVATAR_SIZE = 400
 CX = AVATAR_SIZE // 2
 CY = AVATAR_SIZE // 2
-ANIM_INTERVAL_MS = 110  # ~9 FPS, versetzt zu Preview-100ms (Gate0 Phase 9: CPU < 15%)
+ANIM_INTERVAL_MS = 200  # ~5 FPS — genuegt fuer Avatar, spart Main-Thread-Last
 
 # Hintergrund
 BG_AVATAR = "#0A0A14"

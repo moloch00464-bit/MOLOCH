@@ -84,6 +84,9 @@ class PreviewModule:
         # Watchdog: Letzter erfolgreicher Render (Gate0 Phase 9)
         self.last_render_time = 0.0
 
+        # Persistent SHM File-Descriptor (spart open/close pro Tick)
+        self._shm_fd = None
+
         # Lag-Diagnostik: 30s Logging, alle 2s ein Eintrag
         self._lag_log_start = 0.0
         self._lag_log_next = 0.0
@@ -161,27 +164,31 @@ class PreviewModule:
             (width, height, seq, ts, raw_bytes) oder None bei Fehler
         """
         try:
-            if not os.path.exists(SHM_FRAME):
+            # Persistent FD: einmal oeffnen, dann seek+read (spart 30x/s open/close)
+            if self._shm_fd is None:
+                if not os.path.exists(SHM_FRAME):
+                    return None
+                self._shm_fd = open(SHM_FRAME, "rb")
+            f = self._shm_fd
+            f.seek(0)
+            header = f.read(24)
+            if len(header) >= 24:
+                h, w, c, seq, ts = struct.unpack("<IIIId", header)
+            elif len(header) >= 16:
+                h, w, c, seq = struct.unpack("<IIII", header[:16])
+                ts = 0.0
+            else:
                 return None
-            with open(SHM_FRAME, "rb") as f:
-                header = f.read(24)
-                if len(header) >= 24:
-                    # Neuer 24-Byte Header (mit Timestamp)
-                    h, w, c, seq, ts = struct.unpack("<IIIId", header)
-                elif len(header) >= 16:
-                    # Alter 16-Byte Header (ohne Timestamp) — Rueckwaertskompatibel
-                    h, w, c, seq = struct.unpack("<IIII", header[:16])
-                    ts = 0.0
-                else:
-                    return None
-                expected = w * h * c
-                if expected == 0 or expected > 10_000_000:
-                    return None
-                raw = f.read(expected)
-                if len(raw) < expected:
-                    return None
+            expected = w * h * c
+            if expected == 0 or expected > 10_000_000:
+                return None
+            raw = f.read(expected)
+            if len(raw) < expected:
+                return None
             return (w, h, seq, ts, raw)
         except OSError:
+            # Datei geloescht/renamed → FD neu oeffnen beim naechsten Tick
+            self._shm_fd = None
             return None
 
     def _on_resolution_changed(self, selection):
@@ -260,11 +267,15 @@ class PreviewModule:
 
                 # Auf Canvas-Groesse resizen (gekappt auf MAX_CANVAS)
                 if img.size != (self._canvas_w, self._canvas_h):
-                    img = img.resize((self._canvas_w, self._canvas_h), Image.BILINEAR)
+                    img = img.resize((self._canvas_w, self._canvas_h), Image.NEAREST)
 
-                # Anzeigen
-                self._photo = ImageTk.PhotoImage(img)
-                self._canvas.itemconfig(self._image_id, image=self._photo)
+                # Anzeigen — PhotoImage recyclen statt neu erzeugen (spart GC-Druck)
+                try:
+                    self._photo.paste(img)
+                except Exception:
+                    # Fallback bei Groessenaenderung: neues PhotoImage
+                    self._photo = ImageTk.PhotoImage(img)
+                    self._canvas.itemconfig(self._image_id, image=self._photo)
                 self._canvas.itemconfig(self._nosignal_id, state='hidden')
 
                 # FPS berechnen (Frames der letzten Sekunde zaehlen)
