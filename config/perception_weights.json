@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "total_decisions": 1008000,
+  "total_decisions": 1008200,
   "weights": {
     "scrfd": -0.1,
     "arcface": 0.05,
