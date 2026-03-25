@@ -97,8 +97,11 @@ class CameraManager:
         self._tracker = None
 
         # Guardian/Tentakel Mode
-        self._guardian_mode = True
-        self._tentakel_enabled = True
+        # Bei TAPPAS: Guardian deaktivieren — MOLOCH ist selbst das Detektionssystem,
+        # kein Smart Tracking zum "zurückgeben". Sonst killt Orphan-Check den Tracker nach 60s.
+        _use_tappas = os.environ.get("MOLOCH_USE_TAPPAS", "0") == "1"
+        self._guardian_mode = not _use_tappas
+        self._tentakel_enabled = not _use_tappas
         self._moloch_has_control = False
         self._takeover_reason = ""
         self._takeover_time = 0

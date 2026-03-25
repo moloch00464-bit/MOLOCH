@@ -102,7 +102,7 @@ class TrackingConfig:
     tilt_gain: float = 0.15         # G1-T05: sanfter (war 0.20)
     max_step_pan: float = 8.0       # SMOOTH: 8 Grad (war 4.0) — fluessiger bei grossem Error
     max_step_tilt: float = 5.0      # SMOOTH: 5 Grad (war 2.5)
-    min_step_deg: float = 2.0       # SMOOTH: Dead-Zone 2 Grad (war 0.3) — kein Micro-Ruckeln
+    min_step_deg: float = 0.5       # Residual-Korrektur erlauben (war 2.0 → Person blieb off-center)
     tracking_speed: float = 0.6     # G1-T05: 60% Speed (war 0.7)
     move_cooldown_ms: float = 100.0  # SMOOTH: 100ms (war 500ms) — mehr Updates, kleinere Schritte
     smooth_alpha: float = 0.30      # SMOOTH: EMA alpha 0.30 (war 0.20) — fluessigere Reaktion
