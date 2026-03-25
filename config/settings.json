@@ -64,8 +64,8 @@
     "search_speed": 0.8,
     "search_home_timeout": 20.0,
     "target_lost_timeout": 8.5,
-    "home_pan": -3.3,
-    "home_tilt": 9.1
+    "home_pan": 103.0,
+    "home_tilt": 9.9
   },
   "profiler": {
     "enabled": true,
