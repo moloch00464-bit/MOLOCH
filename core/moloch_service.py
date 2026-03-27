@@ -1508,6 +1508,16 @@ class MolochService:
         self._ptz_tracker.start()
         logger.info("[START] PTZ-Tracker gestartet (Bewegungs-Analyse)")
 
+        # PiPower5 Power Monitor (Akku-Bewusstsein, Tentakel)
+        try:
+            from core.hardware.power_monitor import get_power_monitor
+            self._power_monitor = get_power_monitor()
+            self._power_monitor.set_core_integrator(self._core_integrator)
+            self._power_monitor.start()
+        except Exception as e:
+            self._power_monitor = None
+            logger.warning(f"[START] PowerMonitor fehlgeschlagen: {e}")
+
         # G1-T03: Auto-Resume Callback — TTS Spruch bei Manuell→Autonom
         try:
             from core.ptz_arbiter import get_ptz_arbiter
@@ -1742,6 +1752,7 @@ class MolochService:
                 "moloch_has_control": self._cam._moloch_has_control,
                 "tentakel_enabled": self._cam._tentakel_enabled,
                 "teachen_enabled": self._teachen.enabled if self._teachen else False,
+                "power": self._power_monitor.get_status() if getattr(self, '_power_monitor', None) else {},
                 "frame_age": round(time.time() - self._cam._last_frame_write, 1) if self._cam._last_frame_write else -1,
                 "frozen_restarts": self._cam._frozen_restart_count,
                 "fps": {k: round(v, 1) for k, v in fps_snapshot.items()},
