@@ -69,7 +69,7 @@ WHOLE_BUFFER_SO = "/usr/lib/aarch64-linux-gnu/hailo/tappas/post_processes/croppi
 
 # --- Pose Estimation (YOLOv8s Pose) ---
 POSE_HEF = "/mnt/moloch-data/hailo/models/yolov8s_pose_h10.hef"
-POSE_POSTPROCESS_SO = "/usr/local/hailo/resources/so/libyolov8pose_postprocess.so"
+POSE_POSTPROCESS_SO = "/usr/lib/aarch64-linux-gnu/hailo/tappas/post_processes/libyolov8pose_post.so"
 POSE_POSTPROCESS_FUNC = "filter"
 
 # --- Person ReID (RepVGG-A0, 512d Embedding) ---
@@ -219,6 +219,7 @@ class TappasPipeline:
         # --- Pose Valve-Gating ---
         self._pose_valve = None
         self._pose_selector = None
+        self._pose_gate_state = False  # Aktueller Valve-Zustand
 
         # --- ReID Valve-Gating ---
         self._reid_valve = None
@@ -495,18 +496,21 @@ class TappasPipeline:
         """Pose NPU-Gating via GStreamer valve + input-selector."""
         if self._pose_valve is None or self._pose_selector is None:
             return
+        if enabled == self._pose_gate_state:
+            return  # Keine Aenderung
+        self._pose_gate_state = enabled
         if enabled:
             sink0 = self._pose_selector.get_static_pad("sink_0")
             if sink0:
                 self._pose_selector.set_property("active-pad", sink0)
             self._pose_valve.set_property("drop", False)
-            logger.debug("[POSE-GATE] Pose aktiviert (Valve auf, sink_0)")
+            logger.info("[POSE-GATE] Pose aktiviert (Valve auf, sink_0)")
         else:
             self._pose_valve.set_property("drop", True)
             sink1 = self._pose_selector.get_static_pad("sink_1")
             if sink1:
                 self._pose_selector.set_property("active-pad", sink1)
-            logger.debug("[POSE-GATE] Pose deaktiviert (Valve zu, sink_1 Bypass)")
+            logger.info("[POSE-GATE] Pose deaktiviert (Valve zu, sink_1 Bypass)")
 
     def _apply_reid_gate(self, enabled: bool):
         """ReID NPU-Gating via GStreamer valve + input-selector."""
