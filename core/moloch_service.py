@@ -1193,14 +1193,14 @@ class MolochService:
                 def _on_music_mood(event):
                     mood = event.get("payload", {}).get("mood", "neutral")
                     if mood in ("aggressive", "dark"):
-                        self._core_integrator.feed_event("unknown_person", 0.05)
+                        self._core_integrator.feed_event("environmental_stress", 0.05)
                     elif mood in ("euphoric", "neutral"):
-                        self._core_integrator.feed_event("markus_recognized", 0.05)
+                        self._core_integrator.feed_event("respect_score", 0.05)
 
                 def _on_music_features(event):
                     energy = event.get("payload", {}).get("features", {}).get("energy", 0.0)
                     if energy > 0.8:
-                        self._core_integrator.feed_event("unknown_person", 0.03)
+                        self._core_integrator.feed_event("environmental_stress", 0.03)
 
                 bus.subscribe("music_mood_changed", _on_music_mood)
                 bus.subscribe("music_features_received", _on_music_features)
@@ -1259,9 +1259,9 @@ class MolochService:
                     alertness = p.get("alertness", 0.0)
                     # Hohe Alertness → Tension steigt, niedrige → Tension sinkt
                     if alertness > 0.6:
-                        self._core_integrator.feed_event("unknown_person", 0.02)
+                        self._core_integrator.feed_event("environmental_stress", 0.02)
                     elif alertness < 0.3:
-                        self._core_integrator.feed_event("markus_recognized", 0.02)
+                        self._core_integrator.feed_event("respect_score", 0.02)
 
                 def _on_music_energy_for_awareness(event):
                     energy = event.get("payload", {}).get("features", {}).get("energy", 0.0)

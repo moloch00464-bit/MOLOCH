@@ -451,9 +451,16 @@ class CoreIntegrator:
             # 1. TENSION berechnen (exponentieller Decay + Impulse)
             # =============================================================
             tension_impulse = 0.0
+            _debug_parts = []
             for key, weight in self.TENSION_WEIGHTS.items():
                 val = all_inputs.get(key, 0.0)
-                tension_impulse += val * weight
+                contrib = val * weight
+                tension_impulse += contrib
+                if abs(contrib) > 0.001:
+                    _debug_parts.append(f"{key}={val:.2f}*{weight:+.1f}={contrib:+.3f}")
+            # Debug: alle 60 Ticks (1 Min) die Tension-Inputs loggen
+            if self._tick_count % 60 == 0 and _debug_parts:
+                _logger.info(f"[TENSION-DEBUG] Impulse={tension_impulse:+.3f} | {' | '.join(_debug_parts)}")
 
             # CPU-Temperatur Daempfung: Spikes -20% ab THERMAL_DAMPING_START
             _thermal_norm = (self.THERMAL_DAMPING_START - self.CPU_TEMP_MIN) / (self.CPU_TEMP_MAX - self.CPU_TEMP_MIN)
