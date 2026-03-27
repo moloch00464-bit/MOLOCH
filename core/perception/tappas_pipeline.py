@@ -54,7 +54,7 @@ FACE_ATTR_HEF = "/mnt/moloch-data/hailo/models/face_attr_resnet_v1_18.hef"
 
 # --- Postprocess SOs ---
 YOLO_POSTPROCESS_SO = "/usr/local/hailo/resources/so/libyolo_hailortpp_postprocess.so"
-YOLO_POSTPROCESS_FUNC = "filter_letterbox"
+YOLO_POSTPROCESS_FUNC = "filter"  # NICHT filter_letterbox! internal-offset=true macht die Korrektur
 SCRFD_POSTPROCESS_SO = "/usr/local/hailo/resources/so/libscrfd.so"
 SCRFD_POSTPROCESS_FUNC = "scrfd_10g_letterbox"
 SCRFD_CONFIG_JSON = "/usr/local/hailo/resources/json/scrfd.json"
@@ -1354,11 +1354,11 @@ class TappasPipeline:
             if label == "face" and conf < self.scrfd_conf_val:
                 continue
 
-            # Normalisierte BBox [0.0-1.0]
-            x1 = bbox.xmin()
-            y1 = bbox.ymin()
-            x2 = bbox.xmax()
-            y2 = bbox.ymax()
+            # Normalisierte BBox [0.0-1.0] mit Clamp (Safety-Net gegen Letterbox-Ueberlauf)
+            x1 = max(0.0, min(1.0, bbox.xmin()))
+            y1 = max(0.0, min(1.0, bbox.ymin()))
+            x2 = max(0.0, min(1.0, bbox.xmax()))
+            y2 = max(0.0, min(1.0, bbox.ymax()))
 
             entry = {
                 "class": label,
@@ -1374,11 +1374,6 @@ class TappasPipeline:
                 entry["track_id"] = track_ids[0].get_id()
 
             if label == "person":
-                # DEBUG: BBox-Werte loggen (alle 100 Frames)
-                self._bbox_debug_count = getattr(self, '_bbox_debug_count', 0) + 1
-                if self._bbox_debug_count % 100 == 1:
-                    logger.info(f"[BBOX-DEBUG] person bbox=({x1:.3f},{y1:.3f},{x2:.3f},{y2:.3f}) "
-                                f"h={y2-y1:.3f} w={x2-x1:.3f} conf={conf:.2f}")
                 persons.append(entry)
             elif label == "face":
                 # ArcFace Embedding extrahieren
