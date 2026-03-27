@@ -1763,33 +1763,69 @@ class AutonomousTracker:
 
         return result
 
+    # Smart-Tracking Handover: Kamera-Bewegung beobachten
+    _ST_SETTLE_THRESHOLD = 2.0   # Grad — weniger Bewegung = Kamera hat sich beruhigt
+    _ST_SETTLE_FRAMES = 3        # N aufeinanderfolgende stabile Reads = "settled"
+    _ST_MIN_TIME = 1.5           # Absolute Mindestzeit (Sicherheit)
+
     def _should_moloch_track(self, detection: DetectionData) -> bool:
         """Entscheidet ob Moloch selbst tracken soll oder Kamera-ST laufen laesst.
 
-        Moloch uebernimmt wenn:
-        1. Face erkannt → Praezisionstracking noetig
-        2. Person am Bildrand (>35% vom Center) → Kamera-ST verliert sie gleich
-        3. Kamera-ST war AUS (erster Kontakt nach Verlust)
+        INTELLIGENTE HANDOVER-LOGIK:
+        Moloch beobachtet die Kamerabewegung. Wenn die Kamera sich beruhigt
+        hat (Position stabil ueber mehrere Reads), hat Sonoff sein Ziel
+        zentriert → Moloch uebernimmt fuer Praezision.
 
-        Kamera-ST laeuft weiter wenn:
-        - Nur Body, stabil mittig im Bild
+        Kamera-ST laeuft weiter solange:
+        - Kamera noch in Bewegung (Sonoff zentriert noch)
+        - Person stabil mittig und kein Face erkannt
         """
-        # Immer Moloch wenn Face erkannt (Praezision noetig)
-        if detection.has_face:
-            return True
-
-        # Immer Moloch wenn Kamera-ST nicht aktiv war (frischer Kontakt)
+        # Moloch trackt bereits (ST war nie an) → weiter tracken
         if not self._camera_smart_tracking_on:
             return True
 
-        # Person am Bildrand? Moloch muss korrigieren
-        cx = detection.center_x  # 0.0-1.0, 0.5 = Mitte
-        cy = detection.center_y
-        off_center = max(abs(cx - 0.5), abs(cy - 0.5))
-        if off_center > 0.35:
+        now = time.time()
+        st_duration = now - getattr(self, '_st_activate_time', 0.0)
+
+        # Absolute Mindestzeit — Sonoff braucht mindestens 1.5s
+        if st_duration < self._ST_MIN_TIME:
+            return False
+
+        # Kamera-Bewegung pruefen: hat sie sich beruhigt?
+        pan_delta = abs(self.last_known_pan - getattr(self, '_st_prev_pan', self.last_known_pan))
+        tilt_delta = abs(self.last_known_tilt - getattr(self, '_st_prev_tilt', self.last_known_tilt))
+        movement = pan_delta + tilt_delta
+
+        self._st_prev_pan = self.last_known_pan
+        self._st_prev_tilt = self.last_known_tilt
+
+        if movement < self._ST_SETTLE_THRESHOLD:
+            self._st_settle_count = getattr(self, '_st_settle_count', 0) + 1
+        else:
+            self._st_settle_count = 0
+            # Kamera bewegt sich noch → ST weiter laufen lassen
+            return False
+
+        # Kamera hat sich beruhigt (N stabile Reads)?
+        camera_settled = self._st_settle_count >= self._ST_SETTLE_FRAMES
+
+        if not camera_settled:
+            return False
+
+        # === Kamera hat zentriert — jetzt entscheiden ===
+
+        # Face erkannt → Moloch uebernimmt fuer Praezision
+        if detection.has_face:
+            logger.info(f"[HANDOVER] Kamera settled nach {st_duration:.1f}s + Face → Moloch uebernimmt")
             return True
 
-        # Person stabil mittig → Kamera-ST weiter laufen lassen
+        # Person am Bildrand? → Moloch korrigiert
+        off_center = max(abs(detection.center_x - 0.5), abs(detection.center_y - 0.5))
+        if off_center > 0.35:
+            logger.info(f"[HANDOVER] Kamera settled aber Person am Rand ({off_center:.2f}) → Moloch uebernimmt")
+            return True
+
+        # Person mittig, kein Face → Kamera-ST macht guten Job
         return False
 
     def _enable_camera_smart_tracking(self, on: bool):
@@ -1802,6 +1838,11 @@ class AutonomousTracker:
             if self.camera and hasattr(self.camera, 'cloud_bridge') and self.camera.cloud_bridge:
                 self.camera.cloud_bridge.set_smart_tracking(on)
                 self._camera_smart_tracking_on = on
+                if on:
+                    self._st_activate_time = time.time()
+                    self._st_settle_count = 0
+                    self._st_prev_pan = self.last_known_pan
+                    self._st_prev_tilt = self.last_known_tilt
                 logger.info(f"[SMART-TRACK] Kamera Smart-Tracking {'AN' if on else 'AUS'}")
         except Exception as e:
             logger.warning(f"[SMART-TRACK] Fehler: {e}")
