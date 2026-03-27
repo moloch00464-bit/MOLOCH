@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 # Persistente letzte Face-Position (ueberlebt Reboot)
 import os as _os
 _LAST_FACE_POS_FILE = _os.path.expanduser("~/moloch/config/last_face_position.json")
+_LEARNED_POSITIONS_FILE = _os.path.expanduser("~/moloch/config/learned_patrol_positions.json")
 
 def _save_last_face_pos(pan: float, tilt: float):
     """Letzte Face-Position auf Disk speichern (max alle 10s)."""
@@ -61,6 +62,104 @@ def _load_last_face_pos() -> tuple:
     except Exception:
         pass
     return 0.0, 0.0
+
+def _save_learned_positions(positions: list):
+    """Gelernte Patrol-Positionen persistent speichern."""
+    try:
+        with open(_LEARNED_POSITIONS_FILE, "w") as f:
+            json.dump({"positions": positions, "ts": time.time()}, f)
+    except Exception:
+        pass
+
+def _load_learned_positions() -> list:
+    """Gelernte Patrol-Positionen laden. Returns Liste oder []."""
+    try:
+        with open(_LEARNED_POSITIONS_FILE) as f:
+            d = json.load(f)
+        # Nur gueltig wenn < 7 Tage alt
+        if time.time() - d.get("ts", 0) < 7 * 86400:
+            return d.get("positions", [])
+    except Exception:
+        pass
+    return []
+
+
+class STMovementLearner:
+    """Lernt aus Kamera-Smart-Tracking Bewegungen.
+
+    Zeichnet Positionen auf waehrend Kamera-ST aktiv ist.
+    Wenn Kamera stoppt/verlangsamt = Person erkannt → "Hot-Spot".
+    Clustert Hot-Spots zu Patrol-Positionen (max 8).
+    """
+
+    def __init__(self):
+        self._positions = []       # [(pan, tilt, ts), ...] — Rohaufzeichnung
+        self._hot_spots = []       # [(pan, tilt, count), ...] — Wo Kamera stoppt
+        self._prev_pan = None
+        self._prev_tilt = None
+        self._still_since = 0.0    # Seit wann Kamera stillsteht
+        self._STILL_THRESHOLD = 2.0  # Grad — weniger Bewegung = "still"
+        self._STILL_TIME = 1.5      # Sekunden still = Hot-Spot
+        self._MAX_HOTSPOTS = 50     # Ringbuffer-Groesse
+
+    def record(self, pan: float, tilt: float):
+        """Aufrufen bei jedem Position-Read waehrend Kamera-ST aktiv."""
+        now = time.time()
+
+        if self._prev_pan is not None:
+            delta = abs(pan - self._prev_pan) + abs(tilt - self._prev_tilt)
+
+            if delta < self._STILL_THRESHOLD:
+                # Kamera steht (fast) still — Sensor hat was erkannt
+                if self._still_since == 0.0:
+                    self._still_since = now
+                elif now - self._still_since >= self._STILL_TIME:
+                    # Genuegend lang still → Hot-Spot registrieren
+                    self._add_hot_spot(pan, tilt)
+                    self._still_since = 0.0  # Reset, erst wieder nach Bewegung
+            else:
+                # Kamera bewegt sich — Reset
+                self._still_since = 0.0
+
+        self._prev_pan = pan
+        self._prev_tilt = tilt
+
+    def _add_hot_spot(self, pan: float, tilt: float):
+        """Hot-Spot registrieren (Ringbuffer, max _MAX_HOTSPOTS)."""
+        # Existierenden Hot-Spot in der Naehe mergen (±15°)
+        for i, (hp, ht, count) in enumerate(self._hot_spots):
+            if abs(hp - pan) < 15.0 and abs(ht - tilt) < 10.0:
+                # Gleitender Durchschnitt
+                new_pan = (hp * count + pan) / (count + 1)
+                new_tilt = (ht * count + tilt) / (count + 1)
+                self._hot_spots[i] = (round(new_pan, 1), round(new_tilt, 1), count + 1)
+                return
+
+        # Neuer Hot-Spot
+        if len(self._hot_spots) >= self._MAX_HOTSPOTS:
+            # Aeltesten/seltensten entfernen
+            self._hot_spots.sort(key=lambda x: x[2])
+            self._hot_spots.pop(0)
+        self._hot_spots.append((round(pan, 1), round(tilt, 1), 1))
+
+    def get_patrol_positions(self, max_positions: int = 8) -> list:
+        """Top Hot-Spots als Patrol-Positionen (sortiert nach Haeufigkeit).
+
+        Returns: [(pan, tilt), ...] — max max_positions Eintraege.
+        """
+        if not self._hot_spots:
+            return []
+        # Nach Haeufigkeit sortieren, Top N
+        sorted_spots = sorted(self._hot_spots, key=lambda x: x[2], reverse=True)
+        positions = [(p, t) for p, t, _c in sorted_spots[:max_positions]]
+        return positions
+
+    def get_stats(self) -> dict:
+        """Statistiken fuer Status/Debug."""
+        return {
+            "hot_spots": len(self._hot_spots),
+            "top_positions": self.get_patrol_positions(4),
+        }
 
 # PTZ Debug Logger - schreibt in ~/moloch/logs/ptz_debug.log
 _ptz_log_path = _os.path.expanduser("~/moloch/logs/ptz_debug.log")
@@ -291,6 +390,14 @@ class AutonomousTracker:
         self._visited_positions: set = set()  # Bereits abgefahrene Patrol-Positionen
         self._camera_smart_tracking_on = False  # Kamera-eigenes Smart-Tracking aktiv?
         self._last_face_save_time = 0.0  # Throttle: max alle 10s speichern
+
+        # ST-Bewegungslernen: Kamera-Positionen aufzeichnen
+        self._st_learner = STMovementLearner()
+        # Gelernte Positionen laden (persistent)
+        learned = _load_learned_positions()
+        if learned:
+            logger.info(f"[TRACKER] {len(learned)} gelernte Patrol-Positionen geladen")
+            self.config.search_patrol_positions = learned
 
         # G1-T04: Letzte Face-Position laden (persistent, ueberlebt Reboot)
         saved_pan, saved_tilt = _load_last_face_pos()
@@ -882,6 +989,10 @@ class AutonomousTracker:
             self.last_position_time = time.time()
             self.stats["position_reads"] += 1
 
+            # ST-Learner: Kamera-Bewegungen aufzeichnen wenn ST aktiv
+            if self._camera_smart_tracking_on:
+                self._st_learner.record(pos.pan, pos.tilt)
+
             # Drift erkennen und Target-Cache invalidieren wenn zu gross
             drift = abs(old_pan - pos.pan) + abs(old_tilt - pos.tilt)
             if drift > 5.0:
@@ -1034,14 +1145,25 @@ class AutonomousTracker:
                 self._do_tracking(detection)
             return
 
-        # === PHASE 0: Detection aktiv -> SOFORT tracken ===
+        # === PHASE 0: Detection aktiv -> Smart-Handover entscheiden ===
         if detection.detected and time_since_detection < 0.5:
             # Search/Patrol SOFORT abbrechen wenn Person im Bild
             if self.state == TrackerState.SEARCHING:
                 logger.info("[CYCLE] Person erkannt waehrend Search -> SOFORT tracken!")
                 if self.camera:
                     self.camera.stop()
-            self._do_tracking(detection)
+
+            # Smart-Handover: Moloch uebernimmt NUR wenn noetig
+            moloch_should_track = self._should_moloch_track(detection)
+            if moloch_should_track:
+                self._do_tracking(detection)
+            else:
+                # Kamera-ST laeuft gut, Moloch beobachtet nur
+                if not self._camera_smart_tracking_on:
+                    self._enable_camera_smart_tracking(True)
+                    logger.info("[HANDOVER] Kamera-ST uebernimmt (Person stabil mittig)")
+                self._returning_home = False
+                self.last_detection_time = time.time()
             return
 
         # === Kein Target: 3-Phasen Verlust-Logik ===
@@ -1117,6 +1239,13 @@ class AutonomousTracker:
         # Kamera-Smart-Tracking aus — Moloch uebernimmt wieder
         if self._camera_smart_tracking_on:
             self._enable_camera_smart_tracking(False)
+            # Gelernte Positionen aktualisieren und speichern
+            learned = self._st_learner.get_patrol_positions()
+            if learned:
+                self.config.search_patrol_positions = learned
+                _save_learned_positions(learned)
+                logger.info(f"[ST-LEARN] {len(learned)} Patrol-Positionen gelernt: "
+                           f"{[(p,t) for p,t in learned[:3]]}...")
         # G1-T04: Tracking-Position laufend aktualisieren (fuer Suchrichtung bei Verlust)
         self._last_tracking_pan = self.last_known_pan
         self._last_tracking_tilt = self.last_known_tilt
@@ -1634,6 +1763,35 @@ class AutonomousTracker:
 
         return result
 
+    def _should_moloch_track(self, detection: DetectionData) -> bool:
+        """Entscheidet ob Moloch selbst tracken soll oder Kamera-ST laufen laesst.
+
+        Moloch uebernimmt wenn:
+        1. Face erkannt → Praezisionstracking noetig
+        2. Person am Bildrand (>35% vom Center) → Kamera-ST verliert sie gleich
+        3. Kamera-ST war AUS (erster Kontakt nach Verlust)
+
+        Kamera-ST laeuft weiter wenn:
+        - Nur Body, stabil mittig im Bild
+        """
+        # Immer Moloch wenn Face erkannt (Praezision noetig)
+        if detection.has_face:
+            return True
+
+        # Immer Moloch wenn Kamera-ST nicht aktiv war (frischer Kontakt)
+        if not self._camera_smart_tracking_on:
+            return True
+
+        # Person am Bildrand? Moloch muss korrigieren
+        cx = detection.center_x  # 0.0-1.0, 0.5 = Mitte
+        cy = detection.center_y
+        off_center = max(abs(cx - 0.5), abs(cy - 0.5))
+        if off_center > 0.35:
+            return True
+
+        # Person stabil mittig → Kamera-ST weiter laufen lassen
+        return False
+
     def _enable_camera_smart_tracking(self, on: bool):
         """Sonoff-eigenes Smart-Tracking ein/ausschalten (schnellerer Raum-Scan).
 
@@ -1733,6 +1891,7 @@ class AutonomousTracker:
                 "park_timeout_sec": self.config.search_park_timeout
             },
             "camera_smart_tracking": self._camera_smart_tracking_on,
+            "st_learner": self._st_learner.get_stats(),
             "stats": self.stats.copy(),
             "config": {
                 "lock_threshold_px": self.config.lock_threshold_pixels,
