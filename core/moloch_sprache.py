@@ -238,9 +238,7 @@ class MolochSprache:
                         vectors_config=VectorParams(
                             size=EMBED_DIM,
                             distance=Distance.COSINE,
-                            on_disk=True,
                         ),
-                        on_disk_payload=True,
                     )
                     logger.info(f"[MS] Collection erstellt: {name}")
                 else:
