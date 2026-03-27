@@ -475,8 +475,9 @@ class CoreIntegrator:
             # Exponentieller Decay (tau=300s)
             self._tension *= self._TENSION_DECAY_FACTOR
 
-            # Impuls addieren
-            self._tension = _clamp(self._tension + tension_impulse * 0.3)
+            # Impuls addieren — Tension darf negativ werden (Wohlbefinden)
+            # -1.0 = maximales Wohlbefinden, 0.0 = neutral, +1.0 = maximaler Stress
+            self._tension = _clamp(self._tension + tension_impulse * 0.3, lo=-1.0, hi=1.0)
 
             # CPU Selbstschutz: Tension deckeln bei Ueberhitzung
             if self._cpu_temp_normalized > 0.9:
