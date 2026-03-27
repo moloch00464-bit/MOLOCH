@@ -41,6 +41,7 @@ from gi.repository import Gst, GLib
 import hailo
 
 from core.perception.perception_frame import PerceptionFrame, estimate_distance
+from core.perception.model_scheduler import ModelScheduler
 from core.moloch_event_bus import get_event_bus, PRIO_PERCEPTION
 
 logger = logging.getLogger("TappasPipeline")
@@ -192,6 +193,9 @@ class TappasPipeline:
         self._sched_face_last_seen = 0.0
         self._sched_lock = threading.Lock()
         self._sched_force_all = False  # Teach-Modus: Scheduler auf ALL_ACTIVE erzwingen
+
+        # --- Perception Router (neuer 7-Szenario Scheduler, Phase 1: nur Logging) ---
+        self._scheduler = ModelScheduler()
 
         # --- SCRFD Valve-Gating (echtes NPU-Gating via GStreamer valve) ---
         self._scrfd_valve = None       # valve element: drop=True = SCRFD aus
@@ -1200,6 +1204,16 @@ class TappasPipeline:
                 face_id = f.get("face_id")
                 face_similarity = f.get("face_similarity", 0)
 
+        # --- Perception Router: Szenario berechnen (Phase 1: nur Logging) ---
+        max_person_height = 0.0
+        if persons:
+            max_person_height = max((p["bbox"][3] - p["bbox"][1]) for p in persons)
+        self._scheduler.tick(
+            person_count=len(persons),
+            face_detected=len(faces) > 0,
+            bbox_height_pct=max_person_height,
+        )
+
         # --- NPU Model-Scheduler: Modus aktualisieren + Ergebnisse unterdrücken ---
         self._update_npu_scheduler(len(persons) > 0, len(faces) > 0)
         sched_mode = self.get_npu_sched_mode()
@@ -1450,13 +1464,14 @@ class TappasPipeline:
         pf.person_detected = len(persons) > 0 or len(faces) > 0
         pf.person_count = len(persons) if persons else (1 if faces else 0)
 
-        # Distanz aus groesster Person-BBox
+        # Distanz + BBox-Hoehe aus groesster Person-BBox
         if persons:
             biggest = max(persons, key=lambda d: (d["bbox"][2]-d["bbox"][0]) * (d["bbox"][3]-d["bbox"][1]))
             bbox = biggest["bbox"]
             area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
             pf.distance_ratio = area
             pf.distance = estimate_distance(area)
+            pf.person_bbox_height = bbox[3] - bbox[1]
         elif best_face_bbox:
             area = (best_face_bbox[2] - best_face_bbox[0]) * (best_face_bbox[3] - best_face_bbox[1])
             pf.distance_ratio = area
@@ -1482,7 +1497,9 @@ class TappasPipeline:
             if best_attr_face.get("smiling") is not None:
                 pf.emotion = "happy" if best_attr_face["smiling"] else "neutral"
 
-        # Active Models (Scheduler-basiert: logisch aktiv, nicht nur NPU-seitig)
+        # Perception Router: Szenario + aktive Modelle
+        pf.scenario = self._scheduler.get_scenario()
+        # Active Models (noch alter Scheduler — wird in Schritt 4 migriert)
         sched = self.get_npu_sched_mode()
         if sched == SCHED_ALL_ACTIVE:
             pf.active_models = ["yolov8m", "scrfd", "arcface"]
