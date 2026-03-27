@@ -67,6 +67,11 @@ FACE_CROP_SO = "/usr/local/hailo/resources/so/libvms_croppers.so"
 FACE_CROP_FUNC = "face_recognition"
 WHOLE_BUFFER_SO = "/usr/lib/aarch64-linux-gnu/hailo/tappas/post_processes/cropping_algorithms/libwhole_buffer.so"
 
+# --- Pose Estimation (YOLOv8s Pose) ---
+POSE_HEF = "/mnt/moloch-data/hailo/models/yolov8s_pose_h10.hef"
+POSE_POSTPROCESS_SO = "/usr/local/hailo/resources/so/libyolov8pose_postprocess.so"
+POSE_POSTPROCESS_FUNC = "filter"
+
 VDEVICE_GROUP_ID = "SHARED"
 
 # YOLO Klassen-Whitelist (nur diese werden verarbeitet, Rest ignoriert)
@@ -201,6 +206,10 @@ class TappasPipeline:
         self._scrfd_valve = None       # valve element: drop=True = SCRFD aus
         self._scrfd_selector = None    # input-selector: sink_0=SCRFD, sink_1=Bypass
 
+        # --- Pose Valve-Gating ---
+        self._pose_valve = None
+        self._pose_selector = None
+
         # GStreamer einmal initialisieren
         if not Gst.is_initialized():
             Gst.init(None)
@@ -242,6 +251,18 @@ class TappasPipeline:
             GLib.timeout_add(200, self._init_scrfd_gate)
         else:
             logger.warning("[SCRFD-GATE] Valve oder Selector NICHT gefunden — kein Gating!")
+
+        # Pose Valve + Selector
+        self._pose_valve = self._pipeline.get_by_name("pose_valve")
+        self._pose_selector = self._pipeline.get_by_name("pose_sel")
+        if self._pose_valve and self._pose_selector:
+            self._pose_valve.set_property("drop", True)
+            pose_sink1 = self._pose_selector.get_static_pad("sink_1")
+            if pose_sink1:
+                self._pose_selector.set_property("active-pad", pose_sink1)
+            logger.info("[POSE-GATE] Initial: Valve=drop (sicherer Start)")
+        else:
+            logger.warning("[POSE-GATE] Valve oder Selector NICHT gefunden — kein Gating!")
 
         # Identity Callback (Pad-Probe fuer Detection-Auswertung)
         identity = self._pipeline.get_by_name("identity_callback")
@@ -427,6 +448,23 @@ class TappasPipeline:
             if sink1:
                 self._scrfd_selector.set_property("active-pad", sink1)
             logger.debug("[SCRFD-GATE] SCRFD deaktiviert (Valve zu, sink_1 Bypass)")
+
+    def _apply_pose_gate(self, enabled: bool):
+        """Pose NPU-Gating via GStreamer valve + input-selector."""
+        if self._pose_valve is None or self._pose_selector is None:
+            return
+        if enabled:
+            sink0 = self._pose_selector.get_static_pad("sink_0")
+            if sink0:
+                self._pose_selector.set_property("active-pad", sink0)
+            self._pose_valve.set_property("drop", False)
+            logger.debug("[POSE-GATE] Pose aktiviert (Valve auf, sink_0)")
+        else:
+            self._pose_valve.set_property("drop", True)
+            sink1 = self._pose_selector.get_static_pad("sink_1")
+            if sink1:
+                self._pose_selector.set_property("active-pad", sink1)
+            logger.debug("[POSE-GATE] Pose deaktiviert (Valve zu, sink_1 Bypass)")
 
     def _update_npu_scheduler(self, has_person: bool, has_face: bool):
         """Scheduler-Modus basierend auf aktuellen Detections aktualisieren."""
@@ -961,6 +999,35 @@ class TappasPipeline:
             f'scrfd_wrapper_agg. ! queue name=scrfd_wrapper_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
         )
 
+        # --- Stage 2b: Pose Estimation (YOLOv8s Pose, Valve-gated) ---
+        pose_inner = (
+            f'queue name=pose_scale_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'videoscale name=pose_videoscale n-threads=2 qos=false ! '
+            f'queue name=pose_convert_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'video/x-raw, pixel-aspect-ratio=1/1 ! '
+            f'videoconvert name=pose_videoconvert n-threads=2 ! '
+            f'queue name=pose_hailonet_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'hailonet name=pose_hailonet hef-path={POSE_HEF} batch-size=1 '
+            f'vdevice-group-id={VDEVICE_GROUP_ID} '
+            f'nms-score-threshold=0.3 nms-iou-threshold=0.45 '
+            f'output-format-type=HAILO_FORMAT_TYPE_FLOAT32 '
+            f'force-writable=true ! '
+            f'queue name=pose_hailofilter_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'hailofilter name=pose_hailofilter so-path={POSE_POSTPROCESS_SO} '
+            f'function-name={POSE_POSTPROCESS_FUNC} qos=false ! '
+            f'queue name=pose_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
+        )
+
+        pose_wrapper = (
+            f'queue name=pose_wrapper_input_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'hailocropper name=pose_wrapper_crop so-path={WHOLE_BUFFER_SO} function-name=create_crops '
+            f'use-letterbox=true resize-method=inter-area internal-offset=true '
+            f'hailoaggregator name=pose_wrapper_agg '
+            f'pose_wrapper_crop. ! queue name=pose_wrapper_bypass_q leaky=no max-size-buffers=20 max-size-bytes=0 max-size-time=0 ! pose_wrapper_agg.sink_0 '
+            f'pose_wrapper_crop. ! {pose_inner} ! pose_wrapper_agg.sink_1 '
+            f'pose_wrapper_agg. ! queue name=pose_wrapper_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
+        )
+
         # --- Stage 3: Tracker + Face Cropper (face_align + ArcFace) ---
         tracker = (
             f'hailotracker name=hailo_face_tracker class-id=-1 '
@@ -1038,33 +1105,33 @@ class TappasPipeline:
             f'appsink name=sink emit-signals=true drop=true max-buffers=1 sync=false'
         )
 
-        # --- SCRFD Valve-Gating: tee → (A) valve → scrfd → selector.sink_0
-        #                                  → (B) bypass  → selector.sink_1
-        # Wenn Valve zu: Frames gehen direkt via Bypass zum Tracker (kein SCRFD auf NPU).
-        # Wenn Valve auf: Frames gehen durch SCRFD, Bypass-Queue dropt (leaky=downstream).
-        # input-selector gibt IMMER nur den aktiven Pfad weiter.
+        # --- Pipeline-Topologie mit Valve-Gating ---
+        # source → yolo → tee(scrfd) → [valve→scrfd | bypass] → sel
+        #        → tee(pose) → [valve→pose | bypass] → sel
+        #        → tracker → face_cropper → face_attr → callback → sink
         #
-        # ArcFace (face_cropper) ist bereits nativ gated: hailocropper erzeugt
-        # nur Crops wenn Face-ROIs im Buffer sind → kein Face = kein ArcFace-Inference.
-        # Pipeline-Topologie mit SCRFD Valve-Gating:
-        #   yolo_out → tee → (src_0) valve → scrfd_wrapper → selector.sink_0
-        #                  → (src_1) bypass_q              → selector.sink_1
-        #   selector → tracker → face_cropper → face_attr → callback → sink
-        #
-        # tee name=scrfd_tee ! valve ...  = tee.src_0 per "!" mit valve verbunden
-        # scrfd_tee. ! queue ...          = tee.src_1 per Namens-Referenz verbunden
+        # Bypass-Queues am Ende (GStreamer Namens-Referenz)
         return (
             f'{source} ! '
             f'{yolo_wrapper} ! '
+            # SCRFD Valve-Branch
             f'tee name=scrfd_tee ! '
             f'valve name=scrfd_valve drop=true ! {scrfd_wrapper} ! scrfd_sel.sink_0 '
             f'input-selector name=scrfd_sel ! '
+            # Pose Valve-Branch
+            f'tee name=pose_tee ! '
+            f'valve name=pose_valve drop=true ! {pose_wrapper} ! pose_sel.sink_0 '
+            f'input-selector name=pose_sel ! '
+            # Tracker + Face Recognition + Face Attributes
             f'{tracker} ! '
             f'{face_cropper} ! '
             f'{face_attr_cropper} ! '
             f'{callback_and_sink} '
+            # Bypass-Queues (Namens-Referenzen, am Ende der Pipeline-Description)
             f'scrfd_tee. ! queue name=scrfd_bypass_q leaky=downstream max-size-buffers=5 '
-            f'max-size-bytes=0 max-size-time=0 ! scrfd_sel.sink_1'
+            f'max-size-bytes=0 max-size-time=0 ! scrfd_sel.sink_1 '
+            f'pose_tee. ! queue name=pose_bypass_q leaky=downstream max-size-buffers=5 '
+            f'max-size-bytes=0 max-size-time=0 ! pose_sel.sink_1'
         )
 
     # =====================================================================
@@ -1218,14 +1285,17 @@ class TappasPipeline:
             bbox_height_pct=max_person_height,
         )
 
-        # Valve-Steuerung: SCRFD aktiv wenn Szenario es verlangt oder RUECKEN-Probe
+        # Valve-Steuerung: Modelle ein/aus basierend auf Szenario
         scrfd_needed = (self._scheduler.is_model_active("scrfd")
                         or self._scheduler.get_scrfd_probe_needed())
+        pose_needed = self._scheduler.is_model_active("pose")
         self._apply_scrfd_gate(enabled=scrfd_needed)
+        self._apply_pose_gate(enabled=pose_needed)
 
         # Model-Active-Flags aktualisieren (fuer Panel/Status-JSON)
         self.scrfd_active = scrfd_needed
         self.arcface_active = self._scheduler.is_model_active("arcface")
+        self.pose_active = pose_needed
 
         # Teach-Modus: Scheduler auf ALL_ACTIVE erzwingen
         if self._sched_force_all:
