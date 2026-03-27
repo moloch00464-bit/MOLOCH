@@ -79,6 +79,9 @@ REID_POSTPROCESS_FUNC = "filter"
 REID_CROP_SO = "/usr/lib/aarch64-linux-gnu/hailo/tappas/post_processes/cropping_algorithms/libre_id.so"
 REID_CROP_FUNC = "create_crops"
 
+# --- Hand Landmark (PoC, Full-Frame) ---
+HAND_HEF = "/mnt/moloch-data/hailo/models/hand_landmark_lite.hef"
+
 VDEVICE_GROUP_ID = "SHARED"
 
 # YOLO Klassen-Whitelist (nur diese werden verarbeitet, Rest ignoriert)
@@ -221,6 +224,10 @@ class TappasPipeline:
         self._reid_valve = None
         self._reid_selector = None
 
+        # --- Hand Detection Valve-Gating ---
+        self._hand_valve = None
+        self._hand_selector = None
+
         # GStreamer einmal initialisieren
         if not Gst.is_initialized():
             Gst.init(None)
@@ -286,6 +293,18 @@ class TappasPipeline:
             logger.info("[REID-GATE] Initial: Valve=drop (sicherer Start)")
         else:
             logger.warning("[REID-GATE] Valve oder Selector NICHT gefunden — kein Gating!")
+
+        # Hand Valve + Selector
+        self._hand_valve = self._pipeline.get_by_name("hand_valve")
+        self._hand_selector = self._pipeline.get_by_name("hand_sel")
+        if self._hand_valve and self._hand_selector:
+            self._hand_valve.set_property("drop", True)
+            hand_sink1 = self._hand_selector.get_static_pad("sink_1")
+            if hand_sink1:
+                self._hand_selector.set_property("active-pad", hand_sink1)
+            logger.info("[HAND-GATE] Initial: Valve=drop (sicherer Start)")
+        else:
+            logger.warning("[HAND-GATE] Valve oder Selector NICHT gefunden — kein Gating!")
 
         # Identity Callback (Pad-Probe fuer Detection-Auswertung)
         identity = self._pipeline.get_by_name("identity_callback")
@@ -505,6 +524,23 @@ class TappasPipeline:
             if sink1:
                 self._reid_selector.set_property("active-pad", sink1)
             logger.debug("[REID-GATE] ReID deaktiviert (Valve zu, sink_1 Bypass)")
+
+    def _apply_hand_gate(self, enabled: bool):
+        """Hand-Detection NPU-Gating via GStreamer valve + input-selector."""
+        if self._hand_valve is None or self._hand_selector is None:
+            return
+        if enabled:
+            sink0 = self._hand_selector.get_static_pad("sink_0")
+            if sink0:
+                self._hand_selector.set_property("active-pad", sink0)
+            self._hand_valve.set_property("drop", False)
+            logger.debug("[HAND-GATE] Hand aktiviert (Valve auf, sink_0)")
+        else:
+            self._hand_valve.set_property("drop", True)
+            sink1 = self._hand_selector.get_static_pad("sink_1")
+            if sink1:
+                self._hand_selector.set_property("active-pad", sink1)
+            logger.debug("[HAND-GATE] Hand deaktiviert (Valve zu, sink_1 Bypass)")
 
     def _update_npu_scheduler(self, has_person: bool, has_face: bool):
         """Scheduler-Modus basierend auf aktuellen Detections aktualisieren."""
@@ -1160,6 +1196,30 @@ class TappasPipeline:
             f'fattr_crop_agg. ! queue name=fattr_crop_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
         )
 
+        # --- Stage 5: Hand Landmark (Valve-gated, PoC Full-Frame) ---
+        hand_inner = (
+            f'queue name=hand_scale_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'videoscale name=hand_videoscale n-threads=2 qos=false ! '
+            f'queue name=hand_convert_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'video/x-raw, pixel-aspect-ratio=1/1 ! '
+            f'videoconvert name=hand_videoconvert n-threads=2 ! '
+            f'queue name=hand_hailonet_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'hailonet name=hand_hailonet hef-path={HAND_HEF} batch-size=1 '
+            f'vdevice-group-id={VDEVICE_GROUP_ID} '
+            f'force-writable=true ! '
+            f'queue name=hand_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
+        )
+
+        hand_wrapper = (
+            f'queue name=hand_wrapper_input_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'hailocropper name=hand_wrapper_crop so-path={WHOLE_BUFFER_SO} function-name=create_crops '
+            f'use-letterbox=true resize-method=inter-area internal-offset=true '
+            f'hailoaggregator name=hand_wrapper_agg '
+            f'hand_wrapper_crop. ! queue name=hand_wrapper_bypass_q leaky=no max-size-buffers=20 max-size-bytes=0 max-size-time=0 ! hand_wrapper_agg.sink_0 '
+            f'hand_wrapper_crop. ! {hand_inner} ! hand_wrapper_agg.sink_1 '
+            f'hand_wrapper_agg. ! queue name=hand_wrapper_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
+        )
+
         # --- Callback + Overlay + appsink ---
         callback_and_sink = (
             f'queue name=cb_q leaky=downstream max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! '
@@ -1199,6 +1259,10 @@ class TappasPipeline:
             # Face Recognition + Face Attributes
             f'{face_cropper} ! '
             f'{face_attr_cropper} ! '
+            # Hand Detection Valve-Branch (PoC, nach Face Attr)
+            f'tee name=hand_tee ! '
+            f'valve name=hand_valve drop=true ! {hand_wrapper} ! hand_sel.sink_0 '
+            f'input-selector name=hand_sel ! '
             f'{callback_and_sink} '
             # Bypass-Queues (Namens-Referenzen, am Ende der Pipeline-Description)
             f'scrfd_tee. ! queue name=scrfd_bypass_q leaky=downstream max-size-buffers=5 '
@@ -1206,7 +1270,9 @@ class TappasPipeline:
             f'pose_tee. ! queue name=pose_bypass_q leaky=downstream max-size-buffers=5 '
             f'max-size-bytes=0 max-size-time=0 ! pose_sel.sink_1 '
             f'reid_tee. ! queue name=reid_bypass_q leaky=downstream max-size-buffers=5 '
-            f'max-size-bytes=0 max-size-time=0 ! reid_sel.sink_1'
+            f'max-size-bytes=0 max-size-time=0 ! reid_sel.sink_1 '
+            f'hand_tee. ! queue name=hand_bypass_q leaky=downstream max-size-buffers=5 '
+            f'max-size-bytes=0 max-size-time=0 ! hand_sel.sink_1'
         )
 
     # =====================================================================
@@ -1365,14 +1431,17 @@ class TappasPipeline:
                         or self._scheduler.get_scrfd_probe_needed())
         pose_needed = self._scheduler.is_model_active("pose")
         reid_needed = self._scheduler.is_model_active("reid")
+        hand_needed = self._scheduler.is_model_active("hand")
         self._apply_scrfd_gate(enabled=scrfd_needed)
         self._apply_pose_gate(enabled=pose_needed)
         self._apply_reid_gate(enabled=reid_needed)
+        self._apply_hand_gate(enabled=hand_needed)
 
         # Model-Active-Flags aktualisieren (fuer Panel/Status-JSON)
         self.scrfd_active = scrfd_needed
         self.arcface_active = self._scheduler.is_model_active("arcface")
         self.pose_active = pose_needed
+        self.hand_active = hand_needed
 
         # Teach-Modus: Scheduler auf ALL_ACTIVE erzwingen
         if self._sched_force_all:
