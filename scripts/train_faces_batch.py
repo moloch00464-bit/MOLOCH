@@ -1,18 +1,26 @@
 #!/usr/bin/env python3
 """
+!! DEPRECATED — NICHT VERWENDEN !!
+
+Dieses Script erzeugt HailoRT-direkt Embeddings die INKOMPATIBEL mit der
+TAPPAS GStreamer-Pipeline sind (anderes Face-Alignment → cosine sim ~0).
+
+Stattdessen: Enrollment NUR ueber Live-Pipeline (IPC enrollment_start):
+    echo '{"cmd":"enrollment_start","name":"markus","n":20}' | nc -U /tmp/moloch.sock
+
+Oder per Chat-Keyword: "enrollment_start markus"
+
+Siehe: CLAUDE.md Regel 11 — ArcFace Enrollment NUR ueber Live-Pipeline.
+
+--- Original-Beschreibung (historisch) ---
 M.O.L.O.C.H. Face Training — Batch-Enrollment aus Snapshot-Galerie.
-
 Jagt alle JPGs aus snapshots/ durch SCRFD + ArcFace auf der Hailo-10H NPU.
-Erkannte Gesichter werden als Markus-Embeddings in face_embeddings.json gespeichert.
-
-WICHTIG: Service muss GESTOPPT sein (NPU darf nicht von GStreamer belegt sein)!
-         Das Script stoppt/startet den Service automatisch.
-
-Aufruf:
-    python3 ~/moloch/scripts/train_faces_batch.py
-    python3 ~/moloch/scripts/train_faces_batch.py --dry-run    # Nur zaehlen, nichts speichern
-    python3 ~/moloch/scripts/train_faces_batch.py --person ray  # Anderer Name als markus
 """
+import sys
+print("\\n!! DEPRECATED — Dieses Script erzeugt inkompatible Embeddings!")
+print("   Nutze stattdessen IPC: enrollment_start markus")
+print("   Siehe CLAUDE.md Regel 11\\n")
+sys.exit(1)
 
 import os
 import sys

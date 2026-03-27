@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
 """
-ArcFace Enrollment auf Hailo-10H NPU.
+!! DEPRECATED — NICHT VERWENDEN !!
 
-Laedt Bilder, findet Gesichter via SCRFD, erzeugt ArcFace Embeddings,
-speichert Durchschnitts-Embedding in face_embeddings.json.
-
-Usage:
-    python3 scripts/enroll_arcface.py --name Markus
-    python3 scripts/enroll_arcface.py --name Markus --source snapshots
-    python3 scripts/enroll_arcface.py --list
-    python3 scripts/enroll_arcface.py --snapshots-multi --name markus --conf 0.7 --dedup 0.95
+Erzeugt HailoRT-direkt Embeddings die INKOMPATIBEL mit TAPPAS sind.
+Enrollment NUR ueber Live-Pipeline: IPC enrollment_start oder Chat-Keyword.
+Siehe CLAUDE.md Regel 11.
 """
+import sys
+print("\n!! DEPRECATED — Nutze IPC: enrollment_start markus")
+sys.exit(1)
 
 import os
 import sys
