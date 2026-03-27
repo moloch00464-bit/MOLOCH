@@ -1428,9 +1428,11 @@ class TappasPipeline:
         # Valve-Steuerung: Modelle ein/aus basierend auf Szenario
         scrfd_needed = (self._scheduler.is_model_active("scrfd")
                         or self._scheduler.get_scrfd_probe_needed())
-        pose_needed = self._scheduler.is_model_active("pose")
-        reid_needed = self._scheduler.is_model_active("reid")
-        hand_needed = self._scheduler.is_model_active("hand")
+        # FIXME: Pose/ReID/Hand Valves deaktiviert — cv2::resize Crash in
+        # kompilierten SOs beim Valve-Wechsel. Einzeln testen + aktivieren!
+        pose_needed = False   # self._scheduler.is_model_active("pose")
+        reid_needed = False   # self._scheduler.is_model_active("reid")
+        hand_needed = False   # self._scheduler.is_model_active("hand")
         self._apply_scrfd_gate(enabled=scrfd_needed)
         self._apply_pose_gate(enabled=pose_needed)
         self._apply_reid_gate(enabled=reid_needed)
@@ -1803,7 +1805,11 @@ class TappasPipeline:
                 if self._shm_mmap is None:
                     return
 
+            if frame is None or frame.size == 0:
+                return
             h, w = frame.shape[:2]
+            if h == 0 or w == 0:
+                return
             if h != SHM_PREVIEW_H or w != SHM_PREVIEW_W:
                 frame = cv2.resize(frame, (SHM_PREVIEW_W, SHM_PREVIEW_H))
                 h, w = SHM_PREVIEW_H, SHM_PREVIEW_W
