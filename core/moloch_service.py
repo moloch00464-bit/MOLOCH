@@ -1812,6 +1812,7 @@ class MolochService:
                 ptz_status["tracker_state"] = tracker.state.value
                 ptz_status["tracking_moves"] = tracker.stats.get("tracking_moves", 0)
                 ptz_status["search_moves"] = tracker.stats.get("search_moves", 0)
+                ptz_status["camera_smart_tracking"] = getattr(tracker, '_camera_smart_tracking_on', False)
             # PTZ-Tracker restless_score
             if hasattr(self, '_ptz_tracker') and self._ptz_tracker:
                 ptz_state = self._ptz_tracker.get_state()

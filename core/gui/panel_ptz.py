@@ -292,18 +292,18 @@ class PtzModule:
         )
         self._lbl_arbiter.pack(side=tk.LEFT, padx=5)
 
-        # Zeile 2: AUTONOM + TEACHEN
+        # Zeile 2: Tracking-Status + TEACHEN
         grid = tk.Frame(section, bg=BG_FRAME)
         grid.pack(pady=(2, 5), padx=5)
 
-        # AUTONOM
-        self._btn_autonom = tk.Button(
-            grid, text="AUTONOM", width=12,
-            bg=BTN_OFF_RED, fg=FG_WHITE, font=FONT_BUTTON,
+        # Tracking-Status (Moloch vs Kamera)
+        self._btn_tracking = tk.Button(
+            grid, text="MOLOCH trackt", width=14,
+            bg=BTN_ON_GREEN, fg=FG_WHITE, font=FONT_BUTTON,
             activebackground=BG_FRAME,
             command=self._toggle_autonomous,
         )
-        self._btn_autonom.grid(row=0, column=0, padx=3, pady=2)
+        self._btn_tracking.grid(row=0, column=0, padx=3, pady=2)
 
         # TEACHEN
         self._btn_alltag = tk.Button(
@@ -315,10 +315,10 @@ class PtzModule:
         self._btn_alltag.grid(row=0, column=1, padx=3, pady=2)
 
         # Status-Labels unter den Buttons
-        self._lbl_autonom = tk.Label(
-            grid, text="Manuell", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
+        self._lbl_tracking = tk.Label(
+            grid, text="Moloch autonom", bg=BG_FRAME, fg=BTN_ON_GREEN, font=FONT_SMALL,
         )
-        self._lbl_autonom.grid(row=1, column=0, pady=(0, 5))
+        self._lbl_tracking.grid(row=1, column=0, pady=(0, 5))
 
         self._lbl_alltag = tk.Label(
             grid, text="Bereit", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
@@ -346,17 +346,24 @@ class PtzModule:
         status = self._service.read_status()
 
         if status:
-            # Autonomer Modus
+            # Tracking-Status: Moloch vs Kamera Smart-Tracking
             auto = not status.get("manual_mode", True)
-            if auto != self._autonomous:
-                self._autonomous = auto
-                self._btn_autonom.config(
-                    bg=BTN_ON_GREEN if auto else BTN_OFF_RED
-                )
-                self._lbl_autonom.config(
-                    text="Autonom" if auto else "Manuell",
-                    fg=BTN_ON_GREEN if auto else FG_DIM,
-                )
+            ptz_data = status.get("ptz", {})
+            cam_st = ptz_data.get("camera_smart_tracking", False)
+            self._autonomous = auto
+
+            if cam_st:
+                # Kamera-eigenes Smart-Tracking aktiv
+                self._btn_tracking.config(text="KAMERA trackt", bg=STATUS_YELLOW)
+                self._lbl_tracking.config(text="Kamera scannt", fg=STATUS_YELLOW)
+            elif auto:
+                # Moloch trackt autonom
+                self._btn_tracking.config(text="MOLOCH trackt", bg=BTN_ON_GREEN)
+                self._lbl_tracking.config(text="Moloch autonom", fg=BTN_ON_GREEN)
+            else:
+                # Manuell
+                self._btn_tracking.config(text="MANUELL", bg=BTN_OFF_RED)
+                self._lbl_tracking.config(text="Manuell", fg=FG_DIM)
 
             # Teach-Modus (persistent)
             dl = status.get("teach_mode_enabled", False)
@@ -440,14 +447,18 @@ class PtzModule:
 
         self._autonomous = not status.get("manual_mode", True)
         self._teachen = status.get("teach_mode_enabled", False)
+        ptz_data = status.get("ptz", {})
+        cam_st = ptz_data.get("camera_smart_tracking", False)
 
-        self._btn_autonom.config(
-            bg=BTN_ON_GREEN if self._autonomous else BTN_OFF_RED
-        )
-        self._lbl_autonom.config(
-            text="Autonom" if self._autonomous else "Manuell",
-            fg=BTN_ON_GREEN if self._autonomous else FG_DIM,
-        )
+        if cam_st:
+            self._btn_tracking.config(text="KAMERA trackt", bg=STATUS_YELLOW)
+            self._lbl_tracking.config(text="Kamera scannt", fg=STATUS_YELLOW)
+        elif self._autonomous:
+            self._btn_tracking.config(text="MOLOCH trackt", bg=BTN_ON_GREEN)
+            self._lbl_tracking.config(text="Moloch autonom", fg=BTN_ON_GREEN)
+        else:
+            self._btn_tracking.config(text="MANUELL", bg=BTN_OFF_RED)
+            self._lbl_tracking.config(text="Manuell", fg=FG_DIM)
 
         self._btn_alltag.config(
             bg=BTN_ON_GREEN if self._teachen else BTN_OFF_DARK

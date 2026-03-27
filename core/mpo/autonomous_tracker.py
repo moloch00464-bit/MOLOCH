@@ -26,6 +26,7 @@ Author: M.O.L.O.C.H. System
 Date: 2026-02-08
 """
 
+import json
 import time
 import math
 import logging
@@ -36,8 +37,32 @@ from typing import Optional, Dict, Any, List, Callable
 
 logger = logging.getLogger(__name__)
 
-# PTZ Debug Logger - schreibt in ~/moloch/logs/ptz_debug.log
+# Persistente letzte Face-Position (ueberlebt Reboot)
 import os as _os
+_LAST_FACE_POS_FILE = _os.path.expanduser("~/moloch/config/last_face_position.json")
+
+def _save_last_face_pos(pan: float, tilt: float):
+    """Letzte Face-Position auf Disk speichern (max alle 10s)."""
+    try:
+        with open(_LAST_FACE_POS_FILE, "w") as f:
+            json.dump({"pan": round(pan, 1), "tilt": round(tilt, 1),
+                       "ts": time.time()}, f)
+    except Exception:
+        pass
+
+def _load_last_face_pos() -> tuple:
+    """Letzte Face-Position laden. Returns (pan, tilt) oder (0.0, 0.0)."""
+    try:
+        with open(_LAST_FACE_POS_FILE) as f:
+            d = json.load(f)
+        # Nur gueltig wenn < 24h alt
+        if time.time() - d.get("ts", 0) < 86400:
+            return d.get("pan", 0.0), d.get("tilt", 0.0)
+    except Exception:
+        pass
+    return 0.0, 0.0
+
+# PTZ Debug Logger - schreibt in ~/moloch/logs/ptz_debug.log
 _ptz_log_path = _os.path.expanduser("~/moloch/logs/ptz_debug.log")
 _os.makedirs(_os.path.dirname(_ptz_log_path), exist_ok=True)
 ptz_debug = logging.getLogger("ptz_debug")
@@ -111,8 +136,8 @@ class TrackingConfig:
     # aber Tracker muss gecachte Position AUCH clampen!)
     pan_limit_min: float = -168.4
     pan_limit_max: float = 170.0
-    tilt_limit_min: float = -78.0
-    tilt_limit_max: float = 78.8
+    tilt_limit_min: float = -15.0   # Boden bringt nix, Personen stehen/sitzen
+    tilt_limit_max: float = 30.0    # Decke auch nicht (war 78.8)
 
     # Search mode parameters
     search_speed_min: float = 0.08      # Minimum bei kurzen Distanzen
@@ -264,6 +289,16 @@ class AutonomousTracker:
         self.search_move_time = 0.0
         self._returning_home = False  # Phase-2 Flag: langsam Home fahren
         self._visited_positions: set = set()  # Bereits abgefahrene Patrol-Positionen
+        self._camera_smart_tracking_on = False  # Kamera-eigenes Smart-Tracking aktiv?
+        self._last_face_save_time = 0.0  # Throttle: max alle 10s speichern
+
+        # G1-T04: Letzte Face-Position laden (persistent, ueberlebt Reboot)
+        saved_pan, saved_tilt = _load_last_face_pos()
+        self._last_tracking_pan = saved_pan
+        self._last_tracking_tilt = saved_tilt
+        if saved_pan != 0.0 or saved_tilt != 0.0:
+            logger.info(f"[TRACKER] Letzte Face-Position geladen: "
+                       f"pan={saved_pan:+.1f} tilt={saved_tilt:+.1f}")
 
         # === Real Camera Position (replaces virtual position) ===
         self.last_known_pan = 0.0
@@ -1022,23 +1057,32 @@ class AutonomousTracker:
             self._do_coast()
             return
 
-        # Phase 2: 5s+ -> Home fahren und dort warten (kein Patrol)
-        # Gespeicherte Home-Position nutzen (Panel-Setting, nicht hardcoded)
-        home_pan = getattr(self.config, 'home_pan', 0.0)
-        home_tilt = getattr(self.config, 'home_tilt', 0.0)
-
+        # Phase 2: 5s+ -> Kamera-Smart-Tracking AN + zur letzten Face-Position
+        # Sonoff-Sensoren scannen den Raum, Moloch wartet auf YOLO-Detection
         if not getattr(self, '_returning_home', False):
             self._returning_home = True
-            logger.info(f"[CYCLE] Phase 2: Home fahren ({home_pan:+.1f},{home_tilt:+.1f}) "
+            # Letzte Tracking-Position speichern BEVOR Kamera-ST uebernimmt
+            self._last_tracking_pan = self.last_known_pan
+            self._last_tracking_tilt = self.last_known_tilt
+
+            # Kamera-ST aktivieren: Sonoff-Sensoren + interner Motor uebernehmen
+            self._enable_camera_smart_tracking(True)
+
+            # Kamera zur letzten Face-Position fahren (dort sind Sensoren am relevantesten)
+            target_pan = self._last_tracking_pan
+            target_tilt = max(self.config.tilt_limit_min,
+                            self._last_tracking_tilt)  # Nicht unter Tilt-Limit
+            logger.info(f"[CYCLE] Phase 2: Kamera-ST AN + fahre zu letzter Position "
+                       f"({target_pan:+.1f},{target_tilt:+.1f}) "
                        f"nach {time_since_detection:.1f}s ohne Detection")
             if self.camera and self.camera.is_connected:
-                self.camera.move_absolute(home_pan, home_tilt, speed=0.15)
+                self.camera.move_absolute(target_pan, target_tilt, speed=0.15)
 
-        # Phase 3: >30s -> PARK auf Home (NPU IDLE, kein Patrol)
+        # Phase 3: >30s -> PARK (NPU IDLE), aber Kamera-ST bleibt AN
         if time_since_detection > self.config.home_return_timeout:
             if self.state != TrackerState.PARKED:
-                logger.info(f"[PARK] Geparkt auf Home ({home_pan:+.1f},{home_tilt:+.1f}) "
-                           f"— warte auf Besucher")
+                logger.info(f"[PARK] Geparkt — Kamera-ST scannt weiter, "
+                           f"Moloch wartet auf YOLO-Detection")
                 self._park_time = time.time()
                 self._set_state(TrackerState.PARKED)
                 if self.on_park_change:
@@ -1053,7 +1097,7 @@ class AutonomousTracker:
                     except Exception:
                         pass
         elif debug_log:
-            logger.info(f"[CYCLE] Phase 2: Warte auf Home ({time_since_detection:.1f}s)")
+            logger.info(f"[CYCLE] Phase 2: Kamera-ST aktiv, warte auf YOLO ({time_since_detection:.1f}s)")
 
     # =========================================================================
     # Tracking (AbsoluteMove-based)
@@ -1069,6 +1113,17 @@ class AutonomousTracker:
 
         # Home-Return Flag zuruecksetzen — Person gefunden
         self._returning_home = False
+        # Kamera-Smart-Tracking aus — Moloch uebernimmt wieder
+        if self._camera_smart_tracking_on:
+            self._enable_camera_smart_tracking(False)
+        # G1-T04: Tracking-Position laufend aktualisieren (fuer Suchrichtung bei Verlust)
+        self._last_tracking_pan = self.last_known_pan
+        self._last_tracking_tilt = self.last_known_tilt
+
+        # Face erkannt? Position persistent speichern (max alle 10s, SSD-schonend)
+        if detection.has_face and now - self._last_face_save_time > 10.0:
+            self._last_face_save_time = now
+            _save_last_face_pos(self.last_known_pan, self.last_known_tilt)
 
         # EMA Glaettung: smooth detection center (kein Ruckeln/Springen)
         alpha = self.config.smooth_alpha
@@ -1203,12 +1258,19 @@ class AutonomousTracker:
             else:
                 self._target_wait_start = None
 
+        # === TILT-KORREKTUR: Body ohne Face -> nach oben (Kopf suchen) ===
+        # Wenn nur Body/Hand erkannt wird, liegt der BBox-Center zu tief.
+        # Kopf ist ca. 15% der BBox-Hoehe ueber dem Center -> Tilt-Bias nach oben
+        tilt_up_bias = 0.0
+        if not detection.has_face and self._current_source == "body":
+            tilt_up_bias = 0.08  # ~8% vom Bild nach oben = Kopf-Richtung
+
         # === PD-REGLER: Proportional + Derivative (Bremse) ===
         # P-Term: proportional zum Fehler
         # VORZEICHEN: positiver error_x_norm = Gesicht RECHTS → Kamera muss RECHTS (Pan negativ)
         # Daher: -error_x_norm (analog zu Tilt, wo -error_y_norm korrekt war)
         pan_p = -error_x_norm * self.config.fov_horizontal * self.config.pan_gain
-        tilt_p = -error_y_norm * self.config.fov_vertical * self.config.tilt_gain
+        tilt_p = -(error_y_norm - tilt_up_bias) * self.config.fov_vertical * self.config.tilt_gain
 
         # D-Term: Bremse wenn Fehler ABNIMMT (Kamera naehert sich dem Ziel)
         d_gain = 0.4  # Daempfungsfaktor (0 = kein Bremsen, 1 = starkes Bremsen)
@@ -1409,9 +1471,9 @@ class AutonomousTracker:
             self._search_start_time = now
             self._visited_positions.clear()  # Neue Suche, alles reset
 
-            # G1-T04: Suchrichtung = Richtung wo Person zuletzt war
-            # Starte bei Patrol-Position naechst zur letzten Kamera-Pan
-            last_pan = self.last_known_pan
+            # G1-T04: Suchrichtung = Richtung wo Person ZULETZT GESEHEN wurde
+            # _last_tracking_pan wird in Phase 2 gespeichert BEVOR Home faehrt
+            last_pan = self._last_tracking_pan
             positions = self.config.search_patrol_positions
             nearest_idx = 0
             min_dist = float('inf')
@@ -1422,8 +1484,9 @@ class AutonomousTracker:
                     nearest_idx = i
             self.search_patrol_index = nearest_idx
 
-            logger.info(f"[SEARCH] Suche gestartet Richtung pan={last_pan:+.1f} "
-                       f"(start={nearest_idx}, {len(positions)} Positionen)")
+            logger.info(f"[SEARCH] Suche gestartet bei letzter Tracking-Pan={last_pan:+.1f} "
+                       f"(start=Pos[{nearest_idx}]={positions[nearest_idx][0]:+.1f}, "
+                       f"{len(positions)} Positionen)")
 
             # Reset dwell state for next target acquisition
             self.dwell_target_acquired = False
@@ -1495,13 +1558,16 @@ class AutonomousTracker:
             # Aktuelle Position als besucht markieren
             self._visited_positions.add(self.search_patrol_index)
 
-            # Naechste UNBESUCHTE Position finden
-            next_idx = None
-            for offset in range(1, len(patrol_positions) + 1):
-                candidate = (self.search_patrol_index + offset) % len(patrol_positions)
-                if candidate not in self._visited_positions:
-                    next_idx = candidate
-                    break
+            # G1-T04: Naechste UNBESUCHTE Position — sortiert nach Naehe
+            # zur letzten Tracking-Pan (Fluchtrichtung zuerst)
+            ref_pan = self._last_tracking_pan
+            candidates = [
+                (i, abs(patrol_positions[i][0] - ref_pan))
+                for i in range(len(patrol_positions))
+                if i not in self._visited_positions
+            ]
+            candidates.sort(key=lambda x: x[1])  # Naechste zuerst
+            next_idx = candidates[0][0] if candidates else None
 
             if next_idx is None:
                 # Alle besucht — naechster Cycle-Aufruf geht in den Park-Block oben
@@ -1566,6 +1632,20 @@ class AutonomousTracker:
             logger.debug(f"[SEARCH] Move -> ({pan_deg:+.1f},{tilt_deg:+.1f}) speed={speed:.3f}")
 
         return result
+
+    def _enable_camera_smart_tracking(self, on: bool):
+        """Sonoff-eigenes Smart-Tracking ein/ausschalten (schnellerer Raum-Scan).
+
+        Wird aktiviert wenn Moloch Person verliert (Phase 2),
+        deaktiviert wenn Moloch wieder selbst trackt.
+        """
+        try:
+            if self.camera and hasattr(self.camera, 'cloud_bridge') and self.camera.cloud_bridge:
+                self.camera.cloud_bridge.set_smart_tracking(on)
+                self._camera_smart_tracking_on = on
+                logger.info(f"[SMART-TRACK] Kamera Smart-Tracking {'AN' if on else 'AUS'}")
+        except Exception as e:
+            logger.warning(f"[SMART-TRACK] Fehler: {e}")
 
     def _do_coast(self):
         """Coast - stop movement when target briefly lost."""
@@ -1651,6 +1731,7 @@ class AutonomousTracker:
                 "parked_since_sec": int(time.time() - self._park_time) if self.state == TrackerState.PARKED and self._park_time > 0 else 0,
                 "park_timeout_sec": self.config.search_park_timeout
             },
+            "camera_smart_tracking": self._camera_smart_tracking_on,
             "stats": self.stats.copy(),
             "config": {
                 "lock_threshold_px": self.config.lock_threshold_pixels,
