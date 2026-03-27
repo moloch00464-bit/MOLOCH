@@ -627,12 +627,16 @@ class MolochService:
                         if face_id and face_id != "unknown":
                             # Owner erkannt: Tension SOFORT runter + Guardian-Boost
                             self._core_integrator.feed_event("markus_recognized", 0.5)
+                            # WICHTIG: unknown_person zuruecksetzen (sonst bleibt alter Wert)
+                            self._core_integrator.feed_event("unknown_person", 0.0)
                             # Owner-Override triggern (Tension -0.3, Dominance +0.3)
                             if not self._core_integrator._owner_confirmed:
                                 self._core_integrator.owner_override()
                                 logger.info(f"[TENSION] Owner-Override: {face_id}")
                         elif face_detected and (not face_id or face_id == "unknown"):
                             self._core_integrator.feed_event("unknown_person", 0.3)
+                            # markus_recognized zuruecksetzen
+                            self._core_integrator.feed_event("markus_recognized", 0.0)
                     except Exception as e:
                         logger.debug(f"[TAPPAS-PERC] CoreIntegrator feed: {e}")
 
