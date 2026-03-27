@@ -163,7 +163,7 @@ class TappasPipeline:
         # --- Threshold-Werte (Panel setzt diese, TAPPAS managed intern) ---
         self.scrfd_conf_val = 0.30
         self.scrfd_nms_val = 0.45
-        self.arcface_thresh_val = 0.65
+        self.arcface_thresh_val = 0.70
         self.yolo_conf_val = 0.30
         self.pose_conf_val = 0.30
         self.hand_conf_val = 0.30
