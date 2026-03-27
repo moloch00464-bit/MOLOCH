@@ -816,7 +816,9 @@ class AvatarModule:
 
             # Smooth Interpolation (rate=dt*6 ~ 300ms Settling)
             rate = min(1.0, dt * 6.0)
-            self._s_tension += (self._tension - self._s_tension) * rate
+            # Tension fuer Auge: negative Werte = ruhig/entspannt = 0.0 visuell
+            visual_tension = max(0.0, self._tension)
+            self._s_tension += (visual_tension - self._s_tension) * rate
             self._s_dominance += (self._dominance - self._s_dominance) * rate
             self._s_cpu += (self._cpu_temp - self._s_cpu) * rate
 
