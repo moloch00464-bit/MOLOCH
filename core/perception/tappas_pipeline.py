@@ -72,6 +72,13 @@ POSE_HEF = "/mnt/moloch-data/hailo/models/yolov8s_pose_h10.hef"
 POSE_POSTPROCESS_SO = "/usr/local/hailo/resources/so/libyolov8pose_postprocess.so"
 POSE_POSTPROCESS_FUNC = "filter"
 
+# --- Person ReID (RepVGG-A0, 512d Embedding) ---
+REID_HEF = "/mnt/moloch-data/hailo/models/repvgg_a0_person_reid_512.hef"
+REID_POSTPROCESS_SO = "/usr/local/hailo/resources/so/librepvgg_reid_postprocess.so"
+REID_POSTPROCESS_FUNC = "filter"
+REID_CROP_SO = "/usr/lib/aarch64-linux-gnu/hailo/tappas/post_processes/cropping_algorithms/libre_id.so"
+REID_CROP_FUNC = "create_crops"
+
 VDEVICE_GROUP_ID = "SHARED"
 
 # YOLO Klassen-Whitelist (nur diese werden verarbeitet, Rest ignoriert)
@@ -210,6 +217,10 @@ class TappasPipeline:
         self._pose_valve = None
         self._pose_selector = None
 
+        # --- ReID Valve-Gating ---
+        self._reid_valve = None
+        self._reid_selector = None
+
         # GStreamer einmal initialisieren
         if not Gst.is_initialized():
             Gst.init(None)
@@ -263,6 +274,18 @@ class TappasPipeline:
             logger.info("[POSE-GATE] Initial: Valve=drop (sicherer Start)")
         else:
             logger.warning("[POSE-GATE] Valve oder Selector NICHT gefunden — kein Gating!")
+
+        # ReID Valve + Selector
+        self._reid_valve = self._pipeline.get_by_name("reid_valve")
+        self._reid_selector = self._pipeline.get_by_name("reid_sel")
+        if self._reid_valve and self._reid_selector:
+            self._reid_valve.set_property("drop", True)
+            reid_sink1 = self._reid_selector.get_static_pad("sink_1")
+            if reid_sink1:
+                self._reid_selector.set_property("active-pad", reid_sink1)
+            logger.info("[REID-GATE] Initial: Valve=drop (sicherer Start)")
+        else:
+            logger.warning("[REID-GATE] Valve oder Selector NICHT gefunden — kein Gating!")
 
         # Identity Callback (Pad-Probe fuer Detection-Auswertung)
         identity = self._pipeline.get_by_name("identity_callback")
@@ -465,6 +488,23 @@ class TappasPipeline:
             if sink1:
                 self._pose_selector.set_property("active-pad", sink1)
             logger.debug("[POSE-GATE] Pose deaktiviert (Valve zu, sink_1 Bypass)")
+
+    def _apply_reid_gate(self, enabled: bool):
+        """ReID NPU-Gating via GStreamer valve + input-selector."""
+        if self._reid_valve is None or self._reid_selector is None:
+            return
+        if enabled:
+            sink0 = self._reid_selector.get_static_pad("sink_0")
+            if sink0:
+                self._reid_selector.set_property("active-pad", sink0)
+            self._reid_valve.set_property("drop", False)
+            logger.debug("[REID-GATE] ReID aktiviert (Valve auf, sink_0)")
+        else:
+            self._reid_valve.set_property("drop", True)
+            sink1 = self._reid_selector.get_static_pad("sink_1")
+            if sink1:
+                self._reid_selector.set_property("active-pad", sink1)
+            logger.debug("[REID-GATE] ReID deaktiviert (Valve zu, sink_1 Bypass)")
 
     def _update_npu_scheduler(self, has_person: bool, has_face: bool):
         """Scheduler-Modus basierend auf aktuellen Detections aktualisieren."""
@@ -1037,6 +1077,33 @@ class TappasPipeline:
             f'queue name=tracker_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
         )
 
+        # --- Stage 3b: Person ReID (Valve-gated, nach Tracker) ---
+        reid_inner = (
+            f'queue name=reid_scale_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'videoscale name=reid_videoscale n-threads=2 qos=false ! '
+            f'queue name=reid_convert_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'video/x-raw, pixel-aspect-ratio=1/1 ! '
+            f'videoconvert name=reid_videoconvert n-threads=2 ! '
+            f'queue name=reid_hailonet_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'hailonet name=reid_hailonet hef-path={REID_HEF} batch-size=1 '
+            f'vdevice-group-id={VDEVICE_GROUP_ID} '
+            f'force-writable=true ! '
+            f'queue name=reid_hailofilter_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'hailofilter name=reid_hailofilter so-path={REID_POSTPROCESS_SO} '
+            f'function-name={REID_POSTPROCESS_FUNC} qos=false ! '
+            f'queue name=reid_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
+        )
+
+        reid_cropper = (
+            f'queue name=reid_crop_input_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'hailocropper name=reid_cropper so-path={REID_CROP_SO} function-name={REID_CROP_FUNC} '
+            f'use-letterbox=true internal-offset=true resize-method=bilinear '
+            f'hailoaggregator name=reid_crop_agg '
+            f'reid_cropper. ! queue name=reid_crop_bypass_q leaky=no max-size-buffers=20 max-size-bytes=0 max-size-time=0 ! reid_crop_agg.sink_0 '
+            f'reid_cropper. ! {reid_inner} ! reid_crop_agg.sink_1 '
+            f'reid_crop_agg. ! queue name=reid_crop_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
+        )
+
         arcface_inner = (
             f'hailofilter so-path={FACE_ALIGN_SO} name=face_align_hailofilter use-gst-buffer=true qos=false ! '
             f'queue name=face_align_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
@@ -1108,7 +1175,8 @@ class TappasPipeline:
         # --- Pipeline-Topologie mit Valve-Gating ---
         # source → yolo → tee(scrfd) → [valve→scrfd | bypass] → sel
         #        → tee(pose) → [valve→pose | bypass] → sel
-        #        → tracker → face_cropper → face_attr → callback → sink
+        #        → tracker → tee(reid) → [valve→reid | bypass] → sel
+        #        → face_cropper → face_attr → callback → sink
         #
         # Bypass-Queues am Ende (GStreamer Namens-Referenz)
         return (
@@ -1122,8 +1190,13 @@ class TappasPipeline:
             f'tee name=pose_tee ! '
             f'valve name=pose_valve drop=true ! {pose_wrapper} ! pose_sel.sink_0 '
             f'input-selector name=pose_sel ! '
-            # Tracker + Face Recognition + Face Attributes
+            # Tracker
             f'{tracker} ! '
+            # ReID Valve-Branch (nach Tracker, braucht Person-Detections)
+            f'tee name=reid_tee ! '
+            f'valve name=reid_valve drop=true ! {reid_cropper} ! reid_sel.sink_0 '
+            f'input-selector name=reid_sel ! '
+            # Face Recognition + Face Attributes
             f'{face_cropper} ! '
             f'{face_attr_cropper} ! '
             f'{callback_and_sink} '
@@ -1131,7 +1204,9 @@ class TappasPipeline:
             f'scrfd_tee. ! queue name=scrfd_bypass_q leaky=downstream max-size-buffers=5 '
             f'max-size-bytes=0 max-size-time=0 ! scrfd_sel.sink_1 '
             f'pose_tee. ! queue name=pose_bypass_q leaky=downstream max-size-buffers=5 '
-            f'max-size-bytes=0 max-size-time=0 ! pose_sel.sink_1'
+            f'max-size-bytes=0 max-size-time=0 ! pose_sel.sink_1 '
+            f'reid_tee. ! queue name=reid_bypass_q leaky=downstream max-size-buffers=5 '
+            f'max-size-bytes=0 max-size-time=0 ! reid_sel.sink_1'
         )
 
     # =====================================================================
@@ -1289,8 +1364,10 @@ class TappasPipeline:
         scrfd_needed = (self._scheduler.is_model_active("scrfd")
                         or self._scheduler.get_scrfd_probe_needed())
         pose_needed = self._scheduler.is_model_active("pose")
+        reid_needed = self._scheduler.is_model_active("reid")
         self._apply_scrfd_gate(enabled=scrfd_needed)
         self._apply_pose_gate(enabled=pose_needed)
+        self._apply_reid_gate(enabled=reid_needed)
 
         # Model-Active-Flags aktualisieren (fuer Panel/Status-JSON)
         self.scrfd_active = scrfd_needed
