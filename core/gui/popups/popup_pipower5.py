@@ -13,12 +13,10 @@ Zeigt alle Anschluesse und Messwerte des PiPower 5 HAT+:
   - Anschluesse:   Schraubklemmen-Uebersicht (statisch)
 
 Daten werden alle 5 Sekunden aktualisiert.
-Pipower5-Bibliothek liegt in eigenem venv — Zugriff via subprocess.
+Liest direkt via SPC (I2C) — kein subprocess mehr noetig.
 """
 
-import json
 import logging
-import subprocess
 import tkinter as tk
 
 from core.gui.panel_styles import (
@@ -30,9 +28,6 @@ from core.gui.panel_styles import (
 
 logger = logging.getLogger("moloch.popup_pipower5")
 
-# PiPower5 venv Python
-_PIPOWER5_PYTHON = "/opt/pipower5/venv/bin/python3"
-
 # Aktualisierungsintervall
 UPDATE_MS = 5000
 
@@ -40,25 +35,32 @@ UPDATE_MS = 5000
 BAR_WIDTH  = 300
 BAR_HEIGHT = 16
 
-# read_all() via separatem Prozess (eigenes venv)
-_READ_CMD = [
-    _PIPOWER5_PYTHON, "-c",
-    "import json; "
-    "from pipower5.pipower5_service import PiPower5; "
-    "p=PiPower5(); "
-    "print(json.dumps(p.read_all()))"
-]
+# Daten via PowerMonitor (I2C direkt, kein subprocess)
+_spc = None
+
+def _get_spc():
+    """SPC-Instanz lazy laden (einmalig)."""
+    global _spc
+    if _spc is not None:
+        return _spc
+    try:
+        import sys
+        sys.path.insert(0, "/opt/pipower5/venv/lib/python3.13/site-packages")
+        from spc.spc import SPC
+        _spc = SPC()
+        return _spc
+    except Exception as e:
+        logger.warning("SPC init fehlgeschlagen: %s", e)
+        return None
 
 
 def _read_pipower5():
     """Liefert dict mit allen PiPower5-Messwerten oder None bei Fehler."""
+    spc = _get_spc()
+    if spc is None:
+        return None
     try:
-        result = subprocess.run(
-            _READ_CMD,
-            capture_output=True, text=True, timeout=4
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return json.loads(result.stdout.strip())
+        return spc.read_all()
     except Exception as e:
         logger.warning("PiPower5 read_all() Fehler: %s", e)
     return None
