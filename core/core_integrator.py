@@ -133,6 +133,11 @@ class CoreIntegrator:
         self._owner_confirmed = False
         self._owner_confirmed_until = 0.0  # monotonic timestamp
 
+        # === Presence/Wohlbefinden — waechst bei dauerhafter Owner-Praesenz ===
+        self._presence = 0.0       # 0.0 = niemand da, 1.0 = Owner seit langem hier
+        self._presence_grow_rate = 0.005   # +0.005/Tick (~0.3/Min bei Owner-Erkennung)
+        self._presence_decay_rate = 0.01   # -0.01/Tick (~0.6/Min ohne Owner)
+
         # === Tension-basierte Zone-Hysterese (Gate0 Phase 5) ===
         self._tension_high_since: Optional[float] = None  # monotonic, wann tension > 0.6
         self._tension_low_since: Optional[float] = None   # monotonic, wann tension < 0.3
@@ -510,6 +515,17 @@ class CoreIntegrator:
                 self._dominance = max(-1.0, self._dominance)
 
             # =============================================================
+            # 2b. PRESENCE — waechst bei Owner, sinkt ohne
+            # =============================================================
+            markus_val = all_inputs.get("markus_recognized", 0.0)
+            if markus_val > 0.1:
+                # Owner erkannt → Presence waechst
+                self._presence = min(1.0, self._presence + self._presence_grow_rate)
+            else:
+                # Kein Owner → Presence sinkt
+                self._presence = max(0.0, self._presence - self._presence_decay_rate)
+
+            # =============================================================
             # 3. Cross-Model Correlation
             # =============================================================
             self._apply_cross_model_patterns(all_inputs)
@@ -637,6 +653,7 @@ class CoreIntegrator:
                 _logger.info(
                     f"[CORE] Heartbeat #{self._tick_count}: "
                     f"T={self._tension:.3f} D={self._dominance:+.3f} "
+                    f"P={self._presence:.2f} "
                     f"zone={self._current_zone} CPU={self._cpu_temp_raw:.0f}°C "
                     f"NPU={self._npu_load:.2f}"
                 )
@@ -755,6 +772,8 @@ class CoreIntegrator:
         if npu > 0.8:
             latency_variation = 1.05  # +5%
 
+        p = self._presence
+
         return {
             # --- Tension-basierte Effekte ---
             "voice_intensity": _clamp(0.3 + t * 0.7),
@@ -765,6 +784,12 @@ class CoreIntegrator:
             # --- Dominance-basierte Effekte ---
             "guardian_influence": guardian_influence,
             "shadow_influence": shadow_influence,
+
+            # --- Presence-basierte Effekte (waechst bei Owner-Praesenz) ---
+            "presence": p,
+            "voice_warmth": _clamp(0.3 + p * 0.7),      # Waermere Stimme bei hoher Presence
+            "patience": _clamp(0.4 + p * 0.6),           # Mehr Geduld
+            "engagement": _clamp(0.2 + p * 0.5),         # Mehr Eigeninitiative
 
             # --- Kombinierte Effekte ---
             "camera_stability": _clamp((1.0 - t * 0.4) * ptz_speed_factor),
@@ -796,6 +821,7 @@ class CoreIntegrator:
             result = {
                 "tension": round(self._tension, 4),
                 "dominance": round(self._dominance, 4),
+                "presence": round(self._presence, 3),
                 "zone": self._current_zone,
                 "time_period": self._get_time_period(),
                 "cpu_temp": round(self._cpu_temp_raw, 1),
