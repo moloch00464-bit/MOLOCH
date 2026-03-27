@@ -148,8 +148,10 @@ class SystemStatusModule:
             row_t, width=100, height=12, bg=BG_INPUT, highlightthickness=0,
         )
         self._tension_canvas.pack(side=tk.LEFT, padx=5)
+        # Mittelmarkierung (0-Punkt)
+        self._tension_canvas.create_line(50, 0, 50, 12, fill=FG_DIM, width=1)
         self._tension_bar = self._tension_canvas.create_rectangle(
-            0, 0, 0, 12, fill=STATUS_GREEN, outline="",
+            50, 0, 50, 12, fill=STATUS_GREEN, outline="",
         )
 
         self._lbl_tension_val = tk.Label(
@@ -293,14 +295,16 @@ class SystemStatusModule:
         """Tension, Zone, Personality, Tageszeit aktualisieren."""
         core = status.get("core", {})
 
-        # Tension (0.0 - 1.0)
+        # Tension (-1.0 bis +1.0): negativ = Wohlbefinden, positiv = Stress
         tension = core.get("tension", 0.0)
         if not isinstance(tension, (int, float)):
             tension = 0.0
-        tension = max(0.0, min(1.0, tension))
+        tension = max(-1.0, min(1.0, tension))
 
-        # Tension-Bar Farbe: gruen < 0.3, gelb < 0.6, orange < 0.8, rot >= 0.8
-        if tension < 0.3:
+        # Farbe: cyan < -0.3, gruen < 0.3, gelb < 0.6, orange < 0.8, rot >= 0.8
+        if tension < -0.3:
+            bar_color = ACCENT_CYAN
+        elif tension < 0.3:
             bar_color = STATUS_GREEN
         elif tension < 0.6:
             bar_color = STATUS_YELLOW
@@ -309,10 +313,18 @@ class SystemStatusModule:
         else:
             bar_color = STATUS_RED
 
-        bar_width = int(tension * 100)
-        self._tension_canvas.coords(self._tension_bar, 0, 0, bar_width, 12)
+        # Bar: Mitte = 0, links = negativ (Wohlbefinden), rechts = positiv (Stress)
+        # Canvas ist 100px breit, Mitte bei 50
+        bar_center = 50
+        if tension >= 0:
+            bar_x1 = bar_center
+            bar_x2 = bar_center + int(tension * 50)
+        else:
+            bar_x1 = bar_center + int(tension * 50)  # links von Mitte
+            bar_x2 = bar_center
+        self._tension_canvas.coords(self._tension_bar, bar_x1, 0, bar_x2, 12)
         self._tension_canvas.itemconfig(self._tension_bar, fill=bar_color)
-        self._lbl_tension_val.config(text=f"{tension:.2f}", fg=bar_color)
+        self._lbl_tension_val.config(text=f"{tension:+.2f}", fg=bar_color)
 
         # Dominance
         dom = core.get("dominance", 0.0)
