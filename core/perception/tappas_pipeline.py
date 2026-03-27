@@ -69,7 +69,7 @@ WHOLE_BUFFER_SO = "/usr/lib/aarch64-linux-gnu/hailo/tappas/post_processes/croppi
 
 # --- Pose Estimation (YOLOv8s Pose) ---
 POSE_HEF = "/mnt/moloch-data/hailo/models/yolov8s_pose_h10.hef"
-POSE_POSTPROCESS_SO = "/usr/lib/aarch64-linux-gnu/hailo/tappas/post_processes/libyolov8pose_post.so"
+POSE_POSTPROCESS_SO = "/usr/local/hailo/resources/so/libyolov8pose_postprocess.so"
 POSE_POSTPROCESS_FUNC = "filter"
 
 # --- Person ReID (RepVGG-A0, 512d Embedding) ---
