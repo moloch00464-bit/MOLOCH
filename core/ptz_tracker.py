@@ -189,20 +189,15 @@ class PTZTracker:
 
         score = self._restless_score
 
-        # Hoher Score (>0.6) → Tension steigt, Shadow-Gewichtung
-        if score > 0.6:
+        # PTZ-Bewegung beim Tracking ist NORMAL, kein Stress.
+        # Nur extreme Hektik (score > 0.8) als leichter Stress
+        if score > 0.8:
             ci.update_inputs("ptz_tracker", {
-                "environmental_stress": min(1.0, score * 0.5),
-            })
-        # Niedriger Score (<0.2) → Beruhigung
-        elif score < 0.2:
-            ci.update_inputs("ptz_tracker", {
-                "environmental_stress": 0.0,
+                "environmental_stress": min(0.3, (score - 0.8) * 1.5),
             })
         else:
-            # Mittlerer Bereich — leichter Stress proportional zum Score
             ci.update_inputs("ptz_tracker", {
-                "environmental_stress": score * 0.3,
+                "environmental_stress": 0.0,
             })
 
 

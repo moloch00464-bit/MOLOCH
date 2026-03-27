@@ -625,9 +625,10 @@ class MolochService:
                         face_detected = getattr(pframe, 'face_detected', False)
 
                         if face_id and face_id != "unknown":
-                            self._core_integrator.feed_event("markus_recognized", 0.1)
+                            # Starker Input: Owner erkannt → Tension sinkt, Guardian steigt
+                            self._core_integrator.feed_event("markus_recognized", 0.5)
                         elif face_detected and (not face_id or face_id == "unknown"):
-                            self._core_integrator.feed_event("unknown_person", 0.1)
+                            self._core_integrator.feed_event("unknown_person", 0.3)
                     except Exception as e:
                         logger.debug(f"[TAPPAS-PERC] CoreIntegrator feed: {e}")
 

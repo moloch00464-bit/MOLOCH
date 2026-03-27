@@ -81,10 +81,12 @@ class TensionIntegrator:
         tension_delta += alertness * ALERTNESS_TENSION_WEIGHT
 
         # Via update_input an CoreIntegrator — positiv = tension steigt
-        if tension_delta > 0:
-            self._core_integrator.update_input("awareness", "conflict_input", abs(tension_delta))
-        else:
-            self._core_integrator.update_input("awareness", "respect_score", abs(tension_delta))
+        # GEDAEMPFT: tension_delta direkt als conflict_input erzeugt Feedback-Loop!
+        # Stattdessen: nur starke Deltas (>0.3) als schwachen Input weitergeben
+        if tension_delta > 0.3:
+            self._core_integrator.update_input("awareness", "conflict_input", min(0.2, tension_delta * 0.3))
+        elif tension_delta < -0.1:
+            self._core_integrator.update_input("awareness", "respect_score", min(0.3, abs(tension_delta)))
 
     def on_activity_changed(self, event: Dict[str, Any]):
         """Event-Handler fuer activity_changed Events.
