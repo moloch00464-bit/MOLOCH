@@ -1434,7 +1434,7 @@ class TappasPipeline:
                         or self._scheduler.get_scrfd_probe_needed())
         # FIXME: Pose/ReID/Hand Valves deaktiviert — cv2::resize Crash in
         # kompilierten SOs beim Valve-Wechsel. Einzeln testen + aktivieren!
-        pose_needed = True    # TEST: permanent aktiv (ohne Valve-Switching)
+        pose_needed = False   # Pose vergroessert BBoxen im Overlay — erstmal aus
         reid_needed = False   # self._scheduler.is_model_active("reid")
         hand_needed = False   # self._scheduler.is_model_active("hand")
         self._apply_scrfd_gate(enabled=scrfd_needed)
