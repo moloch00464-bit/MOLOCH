@@ -325,6 +325,16 @@ class TappasPipeline:
         else:
             logger.warning("[FACE-ATTR] fattr_output_q Element nicht gefunden")
 
+        # Pre-Overlay Probe: Pose-Duplikate entfernen + BBox clampen VOR hailooverlay
+        overlay_q = self._pipeline.get_by_name("overlay_q")
+        if overlay_q:
+            overlay_src = overlay_q.get_static_pad("src")
+            if overlay_src:
+                overlay_src.add_probe(Gst.PadProbeType.BUFFER, self._on_pre_overlay, None)
+                logger.info("[OVERLAY-PROBE] Pad-Probe auf overlay_q src registriert")
+        else:
+            logger.warning("[OVERLAY-PROBE] overlay_q Element nicht gefunden")
+
         # appsink — Frames abholen damit Pipeline nicht blockiert
         appsink = self._pipeline.get_by_name("sink")
         if appsink:
@@ -1322,6 +1332,54 @@ class TappasPipeline:
                 logger.error(f"[FACE-ATTR] Probe-Fehler: {e}")
         return Gst.PadProbeReturn.OK
 
+    def _on_pre_overlay(self, pad, info, user_data):
+        """VOR hailooverlay: Pose-Duplikate entfernen, Landmarks umhaengen, BBox clampen."""
+        buffer = info.get_buffer()
+        if buffer is None:
+            return Gst.PadProbeReturn.OK
+        try:
+            roi = hailo.get_roi_from_buffer(buffer)
+            all_dets = roi.get_objects_typed(hailo.HAILO_DETECTION)
+
+            # YOLO-Persons sammeln (ohne Landmarks)
+            yolo_persons = [d for d in all_dets
+                            if d.get_label() == "person"
+                            and not d.get_objects_typed(hailo.HAILO_LANDMARKS)]
+
+            to_remove = []
+            for det in all_dets:
+                label = det.get_label()
+
+                # Pose-Duplikate: person MIT Landmarks → Landmarks umhaengen, Detection entfernen
+                if label == "person" and det.get_objects_typed(hailo.HAILO_LANDMARKS):
+                    landmarks = det.get_objects_typed(hailo.HAILO_LANDMARKS)
+                    if yolo_persons and landmarks:
+                        for lm in landmarks:
+                            yolo_persons[0].add_object(lm)
+                    to_remove.append(det)
+                    continue
+
+                # BBox-Clamp auf [0,1] fuer hailooverlay
+                bbox = det.get_bbox()
+                x1, y1 = bbox.xmin(), bbox.ymin()
+                w, h = bbox.width(), bbox.height()
+                needs_clamp = (x1 < 0.0 or y1 < 0.0 or x1 + w > 1.0 or y1 + h > 1.0)
+                if needs_clamp:
+                    x1_c = max(0.0, min(1.0, x1))
+                    y1_c = max(0.0, min(1.0, y1))
+                    w_c = max(0.001, min(w, 1.0 - x1_c))
+                    h_c = max(0.001, min(h, 1.0 - y1_c))
+                    det.set_bbox(hailo.HailoBBox(x1_c, y1_c, w_c, h_c))
+
+            for det in to_remove:
+                roi.remove_object(det)
+
+        except Exception as e:
+            self._overlay_err = getattr(self, '_overlay_err', 0) + 1
+            if self._overlay_err % 100 == 1:
+                logger.error(f"[OVERLAY-PROBE] Fehler: {e}")
+        return Gst.PadProbeReturn.OK
+
     def _on_buffer(self, pad, info, user_data):
         """Pad-Probe auf identity element — extrahiert Detections + baut PerceptionFrame."""
         buffer = info.get_buffer()
@@ -1343,6 +1401,10 @@ class TappasPipeline:
             label = det.get_label()
             conf = det.get_confidence()
             bbox = det.get_bbox()
+
+            # Pose-Detection erkennen: person MIT Landmarks → Skip (YOLO hat sie schon)
+            if label == "person" and det.get_objects_typed(hailo.HAILO_LANDMARKS):
+                continue
 
             # YOLO-Klassenfilter: nur erlaubte Klassen durchlassen
             if label != "face" and label not in YOLO_ALLOWED_CLASSES:
@@ -1374,11 +1436,6 @@ class TappasPipeline:
                 entry["track_id"] = track_ids[0].get_id()
 
             if label == "person":
-                # DEBUG: BBox-Werte loggen (alle 100 Frames)
-                self._bbox_debug_count = getattr(self, '_bbox_debug_count', 0) + 1
-                if self._bbox_debug_count % 100 == 1:
-                    logger.info(f"[BBOX-DEBUG] person bbox=({x1:.3f},{y1:.3f},{x2:.3f},{y2:.3f}) "
-                                f"h={y2-y1:.3f} w={x2-x1:.3f} conf={conf:.2f}")
                 persons.append(entry)
             elif label == "face":
                 # ArcFace Embedding extrahieren
@@ -1439,7 +1496,7 @@ class TappasPipeline:
                         or self._scheduler.get_scrfd_probe_needed())
         # FIXME: Pose/ReID/Hand Valves deaktiviert — cv2::resize Crash in
         # kompilierten SOs beim Valve-Wechsel. Einzeln testen + aktivieren!
-        pose_needed = False   # Pose vergroessert BBoxen im Overlay — erstmal aus
+        pose_needed = True    # Pre-Overlay-Probe entfernt Duplikate + clampt BBox
         reid_needed = False   # self._scheduler.is_model_active("reid")
         hand_needed = False   # self._scheduler.is_model_active("hand")
         self._apply_scrfd_gate(enabled=scrfd_needed)
