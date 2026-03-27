@@ -1333,7 +1333,7 @@ class TappasPipeline:
         return Gst.PadProbeReturn.OK
 
     def _on_pre_overlay(self, pad, info, user_data):
-        """VOR hailooverlay: Pose-Duplikate entfernen, Landmarks umhaengen, BBox clampen."""
+        """VOR hailooverlay: Pose-Duplikate entfernen, Landmarks auf YOLO-Person umhaengen."""
         buffer = info.get_buffer()
         if buffer is None:
             return Gst.PadProbeReturn.OK
@@ -1346,30 +1346,15 @@ class TappasPipeline:
                             if d.get_label() == "person"
                             and not d.get_objects_typed(hailo.HAILO_LANDMARKS)]
 
+            # Pose-Duplikate: person MIT Landmarks → Landmarks umhaengen, Detection entfernen
             to_remove = []
             for det in all_dets:
-                label = det.get_label()
-
-                # Pose-Duplikate: person MIT Landmarks → Landmarks umhaengen, Detection entfernen
-                if label == "person" and det.get_objects_typed(hailo.HAILO_LANDMARKS):
+                if det.get_label() == "person" and det.get_objects_typed(hailo.HAILO_LANDMARKS):
                     landmarks = det.get_objects_typed(hailo.HAILO_LANDMARKS)
                     if yolo_persons and landmarks:
                         for lm in landmarks:
                             yolo_persons[0].add_object(lm)
                     to_remove.append(det)
-                    continue
-
-                # BBox-Clamp auf [0,1] fuer hailooverlay
-                bbox = det.get_bbox()
-                x1, y1 = bbox.xmin(), bbox.ymin()
-                w, h = bbox.width(), bbox.height()
-                needs_clamp = (x1 < 0.0 or y1 < 0.0 or x1 + w > 1.0 or y1 + h > 1.0)
-                if needs_clamp:
-                    x1_c = max(0.0, min(1.0, x1))
-                    y1_c = max(0.0, min(1.0, y1))
-                    w_c = max(0.001, min(w, 1.0 - x1_c))
-                    h_c = max(0.001, min(h, 1.0 - y1_c))
-                    det.set_bbox(hailo.HailoBBox(x1_c, y1_c, w_c, h_c))
 
             for det in to_remove:
                 roi.remove_object(det)
