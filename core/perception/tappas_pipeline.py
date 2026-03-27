@@ -1374,6 +1374,11 @@ class TappasPipeline:
                 entry["track_id"] = track_ids[0].get_id()
 
             if label == "person":
+                # DEBUG: BBox-Werte loggen (alle 100 Frames)
+                self._bbox_debug_count = getattr(self, '_bbox_debug_count', 0) + 1
+                if self._bbox_debug_count % 100 == 1:
+                    logger.info(f"[BBOX-DEBUG] person bbox=({x1:.3f},{y1:.3f},{x2:.3f},{y2:.3f}) "
+                                f"h={y2-y1:.3f} w={x2-x1:.3f} conf={conf:.2f}")
                 persons.append(entry)
             elif label == "face":
                 # ArcFace Embedding extrahieren
