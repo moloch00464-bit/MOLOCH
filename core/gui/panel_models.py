@@ -275,16 +275,28 @@ class ModelsModule:
 
     def _update_npu_status_display(self, status):
         """NPU Scheduler Mode + Tracking Source aus Status aktualisieren."""
-        # Aktive Modelle basierend auf Scheduler-Modus
+        # Szenario-Anzeige (Perception Router)
         sched = status.get("npu_sched_mode", "")
-        if sched == "ALL_ACTIVE":
-            self._lbl_npu_models.config(text="YOLO + SCRFD + ArcFace", fg=ACCENT_GREEN)
-        elif sched == "YOLO_SCRFD":
-            self._lbl_npu_models.config(text="YOLO + SCRFD", fg=STATUS_YELLOW)
-        elif sched == "YOLO_ONLY":
-            self._lbl_npu_models.config(text="YOLO only", fg=FG_DIM)
+        _SCENARIO_DISPLAY = {
+            "IDLE":     ("IDLE — YOLO only", FG_DIM),
+            "FERN":     ("FERN — YOLO+ReID+Pose", STATUS_YELLOW),
+            "MITTEL":   ("MITTEL — YOLO+SCRFD+ArcFace+Pose", ACCENT_CYAN),
+            "NAH":      ("NAH — SCRFD+ArcFace+Hand", ACCENT_GREEN),
+            "RUECKEN":  ("RUECKEN — YOLO+ReID+Pose", STATUS_YELLOW),
+            "MULTI":    ("MULTI — Alle aktiv", ACCENT_GREEN),
+            "NACHT":    ("NACHT — Schlafmodus", FG_DIM),
+        }
+        if sched in _SCENARIO_DISPLAY:
+            text, color = _SCENARIO_DISPLAY[sched]
+            self._lbl_npu_models.config(text=text, fg=color)
+        elif sched in ("ALL_ACTIVE", "YOLO_SCRFD", "YOLO_ONLY"):
+            # Legacy-Fallback
+            legacy = {"ALL_ACTIVE": ("YOLO+SCRFD+ArcFace", ACCENT_GREEN),
+                       "YOLO_SCRFD": ("YOLO+SCRFD", STATUS_YELLOW),
+                       "YOLO_ONLY": ("YOLO only", FG_DIM)}
+            text, color = legacy[sched]
+            self._lbl_npu_models.config(text=text, fg=color)
         elif not sched:
-            # Kein TAPPAS oder Status noch nicht da
             active = status.get("active_models", [])
             if active:
                 self._lbl_npu_models.config(text=" + ".join(active), fg=ACCENT_CYAN)

@@ -365,9 +365,12 @@ class TappasPipeline:
             }
 
     def get_npu_sched_mode(self) -> str:
-        """Aktueller NPU Scheduler-Modus: YOLO_ONLY / YOLO_SCRFD / ALL_ACTIVE."""
-        with self._sched_lock:
-            return self._sched_mode
+        """Aktueller NPU Scheduler-Modus (jetzt Szenario-Name)."""
+        return self._scheduler.get_scenario()
+
+    def get_scenario(self) -> str:
+        """Aktuelles Szenario des Perception Routers."""
+        return self._scheduler.get_scenario()
 
     def force_all_active(self, enabled: bool):
         """Scheduler auf ALL_ACTIVE erzwingen (Teach-Modus).
@@ -377,8 +380,10 @@ class TappasPipeline:
         """
         self._sched_force_all = enabled
         if enabled:
-            # Sofort auf ALL_ACTIVE hochschalten
-            self._update_npu_scheduler(has_person=True, has_face=True)
+            # Sofort SCRFD Valve oeffnen
+            self._apply_scrfd_gate(enabled=True)
+            self.scrfd_active = True
+            self.arcface_active = True
             logger.info("[NPU-SCHED] Force ALL_ACTIVE fuer Teach-Modus")
         else:
             logger.info("[NPU-SCHED] Force ALL_ACTIVE aufgehoben")
@@ -387,13 +392,12 @@ class TappasPipeline:
         """GLib-Timeout-Callback: Gate-State nach Pipeline-Start setzen.
 
         Wird 300ms nach set_state(PLAYING) aufgerufen, damit Pads verhandelt sind.
-        Respektiert den aktuellen Scheduler-Modus (z.B. force_all fuer Teach).
+        Start: SCRFD zu (IDLE Szenario), Scheduler bestimmt spaeter.
         """
-        with self._sched_lock:
-            current_mode = self._sched_mode
-        scrfd_needed = (current_mode in (SCHED_YOLO_SCRFD, SCHED_ALL_ACTIVE))
+        scrfd_needed = self._sched_force_all or self._scheduler.is_model_active("scrfd")
         self._apply_scrfd_gate(enabled=scrfd_needed)
-        logger.info(f"[SCRFD-GATE] Initial-State: {current_mode} "
+        scenario = self._scheduler.get_scenario()
+        logger.info(f"[SCRFD-GATE] Initial-State: {scenario} "
                     f"(Valve {'auf' if scrfd_needed else 'zu'})")
         return False  # Nicht wiederholen
 
@@ -1204,28 +1208,39 @@ class TappasPipeline:
                 face_id = f.get("face_id")
                 face_similarity = f.get("face_similarity", 0)
 
-        # --- Perception Router: Szenario berechnen (Phase 1: nur Logging) ---
+        # --- Perception Router: Szenario berechnen + SCRFD Valve steuern ---
         max_person_height = 0.0
         if persons:
             max_person_height = max((p["bbox"][3] - p["bbox"][1]) for p in persons)
-        self._scheduler.tick(
+        scenario = self._scheduler.tick(
             person_count=len(persons),
             face_detected=len(faces) > 0,
             bbox_height_pct=max_person_height,
         )
 
-        # --- NPU Model-Scheduler: Modus aktualisieren + Ergebnisse unterdrücken ---
-        self._update_npu_scheduler(len(persons) > 0, len(faces) > 0)
-        sched_mode = self.get_npu_sched_mode()
-        if sched_mode == SCHED_YOLO_ONLY:
-            # SCRFD/ArcFace Ergebnisse ignorieren (Pipeline laeuft, Daten werden verworfen)
+        # Valve-Steuerung: SCRFD aktiv wenn Szenario es verlangt oder RUECKEN-Probe
+        scrfd_needed = (self._scheduler.is_model_active("scrfd")
+                        or self._scheduler.get_scrfd_probe_needed())
+        self._apply_scrfd_gate(enabled=scrfd_needed)
+
+        # Model-Active-Flags aktualisieren (fuer Panel/Status-JSON)
+        self.scrfd_active = scrfd_needed
+        self.arcface_active = self._scheduler.is_model_active("arcface")
+
+        # Teach-Modus: Scheduler auf ALL_ACTIVE erzwingen
+        if self._sched_force_all:
+            self._apply_scrfd_gate(enabled=True)
+            self.scrfd_active = True
+            self.arcface_active = True
+
+        # Ergebnisse unterdruecken wenn Modelle inaktiv
+        if not self.scrfd_active:
             faces = []
             best_face_conf = 0.0
             best_face_bbox = None
             face_id = None
             face_similarity = 0.0
-        elif sched_mode == SCHED_YOLO_SCRFD:
-            # ArcFace Matching ignorieren
+        elif not self.arcface_active:
             face_id = None
             face_similarity = 0.0
 
@@ -1499,14 +1514,7 @@ class TappasPipeline:
 
         # Perception Router: Szenario + aktive Modelle
         pf.scenario = self._scheduler.get_scenario()
-        # Active Models (noch alter Scheduler — wird in Schritt 4 migriert)
-        sched = self.get_npu_sched_mode()
-        if sched == SCHED_ALL_ACTIVE:
-            pf.active_models = ["yolov8m", "scrfd", "arcface"]
-        elif sched == SCHED_YOLO_SCRFD:
-            pf.active_models = ["yolov8m", "scrfd"]
-        else:
-            pf.active_models = ["yolov8m"]
+        pf.active_models = sorted(self._scheduler.get_active_models())
 
         return pf
 
