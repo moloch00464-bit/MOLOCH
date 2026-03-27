@@ -1085,7 +1085,6 @@ class TappasPipeline:
             f'queue name=pose_hailonet_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
             f'hailonet name=pose_hailonet hef-path={POSE_HEF} batch-size=1 '
             f'vdevice-group-id={VDEVICE_GROUP_ID} '
-            f'nms-score-threshold=0.3 nms-iou-threshold=0.45 '
             f'output-format-type=HAILO_FORMAT_TYPE_FLOAT32 '
             f'force-writable=true ! '
             f'queue name=pose_hailofilter_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
