@@ -911,13 +911,21 @@ class MolochService:
                 continue
 
             try:
-                tracker = self._cam._tracker
-                if not tracker or not self._cam._autonomous_mode:
+                detections = self._inference.get_detections()
+                if not detections:
                     time.sleep(FEED_INTERVAL)
                     continue
 
-                detections = self._inference.get_detections()
-                if not detections:
+                tracker = self._cam._tracker
+                if not tracker or not self._cam._autonomous_mode:
+                    # G1-T01: Person erkannt aber Tracker noch nicht aktiv
+                    # → Automatisch Takeover triggern
+                    has_person = any(d.get("class") in ("person", "face")
+                                    for d in detections)
+                    if has_person and not self._cam._manual_mode:
+                        if not getattr(self._cam, '_transitioning', False):
+                            logger.info("[ACTION-BRIDGE] Person erkannt, Tracker inaktiv → Takeover!")
+                            self._cam.moloch_takeover("Person erkannt (Auto-Bridge)")
                     time.sleep(FEED_INTERVAL)
                     continue
 
