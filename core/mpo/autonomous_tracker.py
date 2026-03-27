@@ -643,6 +643,7 @@ class AutonomousTracker:
                 confidence=self.current_target_confidence,
                 target_id=self.current_target_id,
                 timestamp=time.time(),
+                has_face=(self._current_source == "face"),
                 target_type=self._current_source
             )
             self.last_detection_time = time.time()
