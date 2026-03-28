@@ -1,6 +1,6 @@
 {
-  "pan": 0.0,
-  "tilt": -14.941406,
+  "pan": 50.0,
+  "tilt": -20.0,
   "timeout_seconds": 30,
   "comment": "Home Position - set via Panel"
 }

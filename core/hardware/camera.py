@@ -316,7 +316,7 @@ class SonoffCameraController:
         self._error_smooth_n: int = 3
 
         # Home-Position (wird von Service/GUI gesetzt)
-        self._home_position = {"pan": 0.0, "tilt": 0.0}
+        self._home_position = {"pan": 50.0, "tilt": -20.0}
 
         # Vision integration (from orchestrator)
         self._tracking_mode = TrackingMode.DISABLED
