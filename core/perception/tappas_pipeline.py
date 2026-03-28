@@ -1435,8 +1435,8 @@ class TappasPipeline:
 
                             # BBox aus Landmark-Extremen + Padding
                             pad_x = 0.25  # 25% Padding links/rechts
-                            pad_top = 0.10  # 10% ueber Augen (knapp)
-                            pad_bot = 0.30  # 30% unter Mund (Kinn, etwas tiefer)
+                            pad_top = -0.10  # Oberkante 10% UNTER Augen (BBox tiefer)
+                            pad_bot = 0.50  # 50% unter Mund (deutlich tiefer)
                             lm_w = max(frame_xs) - min(frame_xs)
                             lm_h = max(frame_ys) - min(frame_ys)
 
