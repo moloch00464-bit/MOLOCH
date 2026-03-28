@@ -904,7 +904,7 @@ class MolochService:
 
         Gleiche Logik wie in InferenceEngine._inference_loop():
         - Face hat IMMER Prioritaet (face_fed_to_tracker)
-        - BBoxen sind normalisiert (0-1) → skaliert auf 640x640 Pixel
+        - BBoxen sind normalisiert (0-1) → skaliert auf 1280x720 Pixel
         - Laeuft mit ~15 Hz (alle 66ms) um Tracker nicht zu ueberlasten
 
         WICHTIG: Loop ueberlebt Pipeline-Restart! Wartet wenn Pipeline offline.
