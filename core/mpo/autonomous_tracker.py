@@ -279,14 +279,14 @@ class TrackingConfig:
     # -----------------------------------------------------------------------
     fov_horizontal: float = 110.0
     fov_vertical: float = 65.0
-    pan_gain: float = 0.20          # G1-T05: sanfter (war 0.25), weniger Ueberschwinger
-    tilt_gain: float = 0.15         # G1-T05: sanfter (war 0.20)
-    max_step_pan: float = 8.0       # SMOOTH: 8 Grad (war 4.0) — fluessiger bei grossem Error
-    max_step_tilt: float = 5.0      # SMOOTH: 5 Grad (war 2.5)
-    min_step_deg: float = 0.5       # Residual-Korrektur erlauben (war 2.0 → Person blieb off-center)
-    tracking_speed: float = 0.6     # G1-T05: 60% Speed (war 0.7)
-    move_cooldown_ms: float = 100.0  # SMOOTH: 100ms (war 500ms) — mehr Updates, kleinere Schritte
-    smooth_alpha: float = 0.30      # SMOOTH: EMA alpha 0.30 (war 0.20) — fluessigere Reaktion
+    pan_gain: float = 0.30          # Schnellere Reaktion (war 0.20 → zu traege)
+    tilt_gain: float = 0.22         # Tilt auch reaktiver (war 0.15)
+    max_step_pan: float = 12.0      # Groessere Schritte (war 8.0) — schneller zentrieren
+    max_step_tilt: float = 8.0      # Tilt auch (war 5.0)
+    min_step_deg: float = 0.3       # Feinere Restkorrektur (war 0.5)
+    tracking_speed: float = 0.7     # Schneller (war 0.6)
+    move_cooldown_ms: float = 80.0   # Noch fluessiger (war 100ms)
+    smooth_alpha: float = 0.40      # Schnellere EMA-Reaktion (war 0.30) — weniger Nachlauf
 
     # Kamera Hardware-Limits (SonoffCameraController clampt intern,
     # aber Tracker muss gecachte Position AUCH clampen!)
@@ -366,9 +366,9 @@ class TrackingConfig:
     # coast_resume_px:     COAST verlassen wenn error wieder groesser
     # tilt_boost_threshold_px: Tilt-Verstaerkung ab diesem Pixel-Error
     # tilt_boost_factor:   Multiplikator fuer Tilt-Delta bei grossem Error
-    frozen_threshold_px: float = 30.0      # < 30px -> FROZEN
-    coast_threshold_px: float = 40.0       # COAST nur wenn error_magnitude < 40px (war 50, tilt-only)
-    coast_resume_px: float = 35.0          # COAST aufwachen bei > 35px (war 50 — zu traege)
+    frozen_threshold_px: float = 20.0      # < 20px -> FROZEN (war 30 → zu frueh eingefroren)
+    coast_threshold_px: float = 25.0       # COAST bei < 25px (war 40)
+    coast_resume_px: float = 50.0          # COAST aufwachen bei > 50px (war 35 → Ping-Pong mit frozen)
     tilt_boost_threshold_px: float = 80.0  # Tilt-Boost ab 80px tilt-Error
     tilt_boost_factor: float = 2.0         # Tilt-Delta verdoppeln bei grossem Error
 
@@ -1339,19 +1339,17 @@ class AutonomousTracker:
         center_x_px = self._smooth_x * self.config.frame_width
         center_y_px = self._smooth_y * self.config.frame_height
         frame_center_x = self.config.frame_width / 2
-        # Kopf soll im oberen Drittel des Bildes erscheinen (33% statt 50%)
-        frame_center_y = self.config.frame_height * 0.33
+        # Gesicht naeher an Bildmitte (40% statt 33% — war zu hoch, Person nicht zentriert)
+        frame_center_y = self.config.frame_height * 0.40
 
         error_x = center_x_px - frame_center_x  # Positive = target RIGHT of center
         error_y = center_y_px - frame_center_y  # Positive = target BELOW center
         error_magnitude = math.sqrt(error_x**2 + error_y**2)
 
         # Normalized error - geglaettet
-        # WICHTIG: error_y_norm muss GLEICHE Referenz wie frame_center_y nutzen (0.33)!
-        # Sonst: Kamera auf Person bei y=0.5 zentriert, aber frame_center_y=0.33
-        # → error_y=120px sichtbar, aber error_y_norm=0 → tilt_p=0 → kein Tilt-Befehl!
+        # WICHTIG: error_y_norm muss GLEICHE Referenz wie frame_center_y nutzen (0.40)!
         error_x_norm = self._smooth_x - 0.5
-        error_y_norm = self._smooth_y - 0.33  # BUG-FIX: war 0.5, muss 0.33 sein (Kopf oben)
+        error_y_norm = self._smooth_y - 0.40  # Gesicht zur Bildmitte (war 0.33)
 
         # PTZ Debug: raw + smooth Position + Error bei jedem Cycle
         ptz_debug.debug(
