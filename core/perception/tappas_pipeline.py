@@ -1415,50 +1415,54 @@ class TappasPipeline:
             if label == "face" and conf < self.scrfd_conf_val:
                 continue
 
-            # --- Face-BBox Letterbox-Korrektur (doppelte Korrektur kompensieren) ---
-            # Letterbox betrifft NUR Y-Achse → X und Y getrennt korrigieren
-            if label == "face" and (FACE_BBOX_SHRINK_X < 1.0 or FACE_BBOX_SHRINK_Y < 1.0):
-                sx, sy = FACE_BBOX_SHRINK_X, FACE_BBOX_SHRINK_Y
-                ab = FACE_BBOX_Y_ANCHOR_BOTTOM  # 0=zentriert, 1=Bottom fix
+            # --- Face-BBox aus Landmarks berechnen ---
+            # SCRFD BBox ist durch doppelte Letterbox-Korrektur auf Y zu gross.
+            # Loesung: BBox direkt aus den 5 Landmarks ableiten (Augen, Nase, Mund).
+            if label == "face":
                 old_xmin = bbox.xmin()
                 old_ymin = bbox.ymin()
                 ow, oh = bbox.width(), bbox.height()
-                cx = old_xmin + ow * 0.5
-                nw, nh = ow * sx, oh * sy
-                y_shift = (oh - nh) * (0.5 + 0.5 * ab)
-                new_ymin = old_ymin + y_shift
-                new_bbox = hailo.HailoBBox(cx - nw * 0.5, new_ymin, nw, nh)
-                det.set_bbox(new_bbox)
 
-                # Landmarks mittransformieren (bbox-relativ → Frame → neue bbox-relativ)
                 try:
-                    for lm_obj in det.get_objects_typed(hailo.HAILO_LANDMARKS):
+                    lm_list = det.get_objects_typed(hailo.HAILO_LANDMARKS)
+                    if lm_list:
+                        lm_obj = lm_list[0]
                         pts = lm_obj.get_points()
-                        new_pts = []
-                        # Debug: einmalig Landmark-Werte loggen
-                        if self._frame_count < 10:
-                            pt_strs = [f"({pt.x():.3f},{pt.y():.3f})" for pt in pts]
-                            logger.info(f"[LM-DEBUG] old_bbox=({old_xmin:.3f},{old_ymin:.3f},{ow:.3f},{oh:.3f}) "
-                                       f"new_bbox=({new_bbox.xmin():.3f},{new_bbox.ymin():.3f},{nw:.3f},{nh:.3f}) "
-                                       f"pts_orig={pt_strs}")
-                        for pt in pts:
-                            # Zurueck in Frame-Space
-                            fx = pt.x() * ow + old_xmin
-                            fy = pt.y() * oh + old_ymin
-                            # Relativ zu neuer BBox (clampen auf 0-1)
-                            rx = max(0.0, min(1.0, (fx - new_bbox.xmin()) / nw))
-                            ry = max(0.0, min(1.0, (fy - new_bbox.ymin()) / nh))
-                            new_pts.append(hailo.HailoPoint(rx, ry, pt.confidence()))
-                        if self._frame_count < 10:
-                            new_strs = [f"({p.x():.3f},{p.y():.3f})" for p in new_pts]
-                            logger.info(f"[LM-DEBUG] pts_new={new_strs}")
-                        det.remove_object(lm_obj)
-                        det.add_object(hailo.HailoLandmarks(
-                            lm_obj.get_landmarks_type(), new_pts, lm_obj.get_threshold()))
-                except Exception:
-                    pass  # Landmarks fehlen bei manchen Detections — kein Problem
+                        if len(pts) >= 5:
+                            # Landmarks in Frame-Space umrechnen
+                            frame_xs = [pt.x() * ow + old_xmin for pt in pts]
+                            frame_ys = [pt.y() * oh + old_ymin for pt in pts]
 
-                bbox = new_bbox
+                            # BBox aus Landmark-Extremen + Padding
+                            pad_x = 0.35  # 35% Padding links/rechts
+                            pad_top = 0.70  # 70% ueber Augen (Stirn/Haare)
+                            pad_bot = 0.30  # 30% unter Mund (Kinn)
+                            lm_w = max(frame_xs) - min(frame_xs)
+                            lm_h = max(frame_ys) - min(frame_ys)
+
+                            nx1 = max(0.0, min(frame_xs) - lm_w * pad_x)
+                            ny1 = max(0.0, min(frame_ys) - lm_h * pad_top)
+                            nx2 = min(1.0, max(frame_xs) + lm_w * pad_x)
+                            ny2 = min(1.0, max(frame_ys) + lm_h * pad_bot)
+                            nw = nx2 - nx1
+                            nh = ny2 - ny1
+
+                            if nw > 0.01 and nh > 0.01:
+                                new_bbox = hailo.HailoBBox(nx1, ny1, nw, nh)
+                                det.set_bbox(new_bbox)
+
+                                # Landmarks auf neue BBox umrechnen
+                                new_pts = []
+                                for fx, fy, pt in zip(frame_xs, frame_ys, pts):
+                                    rx = max(0.0, min(1.0, (fx - nx1) / nw))
+                                    ry = max(0.0, min(1.0, (fy - ny1) / nh))
+                                    new_pts.append(hailo.HailoPoint(rx, ry, pt.confidence()))
+                                det.remove_object(lm_obj)
+                                det.add_object(hailo.HailoLandmarks(
+                                    lm_obj.get_landmarks_type(), new_pts, lm_obj.get_threshold()))
+                                bbox = new_bbox
+                except Exception:
+                    pass  # Keine Landmarks → alte BBox behalten
 
             # Normalisierte BBox [0.0-1.0] mit Clamp (Safety-Net gegen Letterbox-Ueberlauf)
             x1 = max(0.0, min(1.0, bbox.xmin()))
