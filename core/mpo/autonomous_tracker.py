@@ -1841,6 +1841,9 @@ class AutonomousTracker:
     _ST_AUTO_ERROR_THRESHOLD = 0.35   # 35% off-center = wirklich weit weg (war 0.25 → zu schnell)
     _ST_AUTO_CYCLES = 20              # 20 Cycles = ~4s (war 10 → griff zu frueh ein)
 
+    # Hysterese: ST erst nach N aufeinanderfolgenden face-losen Frames aktivieren
+    _ST_NO_FACE_THRESHOLD = 8         # 8 Frames ohne Face (~0.4s) bevor ST uebernimmt
+
     def _should_moloch_track(self, detection: DetectionData) -> bool:
         """Entscheidet ob Moloch selbst tracken soll oder Kamera-ST laufen laesst.
 
@@ -1850,17 +1853,22 @@ class AutonomousTracker:
         Kamera-ST ist schneller (Hardware-Sensoren, interner Motor).
         Moloch ist praeziser (BBox-Zentrierung, Face-Tracking).
         """
-        # === NEUE LOGIK: Kein Face → ST soll laufen ===
+        # === NEUE LOGIK: Kein Face → ST soll laufen (mit Hysterese) ===
         if not detection.has_face:
-            # Nur Person/Pose erkannt, kein Gesicht
-            if not self._camera_smart_tracking_on:
-                # ST noch nicht an → einschalten, Kamera-Sensoren uebernehmen
-                logger.info("[HANDOVER] Nur Person, kein Face → ST einschalten (Sensoren schneller)")
-                self._enable_camera_smart_tracking(True)
-            # ST laeuft, Moloch beobachtet nur
+            # Hysterese: erst nach N aufeinanderfolgenden face-losen Frames ST einschalten
+            self._no_face_count = getattr(self, '_no_face_count', 0) + 1
+            if self._no_face_count >= self._ST_NO_FACE_THRESHOLD:
+                if not self._camera_smart_tracking_on:
+                    logger.info(
+                        f"[HANDOVER] {self._no_face_count}x kein Face → ST einschalten"
+                    )
+                    self._enable_camera_smart_tracking(True)
+            # ST laeuft (oder wartet noch), Moloch beobachtet
             return False
 
         # === Ab hier: Face erkannt → Moloch-Praezision gefragt ===
+        # Hysterese-Counter zuruecksetzen
+        self._no_face_count = 0
 
         # ST war nie an → Moloch trackt direkt
         if not self._camera_smart_tracking_on:
