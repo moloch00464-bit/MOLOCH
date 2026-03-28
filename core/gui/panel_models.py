@@ -90,6 +90,7 @@ class ModelsModule:
         ("SCRFD", "scrfd"),
         ("ArcFace", "arcface"),
         ("YOLOv8m", "yolov8m"),
+        ("FaceAttr", "faceattr"),
     ]
 
     # Zusaetzliche Modelle (HEFs vorhanden, togglebar)
@@ -501,7 +502,7 @@ class ModelsModule:
                 # Detail-FPS pro Modell
                 if isinstance(fps_dict, dict):
                     parts = []
-                    for name in ["scrfd", "arcface", "yolov8m"]:
+                    for name in ["scrfd", "arcface", "yolov8m", "faceattr", "pose"]:
                         val = fps_dict.get(name, 0.0)
                         if val and float(val) > 0:
                             parts.append(f"{name}:{float(val):.0f}")
@@ -515,6 +516,7 @@ class ModelsModule:
                 "scrfd": "scrfd_active",
                 "arcface": "arcface_active",
                 "yolov8m": "yolo_active",
+                "faceattr": "faceattr_active",
                 "hand_landmark": "hand_active",
                 "pose": "pose_active",
                 "person_reid": "person_reid_active",
