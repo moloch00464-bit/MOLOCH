@@ -83,7 +83,7 @@ REID_CROP_FUNC = "create_crops"
 # Letterbox betrifft NUR Y-Achse (140px Padding oben/unten bei 16:9→1:1).
 # X bleibt unveraendert, nur Y wird geschrumpft.
 FACE_BBOX_SHRINK_X = 1.0   # X-Achse: keine Korrektur noetig
-FACE_BBOX_SHRINK_Y = 0.80  # Y-Achse: 20% kleiner (Letterbox-Doppelkorrektur)
+FACE_BBOX_SHRINK_Y = 0.65  # Y-Achse: 35% kleiner (Letterbox-Doppelkorrektur)
 
 # --- Hand Landmark (PoC, Full-Frame) ---
 HAND_HEF = "/mnt/moloch-data/hailo/models/hand_landmark_lite.hef"
