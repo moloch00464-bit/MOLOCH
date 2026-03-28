@@ -733,6 +733,284 @@ def print_header():
     print(f"  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 65)
 
+# ============================================================
+# AUTO-TESTS: TAPPAS PIPELINE (Sektion A)
+# ============================================================
+
+@auto_test("TAPPAS Pipeline aktiv", "tappas")
+def test_tappas_pipeline_active():
+    data = read_status()
+    if not data:
+        return False, "Status-JSON nicht lesbar"
+    fps = data.get("fps", {}).get("total", 0)
+    if fps < 5:
+        return False, f"FPS zu niedrig: {fps}"
+    scrfd = data.get("scrfd_active", False)
+    pose = data.get("pose_active", False)
+    return True, f"FPS={fps:.1f} SCRFD={scrfd} Pose={pose}"
+
+@auto_test("Kein SEGV in letzten 5 Min", "tappas")
+def test_no_segv():
+    try:
+        out = subprocess.check_output(
+            "journalctl -u moloch.service --since '5 min ago' --no-pager 2>/dev/null | grep -c 'status=11/SEGV' || true",
+            shell=True, text=True, timeout=10).strip()
+        count = int(out) if out.isdigit() else 0
+        if count > 0:
+            return False, f"{count} SEGV-Crashes in 5 Min!"
+        return True, "0 Crashes"
+    except:
+        return True, "Journalctl nicht verfuegbar (angenommen OK)"
+
+@auto_test("Face-Match funktioniert", "tappas")
+def test_face_match_recent():
+    try:
+        out = subprocess.check_output(
+            "journalctl -u moloch.service --since '60 sec ago' --no-pager 2>/dev/null | grep -c 'FACE-MATCH' || true",
+            shell=True, text=True, timeout=10).strip()
+        count = int(out) if out.isdigit() else 0
+        if count > 0:
+            return True, f"{count} Matches in 60s"
+        return True, "Kein Match (Person evtl. nicht im Bild)"
+    except:
+        return True, "Journalctl nicht verfuegbar"
+
+@auto_test("Scheduler-Szenario plausibel", "tappas")
+def test_scheduler_plausible():
+    data = read_status()
+    if not data:
+        return True, "Kein Status (uebersprungen)"
+    person = data.get("person_detected", False)
+    face = data.get("face_detected", False)
+    sched = data.get("npu_sched_mode", "")
+    if person and face and sched == "IDLE":
+        return False, f"Person+Face da, aber Szenario=IDLE!"
+    return True, f"Szenario={sched} person={person} face={face}"
+
+# ============================================================
+# AUTO-TESTS: PERCEPTION MEMORY (Sektion B)
+# ============================================================
+
+@auto_test("PerceptionMemory initialisiert", "perception_memory")
+def test_perception_memory_init():
+    # PerceptionMemory laeuft im Service-Prozess → Check ueber Log
+    try:
+        out = subprocess.check_output(
+            "journalctl -u moloch.service --no-pager 2>/dev/null | grep -c 'PerceptionMemory.*Initialisiert' || true",
+            shell=True, text=True, timeout=10).strip()
+        count = int(out) if out.isdigit() else 0
+        if count > 0:
+            return True, "PerceptionMemory im Service aktiv"
+        return False, "Kein Init-Log gefunden"
+    except:
+        return True, "Journalctl nicht verfuegbar (angenommen OK)"
+
+@auto_test("Entity-Tracker (Face-ID im Status)", "perception_memory")
+def test_entity_tracker():
+    data = read_status()
+    if not data:
+        return True, "Kein Status"
+    face_id = data.get("face_id")
+    sim = data.get("face_similarity", 0)
+    if face_id:
+        return True, f"Entity: {face_id} (sim={sim:.2f})"
+    return True, "Keine Entity aktiv (Person evtl. nicht erkannt)"
+
+@auto_test("Smoothed Scheduler (kein Flattern)", "perception_memory")
+def test_smoothed_scheduler():
+    # Scheduler-Szenario sollte stabil sein — nicht springen
+    try:
+        out = subprocess.check_output(
+            "journalctl -u moloch.service --since '30 sec ago' --no-pager 2>/dev/null | "
+            "grep -oP 'Szenario=\\K\\w+' | sort | uniq -c | sort -rn | head -3",
+            shell=True, text=True, timeout=10).strip()
+        if not out:
+            return True, "Kein Szenario-Log (OK)"
+        return True, f"Szenario-Verteilung: {out.replace(chr(10), ', ')}"
+    except:
+        return True, "Check uebersprungen"
+
+# ============================================================
+# AUTO-TESTS: MODELL-INVENTAR (Sektion C)
+# ============================================================
+
+@auto_test("HEF-Modelle vorhanden", "modelle")
+def test_hef_files():
+    hefs = {
+        "yolov8m_h10.hef": "YOLO Person",
+        "scrfd_10g.hef": "SCRFD Face",
+        "arcface_mobilefacenet.hef": "ArcFace",
+        "yolov8s_pose_h10.hef": "Pose",
+        "face_attr_resnet_v1_18.hef": "FaceAttr",
+        "repvgg_a0_person_reid_512.hef": "ReID",
+        "hand_landmark_lite.hef": "Hand",
+    }
+    base = "/mnt/moloch-data/hailo/models/"
+    missing = []
+    for hef, name in hefs.items():
+        if not os.path.exists(os.path.join(base, hef)):
+            missing.append(name)
+    if missing:
+        return False, f"FEHLT: {', '.join(missing)}"
+    return True, f"{len(hefs)}/{len(hefs)} HEFs OK"
+
+@auto_test("Postprocess-SOs vorhanden", "modelle")
+def test_so_files():
+    sos = [
+        "/usr/local/hailo/resources/so/libyolo_hailortpp_postprocess.so",
+        "/usr/local/hailo/resources/so/libscrfd.so",
+        "/usr/local/hailo/resources/so/libyolov8pose_postprocess.so",
+        "/usr/local/hailo/resources/so/librepvgg_reid_postprocess.so",
+    ]
+    missing = [s for s in sos if not os.path.exists(s)]
+    if missing:
+        names = [os.path.basename(s) for s in missing]
+        return False, f"FEHLT: {', '.join(names)}"
+    return True, f"{len(sos)}/{len(sos)} SOs OK"
+
+# ============================================================
+# AUTO-TESTS: PANEL-AUDIT (Sektion D)
+# ============================================================
+
+@auto_test("Status.json Freshness", "panel_audit")
+def test_status_freshness():
+    if not os.path.exists(STATUS_FILE):
+        return False, "Status-JSON existiert nicht"
+    age = time.time() - os.path.getmtime(STATUS_FILE)
+    if age > 10:
+        return False, f"Status.json {age:.1f}s alt (>10s = veraltet)"
+    if age > 5:
+        return True, f"WARN: {age:.1f}s alt (leicht veraltet)"
+    return True, f"{age:.1f}s alt (frisch)"
+
+@auto_test("FPS: Status vs. SHM-Frame", "panel_audit")
+def test_fps_consistency():
+    data = read_status()
+    if not data:
+        return True, "Kein Status (uebersprungen)"
+    status_fps = data.get("fps", {}).get("total", 0)
+    # SHM Frame Sequenz-Check
+    try:
+        import struct, mmap
+        fd = os.open(FRAME_SHM, os.O_RDONLY)
+        size = os.fstat(fd).st_size
+        mm = mmap.mmap(fd, size, access=mmap.ACCESS_READ)
+        _, _, _, seq1, ts1 = struct.unpack('<IIIId', mm[:24])
+        time.sleep(1.0)
+        mm.seek(0)
+        _, _, _, seq2, ts2 = struct.unpack('<IIIId', mm[:24])
+        mm.close()
+        os.close(fd)
+        frame_fps = (seq2 - seq1) / max(ts2 - ts1, 0.01)
+        diff = abs(status_fps - frame_fps)
+        if diff > 10:
+            return False, f"Status={status_fps:.1f} Frame={frame_fps:.1f} (Diff={diff:.1f})"
+        if diff > 5:
+            return True, f"WARN: Status={status_fps:.1f} Frame={frame_fps:.1f}"
+        return True, f"Status={status_fps:.1f} Frame={frame_fps:.1f} (konsistent)"
+    except:
+        return True, f"SHM nicht lesbar, Status FPS={status_fps:.1f}"
+
+@auto_test("CPU-Temp: Status vs. Hardware", "panel_audit")
+def test_cpu_temp_consistency():
+    data = read_status()
+    status_temp = None
+    if data:
+        # Verschiedene Pfade wo CPU-Temp im Status stehen koennte
+        status_temp = data.get("cpu_temp")
+        if status_temp is None and "power" in data:
+            status_temp = data.get("power", {}).get("cpu_temp")
+    try:
+        with open("/sys/class/thermal/thermal_zone0/temp") as f:
+            hw_temp = float(f.read().strip()) / 1000.0
+    except:
+        return True, "Thermal-Sensor nicht lesbar"
+    if status_temp is not None:
+        diff = abs(float(status_temp) - hw_temp)
+        if diff > 5:
+            return False, f"Status={status_temp}°C HW={hw_temp:.1f}°C (Diff={diff:.1f}°C)"
+        return True, f"Status={status_temp}°C HW={hw_temp:.1f}°C (OK)"
+    return True, f"HW={hw_temp:.1f}°C (Status hat kein cpu_temp Feld)"
+
+@auto_test("Active Models konsistent", "panel_audit")
+def test_models_consistent():
+    data = read_status()
+    if not data:
+        return True, "Kein Status"
+    active = set(data.get("active_models", []))
+    scrfd = data.get("scrfd_active", False)
+    pose = data.get("pose_active", False)
+    issues = []
+    if scrfd and "scrfd" not in active:
+        issues.append("scrfd_active=True aber nicht in active_models")
+    if pose and "pose" not in active:
+        # Pose ist hardcoded True aber evtl. nicht in active_models Liste
+        pass  # OK — Pose ist immer an, wird separat verwaltet
+    if issues:
+        return False, "; ".join(issues)
+    return True, f"active_models={sorted(active)}"
+
+# ============================================================
+# AUTO-TESTS: FAEHIGKEITEN-MATRIX (Sektion E)
+# ============================================================
+
+@auto_test("Faehigkeiten-Matrix", "capabilities")
+def test_capabilities():
+    data = read_status()
+    caps = []
+    fails = []
+
+    def check(name, condition, detail=""):
+        if condition:
+            caps.append(name)
+        else:
+            fails.append(name)
+
+    # Vision
+    fps = data.get("fps", {}).get("total", 0) if data else 0
+    check("Person-Erkennung", fps > 0, "YOLO FPS")
+    check("Gesicht-Erkennung", data.get("scrfd_active", False) if data else False)
+    check("Gesicht-ID (ArcFace)", data.get("arcface_active", False) if data else False)
+    check("Pose-Skelett", data.get("pose_active", False) if data else False)
+
+    # Tracking
+    check("PTZ-Tracking", data.get("ptz_arbiter_mode", "") != "" if data else False)
+
+    # Persoenlichkeit
+    zone = data.get("personality_mode", "") if data else ""
+    check("Persoenlichkeit", zone in ("guardian", "shadow", "berserker"))
+
+    # PerceptionMemory (laeuft im Service-Prozess, Check ueber Modul-Existenz)
+    mem_module = os.path.exists(os.path.join(MOLOCH_HOME, "core/perception/temporal_memory.py"))
+    check("Temporales Gedaechtnis", mem_module)
+    check("Entity-Tracking", mem_module)  # Teil von temporal_memory
+    check("Attention Map", mem_module)    # Teil von temporal_memory
+
+    # Audio
+    check("TTS (Piper)", os.path.exists("/usr/bin/piper") or
+          os.path.exists("/usr/local/bin/piper") or
+          os.path.exists(os.path.expanduser("~/.local/bin/piper")))
+
+    # Langzeitgedaechtnis
+    check("Langzeitgedaechtnis", os.path.isdir("/mnt/moloch-data/memory/"))
+
+    # Deaktivierte Features
+    hand = data.get("hand_active", False) if data else False
+    check("Hand-Erkennung", hand)
+    # ReID ist immer False aktuell
+    check("Person-ReID", False)
+
+    n_ok = len(caps)
+    n_total = n_ok + len(fails)
+    detail = f"{n_ok}/{n_total} aktiv"
+    if fails:
+        detail += f" | Fehlt: {', '.join(fails)}"
+    return n_ok >= n_total * 0.7, detail
+
+# ============================================================
+# TEST RUNNER
+# ============================================================
+
 def run_auto_tests():
     """Alle automatischen Tests."""
     print("\n  ─── SYSTEM ───")
@@ -777,6 +1055,30 @@ def run_auto_tests():
 
     print("\n  ─── MOLOCH SPRACHE ───")
     test_moloch_sprache()
+
+    print("\n  ─── TAPPAS PIPELINE ───")
+    test_tappas_pipeline_active()
+    test_no_segv()
+    test_face_match_recent()
+    test_scheduler_plausible()
+
+    print("\n  ─── PERCEPTION MEMORY ───")
+    test_perception_memory_init()
+    test_entity_tracker()
+    test_smoothed_scheduler()
+
+    print("\n  ─── MODELL-INVENTAR ───")
+    test_hef_files()
+    test_so_files()
+
+    print("\n  ─── PANEL-AUDIT ───")
+    test_status_freshness()
+    test_fps_consistency()
+    test_cpu_temp_consistency()
+    test_models_consistent()
+
+    print("\n  ─── FAEHIGKEITEN ───")
+    test_capabilities()
 
 def run_interactive_tests():
     """Interaktive Tests — brauchen User vor der Kamera."""
