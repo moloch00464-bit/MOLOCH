@@ -279,14 +279,14 @@ class TrackingConfig:
     # -----------------------------------------------------------------------
     fov_horizontal: float = 110.0
     fov_vertical: float = 65.0
-    pan_gain: float = 0.45          # Aggressiver (war 0.30) — Person schneller zentrieren
-    tilt_gain: float = 0.35         # Tilt auch aggressiver (war 0.22)
-    max_step_pan: float = 18.0      # Grosse Schritte (war 12.0) — bei schnellen Bewegungen mithalten
-    max_step_tilt: float = 12.0     # Tilt auch (war 8.0)
-    min_step_deg: float = 0.3       # Feinere Restkorrektur
-    tracking_speed: float = 0.85    # Schnell (war 0.7) — Motoren voll nutzen
-    move_cooldown_ms: float = 60.0   # 60ms (war 80ms) — maximale Update-Rate
-    smooth_alpha: float = 0.55      # Schnelle EMA (war 0.40) — kaum Nachlauf, direkte Reaktion
+    pan_gain: float = 0.65          # Voll aggressiv — schnell auf Ziel
+    tilt_gain: float = 0.50         # Tilt ebenso
+    max_step_pan: float = 25.0      # Grosse Spruenge erlaubt
+    max_step_tilt: float = 18.0     # Tilt auch
+    min_step_deg: float = 0.2       # Feinste Restkorrektur
+    tracking_speed: float = 1.0     # Motoren Vollgas
+    move_cooldown_ms: float = 50.0   # 50ms — 20 Updates/s maximal
+    smooth_alpha: float = 0.70      # Fast direkte Reaktion, minimaler EMA-Filter
 
     # Kamera Hardware-Limits (SonoffCameraController clampt intern,
     # aber Tracker muss gecachte Position AUCH clampen!)
