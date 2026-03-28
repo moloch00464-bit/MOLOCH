@@ -86,12 +86,6 @@ FACE_BBOX_SHRINK_X = 1.0   # X-Achse: keine Korrektur noetig
 FACE_BBOX_SHRINK_Y = 0.50  # Y-Achse: 50% kleiner (Letterbox-Doppelkorrektur)
 FACE_BBOX_Y_ANCHOR_BOTTOM = 1.0   # Bottom-Kante fix (Kinn bleibt), nur oben kuerzen
 
-# --- Person-BBox Letterbox-Korrektur (gleiche Ursache wie Face) ---
-# YOLO person BBox ist auch Y-gestreckt. Korrektur weniger aggressiv als Face,
-# weil Person-BBox von Natur aus groesser ist.
-PERSON_BBOX_SHRINK_Y = 0.70  # Y-Achse: 30% kleiner
-PERSON_BBOX_Y_ANCHOR_BOTTOM = 0.80  # Meist oben kuerzen, Bottom leicht anpassen
-
 # --- Debug-Overlay: Dicke BBoxen + Landmarks fuer Snapshot-Analyse ---
 # True = dicke Linien im SHM-Frame (fuer Claude-Referenzbilder)
 DEBUG_THICK_OVERLAY = True
@@ -237,6 +231,7 @@ class TappasPipeline:
         self._pose_valve = None
         self._pose_selector = None
         self._pose_gate_state = False  # Aktueller Valve-Zustand
+        self._pose_person_bbox = None  # (x1,y1,x2,y2) von _on_pre_overlay
 
         # --- ReID Valve-Gating ---
         self._reid_valve = None
@@ -1419,6 +1414,19 @@ class TappasPipeline:
                 logger.info(f"[POSE-DBG] dets={n_all} pose={n_pose} lm_pts={n_lm} labels={labels}")
 
             if has_pose:
+                # Pose-Person BBox sicher auslesen fuer Tracking
+                # (_on_pre_overlay laeuft NACH allen SOs → kein Race Condition)
+                try:
+                    pb = pose_dets[0].get_bbox()
+                    self._pose_person_bbox = (
+                        max(0.0, min(1.0, pb.xmin())),
+                        max(0.0, min(1.0, pb.ymin())),
+                        max(0.0, min(1.0, pb.xmax())),
+                        max(0.0, min(1.0, pb.ymax())),
+                    )
+                except Exception:
+                    pass  # BBox-Zugriff fehlgeschlagen → alten Wert behalten
+
                 # YOLO-Person entfernen (Pose-Person mit Landmarks bleibt)
                 to_remove = [d for d in all_dets
                              if d.get_label() == "person"
@@ -1499,24 +1507,16 @@ class TappasPipeline:
                 det.set_bbox(new_bbox)
                 bbox = new_bbox
 
-            # --- Person-BBox Letterbox-Korrektur (gleiche Ursache wie Face) ---
-            if label == "person" and PERSON_BBOX_SHRINK_Y < 1.0:
-                sy = PERSON_BBOX_SHRINK_Y
-                ab = PERSON_BBOX_Y_ANCHOR_BOTTOM
-                ow, oh = bbox.width(), bbox.height()
-                cx = bbox.xmin() + ow * 0.5
-                nh = oh * sy
-                y_shift = (oh - nh) * (0.5 + 0.5 * ab)
-                new_ymin = bbox.ymin() + y_shift
-                new_bbox = hailo.HailoBBox(cx - ow * 0.5, new_ymin, ow, nh)
-                det.set_bbox(new_bbox)
-                bbox = new_bbox
-
-            # Normalisierte BBox [0.0-1.0] mit Clamp (Safety-Net gegen Letterbox-Ueberlauf)
-            x1 = max(0.0, min(1.0, bbox.xmin()))
-            y1 = max(0.0, min(1.0, bbox.ymin()))
-            x2 = max(0.0, min(1.0, bbox.xmax()))
-            y2 = max(0.0, min(1.0, bbox.ymax()))
+            # Person-BBox: Pose-BBox nutzen wenn verfuegbar (korrektere Groesse)
+            # _on_pre_overlay speichert die Pose-Person-BBox in self._pose_person_bbox
+            if label == "person" and self._pose_person_bbox is not None:
+                x1, y1, x2, y2 = self._pose_person_bbox
+            else:
+                # Normalisierte BBox [0.0-1.0] mit Clamp
+                x1 = max(0.0, min(1.0, bbox.xmin()))
+                y1 = max(0.0, min(1.0, bbox.ymin()))
+                x2 = max(0.0, min(1.0, bbox.xmax()))
+                y2 = max(0.0, min(1.0, bbox.ymax()))
 
             entry = {
                 "class": label,
