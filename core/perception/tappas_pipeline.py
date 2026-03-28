@@ -84,6 +84,7 @@ REID_CROP_FUNC = "create_crops"
 # X bleibt unveraendert, nur Y wird geschrumpft.
 FACE_BBOX_SHRINK_X = 1.0   # X-Achse: keine Korrektur noetig
 FACE_BBOX_SHRINK_Y = 0.65  # Y-Achse: 35% kleiner (Letterbox-Doppelkorrektur)
+FACE_BBOX_Y_ANCHOR_BOTTOM = 0.70  # 0.0=zentriert, 1.0=Bottom-Kante fix. 0.7=meist oben kuerzen
 
 # --- Hand Landmark (PoC, Full-Frame) ---
 HAND_HEF = "/mnt/moloch-data/hailo/models/hand_landmark_lite.hef"
@@ -1411,16 +1412,21 @@ class TappasPipeline:
             # Letterbox betrifft NUR Y-Achse → X und Y getrennt korrigieren
             if label == "face" and (FACE_BBOX_SHRINK_X < 1.0 or FACE_BBOX_SHRINK_Y < 1.0):
                 sx, sy = FACE_BBOX_SHRINK_X, FACE_BBOX_SHRINK_Y
+                ab = FACE_BBOX_Y_ANCHOR_BOTTOM  # 0=zentriert, 1=Bottom fix
                 ow, oh = bbox.width(), bbox.height()
                 cx = bbox.xmin() + ow * 0.5
-                cy = bbox.ymin() + oh * 0.5
                 nw, nh = ow * sx, oh * sy
-                new_bbox = hailo.HailoBBox(cx - nw * 0.5, cy - nh * 0.5, nw, nh)
+                # Y: Mischung aus zentriert und Bottom-verankert
+                # zentriert: new_ymin = ymin + (oh-nh)/2
+                # bottom:    new_ymin = ymin + (oh-nh)
+                y_shift = (oh - nh) * (0.5 + 0.5 * ab)
+                new_ymin = bbox.ymin() + y_shift
+                new_bbox = hailo.HailoBBox(cx - nw * 0.5, new_ymin, nw, nh)
                 # SCRFD-Landmarks (5 Keypoints) umrechnen: BBox-relativ → neue BBox
                 for sub in det.get_objects_typed(hailo.HAILO_LANDMARKS):
                     old_pts = sub.get_points()
                     ox = (1.0 - sx) / (2.0 * sx) if sx < 1.0 else 0.0
-                    oy = (1.0 - sy) / (2.0 * sy) if sy < 1.0 else 0.0
+                    oy = (1.0 - sy) * (0.5 + 0.5 * ab) / sy if sy < 1.0 else 0.0
                     inv_sx = 1.0 / sx if sx < 1.0 else 1.0
                     inv_sy = 1.0 / sy if sy < 1.0 else 1.0
                     new_pts = [
