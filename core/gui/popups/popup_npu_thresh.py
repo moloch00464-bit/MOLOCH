@@ -195,29 +195,11 @@ class NpuThreshPopup:
 
     def _build_threshold_section(self):
         """Per-Model Sektionen mit Status-LED, HEF-Info und Threshold-Slidern."""
-        # Aktive Modelle aus settings.json laden
-        active_models = []
-        try:
-            if os.path.exists(SETTINGS_PATH):
-                with open(SETTINGS_PATH, "r") as f:
-                    data = json.load(f)
-                active_models = data.get("active_models", [])
-        except Exception:
-            pass
-
-        # Mapping: model_name → active (aus active_models Liste)
-        active_map = {
-            "SCRFD 10G (Face)": "scrfd" in active_models,
-            "ArcFace MobileFaceNet": "arcface" in active_models,
-            "YOLOv8m Person": "yolov8m" in active_models,
-            "Face Attributes": "scrfd" in active_models,  # laeuft immer mit SCRFD
-            "Pose YOLOv8s": "pose" in active_models,
-            "Person-ReID": "person_reid" in active_models,
-            "Hand Landmark": "hand_landmark" in active_models,
-        }
-
+        # Aktive Modelle: Defaults aus MODEL_DEFS nutzen
+        # (settings.json "active_models" ist zur Laufzeit leer — Service fuellt sie nicht)
+        # Stattdessen: _default_active aus MODEL_DEFS ist die Wahrheit
         for model_name, hef_info, _default_active, sliders in MODEL_DEFS:
-            is_active = active_map.get(model_name, _default_active)
+            is_active = _default_active
 
             # Model-Section als LabelFrame
             section = tk.LabelFrame(
