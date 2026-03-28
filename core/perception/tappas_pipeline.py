@@ -325,7 +325,7 @@ class TappasPipeline:
         else:
             logger.warning("[FACE-ATTR] fattr_output_q Element nicht gefunden")
 
-        # Pre-Overlay Probe: Pose-Duplikate entfernen + BBox clampen VOR hailooverlay
+        # Pre-Overlay Probe: Pose-Duplikate entfernen VOR hailooverlay
         overlay_q = self._pipeline.get_by_name("overlay_q")
         if overlay_q:
             overlay_src = overlay_q.get_static_pad("src")
