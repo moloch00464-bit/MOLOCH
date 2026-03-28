@@ -380,9 +380,20 @@ class CameraManager:
             pass
 
     def toggle_smart_tracking(self):
-        """Gate 0: Smart Tracking bleibt PERMANENT AUS. Toggle deaktiviert."""
-        logger.info("[GATE0] Smart Tracking Toggle ignoriert — permanent AUS")
-        self._update_status("ST permanent AUS (Gate 0)")
+        """Smart Tracking an/aus via eWeLink Cloud-API."""
+        new_state = not self._smart_tracking_on
+        try:
+            if self._cloud and self._cloud.set_smart_tracking(new_state):
+                self._set_smart_tracking_state(new_state)
+                state_str = "AN" if new_state else "AUS"
+                logger.info(f"[ST] Smart Tracking {state_str} via eWeLink")
+                self._update_status(f"Smart Tracking {state_str}")
+            else:
+                logger.warning("[ST] eWeLink Cloud nicht verfuegbar")
+                self._update_status("ST Toggle fehlgeschlagen (Cloud)")
+        except Exception as e:
+            logger.error(f"[ST] Toggle failed: {e}")
+            self._update_status(f"ST Fehler: {e}")
 
     # =================================================================
     # Tentakel-Logik (Smart Tracking <-> MOLOCH Takeover)
