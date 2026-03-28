@@ -115,6 +115,119 @@ class RoomMap:
 
 
 # =========================================================================
+# Gate 8: Raeumliche Intelligenz — Objekt-Persistenz
+# =========================================================================
+
+class SpatialMemory:
+    """Merkt sich welche Objekte in welcher Zone zuletzt gesehen wurden.
+
+    Baut ueber Zeit eine Karte auf: "Stuhl steht bei Schreibtisch",
+    "Flasche steht bei Sofa" — auch wenn Kamera woanders hinschaut.
+    Persistent auf SSD2.
+    """
+
+    OBJECT_TIMEOUT_S = 3600.0  # Objekt nach 1h vergessen
+    PERSIST_PATH = "/mnt/moloch-data/memory/spatial_objects.json"
+
+    def __init__(self):
+        self._zone_objects: Dict[str, Dict[str, Dict]] = {}
+        # zone → {label → {"confidence": float, "last_seen": float, "count": int}}
+        self._load()
+
+    def _load(self):
+        import json
+        try:
+            with open(self.PERSIST_PATH, "r") as f:
+                self._zone_objects = json.load(f)
+            logger.info(f"[SPATIAL] {sum(len(v) for v in self._zone_objects.values())} Objekte geladen")
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            logger.warning(f"[SPATIAL] Laden: {e}")
+
+    def _save(self):
+        import json, os
+        try:
+            os.makedirs(os.path.dirname(self.PERSIST_PATH), exist_ok=True)
+            with open(self.PERSIST_PATH, "w") as f:
+                json.dump(self._zone_objects, f, indent=2)
+        except Exception as e:
+            logger.warning(f"[SPATIAL] Speichern: {e}")
+
+    def update(self, zone: Optional[str], detections: List[Dict]):
+        """Objekte in der aktuellen Zone aktualisieren.
+
+        Args:
+            zone: Aktuelle Raumzone (oder None)
+            detections: Liste von {"class": str, "confidence": float}
+        """
+        if not zone:
+            return
+        now = time.time()
+        if zone not in self._zone_objects:
+            self._zone_objects[zone] = {}
+
+        zone_objs = self._zone_objects[zone]
+        for det in detections:
+            label = det.get("class", "")
+            conf = det.get("confidence", 0)
+            if label in ("person", "face"):
+                continue  # Personen sind nicht ortsgebunden
+            if not label or conf < 0.3:
+                continue
+            if label not in zone_objs:
+                zone_objs[label] = {"confidence": conf, "last_seen": now, "count": 1}
+            else:
+                obj = zone_objs[label]
+                obj["confidence"] = max(obj["confidence"], conf)
+                obj["last_seen"] = now
+                obj["count"] = obj.get("count", 0) + 1
+
+        # Timeout: alte Objekte entfernen
+        for z in list(self._zone_objects.keys()):
+            for label in list(self._zone_objects[z].keys()):
+                if now - self._zone_objects[z][label]["last_seen"] > self.OBJECT_TIMEOUT_S:
+                    del self._zone_objects[z][label]
+
+        # Alle 100 Updates speichern
+        total = sum(o.get("count", 0) for z in self._zone_objects.values() for o in z.values())
+        if total % 100 == 0:
+            self._save()
+
+    def get_zone_objects(self, zone: str) -> Dict[str, Dict]:
+        """Alle bekannten Objekte in einer Zone."""
+        return dict(self._zone_objects.get(zone, {}))
+
+    def get_full_map(self) -> Dict[str, List[str]]:
+        """Komplette Raumkarte: Zone → Objektliste."""
+        return {zone: list(objs.keys())
+                for zone, objs in self._zone_objects.items()
+                if objs}
+
+    def query(self, object_label: str) -> Optional[str]:
+        """Wo wurde ein bestimmtes Objekt zuletzt gesehen?
+
+        Returns: Zone-Name oder None
+        """
+        best_zone = None
+        best_time = 0
+        for zone, objs in self._zone_objects.items():
+            if object_label in objs:
+                seen = objs[object_label]["last_seen"]
+                if seen > best_time:
+                    best_time = seen
+                    best_zone = zone
+        return best_zone
+
+    def get_status(self) -> Dict:
+        return {
+            "zones_mapped": len(self._zone_objects),
+            "total_objects": sum(len(v) for v in self._zone_objects.values()),
+            "map": self.get_full_map(),
+        }
+
+
+# =========================================================================
 # SINGLETON
 # =========================================================================
 
