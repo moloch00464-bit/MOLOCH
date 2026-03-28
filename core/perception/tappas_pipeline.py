@@ -79,6 +79,10 @@ REID_POSTPROCESS_FUNC = "filter"
 REID_CROP_SO = "/usr/lib/aarch64-linux-gnu/hailo/tappas/post_processes/cropping_algorithms/libre_id.so"
 REID_CROP_FUNC = "create_crops"
 
+# --- Face-BBox Letterbox-Korrektur (doppelte Korrektur kompensieren) ---
+# Faktor < 1.0 schrumpft die BBox. Wert anpassen nach visuellem Check.
+FACE_BBOX_SHRINK = 0.80
+
 # --- Hand Landmark (PoC, Full-Frame) ---
 HAND_HEF = "/mnt/moloch-data/hailo/models/hand_landmark_lite.hef"
 
@@ -1400,6 +1404,29 @@ class TappasPipeline:
                 continue
             if label == "face" and conf < self.scrfd_conf_val:
                 continue
+
+            # --- Face-BBox Letterbox-Korrektur (doppelte Korrektur kompensieren) ---
+            if label == "face" and FACE_BBOX_SHRINK < 1.0:
+                s = FACE_BBOX_SHRINK
+                ow, oh = bbox.width(), bbox.height()
+                cx = bbox.xmin() + ow * 0.5
+                cy = bbox.ymin() + oh * 0.5
+                nw, nh = ow * s, oh * s
+                new_bbox = hailo.HailoBBox(cx - nw * 0.5, cy - nh * 0.5, nw, nh)
+                # SCRFD-Landmarks (5 Keypoints) umrechnen: BBox-relativ → neue BBox
+                for sub in det.get_objects_typed(hailo.HAILO_LANDMARKS):
+                    old_pts = sub.get_points()
+                    offset = (1.0 - s) / (2.0 * s)
+                    inv_s = 1.0 / s
+                    new_pts = [
+                        hailo.HailoPoint(p.x() * inv_s - offset,
+                                         p.y() * inv_s - offset,
+                                         p.confidence())
+                        for p in old_pts
+                    ]
+                    sub.set_points(new_pts)
+                det.set_bbox(new_bbox)
+                bbox = new_bbox
 
             # Normalisierte BBox [0.0-1.0] mit Clamp (Safety-Net gegen Letterbox-Ueberlauf)
             x1 = max(0.0, min(1.0, bbox.xmin()))
