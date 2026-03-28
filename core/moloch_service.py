@@ -62,6 +62,9 @@ from core.autonomy.decision_engine import get_decision_engine
 from core.autonomy.atmosphere_controller import get_atmosphere_controller
 from core.autonomy.homeostasis import get_homeostasis
 from core.autonomy.night_cycle import get_night_cycle
+from core.autonomy.local_llm_bridge import get_llm_bridge
+from core.autonomy.preference_learner import get_preference_learner
+from core.hardware.tentacle_bridge import get_tentacle_bridge
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger("MolochService")
@@ -278,7 +281,8 @@ class MolochService:
 
     def _sync_flags_from_npu(self):
         """Delegiert an InferenceEngine.sync_flags_from_npu()."""
-        self._inference.sync_flags_from_npu()
+        if self._inference is not None:
+            self._inference.sync_flags_from_npu()
 
     def toggle_model(self, model_key, enabled):
         """Thin Wrapper -> ModelOrchestrator.toggle_model()."""
@@ -1157,6 +1161,18 @@ class MolochService:
         except Exception as e:
             logger.warning(f"[INIT] Autonomy Module nicht verfuegbar: {e}")
 
+        # 12. Gate 7-10: LLM Bridge + Tentacle Bridge + Preference Learner
+        self._llm_bridge = None
+        self._tentacle_bridge = None
+        self._preference_learner = None
+        try:
+            self._llm_bridge = get_llm_bridge()
+            self._tentacle_bridge = get_tentacle_bridge()
+            self._preference_learner = get_preference_learner()
+            logger.info("[INIT] Gate 7-10 Module bereit (LLM/Tentacle/Preferences)")
+        except Exception as e:
+            logger.warning(f"[INIT] Gate 7-10 Module teilweise nicht verfuegbar: {e}")
+
         # RGB-LED (ESP32 WS2812) starten
         try:
             from core.moloch_event_bus import get_event_bus
@@ -1289,6 +1305,16 @@ class MolochService:
                     bus.subscribe("activity_changed", self._tension_integrator.on_activity_changed)
                     bus.subscribe("motion_state_changed", self._tension_integrator.on_motion_state_changed)
 
+                # Gate 10: PreferenceLearner Kontext-Update bei Activity-Wechsel
+                if self._preference_learner:
+                    def _on_activity_for_prefs(event):
+                        try:
+                            activity = event.get("payload", {}).get("activity", "alone")
+                            self._preference_learner.set_context(activity=activity)
+                        except Exception:
+                            pass
+                    bus.subscribe("activity_changed", _on_activity_for_prefs)
+
                 # Music Mood fuer MoodEngine cachen
                 def _on_mood_for_personality(event):
                     self._last_mood_music_mood = event.get("payload", {}).get("mood")
@@ -1371,6 +1397,16 @@ class MolochService:
                             except Exception:
                                 pass
                     bus.subscribe("atmosphere_changed", _on_atmosphere_changed)
+
+                    # Gate 9: Tentacle Bridge — Atmosphere an externe Geraete weiterleiten
+                    if self._tentacle_bridge:
+                        def _on_atmosphere_tentacle(event):
+                            try:
+                                atm = event.get("payload", {}).get("atmosphere", "")
+                                self._tentacle_bridge.set_atmosphere(atm)
+                            except Exception:
+                                pass
+                        bus.subscribe("atmosphere_changed", _on_atmosphere_tentacle)
 
                 logger.info("[START] Atmosphere Controller Events registriert")
             except Exception as e:

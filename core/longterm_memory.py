@@ -294,6 +294,10 @@ class MolochMemory:
             }
             self._today_messages.append(msg)
 
+            # RAM-Schutz: Max 500 Messages pro Tag im RAM (Disk hat alles)
+            if len(self._today_messages) > 500:
+                self._today_messages = self._today_messages[-500:]
+
             # SOFORT auf Disk — kein Buffering
             path = self._conv_path(self._today_date)
             _safe_write_json(path, self._today_messages)
