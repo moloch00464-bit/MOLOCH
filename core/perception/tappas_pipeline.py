@@ -325,7 +325,7 @@ class TappasPipeline:
         else:
             logger.warning("[FACE-ATTR] fattr_output_q Element nicht gefunden")
 
-        # Pre-Overlay Probe: Pose-Duplikate entfernen VOR hailooverlay
+        # Pre-Overlay Probe: Pose-Duplikate entfernen + BBox clampen VOR hailooverlay
         overlay_q = self._pipeline.get_by_name("overlay_q")
         if overlay_q:
             overlay_src = overlay_q.get_static_pad("src")
@@ -1333,11 +1333,7 @@ class TappasPipeline:
         return Gst.PadProbeReturn.OK
 
     def _on_pre_overlay(self, pad, info, user_data):
-        """VOR hailooverlay: Pose-Duplikate entfernen, Landmarks auf YOLO-Person umhaengen.
-
-        ACHTUNG: Minimaler Code! get_bbox() in Pad-Probes kann Segfault ausloesen.
-        BBox-Overflow-Filterung passiert sicher in _on_buffer (Python-Seite).
-        """
+        """VOR hailooverlay: Pose-Duplikate entfernen, Landmarks auf YOLO-Person umhaengen."""
         buffer = info.get_buffer()
         if buffer is None:
             return Gst.PadProbeReturn.OK
@@ -1391,12 +1387,9 @@ class TappasPipeline:
             conf = det.get_confidence()
             bbox = det.get_bbox()
 
-            # Pose-Artefakte filtern: person MIT Landmarks ODER BBox-Overflow (>5% ueber Frame)
-            if label == "person":
-                if det.get_objects_typed(hailo.HAILO_LANDMARKS):
-                    continue
-                if bbox.ymin() < -0.05 or bbox.ymax() > 1.05:
-                    continue
+            # Pose-Detection erkennen: person MIT Landmarks → Skip (YOLO hat sie schon)
+            if label == "person" and det.get_objects_typed(hailo.HAILO_LANDMARKS):
+                continue
 
             # YOLO-Klassenfilter: nur erlaubte Klassen durchlassen
             if label != "face" and label not in YOLO_ALLOWED_CLASSES:
@@ -1413,7 +1406,6 @@ class TappasPipeline:
             y1 = max(0.0, min(1.0, bbox.ymin()))
             x2 = max(0.0, min(1.0, bbox.xmax()))
             y2 = max(0.0, min(1.0, bbox.ymax()))
-
 
             entry = {
                 "class": label,
