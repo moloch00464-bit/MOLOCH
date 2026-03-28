@@ -86,6 +86,12 @@ FACE_BBOX_SHRINK_X = 1.0   # X-Achse: keine Korrektur noetig
 FACE_BBOX_SHRINK_Y = 0.50  # Y-Achse: 50% kleiner (Letterbox-Doppelkorrektur)
 FACE_BBOX_Y_ANCHOR_BOTTOM = 1.0   # Bottom-Kante fix (Kinn bleibt), nur oben kuerzen
 
+# --- Person-BBox Letterbox-Korrektur (gleiche Ursache wie Face) ---
+# YOLO person BBox ist auch Y-gestreckt. Korrektur weniger aggressiv als Face,
+# weil Person-BBox von Natur aus groesser ist.
+PERSON_BBOX_SHRINK_Y = 0.70  # Y-Achse: 30% kleiner
+PERSON_BBOX_Y_ANCHOR_BOTTOM = 0.80  # Meist oben kuerzen, Bottom leicht anpassen
+
 # --- Debug-Overlay: Dicke BBoxen + Landmarks fuer Snapshot-Analyse ---
 # True = dicke Linien im SHM-Frame (fuer Claude-Referenzbilder)
 DEBUG_THICK_OVERLAY = True
@@ -1490,6 +1496,19 @@ class TappasPipeline:
                         for p in old_pts
                     ]
                     sub.set_points(new_pts)
+                det.set_bbox(new_bbox)
+                bbox = new_bbox
+
+            # --- Person-BBox Letterbox-Korrektur (gleiche Ursache wie Face) ---
+            if label == "person" and PERSON_BBOX_SHRINK_Y < 1.0:
+                sy = PERSON_BBOX_SHRINK_Y
+                ab = PERSON_BBOX_Y_ANCHOR_BOTTOM
+                ow, oh = bbox.width(), bbox.height()
+                cx = bbox.xmin() + ow * 0.5
+                nh = oh * sy
+                y_shift = (oh - nh) * (0.5 + 0.5 * ab)
+                new_ymin = bbox.ymin() + y_shift
+                new_bbox = hailo.HailoBBox(cx - ow * 0.5, new_ymin, ow, nh)
                 det.set_bbox(new_bbox)
                 bbox = new_bbox
 
