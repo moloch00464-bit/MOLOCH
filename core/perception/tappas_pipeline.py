@@ -85,7 +85,7 @@ REID_CROP_FUNC = "create_crops"
 # X bleibt unveraendert, nur Y wird geschrumpft.
 FACE_BBOX_SHRINK_X = 1.0   # X-Achse: keine Korrektur noetig
 FACE_BBOX_SHRINK_Y = 0.50  # Y-Achse: 50% kleiner (Letterbox-Doppelkorrektur)
-FACE_BBOX_Y_ANCHOR_BOTTOM = 1.0   # Bottom-Kante fix (Kinn bleibt), nur oben kuerzen
+FACE_BBOX_Y_ANCHOR_BOTTOM = 0.0   # Zentriert schrumpfen (Augen+Mund bleiben in BBox)
 
 # --- Debug-Overlay: Dicke BBoxen + Landmarks fuer Snapshot-Analyse ---
 # True = dicke Linien im SHM-Frame (fuer Claude-Referenzbilder)
@@ -1435,6 +1435,12 @@ class TappasPipeline:
                     for lm_obj in det.get_objects_typed(hailo.HAILO_LANDMARKS):
                         pts = lm_obj.get_points()
                         new_pts = []
+                        # Debug: einmalig Landmark-Werte loggen
+                        if self._frame_count < 10:
+                            pt_strs = [f"({pt.x():.3f},{pt.y():.3f})" for pt in pts]
+                            logger.info(f"[LM-DEBUG] old_bbox=({old_xmin:.3f},{old_ymin:.3f},{ow:.3f},{oh:.3f}) "
+                                       f"new_bbox=({new_bbox.xmin():.3f},{new_bbox.ymin():.3f},{nw:.3f},{nh:.3f}) "
+                                       f"pts_orig={pt_strs}")
                         for pt in pts:
                             # Zurueck in Frame-Space
                             fx = pt.x() * ow + old_xmin
@@ -1443,6 +1449,9 @@ class TappasPipeline:
                             rx = max(0.0, min(1.0, (fx - new_bbox.xmin()) / nw))
                             ry = max(0.0, min(1.0, (fy - new_bbox.ymin()) / nh))
                             new_pts.append(hailo.HailoPoint(rx, ry, pt.confidence()))
+                        if self._frame_count < 10:
+                            new_strs = [f"({p.x():.3f},{p.y():.3f})" for p in new_pts]
+                            logger.info(f"[LM-DEBUG] pts_new={new_strs}")
                         det.remove_object(lm_obj)
                         det.add_object(hailo.HailoLandmarks(
                             lm_obj.get_landmarks_type(), new_pts, lm_obj.get_threshold()))
