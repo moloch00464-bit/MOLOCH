@@ -1,0 +1,54 @@
+{
+  "_meta": {
+    "source": "ChatGPT Idee, adaptiert fuer Hailo-10H Hardware",
+    "date": "2026-03-28",
+    "gate": "5.1 Vision — nach Gate 1 Stabilisierung",
+    "note": "NPU-RAM ist NICHT frei adressierbar. Embeddings leben in CPU-RAM/SSD."
+  },
+  "module": "moloch_npu_memory_system",
+  "goal": "Transform NPU RAM from passive inference buffer into active temporal perception memory",
+  "core_concept": {
+    "description": "Embeddings und temporaler State werden persistent gehalten (CPU-RAM + SSD), NPU liefert nur die Inference. Kein Re-Compute wenn Entity bereits bekannt.",
+    "loop": [
+      "capture_input",
+      "compute_embeddings_on_npu",
+      "store_in_temporal_memory_cpu_ram",
+      "update_entity_state",
+      "update_attention_map",
+      "influence_next_inference_via_scheduler"
+    ]
+  },
+  "memory_architecture": {
+    "temporal_buffer": {
+      "type": "ring_buffer",
+      "location": "cpu_ram",
+      "duration_seconds": 10,
+      "stored_data": ["vision_embeddings", "audio_embeddings", "bounding_boxes", "timestamps"]
+    },
+    "entity_memory": {
+      "description": "Tracks persistent entities such as persons",
+      "location": "cpu_ram + /mnt/moloch-data/memory/",
+      "fields": ["entity_id", "embedding", "last_seen", "motion_level", "gaze_direction", "stability_score"],
+      "matching": { "method": "cosine_similarity", "threshold": 0.8 }
+    },
+    "attention_map": {
+      "type": "spatial_grid",
+      "location": "cpu_ram",
+      "grid_size": [8, 8],
+      "cell_fields": ["activity_level", "motion_intensity", "novelty_score", "last_update"]
+    }
+  },
+  "bereits_implementiert": [
+    "ArcFace Entity Memory (_face_db + _match_face)",
+    "Cosine Similarity Matching",
+    "Tension System (Guardian/Shadow/Berserker)",
+    "ModelScheduler 7 Szenarien",
+    "Langzeitgedaechtnis auf SSD2",
+    "PerceptionFrame als temporaler State"
+  ],
+  "blocked_by": [
+    "Pose-Modell liefert 0 Landmarks (SO-Problem)",
+    "ReID/Hand Valves deaktiviert (cv2::resize Crash)",
+    "Scheduler-Flattern"
+  ]
+}

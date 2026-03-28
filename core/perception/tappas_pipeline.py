@@ -336,6 +336,16 @@ class TappasPipeline:
         else:
             logger.warning("[FACE-ATTR] fattr_output_q Element nicht gefunden")
 
+        # DEBUG: Pose-Output Probe — direkt nach hailofilter, VOR Aggregator
+        pose_out_q = self._pipeline.get_by_name("pose_output_q")
+        if pose_out_q:
+            pose_src = pose_out_q.get_static_pad("src")
+            if pose_src:
+                pose_src.add_probe(Gst.PadProbeType.BUFFER, self._on_pose_debug, None)
+                logger.info("[POSE-PROBE] Debug-Probe auf pose_output_q src registriert")
+        else:
+            logger.warning("[POSE-PROBE] pose_output_q NICHT gefunden — Pose-Pipeline fehlt?")
+
         # Pre-Overlay Probe: Pose-Duplikate entfernen + BBox clampen VOR hailooverlay
         overlay_q = self._pipeline.get_by_name("overlay_q")
         if overlay_q:
@@ -1341,6 +1351,32 @@ class TappasPipeline:
             self._fattr_err_count = getattr(self, '_fattr_err_count', 0) + 1
             if self._fattr_err_count % 100 == 1:
                 logger.error(f"[FACE-ATTR] Probe-Fehler: {e}")
+        return Gst.PadProbeReturn.OK
+
+    def _on_pose_debug(self, pad, info, user_data):
+        """DEBUG: Pose-Output direkt nach hailofilter pruefen."""
+        buffer = info.get_buffer()
+        if buffer is None:
+            return Gst.PadProbeReturn.OK
+        try:
+            roi = hailo.get_roi_from_buffer(buffer)
+            tensors = roi.get_tensors()
+            dets = roi.get_objects_typed(hailo.HAILO_DETECTION)
+            lm_dets = [d for d in dets if d.get_objects_typed(hailo.HAILO_LANDMARKS)]
+            self._pose_probe_cnt = getattr(self, '_pose_probe_cnt', 0) + 1
+            if self._pose_probe_cnt % 100 == 1:
+                labels = [d.get_label() for d in dets]
+                n_lm = 0
+                if lm_dets:
+                    lms = lm_dets[0].get_objects_typed(hailo.HAILO_LANDMARKS)
+                    if lms:
+                        n_lm = len(lms[0].get_points())
+                logger.info(f"[POSE-PROBE] tensors={len(tensors)} dets={len(dets)} "
+                            f"with_lm={len(lm_dets)} lm_pts={n_lm} labels={labels}")
+        except Exception as e:
+            self._pose_probe_err = getattr(self, '_pose_probe_err', 0) + 1
+            if self._pose_probe_err % 100 == 1:
+                logger.error(f"[POSE-PROBE] Fehler: {e}")
         return Gst.PadProbeReturn.OK
 
     def _on_pre_overlay(self, pad, info, user_data):
