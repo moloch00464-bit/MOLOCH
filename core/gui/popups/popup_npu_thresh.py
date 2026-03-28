@@ -75,8 +75,8 @@ MODEL_DEFS = [
     ("Person-ReID", "repvgg_a0_person_reid_512.hef (5.1 MB)", True, [
         # Kein eigener Threshold — Embedding-Matching intern
     ]),
-    # --- Optionale Modelle (Valve-gated) ---
-    ("Hand Landmark", "hand_landmark_lite.hef (5.3 MB)", False, [
+    # --- Weitere Modelle (permanent aktiv, kein Valve-Wechsel) ---
+    ("Hand Landmark", "hand_landmark_lite.hef (5.3 MB)", True, [
         ("Confidence", "thresholds", "hand_conf",
          0.1, 0.9, 0.65, 0.05, "", "Hand/Gesten Detection Confidence"),
     ]),

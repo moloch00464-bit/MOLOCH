@@ -1564,8 +1564,10 @@ class TappasPipeline:
         scrfd_needed = (self._scheduler.is_model_active("scrfd")
                         or self._scheduler.get_scrfd_probe_needed())
         pose_needed = True    # Pre-Overlay-Probe entfernt Duplikate + clampt BBox
-        reid_needed = self._scheduler.is_model_active("reid")
-        hand_needed = self._scheduler.is_model_active("hand")
+        # ReID/Hand: PERMANENT AN (kein Valve-Wechsel → kein cv2::resize Crash)
+        # NPU RAM: <1% genutzt, alle Modelle passen locker gleichzeitig
+        reid_needed = True
+        hand_needed = True
         self._apply_scrfd_gate(enabled=scrfd_needed)
         self._apply_pose_gate(enabled=pose_needed)
         self._apply_reid_gate(enabled=reid_needed)
