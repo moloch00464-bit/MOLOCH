@@ -1333,7 +1333,11 @@ class TappasPipeline:
         return Gst.PadProbeReturn.OK
 
     def _on_pre_overlay(self, pad, info, user_data):
-        """VOR hailooverlay: Pose-Duplikate entfernen, Landmarks auf YOLO-Person umhaengen."""
+        """VOR hailooverlay: Pose-Duplikate entfernen, Landmarks auf YOLO-Person umhaengen.
+
+        ACHTUNG: Minimaler Code! get_bbox() in Pad-Probes kann Segfault ausloesen.
+        BBox-Overflow-Filterung passiert sicher in _on_buffer (Python-Seite).
+        """
         buffer = info.get_buffer()
         if buffer is None:
             return Gst.PadProbeReturn.OK
@@ -1387,9 +1391,12 @@ class TappasPipeline:
             conf = det.get_confidence()
             bbox = det.get_bbox()
 
-            # Pose-Detection erkennen: person MIT Landmarks → Skip (YOLO hat sie schon)
-            if label == "person" and det.get_objects_typed(hailo.HAILO_LANDMARKS):
-                continue
+            # Pose-Artefakte filtern: person MIT Landmarks ODER BBox-Overflow (>5% ueber Frame)
+            if label == "person":
+                if det.get_objects_typed(hailo.HAILO_LANDMARKS):
+                    continue
+                if bbox.ymin() < -0.05 or bbox.ymax() > 1.05:
+                    continue
 
             # YOLO-Klassenfilter: nur erlaubte Klassen durchlassen
             if label != "face" and label not in YOLO_ALLOWED_CLASSES:
@@ -1407,15 +1414,6 @@ class TappasPipeline:
             x2 = max(0.0, min(1.0, bbox.xmax()))
             y2 = max(0.0, min(1.0, bbox.ymax()))
 
-            # DEBUG: BBox-Werte loggen (30 Frames, dann automatisch aus)
-            _bbox_dbg = getattr(self, '_bbox_dbg_count', 0)
-            if _bbox_dbg < 30:
-                raw_w = bbox.width()
-                raw_h = bbox.height()
-                logger.warning(f"[BBOX-DBG] {label} raw=({bbox.xmin():.4f},{bbox.ymin():.4f},{bbox.xmax():.4f},{bbox.ymax():.4f}) "
-                               f"w={raw_w:.4f} h={raw_h:.4f} clamped=({x1:.4f},{y1:.4f},{x2:.4f},{y2:.4f}) "
-                               f"px=({x1*1280:.0f},{y1*720:.0f},{x2*1280:.0f},{y2*720:.0f}) conf={conf:.3f}")
-                self._bbox_dbg_count = _bbox_dbg + 1
 
             entry = {
                 "class": label,
