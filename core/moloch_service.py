@@ -1781,6 +1781,7 @@ class MolochService:
                 "yolo_active": getattr(_inf, 'yolo_active', True),
                 "hand_active": getattr(_inf, 'hand_active', False),
                 "pose_active": getattr(_inf, 'pose_active', False),
+                "person_reid_active": getattr(_inf, 'reid_active', False),
                 "npu_paused": self._orchestrator._npu_paused,
                 "active_models": (
                     # TAPPAS: Scheduler-basiert aus pframe, nicht aus _active_ctx
