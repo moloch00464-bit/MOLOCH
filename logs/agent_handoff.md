@@ -1,81 +1,95 @@
 # M.O.L.O.C.H. Übergabeprotokoll
-**Datum:** 2026-03-28, 13:10 CET
-**Von:** Claude Opus 4.6 Session (Face-BBox + Pose + PerceptionMemory + Gate 6 + Audit v3)
-**Service-Status:** LAEUFT (20 FPS, stabil, 39/39 Audit PASS)
+**Datum:** 2026-03-28, 14:30 CET
+**Von:** Claude Sonnet 4.6 — MCP Server + GitHub + Panel-Analyse Session
+**Service-Status:** LAEUFT (20 FPS, 39/39 Audit PASS)
 **USE_TAPPAS:** 1 (aktiv)
+**GitHub:** Verbunden (moloch00464-bit/MOLOCH), sauber gepusht
 
 ---
 
-## Aktueller Code-Stand
-- **Branch**: main, Commit `f24285a`
-- **tappas_pipeline.py**: STABIL — 0 Crashes, Face+Pose+Scheduler aktiv
-- **temporal_memory.py**: NEU — PerceptionMemory + RoutineTracker (Gate 6)
-- **moloch_audit.py**: v3.0 — 39 Tests (5 neue Sektionen)
-- **Backup SSD2**: `/mnt/moloch-data/backups/moloch_20260328_084744`
+## NEU SEIT LETZTER SESSION
 
-## KRITISCH — SEGV Regel (BEIDE Probes betroffen!)
-- `bbox.ymin()` auf Pose-Detections → SEGV nach ~50s
-- Gilt fuer `_on_buffer` UND `_on_pre_overlay`!
-- NIEMALS `bbox.*()` auf Detections mit HAILO_LANDMARKS
-- `get_label()`, `get_confidence()`, `get_objects_typed()` sind SICHER
+### 1. MOLOCH MCP Server
+- Datei: mcp/moloch_mcp_server.py
+- Config: .mcp.json im Projektverzeichnis
+- 8 Tools: moloch_status, moloch_logs, moloch_snapshot, moloch_service, moloch_audit, moloch_read, moloch_git_log, moloch_dmesg
+- Aktivierung: Beim naechsten Session-Start fragt Claude Code nach Bestaetigung
+- MCP Package: mcp==1.26.0 system-wide installiert
 
-## Erledigt — Diese Session
+### 2. Claude Code Skills
+- /moloch-status  -> Live-Status kompakt
+- /moloch-snapshot -> Kamera-Frame holen + analysieren
+- /moloch-audit   -> 39-Test Audit starten
 
-### 1. Face-BBox Letterbox-Fix
-- `FACE_BBOX_SHRINK_X=1.0, SHRINK_Y=0.50, ANCHOR_BOTTOM=1.0`
-- SCRFD-Landmarks werden NICHT umgerechnet
+### 3. GitHub
+- gh CLI verbunden als moloch00464-bit
+- Repo: github.com/moloch00464-bit/MOLOCH
+- api_keys.json aus GESAMTER Git-History entfernt (git-filter-repo)
+- Stand 2026-03-28 gepusht
 
-### 2. Pose-Modell aktiviert
-- Root Cause: `output-format-type=HAILO_FORMAT_TYPE_FLOAT32` entfernt
-- Doppelte Dequantisierung → 0 Detections → jetzt 17 Keypoints korrekt
+---
 
-### 3. Pose-Landmarks korrekt
-- YOLO-Person entfernen, Pose-Person behalten (Landmarks BBox-relativ)
+## KRITISCH: SEGV Regel (IMMER GUELTIG!)
+- bbox.ymin()/xmin() auf Pose-Detections -> SEGV nach ~50s
+- Gilt fuer _on_buffer UND _on_pre_overlay
+- NIEMALS bbox.*() auf Detections mit HAILO_LANDMARKS
+- Sicher: get_label(), get_confidence(), get_objects_typed()
 
-### 4. SEGV durch Pose-BBox Zugriff gefixt
-- Auch _on_pre_overlay ist NICHT sicher fuer bbox-Methoden auf Pose
+---
 
-### 5. PerceptionMemory System (Gate 5.1 / ChatGPT Vision)
-- EntityTracker: Familiarity/Stability/Motion
-- AttentionMap: 8x8 Spatial Grid
-- SmoothedState: Scheduler-Glaettung (kein Flattern)
-- Alles in `core/perception/temporal_memory.py`
+## AUFGABEN NAECHSTE SESSION
 
-### 6. Gate 6: RoutineTracker
-- Lernt Tageszeit-Muster (Anwesenheit, Bewegung, Person)
-- Anomalie-Erkennung (ab 3 Tagen Daten)
-- Persistent: `/mnt/moloch-data/memory/routines.json`
+### PRIO 1: panel_models.py aufraumen
+Problem: Gruen = TAPPAS (immer aktiv), Weiss = togglebar
+FEHLT: face_attr laeuft in Pipeline aber nicht im Panel!
 
-### 7. Audit v3.0
-- 5 neue Sektionen: TAPPAS, PerceptionMemory, Modelle, Panel, Faehigkeiten
-- 39/39 PASS
+Fix in core/gui/panel_models.py:
+1. ("FaceAttr", "faceattr") zu TAPPAS_MODELS hinzufuegen
+2. FPS-Detail: auch pose FPS anzeigen
+3. status_key_map: "faceattr": "faceattr_active" ergaenzen
+4. EXTRA_MODELS: Hand LM ausblenden wenn deaktiviert
 
-### 8. Gate 6-10 Roadmap
-- Gate 6: Temporale Intelligenz (RoutineTracker IMPLEMENTIERT)
-- Gate 7: Lokales LLM (hailo-ollama, Nacht-Reflexion)
-- Gate 8: Raeumliche Intelligenz (Segmentierung, 3D-Raumkarte)
-- Gate 9: Tentakel-Netzwerk (WLED, MQTT, HA)
-- Gate 10: Emergente Autonomie (Selbst-Lernen)
-- Gespeichert: `docs/GATE_6_10_ROADMAP.md`
+### PRIO 2: Tracking-Glaettung (Kamera ruckelt)
+Datei: core/hardware/camera.py ~Zeile 721
+- TRACKING_GAIN_PAN: 0.7 -> 0.4
+- MAX_STEP_PAN: 30 -> 15
+- Dead-Zone: erst bewegen wenn Abweichung > 3%
+- Smooth: Durchschnitt letzte 3 BBox-Positionen
+ACHTUNG: pan_delta = -error_x (MINUS korrekt, nicht aendern!)
 
-## Offene Punkte
-1. Person-BBox zu gross (YOLO) — Pose-BBox SEGV-unsicher, Y-Shrink als Alternative
-2. Pose-Landmarks Skalierung bei Aufstehen/Entfernen
-3. Hand/ReID Valves deaktiviert (cv2::resize Crash)
-4. NPU Load meldet 0.0 an CoreIntegrator
-5. Tracking-Suchgeschwindigkeit zu langsam
-6. Gate 7-10 implementieren
+### PRIO 3: Neue Modelle aktivieren (NPU RAM: <1% genutzt!)
+- face_attr: Laeuft schon, nur Panel-Fix (PRIO 1)
+- Person-ReID (repvgg_a0_person_reid_512.hef): Valve pruefen
+  Test: journalctl -u moloch | grep -i "reid\|cv2\|crash"
+  Falls kein Crash -> Valve in tappas_pipeline.py aktivieren
+- Segmentierung (yolov5n_seg_h10.hef): TAPPAS Pipeline erweitern
 
-## Gate-Status Komplett
-| Gate | Status | Module |
-|------|--------|--------|
-| 0 | ✅ PASS | Systemschliessung |
-| 0.5 | ✅ PASS | TAPPAS Pipeline |
-| 1 | ✅ AKTIV | Action Bridge + Event Bus |
-| 2 | ✅ AKTIV | Memory (5 Module) |
-| 3 | ✅ AKTIV | Awareness (4 Module) |
-| 4 | ✅ AKTIV | Personality (4 Module) |
-| 5 | ✅ AKTIV | Autonomy (4 Module) |
-| 5.1 | ✅ NEU | PerceptionMemory |
-| 6 | ✅ NEU | RoutineTracker |
-| 7-10 | 📋 GEPLANT | Roadmap geschrieben |
+### PRIO 4: Stabilitaets-Waechter
+CronCreate: Alle 5 Min frame_age pruefen, bei >120s Restart
+
+---
+
+## SYSTEM-ZUSTAND
+FPS:            20.1 (scrfd/arcface/yolov8m je 20.1)
+NPU RAM:        ~55MB / 8192MB (<1%)
+Aktive Modelle: arcface, faceattr, hand, scrfd
+Person:         erkannt (face_id: markus, Szenario: NAH)
+Power:          93% Akku, Netzteil, 10.2W
+GitHub:         sauber gepusht 03-28
+Audit:          39/39 PASS
+
+## BEKANNTE BUGS (CLAUDE.md)
+1. Hot-Plug: Stecker raus -> nur Reboot
+2. ArcFace Threshold 0.45 zu niedrig
+3. Suchrichtung asymmetrisch
+4. Tracking Gains zu hoch -> Ueberschwinger (PRIO 2)
+5. Tension-Popup Kontrast schlecht
+
+## GEAENDERTE DATEIEN DIESE SESSION
+- mcp/moloch_mcp_server.py (NEU)
+- .mcp.json (NEU)
+- config/perception_weights.json
+- config/system_capabilities.json
+- .claude/skills/moloch-audit.md (NEU)
+- .claude/skills/moloch-snapshot.md (NEU)
+- .claude/skills/moloch-status.md (NEU)
