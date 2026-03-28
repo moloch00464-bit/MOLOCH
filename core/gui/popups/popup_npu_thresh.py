@@ -72,13 +72,14 @@ MODEL_DEFS = [
         ("Confidence", "thresholds", "pose_conf",
          0.1, 0.9, 0.6, 0.05, "", "Pose/Keypoint Detection Confidence"),
     ]),
-    ("Person-ReID", "repvgg_a0_person_reid_512.hef (5.1 MB)", True, [
-        # Kein eigener Threshold — Embedding-Matching intern
+    ("Person-ReID", "repvgg_a0_person_reid_512.hef (5.1 MB)", False, [
+        # INAKTIV: Valve-Oeffnung crasht (cv2::resize Bug in kompiliertem SO)
+        # HEF geladen im NPU-RAM, aber Valve geschlossen
     ]),
-    # --- Weitere Modelle (permanent aktiv, kein Valve-Wechsel) ---
-    ("Hand Landmark", "hand_landmark_lite.hef (5.3 MB)", True, [
+    ("Hand Landmark", "hand_landmark_lite.hef (5.3 MB)", False, [
         ("Confidence", "thresholds", "hand_conf",
          0.1, 0.9, 0.65, 0.05, "", "Hand/Gesten Detection Confidence"),
+        # INAKTIV: Valve-Oeffnung crasht (cv2::resize Bug in kompiliertem SO)
     ]),
 ]
 
