@@ -56,7 +56,7 @@ FACE_ATTR_HEF = "/mnt/moloch-data/hailo/models/face_attr_resnet_v1_18.hef"
 YOLO_POSTPROCESS_SO = "/usr/local/hailo/resources/so/libyolo_hailortpp_postprocess.so"
 YOLO_POSTPROCESS_FUNC = "filter_letterbox"
 SCRFD_POSTPROCESS_SO = "/usr/local/hailo/resources/so/libscrfd.so"
-SCRFD_POSTPROCESS_FUNC = "scrfd_10g"  # NICHT _letterbox: hailocropper internal-offset=true korrigiert bereits
+SCRFD_POSTPROCESS_FUNC = "scrfd_10g_letterbox"
 SCRFD_CONFIG_JSON = "/usr/local/hailo/resources/json/scrfd.json"
 ARCFACE_POSTPROCESS_SO = "/usr/local/hailo/resources/so/libface_recognition_post.so"
 ARCFACE_POSTPROCESS_FUNC = "filter"
