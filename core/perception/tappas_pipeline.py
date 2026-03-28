@@ -1441,20 +1441,9 @@ class TappasPipeline:
                 y_shift = (oh - nh) * (0.5 + 0.5 * ab)
                 new_ymin = bbox.ymin() + y_shift
                 new_bbox = hailo.HailoBBox(cx - nw * 0.5, new_ymin, nw, nh)
-                # SCRFD-Landmarks (5 Keypoints) umrechnen: BBox-relativ → neue BBox
-                for sub in det.get_objects_typed(hailo.HAILO_LANDMARKS):
-                    old_pts = sub.get_points()
-                    ox = (1.0 - sx) / (2.0 * sx) if sx < 1.0 else 0.0
-                    oy = (1.0 - sy) * (0.5 + 0.5 * ab) / sy if sy < 1.0 else 0.0
-                    inv_sx = 1.0 / sx if sx < 1.0 else 1.0
-                    inv_sy = 1.0 / sy if sy < 1.0 else 1.0
-                    new_pts = [
-                        hailo.HailoPoint(p.x() * inv_sx - ox,
-                                         p.y() * inv_sy - oy,
-                                         p.confidence())
-                        for p in old_pts
-                    ]
-                    sub.set_points(new_pts)
+                # SCRFD-Landmarks NICHT umrechnen — bei aggressivem Shrink
+                # landen obere Punkte (Augen) ausserhalb der BBox.
+                # Overlay zeichnet sie leicht komprimiert, aber erkennbar.
                 det.set_bbox(new_bbox)
                 bbox = new_bbox
 
