@@ -1434,9 +1434,11 @@ class TappasPipeline:
                             frame_ys = [pt.y() * oh + old_ymin for pt in pts]
 
                             # BBox aus Landmark-Extremen + Padding
-                            pad_x = 0.25  # 25% Padding links/rechts
-                            pad_top = -0.10  # Oberkante 10% UNTER Augen (BBox tiefer)
-                            pad_bot = 0.50  # 50% unter Mund (deutlich tiefer)
+                            # Landmarks: Augen (oben), Nase (mitte), Mund (unten)
+                            # lm_h = Abstand Augen→Mund. pad_top/bot relativ zu lm_h.
+                            pad_x   = 0.25  # 25% lm_w links/rechts
+                            pad_top = 0.50  # 50% lm_h UEBER Augen → Stirn einschliessen
+                            pad_bot = 0.30  # 30% lm_h UNTER Mund → Kinn einschliessen
                             lm_w = max(frame_xs) - min(frame_xs)
                             lm_h = max(frame_ys) - min(frame_ys)
 
