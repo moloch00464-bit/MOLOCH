@@ -668,18 +668,21 @@ class ModelOrchestrator:
 
         active_map = {"scrfd": "scrfd_active", "arcface": "arcface_active",
                       "yolov8m": "yolo_active", "hand_landmark": "hand_active",
-                      "pose": "pose_active"}
+                      "pose": "pose_active", "person_reid": "person_reid_active"}
         if model_key not in active_map:
+            logger.warning(f"[TOGGLE] Unbekannter model_key: {model_key}")
             return
 
+        # Panel nutzt "person_reid", Scheduler kennt "reid"
+        sched_key = "reid" if model_key == "person_reid" else model_key
         current = set(self._active_ctx.keys())
         if enabled:
-            wanted = current | {model_key}
+            wanted = current | {sched_key}
             if "arcface" in wanted and "scrfd" not in wanted:
                 wanted.add("scrfd")
         else:
-            wanted = current - {model_key}
-            if model_key == "scrfd":
+            wanted = current - {sched_key}
+            if sched_key == "scrfd":
                 wanted.discard("arcface")
 
         if wanted:
