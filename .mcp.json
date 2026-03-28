@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "moloch": {
+      "command": "python3",
+      "args": ["/home/molochzuhause/moloch/mcp/moloch_mcp_server.py"],
+      "env": {
+        "PYTHONPATH": "/home/molochzuhause/moloch"
+      }
+    }
+  }
+}
