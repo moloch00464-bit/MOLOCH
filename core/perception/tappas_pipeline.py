@@ -42,6 +42,7 @@ import hailo
 
 from core.perception.perception_frame import PerceptionFrame, estimate_distance
 from core.perception.model_scheduler import ModelScheduler
+from core.perception.temporal_memory import get_perception_memory
 from core.moloch_event_bus import get_event_bus, PRIO_PERCEPTION
 
 logger = logging.getLogger("TappasPipeline")
@@ -1499,14 +1500,35 @@ class TappasPipeline:
                 face_id = f.get("face_id")
                 face_similarity = f.get("face_similarity", 0)
 
-        # --- Perception Router: Szenario berechnen + SCRFD Valve steuern ---
+        # --- PerceptionMemory: Temporale Wahrnehmung aktualisieren ---
         max_person_height = 0.0
         if persons:
             max_person_height = max((p["bbox"][3] - p["bbox"][1]) for p in persons)
-        scenario = self._scheduler.tick(
+
+        best_embedding = None
+        for f in faces:
+            if f.get("embedding") is not None:
+                best_embedding = f["embedding"]
+                break
+
+        perception_mem = get_perception_memory()
+        perception_mem.tick(
+            detections=detections,
+            face_id=face_id,
+            face_similarity=face_similarity,
+            face_embedding=best_embedding,
+            face_bbox=best_face_bbox,
             person_count=len(persons),
             face_detected=len(faces) > 0,
             bbox_height_pct=max_person_height,
+        )
+
+        # --- Perception Router: Geglaettete Werte fuer Scheduler ---
+        smoothed = perception_mem.get_smoothed_scheduler_input()
+        scenario = self._scheduler.tick(
+            person_count=smoothed["person_count"],
+            face_detected=smoothed["face_detected"],
+            bbox_height_pct=smoothed["bbox_height_pct"],
         )
 
         # Valve-Steuerung: Modelle ein/aus basierend auf Szenario
