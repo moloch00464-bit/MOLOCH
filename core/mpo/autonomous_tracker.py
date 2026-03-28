@@ -279,14 +279,14 @@ class TrackingConfig:
     # -----------------------------------------------------------------------
     fov_horizontal: float = 110.0
     fov_vertical: float = 65.0
-    pan_gain: float = 0.30          # Schnellere Reaktion (war 0.20 → zu traege)
-    tilt_gain: float = 0.22         # Tilt auch reaktiver (war 0.15)
-    max_step_pan: float = 12.0      # Groessere Schritte (war 8.0) — schneller zentrieren
-    max_step_tilt: float = 8.0      # Tilt auch (war 5.0)
-    min_step_deg: float = 0.3       # Feinere Restkorrektur (war 0.5)
-    tracking_speed: float = 0.7     # Schneller (war 0.6)
-    move_cooldown_ms: float = 80.0   # Noch fluessiger (war 100ms)
-    smooth_alpha: float = 0.40      # Schnellere EMA-Reaktion (war 0.30) — weniger Nachlauf
+    pan_gain: float = 0.45          # Aggressiver (war 0.30) — Person schneller zentrieren
+    tilt_gain: float = 0.35         # Tilt auch aggressiver (war 0.22)
+    max_step_pan: float = 18.0      # Grosse Schritte (war 12.0) — bei schnellen Bewegungen mithalten
+    max_step_tilt: float = 12.0     # Tilt auch (war 8.0)
+    min_step_deg: float = 0.3       # Feinere Restkorrektur
+    tracking_speed: float = 0.85    # Schnell (war 0.7) — Motoren voll nutzen
+    move_cooldown_ms: float = 60.0   # 60ms (war 80ms) — maximale Update-Rate
+    smooth_alpha: float = 0.55      # Schnelle EMA (war 0.40) — kaum Nachlauf, direkte Reaktion
 
     # Kamera Hardware-Limits (SonoffCameraController clampt intern,
     # aber Tracker muss gecachte Position AUCH clampen!)
@@ -1838,8 +1838,8 @@ class AutonomousTracker:
     _ST_MIN_TIME = 1.5           # Absolute Mindestzeit (Sicherheit)
 
     # Auto-ST-Aktivierung: Wenn MOLOCH-Tracking BBox nicht zentriert bekommt
-    _ST_AUTO_ERROR_THRESHOLD = 0.25   # 25% off-center = MOLOCH schafft es nicht
-    _ST_AUTO_CYCLES = 10              # N Cycles hintereinander = ST einschalten
+    _ST_AUTO_ERROR_THRESHOLD = 0.35   # 35% off-center = wirklich weit weg (war 0.25 → zu schnell)
+    _ST_AUTO_CYCLES = 20              # 20 Cycles = ~4s (war 10 → griff zu frueh ein)
 
     def _should_moloch_track(self, detection: DetectionData) -> bool:
         """Entscheidet ob Moloch selbst tracken soll oder Kamera-ST laufen laesst.
