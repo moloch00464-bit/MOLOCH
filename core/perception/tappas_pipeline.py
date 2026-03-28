@@ -1563,11 +1563,9 @@ class TappasPipeline:
         # Valve-Steuerung: Modelle ein/aus basierend auf Szenario
         scrfd_needed = (self._scheduler.is_model_active("scrfd")
                         or self._scheduler.get_scrfd_probe_needed())
-        # FIXME: Pose/ReID/Hand Valves deaktiviert — cv2::resize Crash in
-        # kompilierten SOs beim Valve-Wechsel. Einzeln testen + aktivieren!
         pose_needed = True    # Pre-Overlay-Probe entfernt Duplikate + clampt BBox
-        reid_needed = False   # self._scheduler.is_model_active("reid")
-        hand_needed = False   # self._scheduler.is_model_active("hand")
+        reid_needed = self._scheduler.is_model_active("reid")
+        hand_needed = self._scheduler.is_model_active("hand")
         self._apply_scrfd_gate(enabled=scrfd_needed)
         self._apply_pose_gate(enabled=pose_needed)
         self._apply_reid_gate(enabled=reid_needed)
@@ -1577,6 +1575,7 @@ class TappasPipeline:
         self.scrfd_active = scrfd_needed
         self.arcface_active = self._scheduler.is_model_active("arcface")
         self.pose_active = pose_needed
+        self.reid_active = reid_needed
         self.hand_active = hand_needed
 
         # Teach-Modus: Scheduler auf ALL_ACTIVE erzwingen
