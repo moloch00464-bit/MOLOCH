@@ -1214,6 +1214,20 @@ class AutonomousTracker:
             moloch_should_track = self._should_moloch_track(detection)
             if moloch_should_track:
                 self._do_tracking(detection)
+
+                # Auto-ST: Wenn MOLOCH die BBox nicht zentriert kriegt → ST einschalten
+                off_center = max(abs(detection.center_x - 0.5), abs(detection.center_y - 0.5))
+                if off_center > self._ST_AUTO_ERROR_THRESHOLD and not self._camera_smart_tracking_on:
+                    self._st_auto_fail_count = getattr(self, '_st_auto_fail_count', 0) + 1
+                    if self._st_auto_fail_count >= self._ST_AUTO_CYCLES:
+                        logger.info(f"[AUTO-ST] BBox {self._st_auto_fail_count}x off-center "
+                                   f"({off_center:.2f} > {self._ST_AUTO_ERROR_THRESHOLD}) "
+                                   f"→ Kamera-ST einschalten (Sensoren schneller)")
+                        self._enable_camera_smart_tracking(True)
+                        self._st_auto_fail_count = 0
+                else:
+                    # BBox zentriert oder ST schon an → Counter reset
+                    self._st_auto_fail_count = 0
             else:
                 # Kamera-ST laeuft gut, Moloch beobachtet nur
                 if not self._camera_smart_tracking_on:
@@ -1824,6 +1838,10 @@ class AutonomousTracker:
     _ST_SETTLE_THRESHOLD = 2.0   # Grad — weniger Bewegung = Kamera hat sich beruhigt
     _ST_SETTLE_FRAMES = 3        # N aufeinanderfolgende stabile Reads = "settled"
     _ST_MIN_TIME = 1.5           # Absolute Mindestzeit (Sicherheit)
+
+    # Auto-ST-Aktivierung: Wenn MOLOCH-Tracking BBox nicht zentriert bekommt
+    _ST_AUTO_ERROR_THRESHOLD = 0.25   # 25% off-center = MOLOCH schafft es nicht
+    _ST_AUTO_CYCLES = 10              # N Cycles hintereinander = ST einschalten
 
     def _should_moloch_track(self, detection: DetectionData) -> bool:
         """Entscheidet ob Moloch selbst tracken soll oder Kamera-ST laufen laesst.
