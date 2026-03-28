@@ -236,10 +236,10 @@ class SonoffCameraController:
 
     # Tracking parameters
     DEADZONE = 0.05
-    TRACKING_GAIN_PAN = 0.7
-    TRACKING_GAIN_TILT = 0.5
-    MAX_STEP_PAN = 30.0
-    MAX_STEP_TILT = 20.0
+    TRACKING_GAIN_PAN = 0.4
+    TRACKING_GAIN_TILT = 0.3
+    MAX_STEP_PAN = 15.0
+    MAX_STEP_TILT = 12.0
     TARGET_LOST_TIMEOUT = 10.0
     FOV_HORIZONTAL = 110.0
     FOV_VERTICAL = 65.0
@@ -310,6 +310,10 @@ class SonoffCameraController:
         self.last_detection_time: float = 0
         self.last_move_time: float = 0
         self.patrol_index: int = 0
+
+        # BBox-Smoothing: letzte 3 Error-Werte mitteln
+        self._error_history: list = []
+        self._error_smooth_n: int = 3
 
         # Home-Position (wird von Service/GUI gesetzt)
         self._home_position = {"pan": 0.0, "tilt": 0.0}
@@ -718,8 +722,15 @@ class SonoffCameraController:
         self.last_detection = detection
         self.last_detection_time = now
 
-        error_x = 0.5 - detection.center_x
-        error_y = detection.center_y - 0.5
+        raw_ex = 0.5 - detection.center_x
+        raw_ey = detection.center_y - 0.5
+
+        # BBox-Smoothing: Durchschnitt der letzten N Frames
+        self._error_history.append((raw_ex, raw_ey))
+        if len(self._error_history) > self._error_smooth_n:
+            self._error_history = self._error_history[-self._error_smooth_n:]
+        error_x = sum(e[0] for e in self._error_history) / len(self._error_history)
+        error_y = sum(e[1] for e in self._error_history) / len(self._error_history)
 
         if abs(error_x) < self.DEADZONE and abs(error_y) < self.DEADZONE:
             self._set_tracking_state(TrackingState.LOCKED)
