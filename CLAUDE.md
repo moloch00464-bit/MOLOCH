@@ -78,10 +78,7 @@ yolov8s_pose_h10.hef      14 MB   Pose/Keypoints (640x640)
 ## BEKANNTE OFFENE BUGS
 
 1. Kamera Hot-Plug: Stecker raus/rein killt System, nur Reboot hilft. Kein RTSP-Reconnect.
-2. ArcFace Threshold zu niedrig (0.45): Erkennt alles als Markus. Muss nach TAPPAS-Enrollment auf 0.60+ hoch.
-3. Suchrichtung asymmetrisch: Nach rechts verschwinden → sucht rechts. Nach links verschwinden → sucht NICHT links.
-4. Tracking Gains zu hoch: TRACKING_GAIN_PAN=0.7, MAX_STEP_PAN=30 → Überschwinger.
-5. Panel Tension-Popup: Schlechter Kontrast, nicht lesbar.
+2. ReID + Hand Valve-Crash: cv2::resize Assertion im SO bei Valve-Öffnung — reid_needed=False, hand_needed=False als Workaround.
 
 ---
 
@@ -120,23 +117,10 @@ Lies ~/moloch/CLAUDE.md und ~/moloch/agents/AGENT_[DOMAIN].md.
 
 ---
 
-## GATE 1 TASKS (11 Stück)
+## GATE 1 — ABGESCHLOSSEN (2026-03-28)
 
-| ID | Task | Priorität | Status |
-|----|------|-----------|--------|
-| G1-T01 | Action Bridge FSM | CRITICAL | OPEN |
-| G1-T02 | Person-Detection triggert Tracking | HIGH | OPEN |
-| G1-T03 | Auto-Resume aus Manuell + Spruch | HIGH | OPEN |
-| G1-T04 | Suchrichtung Fix (links = links) | HIGH | OPEN |
-| G1-T05 | Gain-Tuning (Überschwinger weg) | MEDIUM | OPEN |
-| G1-T06 | Park-Position = Tür | MEDIUM | OPEN |
-| G1-T07 | Silence-Level Sensor | MEDIUM | OPEN |
-| G1-T08 | Auto-Enrollment via Chat | MEDIUM | OPEN |
-| G1-T09 | NPU-Dashboard im Panel | MEDIUM | OPEN |
-| G1-T10 | Tension-Popup Farben | LOW | OPEN |
-| G1-T11 | Labelme Kalibrierung | LOW | OPEN |
-
-Details: GATE_1_BRIEFING_v2.json auf dem Pi.
+Alle 11 Gate-1-Tasks erledigt. System läuft auf TAPPAS-Pipeline,
+Hybrid-Tracking, Action-Bridge, Gain-Tuning, Park-Position=Tür, ArcFace-Enrollment.
 
 ---
 
