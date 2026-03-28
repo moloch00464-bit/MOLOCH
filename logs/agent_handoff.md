@@ -1,7 +1,7 @@
 # M.O.L.O.C.H. Übergabeprotokoll
-**Datum:** 2026-03-28, 15:50 CET
-**Von:** Claude Opus 4.6 — Tracking + BBox + Landmark Session
-**Service-Status:** LAEUFT (20 FPS, ArcFace 0.78+, Audit PASS)
+**Datum:** 2026-03-28, 16:25 CET
+**Von:** Claude Opus 4.6 — Tracking + BBox + Landmark + NPU Valve Session
+**Service-Status:** LAEUFT (20 FPS, ArcFace 0.78+ @thresh=0.65, Audit PASS)
 **USE_TAPPAS:** 1 (aktiv)
 
 ---
@@ -78,6 +78,25 @@
 - Grund: hailoaggregator macht create_flattened_bbox() nochmal wenn scaling_bbox nicht cleared
 - **Richtige Loesung:** _letterbox Postprocess BEHALTEN, BBox aus Landmarks ableiten
 - Revert: `a396aa5`
+
+### 13. NPU/MPO Popup aktualisiert ✅
+- Pose: False→True (laeuft in Pipeline)
+- Person-ReID: NEU hinzugefuegt
+- ArcFace Default: 0.6→0.65
+- Commit: `ee12677`
+
+### 14. ReID + Hand Valve-Gating freigeschaltet ✅
+- tappas_pipeline.py: reid_needed/hand_needed nicht mehr hardcoded False
+- Scheduler entscheidet dynamisch je nach Szenario (FERN/RUECKEN/MULTI)
+- model_orchestrator.py: person_reid in active_map + key-mapping reid
+- moloch_service.py: person_reid_active im Status-Dict
+- Panel-Checkbox funktioniert jetzt
+- Commits: `74769c2`, `dacc4ef`, `c675094`
+
+### 15. ArcFace Enrollment erfolgreich ✅
+- Live-Enrollment via IPC (15 Frames, frontal)
+- Similarity 0.78-0.93 (vorher 0.25 nach BBox-Aenderung)
+- Threshold von 0.55 auf 0.65 angehoben
 
 ---
 
