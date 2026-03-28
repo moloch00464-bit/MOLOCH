@@ -50,10 +50,11 @@ MAX_VISUAL_AMP = 0.15
 # Konstanten
 # =============================================================================
 
-AVATAR_SIZE = 400
+AVATAR_SIZE = 400       # Internes Render (Ring-Mathe bleibt stabil)
+DISPLAY_SIZE = 640      # Anzeige-Groesse (LANCZOS Upscale = Anti-Aliasing)
 CX = AVATAR_SIZE // 2
 CY = AVATAR_SIZE // 2
-ANIM_INTERVAL_MS = 200  # ~5 FPS — genuegt fuer Avatar, spart Main-Thread-Last
+ANIM_INTERVAL_MS = 100  # ~10 FPS — fluessigere Animationen
 
 # Hintergrund
 BG_AVATAR = "#0A0A14"
@@ -138,16 +139,18 @@ def _hex_scale(color_hex, factor):
 def _render_glow(radius, color, intensity):
     """Weichen Glow als Alpha-Surface rendern.
 
-    Quadratischer Alpha-Falloff von Zentrum nach aussen.
-    Staerker als vorher (0.35 statt 0.15) fuer sichtbaren Effekt.
+    Kubischer Alpha-Falloff fuer weicheren Verlauf.
+    Feinere Steps (radius//15 statt //25) fuer smootheren Glow.
     """
     size = radius * 2 + 4
     surf = pygame.Surface((size, size), pygame.SRCALPHA)
     cx, cy = size // 2, size // 2
-    step = max(3, radius // 25)
+    step = max(2, radius // 15)  # Feinere Steps
     for r in range(radius, 0, -step):
         t = r / radius
-        alpha = int(intensity * 255 * (1.0 - t) * (1.0 - t) * 0.35)
+        # Kubischer Falloff (weicher als quadratisch)
+        falloff = (1.0 - t) ** 3
+        alpha = int(intensity * 255 * falloff * 0.40)
         alpha = min(255, max(0, alpha))
         if alpha > 0:
             pygame.gfxdraw.filled_circle(surf, cx, cy, r, (*color, alpha))
@@ -266,8 +269,8 @@ class AvatarModule:
         self._label = tk.Label(
             parent_frame,
             bg=BG_AVATAR,
-            width=AVATAR_SIZE,
-            height=AVATAR_SIZE,
+            width=DISPLAY_SIZE,
+            height=DISPLAY_SIZE,
         )
         self._label.pack(padx=5, pady=5)
 
@@ -773,16 +776,27 @@ class AvatarModule:
     }
 
     def _blit_to_tkinter(self):
-        """PyGame Surface -> PIL Image -> Gaussian Blur Glow -> ImageTk -> Label."""
+        """PyGame Surface -> PIL -> Multi-Pass Bloom -> LANCZOS Upscale -> Label."""
         data = pygame.image.tostring(self._surface, 'RGB')
         img = Image.frombytes('RGB', (AVATAR_SIZE, AVATAR_SIZE), data)
 
-        # PIL Gaussian Blur Glow (zone-spezifisch, Screen-Blend)
-        glow = img.filter(ImageFilter.GaussianBlur(radius=14))
+        # Multi-Pass Bloom (2 Radien fuer weichen + breiten Glow)
         tint = self._GLOW_TINTS.get(self._zone, (0, 110, 255))
         tint_layer = Image.new('RGB', (AVATAR_SIZE, AVATAR_SIZE), tint)
-        glow_tinted = ImageChops.multiply(glow, tint_layer)
-        img = ImageChops.screen(img, glow_tinted)
+
+        # Pass 1: Enger Glow (Detail-Schaerfe, Kanten leuchten)
+        glow_near = img.filter(ImageFilter.GaussianBlur(radius=8))
+        glow_near = ImageChops.multiply(glow_near, tint_layer)
+        img = ImageChops.screen(img, glow_near)
+
+        # Pass 2: Breiter Glow (Atmosphaere, weicher Halo)
+        glow_far = img.filter(ImageFilter.GaussianBlur(radius=22))
+        glow_far = ImageChops.multiply(glow_far, tint_layer)
+        img = ImageChops.screen(img, glow_far)
+
+        # LANCZOS Upscale: 400 -> 640px (echtes Anti-Aliasing)
+        if DISPLAY_SIZE != AVATAR_SIZE:
+            img = img.resize((DISPLAY_SIZE, DISPLAY_SIZE), Image.LANCZOS)
 
         self._photo = ImageTk.PhotoImage(img)
         self._label.config(image=self._photo)
