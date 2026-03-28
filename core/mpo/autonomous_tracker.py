@@ -1844,23 +1844,33 @@ class AutonomousTracker:
     def _should_moloch_track(self, detection: DetectionData) -> bool:
         """Entscheidet ob Moloch selbst tracken soll oder Kamera-ST laufen laesst.
 
-        INTELLIGENTE HANDOVER-LOGIK:
-        Moloch beobachtet die Kamerabewegung. Wenn die Kamera sich beruhigt
-        hat (Position stabil ueber mehrere Reads), hat Sonoff sein Ziel
-        zentriert → Moloch uebernimmt fuer Praezision.
+        KERNREGEL: Kein Gesicht erkannt → ST bleibt an, Moloch beobachtet.
+        Erst bei Face-Detection uebernimmt Moloch fuer Praezision.
 
-        Kamera-ST laeuft weiter solange:
-        - Kamera noch in Bewegung (Sonoff zentriert noch)
-        - Person stabil mittig und kein Face erkannt
+        Kamera-ST ist schneller (Hardware-Sensoren, interner Motor).
+        Moloch ist praeziser (BBox-Zentrierung, Face-Tracking).
         """
-        # Moloch trackt bereits (ST war nie an) → weiter tracken
+        # === NEUE LOGIK: Kein Face → ST soll laufen ===
+        if not detection.has_face:
+            # Nur Person/Pose erkannt, kein Gesicht
+            if not self._camera_smart_tracking_on:
+                # ST noch nicht an → einschalten, Kamera-Sensoren uebernehmen
+                logger.info("[HANDOVER] Nur Person, kein Face → ST einschalten (Sensoren schneller)")
+                self._enable_camera_smart_tracking(True)
+            # ST laeuft, Moloch beobachtet nur
+            return False
+
+        # === Ab hier: Face erkannt → Moloch-Praezision gefragt ===
+
+        # ST war nie an → Moloch trackt direkt
         if not self._camera_smart_tracking_on:
             return True
 
+        # ST ist an + Face erkannt → Uebergang zu Moloch
         now = time.time()
         st_duration = now - getattr(self, '_st_activate_time', 0.0)
 
-        # Absolute Mindestzeit — Sonoff braucht mindestens 1.5s
+        # Mindestzeit — Sonoff braucht kurz
         if st_duration < self._ST_MIN_TIME:
             return False
 
@@ -1876,30 +1886,16 @@ class AutonomousTracker:
             self._st_settle_count = getattr(self, '_st_settle_count', 0) + 1
         else:
             self._st_settle_count = 0
-            # Kamera bewegt sich noch → ST weiter laufen lassen
             return False
 
-        # Kamera hat sich beruhigt (N stabile Reads)?
         camera_settled = self._st_settle_count >= self._ST_SETTLE_FRAMES
-
         if not camera_settled:
             return False
 
-        # === Kamera hat zentriert — jetzt entscheiden ===
-
-        # Face erkannt → Moloch uebernimmt fuer Praezision
-        if detection.has_face:
-            logger.info(f"[HANDOVER] Kamera settled nach {st_duration:.1f}s + Face → Moloch uebernimmt")
-            return True
-
-        # Person am Bildrand? → Moloch korrigiert
-        off_center = max(abs(detection.center_x - 0.5), abs(detection.center_y - 0.5))
-        if off_center > 0.35:
-            logger.info(f"[HANDOVER] Kamera settled aber Person am Rand ({off_center:.2f}) → Moloch uebernimmt")
-            return True
-
-        # Person mittig, kein Face → Kamera-ST macht guten Job
-        return False
+        # Kamera settled + Face erkannt → Moloch uebernimmt
+        logger.info(f"[HANDOVER] Face erkannt + Kamera settled ({st_duration:.1f}s) → Moloch uebernimmt")
+        self._enable_camera_smart_tracking(False)
+        return True
 
     def _enable_camera_smart_tracking(self, on: bool):
         """Sonoff-eigenes Smart-Tracking ein/ausschalten (schnellerer Raum-Scan).
