@@ -911,7 +911,10 @@ class MolochService:
         """
         FEED_INTERVAL = 0.066  # ~15 Hz
         OFFLINE_POLL = 1.0     # 1 Hz wenn Pipeline offline
-        FRAME_DIM = 640
+        # Pipeline-Aufloesung (TAPPAS skaliert RTSP 1920x1080 auf 1280x720)
+        # BBoxes aus TAPPAS sind normalisiert [0.0-1.0] relativ zu diesem Frame
+        FRAME_W = 1280
+        FRAME_H = 720
 
         while self.running:
             # Pipeline offline → langsam pollen
@@ -945,8 +948,8 @@ class MolochService:
                     cls = d.get("class", "")
                     bbox = d.get("bbox", [0, 0, 0, 0])
                     conf = d.get("confidence", 0)
-                    pixel_bbox = [bbox[0] * FRAME_DIM, bbox[1] * FRAME_DIM,
-                                  bbox[2] * FRAME_DIM, bbox[3] * FRAME_DIM]
+                    pixel_bbox = [bbox[0] * FRAME_W, bbox[1] * FRAME_H,
+                                  bbox[2] * FRAME_W, bbox[3] * FRAME_H]
                     entry = {"bbox": pixel_bbox, "confidence": conf, "class": cls}
                     if cls == "face":
                         face_dets.append(entry)
@@ -956,12 +959,12 @@ class MolochService:
                 if face_dets:
                     tracker.update_detection(
                         detections=face_dets,
-                        frame_width=FRAME_DIM, frame_height=FRAME_DIM
+                        frame_width=FRAME_W, frame_height=FRAME_H
                     )
                 elif person_dets:
                     tracker.update_detection(
                         detections=person_dets,
-                        frame_width=FRAME_DIM, frame_height=FRAME_DIM
+                        frame_width=FRAME_W, frame_height=FRAME_H
                     )
 
                 if self._cam._waiting_for_first_detection:
