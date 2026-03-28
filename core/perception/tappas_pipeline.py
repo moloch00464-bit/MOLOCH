@@ -55,9 +55,9 @@ FACE_ATTR_HEF = "/mnt/moloch-data/hailo/models/face_attr_resnet_v1_18.hef"
 
 # --- Postprocess SOs ---
 YOLO_POSTPROCESS_SO = "/usr/local/hailo/resources/so/libyolo_hailortpp_postprocess.so"
-YOLO_POSTPROCESS_FUNC = "filter_letterbox"
+YOLO_POSTPROCESS_FUNC = "filter"  # Keine SO-interne Letterbox — hailocropper macht das allein
 SCRFD_POSTPROCESS_SO = "/usr/local/hailo/resources/so/libscrfd.so"
-SCRFD_POSTPROCESS_FUNC = "scrfd_10g_letterbox"
+SCRFD_POSTPROCESS_FUNC = "scrfd_10g"  # Keine SO-interne Letterbox — hailocropper macht das allein
 SCRFD_CONFIG_JSON = "/usr/local/hailo/resources/json/scrfd.json"
 ARCFACE_POSTPROCESS_SO = "/usr/local/hailo/resources/so/libface_recognition_post.so"
 ARCFACE_POSTPROCESS_FUNC = "filter"
@@ -80,12 +80,13 @@ REID_POSTPROCESS_FUNC = "filter"
 REID_CROP_SO = "/usr/lib/aarch64-linux-gnu/hailo/tappas/post_processes/cropping_algorithms/libre_id.so"
 REID_CROP_FUNC = "create_crops"
 
-# --- Face-BBox Letterbox-Korrektur (doppelte Korrektur kompensieren) ---
-# Letterbox betrifft NUR Y-Achse (140px Padding oben/unten bei 16:9→1:1).
-# X bleibt unveraendert, nur Y wird geschrumpft.
-FACE_BBOX_SHRINK_X = 1.0   # X-Achse: keine Korrektur noetig
-FACE_BBOX_SHRINK_Y = 0.50  # Y-Achse: 50% kleiner (Letterbox-Doppelkorrektur)
-FACE_BBOX_Y_ANCHOR_BOTTOM = 1.0   # Bottom-Kante fix (Kinn bleibt), nur oben kuerzen
+# --- Face-BBox Letterbox-Korrektur ---
+# Doppelte Korrektur GEFIXT: SO nutzt jetzt filter/scrfd_10g (ohne _letterbox),
+# hailocropper+internal-offset macht die einzige Korrektur.
+# Shrink-Hack nicht mehr noetig (1.0 = No-Op).
+FACE_BBOX_SHRINK_X = 1.0
+FACE_BBOX_SHRINK_Y = 1.0   # Keine Kompensation mehr noetig (war 0.50)
+FACE_BBOX_Y_ANCHOR_BOTTOM = 0.0
 
 # --- Debug-Overlay: Dicke BBoxen + Landmarks fuer Snapshot-Analyse ---
 # True = dicke Linien im SHM-Frame (fuer Claude-Referenzbilder)
