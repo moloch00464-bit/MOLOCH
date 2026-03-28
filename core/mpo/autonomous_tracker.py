@@ -97,17 +97,42 @@ class STMovementLearner:
         self._hot_spots = []       # [(pan, tilt, count), ...] — Wo Kamera stoppt
         self._prev_pan = None
         self._prev_tilt = None
+        self._prev_ts = 0.0
         self._still_since = 0.0    # Seit wann Kamera stillsteht
         self._STILL_THRESHOLD = 2.0  # Grad — weniger Bewegung = "still"
         self._STILL_TIME = 1.5      # Sekunden still = Hot-Spot
         self._MAX_HOTSPOTS = 50     # Ringbuffer-Groesse
+        self._MAX_POSITIONS = 500   # Rohaufzeichnung Ringbuffer
+
+        # Bewegungsdynamik: gelernte Kamera-Motor-Eigenschaften
+        self._velocities_pan = []   # deg/s — Pan-Geschwindigkeiten
+        self._velocities_tilt = []  # deg/s — Tilt-Geschwindigkeiten
+        self._MAX_VELOCITIES = 200  # Ringbuffer
 
     def record(self, pan: float, tilt: float):
         """Aufrufen bei jedem Position-Read waehrend Kamera-ST aktiv."""
         now = time.time()
 
+        # Rohaufzeichnung (Ringbuffer)
+        self._positions.append((pan, tilt, now))
+        if len(self._positions) > self._MAX_POSITIONS:
+            self._positions = self._positions[-self._MAX_POSITIONS:]
+
         if self._prev_pan is not None:
-            delta = abs(pan - self._prev_pan) + abs(tilt - self._prev_tilt)
+            dt = now - self._prev_ts
+            delta_pan = pan - self._prev_pan
+            delta_tilt = tilt - self._prev_tilt
+            delta = abs(delta_pan) + abs(delta_tilt)
+
+            # Bewegungsdynamik: Geschwindigkeit aufzeichnen (nur bei echter Bewegung)
+            if dt > 0.05 and delta > 0.5:
+                vel_pan = abs(delta_pan) / dt
+                vel_tilt = abs(delta_tilt) / dt
+                self._velocities_pan.append(vel_pan)
+                self._velocities_tilt.append(vel_tilt)
+                if len(self._velocities_pan) > self._MAX_VELOCITIES:
+                    self._velocities_pan = self._velocities_pan[-self._MAX_VELOCITIES:]
+                    self._velocities_tilt = self._velocities_tilt[-self._MAX_VELOCITIES:]
 
             if delta < self._STILL_THRESHOLD:
                 # Kamera steht (fast) still — Sensor hat was erkannt
@@ -123,6 +148,7 @@ class STMovementLearner:
 
         self._prev_pan = pan
         self._prev_tilt = tilt
+        self._prev_ts = now
 
     def _add_hot_spot(self, pan: float, tilt: float):
         """Hot-Spot registrieren (Ringbuffer, max _MAX_HOTSPOTS)."""
@@ -154,11 +180,42 @@ class STMovementLearner:
         positions = [(p, t) for p, t, _c in sorted_spots[:max_positions]]
         return positions
 
+    def get_learned_dynamics(self) -> dict:
+        """Gelernte Kamera-Motor-Dynamik fuer MOLOCH Tracking.
+
+        Returns dict mit:
+          avg_vel_pan/tilt:  Durchschnittliche Geschwindigkeit (deg/s)
+          max_vel_pan/tilt:  Maximale beobachtete Geschwindigkeit
+          median_vel_pan/tilt: Median-Geschwindigkeit (robust)
+          samples: Anzahl Messungen
+        """
+        if not self._velocities_pan:
+            return {"samples": 0}
+
+        sorted_pan = sorted(self._velocities_pan)
+        sorted_tilt = sorted(self._velocities_tilt)
+        n = len(sorted_pan)
+        median_pan = sorted_pan[n // 2]
+        median_tilt = sorted_tilt[n // 2]
+
+        return {
+            "avg_vel_pan": round(sum(self._velocities_pan) / n, 1),
+            "avg_vel_tilt": round(sum(self._velocities_tilt) / n, 1),
+            "max_vel_pan": round(max(self._velocities_pan), 1),
+            "max_vel_tilt": round(max(self._velocities_tilt), 1),
+            "median_vel_pan": round(median_pan, 1),
+            "median_vel_tilt": round(median_tilt, 1),
+            "samples": n,
+            "positions_recorded": len(self._positions),
+        }
+
     def get_stats(self) -> dict:
         """Statistiken fuer Status/Debug."""
+        dynamics = self.get_learned_dynamics()
         return {
             "hot_spots": len(self._hot_spots),
             "top_positions": self.get_patrol_positions(4),
+            "dynamics": dynamics,
         }
 
 # PTZ Debug Logger - schreibt in ~/moloch/logs/ptz_debug.log
