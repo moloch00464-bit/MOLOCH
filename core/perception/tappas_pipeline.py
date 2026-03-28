@@ -80,8 +80,10 @@ REID_CROP_SO = "/usr/lib/aarch64-linux-gnu/hailo/tappas/post_processes/cropping_
 REID_CROP_FUNC = "create_crops"
 
 # --- Face-BBox Letterbox-Korrektur (doppelte Korrektur kompensieren) ---
-# Faktor < 1.0 schrumpft die BBox. Wert anpassen nach visuellem Check.
-FACE_BBOX_SHRINK = 0.80
+# Letterbox betrifft NUR Y-Achse (140px Padding oben/unten bei 16:9→1:1).
+# X bleibt unveraendert, nur Y wird geschrumpft.
+FACE_BBOX_SHRINK_X = 1.0   # X-Achse: keine Korrektur noetig
+FACE_BBOX_SHRINK_Y = 0.80  # Y-Achse: 20% kleiner (Letterbox-Doppelkorrektur)
 
 # --- Hand Landmark (PoC, Full-Frame) ---
 HAND_HEF = "/mnt/moloch-data/hailo/models/hand_landmark_lite.hef"
@@ -1406,21 +1408,24 @@ class TappasPipeline:
                 continue
 
             # --- Face-BBox Letterbox-Korrektur (doppelte Korrektur kompensieren) ---
-            if label == "face" and FACE_BBOX_SHRINK < 1.0:
-                s = FACE_BBOX_SHRINK
+            # Letterbox betrifft NUR Y-Achse → X und Y getrennt korrigieren
+            if label == "face" and (FACE_BBOX_SHRINK_X < 1.0 or FACE_BBOX_SHRINK_Y < 1.0):
+                sx, sy = FACE_BBOX_SHRINK_X, FACE_BBOX_SHRINK_Y
                 ow, oh = bbox.width(), bbox.height()
                 cx = bbox.xmin() + ow * 0.5
                 cy = bbox.ymin() + oh * 0.5
-                nw, nh = ow * s, oh * s
+                nw, nh = ow * sx, oh * sy
                 new_bbox = hailo.HailoBBox(cx - nw * 0.5, cy - nh * 0.5, nw, nh)
                 # SCRFD-Landmarks (5 Keypoints) umrechnen: BBox-relativ → neue BBox
                 for sub in det.get_objects_typed(hailo.HAILO_LANDMARKS):
                     old_pts = sub.get_points()
-                    offset = (1.0 - s) / (2.0 * s)
-                    inv_s = 1.0 / s
+                    ox = (1.0 - sx) / (2.0 * sx) if sx < 1.0 else 0.0
+                    oy = (1.0 - sy) / (2.0 * sy) if sy < 1.0 else 0.0
+                    inv_sx = 1.0 / sx if sx < 1.0 else 1.0
+                    inv_sy = 1.0 / sy if sy < 1.0 else 1.0
                     new_pts = [
-                        hailo.HailoPoint(p.x() * inv_s - offset,
-                                         p.y() * inv_s - offset,
+                        hailo.HailoPoint(p.x() * inv_sx - ox,
+                                         p.y() * inv_sy - oy,
                                          p.confidence())
                         for p in old_pts
                     ]
