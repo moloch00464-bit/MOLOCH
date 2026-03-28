@@ -231,7 +231,6 @@ class TappasPipeline:
         self._pose_valve = None
         self._pose_selector = None
         self._pose_gate_state = False  # Aktueller Valve-Zustand
-        self._pose_person_bbox = None  # (x1,y1,x2,y2) von _on_pre_overlay
 
         # --- ReID Valve-Gating ---
         self._reid_valve = None
@@ -1365,19 +1364,7 @@ class TappasPipeline:
             has_pose = len(pose_dets) > 0
 
             if has_pose:
-                # Pose-Person BBox sicher auslesen fuer Tracking
-                # (_on_pre_overlay laeuft NACH allen SOs → kein Race Condition)
-                try:
-                    pb = pose_dets[0].get_bbox()
-                    self._pose_person_bbox = (
-                        max(0.0, min(1.0, pb.xmin())),
-                        max(0.0, min(1.0, pb.ymin())),
-                        max(0.0, min(1.0, pb.xmax())),
-                        max(0.0, min(1.0, pb.ymax())),
-                    )
-                except Exception:
-                    pass  # BBox-Zugriff fehlgeschlagen → alten Wert behalten
-
+                # ACHTUNG: NIEMALS bbox-Methoden auf Pose-Detections aufrufen → SEGV!
                 # YOLO-Person entfernen (Pose-Person mit Landmarks bleibt)
                 to_remove = [d for d in all_dets
                              if d.get_label() == "person"
@@ -1447,16 +1434,11 @@ class TappasPipeline:
                 det.set_bbox(new_bbox)
                 bbox = new_bbox
 
-            # Person-BBox: Pose-BBox nutzen wenn verfuegbar (korrektere Groesse)
-            # _on_pre_overlay speichert die Pose-Person-BBox in self._pose_person_bbox
-            if label == "person" and self._pose_person_bbox is not None:
-                x1, y1, x2, y2 = self._pose_person_bbox
-            else:
-                # Normalisierte BBox [0.0-1.0] mit Clamp
-                x1 = max(0.0, min(1.0, bbox.xmin()))
-                y1 = max(0.0, min(1.0, bbox.ymin()))
-                x2 = max(0.0, min(1.0, bbox.xmax()))
-                y2 = max(0.0, min(1.0, bbox.ymax()))
+            # Normalisierte BBox [0.0-1.0] mit Clamp (Safety-Net gegen Letterbox-Ueberlauf)
+            x1 = max(0.0, min(1.0, bbox.xmin()))
+            y1 = max(0.0, min(1.0, bbox.ymin()))
+            x2 = max(0.0, min(1.0, bbox.xmax()))
+            y2 = max(0.0, min(1.0, bbox.ymax()))
 
             entry = {
                 "class": label,
