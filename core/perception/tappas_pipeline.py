@@ -1420,19 +1420,35 @@ class TappasPipeline:
             if label == "face" and (FACE_BBOX_SHRINK_X < 1.0 or FACE_BBOX_SHRINK_Y < 1.0):
                 sx, sy = FACE_BBOX_SHRINK_X, FACE_BBOX_SHRINK_Y
                 ab = FACE_BBOX_Y_ANCHOR_BOTTOM  # 0=zentriert, 1=Bottom fix
+                old_xmin = bbox.xmin()
+                old_ymin = bbox.ymin()
                 ow, oh = bbox.width(), bbox.height()
-                cx = bbox.xmin() + ow * 0.5
+                cx = old_xmin + ow * 0.5
                 nw, nh = ow * sx, oh * sy
-                # Y: Mischung aus zentriert und Bottom-verankert
-                # zentriert: new_ymin = ymin + (oh-nh)/2
-                # bottom:    new_ymin = ymin + (oh-nh)
                 y_shift = (oh - nh) * (0.5 + 0.5 * ab)
-                new_ymin = bbox.ymin() + y_shift
+                new_ymin = old_ymin + y_shift
                 new_bbox = hailo.HailoBBox(cx - nw * 0.5, new_ymin, nw, nh)
-                # SCRFD-Landmarks NICHT umrechnen — bei aggressivem Shrink
-                # landen obere Punkte (Augen) ausserhalb der BBox.
-                # Overlay zeichnet sie leicht komprimiert, aber erkennbar.
                 det.set_bbox(new_bbox)
+
+                # Landmarks mittransformieren (bbox-relativ → Frame → neue bbox-relativ)
+                try:
+                    for lm_obj in det.get_objects_typed(hailo.HAILO_LANDMARKS):
+                        pts = lm_obj.get_points()
+                        new_pts = []
+                        for pt in pts:
+                            # Zurueck in Frame-Space
+                            fx = pt.x() * ow + old_xmin
+                            fy = pt.y() * oh + old_ymin
+                            # Relativ zu neuer BBox (clampen auf 0-1)
+                            rx = max(0.0, min(1.0, (fx - new_bbox.xmin()) / nw))
+                            ry = max(0.0, min(1.0, (fy - new_bbox.ymin()) / nh))
+                            new_pts.append(hailo.HailoPoint(rx, ry, pt.confidence()))
+                        det.remove_object(lm_obj)
+                        det.add_object(hailo.HailoLandmarks(
+                            lm_obj.get_landmarks_type(), new_pts, lm_obj.get_threshold()))
+                except Exception:
+                    pass  # Landmarks fehlen bei manchen Detections — kein Problem
+
                 bbox = new_bbox
 
             # Normalisierte BBox [0.0-1.0] mit Clamp (Safety-Net gegen Letterbox-Ueberlauf)
