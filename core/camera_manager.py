@@ -128,7 +128,7 @@ class CameraManager:
         self._last_manual_ptz = 0
 
         # Home Position (fuer Release -> Home -> ST)
-        self._home_position = {"pan": 0.0, "tilt": -15.0}
+        self._home_position = {"pan": 50.0, "tilt": -20.0}
         try:
             _home_cfg = os.path.join(os.path.dirname(os.path.dirname(__file__)),
                                      "config", "camera_home.json")
