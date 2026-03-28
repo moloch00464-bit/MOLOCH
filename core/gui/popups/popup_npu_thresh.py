@@ -50,7 +50,8 @@ SETTINGS_PATH = os.path.expanduser("~/moloch/config/settings.json")
 # ============================================================================
 
 MODEL_DEFS = [
-    ("SCRFD 10G", "scrfd_10g.hef (5.8 MB)", True, [
+    # --- TAPPAS Pipeline Modelle (immer aktiv, NPU shared) ---
+    ("SCRFD 10G (Face)", "scrfd_10g.hef (5.8 MB)", True, [
         ("Confidence", "thresholds", "scrfd_conf",
          0.1, 0.9, 0.5, 0.05, "", "Gesichtserkennung (hoeher = weniger Fehlalarme)"),
         ("NMS Ueberlappung", "thresholds", "scrfd_nms",
@@ -58,22 +59,26 @@ MODEL_DEFS = [
     ]),
     ("ArcFace MobileFaceNet", "arcface_mobilefacenet.hef (2.6 MB)", True, [
         ("Aehnlichkeit", "thresholds", "arcface_thresh",
-         0.3, 0.9, 0.6, 0.05, "", "Wie aehnlich muss ein Gesicht sein? (hoeher = strenger)"),
+         0.3, 0.9, 0.65, 0.05, "", "Wie aehnlich muss ein Gesicht sein? (hoeher = strenger)"),
     ]),
     ("YOLOv8m Person", "yolov8m_h10.hef (21 MB)", True, [
         ("Confidence", "thresholds", "yolo_conf",
          0.1, 0.9, 0.5, 0.05, "", "Person Detection (hoeher = weniger Fehlalarme)"),
     ]),
-    ("Face Attributes", "face_attr_resnet_v1_18.hef", True, [
+    ("Face Attributes", "face_attr_resnet_v1_18.hef (1.2 MB)", True, [
         # Kein eigener Threshold — laeuft immer mit SCRFD
     ]),
-    ("Pose YOLOv8s", "yolov8s_pose_h10.hef (14 MB)", False, [
+    ("Pose YOLOv8s", "yolov8s_pose_h10.hef (14 MB)", True, [
         ("Confidence", "thresholds", "pose_conf",
-         0.1, 0.9, 0.5, 0.05, "", "Pose/Keypoint Detection Confidence"),
+         0.1, 0.9, 0.6, 0.05, "", "Pose/Keypoint Detection Confidence"),
     ]),
-    ("Hand Landmark", "hand_landmarker.hef", False, [
+    ("Person-ReID", "repvgg_a0_person_reid_512.hef (5.1 MB)", True, [
+        # Kein eigener Threshold — Embedding-Matching intern
+    ]),
+    # --- Optionale Modelle (Valve-gated) ---
+    ("Hand Landmark", "hand_landmark_lite.hef (5.3 MB)", False, [
         ("Confidence", "thresholds", "hand_conf",
-         0.1, 0.9, 0.3, 0.05, "", "Hand/Gesten Detection Confidence"),
+         0.1, 0.9, 0.65, 0.05, "", "Hand/Gesten Detection Confidence"),
     ]),
 ]
 
@@ -202,11 +207,12 @@ class NpuThreshPopup:
 
         # Mapping: model_name → active (aus active_models Liste)
         active_map = {
-            "SCRFD 10G": "scrfd" in active_models,
+            "SCRFD 10G (Face)": "scrfd" in active_models,
             "ArcFace MobileFaceNet": "arcface" in active_models,
             "YOLOv8m Person": "yolov8m" in active_models,
             "Face Attributes": "scrfd" in active_models,  # laeuft immer mit SCRFD
             "Pose YOLOv8s": "pose" in active_models,
+            "Person-ReID": "person_reid" in active_models,
             "Hand Landmark": "hand_landmark" in active_models,
         }
 
