@@ -60,9 +60,9 @@ class PreviewModule:
         self._running = False
         self._after_id = None
 
-        # Resize-Ziel (Aufloesung aus Dropdown) — Default: HD 800x450
-        self._resize_w = RESOLUTIONS[1][1]
-        self._resize_h = RESOLUTIONS[1][2]
+        # Resize-Ziel (Aufloesung aus Dropdown) — Default: HD+ 960x540
+        self._resize_w = RESOLUTIONS[2][1]
+        self._resize_h = RESOLUTIONS[2][2]
 
         # Canvas-Groesse (gekappt auf MAX_CANVAS)
         self._canvas_w = min(self._resize_w, MAX_CANVAS_W)
@@ -103,7 +103,7 @@ class PreviewModule:
             fg=FG_TEXT, font=FONT_SMALL,
         ).pack(side=tk.LEFT, padx=(0, 5))
 
-        self._res_var = tk.StringVar(value=RESOLUTIONS[0][0])
+        self._res_var = tk.StringVar(value=RESOLUTIONS[2][0])
         self._res_menu = tk.OptionMenu(
             self._res_frame, self._res_var,
             *[r[0] for r in RESOLUTIONS],

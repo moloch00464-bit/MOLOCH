@@ -66,7 +66,7 @@ class TalkChatModule:
     def _build_chat_display(self):
         """Scrollbares Text-Widget fuer Chat-Nachrichten."""
         chat_frame = tk.Frame(self._parent, bg=BG_FRAME)
-        chat_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=(5, 2))
+        chat_frame.pack(fill=tk.BOTH, expand=True, padx=3, pady=(3, 1))
 
         # Scrollbar
         scrollbar = tk.Scrollbar(chat_frame)
@@ -81,7 +81,6 @@ class TalkChatModule:
             selectbackground=ACCENT_CYAN,
             yscrollcommand=scrollbar.set,
             state=tk.DISABLED,
-            height=12,
         )
         self._txt_chat.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.config(command=self._txt_chat.yview)
@@ -135,14 +134,14 @@ class TalkChatModule:
     def _build_input_row(self):
         """Entry + Send-Button."""
         row = tk.Frame(self._parent, bg=BG_FRAME)
-        row.pack(fill=tk.X, padx=5, pady=2)
+        row.pack(fill=tk.X, padx=3, pady=1)
 
         self._entry = tk.Entry(
             row,
             bg=BG_INPUT, fg=FG_TEXT, font=FONT_MONO,
             insertbackground=FG_TEXT,
         )
-        self._entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        self._entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 3))
         self._entry.bind("<Return>", lambda e: self._send_message())
 
         tk.Button(
@@ -176,14 +175,14 @@ class TalkChatModule:
             fg=FG_LABEL,
             font=FONT_LABEL,
         )
-        section.pack(fill=tk.X, padx=5, pady=2)
+        section.pack(fill=tk.X, padx=3, pady=1)
 
         row = tk.Frame(section, bg=BG_FRAME)
-        row.pack(pady=5, padx=5)
+        row.pack(pady=3, padx=3)
 
-        # PTT Button — Hold-Logik via Bind
+        # PTT Button — Hold-Logik via Bind (kompakt)
         self._btn_ptt = tk.Button(
-            row, text="PTT", width=12, height=2,
+            row, text="PTT", width=8, height=1,
             bg=BTN_OFF_DARK, fg=FG_WHITE, font=FONT_BUTTON,
             activebackground=ACCENT_RED,
         )
@@ -224,7 +223,7 @@ class TalkChatModule:
     def _build_voice_section(self):
         """Voice Output Checkbutton."""
         row = tk.Frame(self._parent, bg=BG_FRAME)
-        row.pack(fill=tk.X, padx=5, pady=(2, 5))
+        row.pack(fill=tk.X, padx=3, pady=(1, 3))
 
         tk.Checkbutton(
             row, text="Sprache AN/AUS",

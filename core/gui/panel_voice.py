@@ -64,11 +64,11 @@ class VoiceModule:
             fg=FG_LABEL,
             font=FONT_LABEL,
         )
-        section.pack(fill=tk.X, padx=5, pady=(2, 5))
+        section.pack(fill=tk.X, padx=3, pady=(1, 3))
 
         # Dropdown-Zeile
         row = tk.Frame(section, bg=BG_FRAME)
-        row.pack(fill=tk.X, padx=5, pady=5)
+        row.pack(fill=tk.X, padx=3, pady=3)
 
         # Voice Dropdown
         self._voice_var = tk.StringVar(value="Thorsten (High)")
@@ -81,7 +81,7 @@ class VoiceModule:
             textvariable=self._voice_var,
             values=display_names,
             state="readonly",
-            width=18,
+            width=14,
         )
         self._voice_combo.pack(side=tk.LEFT, padx=(0, 5))
         self._voice_combo.bind("<<ComboboxSelected>>", self._on_voice_changed)

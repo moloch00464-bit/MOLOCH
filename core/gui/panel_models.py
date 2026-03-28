@@ -474,7 +474,7 @@ class ModelsModule:
                 bg=BG_BUTTON, fg=FG_LABEL, font=FONT_BUTTON,
                 activebackground=BG_FRAME,
                 command=cmd,
-            ).grid(row=i // 4, column=i % 4, padx=2, pady=2)
+            ).grid(row=i // 5, column=i % 5, padx=2, pady=2)
 
     # =========================================================================
     # Status-Polling

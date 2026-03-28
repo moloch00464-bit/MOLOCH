@@ -346,6 +346,12 @@ class MolochPanel:
         self.root.configure(bg=BG_DARK)
         self.root.resizable(True, True)
 
+        # Fenster maximiert starten (1920x1080 Vollbild)
+        try:
+            self.root.attributes('-zoomed', True)
+        except tk.TclError:
+            self.root.geometry("1920x1050+0+0")
+
         # Layout aufbauen
         self._build_layout()
 
@@ -369,10 +375,10 @@ class MolochPanel:
         main_frame = tk.Frame(self.root, bg=BG_DARK)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        # Spalten konfigurieren
+        # Spalten konfigurieren — Chat schmal, Steuerung bekommt Platz
         main_frame.columnconfigure(0, weight=0)  # Kamera: feste Breite
-        main_frame.columnconfigure(1, weight=3, minsize=350)  # Steuerung: mehr Platz, nie kleiner als 350px
-        main_frame.columnconfigure(2, weight=1)  # Chat: minimal
+        main_frame.columnconfigure(1, weight=1, minsize=400)  # Steuerung: flexibel
+        main_frame.columnconfigure(2, weight=0, minsize=260)  # Chat: kompakt, fest
         main_frame.rowconfigure(0, weight=1)
 
         # --- Spalte Links: Kamera Preview ---
@@ -424,7 +430,7 @@ class MolochPanel:
             fg=FG_LABEL,
             font=FONT_TITLE,
         )
-        self.frame_chat.grid(row=0, column=2, sticky="nsew", padx=(10, 10), ipadx=5)
+        self.frame_chat.grid(row=0, column=2, sticky="nsew", padx=(3, 0))
 
         # Platzhalter
         tk.Label(
