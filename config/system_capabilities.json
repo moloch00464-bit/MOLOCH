@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-03-28T13:13:01",
-  "generation_ms": 1946.4,
+  "generated": "2026-03-28T13:21:55",
+  "generation_ms": 2001.5,
   "summary": {
     "core_modules": "38/38",
     "external_deps": "11/11",
@@ -35,83 +35,11 @@
       "ready": true
     },
     "gate_2": {
-      "name": "Identity/Memory",
-      "date": "2026-03-08",
-      "status": "AKTIV",
+      "name": "Identity (ReID + Qdrant)",
+      "date": null,
+      "status": "GEPLANT",
       "modules_total": 5,
       "modules_available": 5,
-      "ready": true
-    },
-    "gate_3": {
-      "name": "Awareness",
-      "date": "2026-03-08",
-      "status": "AKTIV",
-      "modules_total": 4,
-      "modules_available": 4,
-      "ready": true
-    },
-    "gate_4": {
-      "name": "Personality",
-      "date": "2026-03-08",
-      "status": "AKTIV",
-      "modules_total": 4,
-      "modules_available": 4,
-      "ready": true
-    },
-    "gate_5": {
-      "name": "Autonomy",
-      "date": "2026-03-08",
-      "status": "AKTIV",
-      "modules_total": 4,
-      "modules_available": 4,
-      "ready": true
-    },
-    "gate_5.1": {
-      "name": "PerceptionMemory",
-      "date": "2026-03-28",
-      "status": "AKTIV",
-      "modules_total": 1,
-      "modules_available": 1,
-      "ready": true
-    },
-    "gate_6": {
-      "name": "Temporale Intelligenz",
-      "date": "2026-03-28",
-      "status": "AKTIV",
-      "modules_total": 1,
-      "modules_available": 1,
-      "ready": true
-    },
-    "gate_7": {
-      "name": "Lokales LLM",
-      "date": "2026-03-28",
-      "status": "BEREIT (hailo-ollama fehlt)",
-      "modules_total": 1,
-      "modules_available": 1,
-      "ready": false
-    },
-    "gate_8": {
-      "name": "Raeumliche Intelligenz",
-      "date": "2026-03-28",
-      "status": "AKTIV",
-      "modules_total": 1,
-      "modules_available": 1,
-      "ready": true
-    },
-    "gate_9": {
-      "name": "Tentakel-Netzwerk",
-      "date": "2026-03-28",
-      "status": "BEREIT (keine externen Geraete)",
-      "modules_total": 1,
-      "modules_available": 1,
-      "ready": false
-    },
-    "gate_10": {
-      "name": "Emergente Autonomie",
-      "date": "2026-03-28",
-      "status": "AKTIV",
-      "modules_total": 1,
-      "modules_available": 1,
       "ready": true
     }
   },
