@@ -210,6 +210,17 @@ class TappasPipeline:
         self._enroll_diversity = 0.85  # Cosine-Sim Schwelle
         self._enroll_lock = threading.Lock()
 
+        # --- Passives Continuous-Learning ---
+        # Wenn Owner erkannt wird UND neuer Winkel, Embedding automatisch speichern
+        self._cl_enabled = True           # Feature aktiv
+        self._cl_interval_sec = 30.0      # Min. Sekunden zwischen Speicherungen
+        self._cl_last_save = 0.0          # Zeitstempel letzte Speicherung
+        self._cl_min_sim = 0.55           # Min. Similarity (muss schon als Owner erkannt sein)
+        self._cl_max_sim = 0.92           # Max. Similarity (ueber 0.92 = bekannter Winkel)
+        self._cl_min_scrfd = 0.70         # Min. SCRFD Confidence (Gesicht gut sichtbar)
+        self._cl_max_embeddings = 50      # Max. Embeddings pro Person
+        self._cl_diversity_thresh = 0.80  # Neues Embedding muss sich unterscheiden
+
         # Event Bus fuer Action Bridge
         self._event_bus = get_event_bus()
         self._last_person_state = False  # Fuer target_lost Erkennung
@@ -1511,6 +1522,10 @@ class TappasPipeline:
                         entry["face_id"] = matched_name
                         entry["face_similarity"] = matched_sim
 
+                    # Passives Continuous-Learning: neuen Winkel automatisch speichern
+                    if not self._enroll_active:
+                        self._continuous_learn(emb_data, matched_name, matched_sim, conf)
+
                 # Face Attributes aus Cache (befuellt von _on_face_attr_buffer Probe)
                 with self._face_attr_lock:
                     if self._face_attr_cache:
@@ -1823,6 +1838,104 @@ class TappasPipeline:
         if len(data) != expected:
             return None
         return data.reshape(height, width, 3)
+
+    # =====================================================================
+    # Passives Continuous-Learning
+    # =====================================================================
+
+    def _continuous_learn(self, embedding: np.ndarray, matched_name: str,
+                          matched_sim: float, scrfd_conf: float):
+        """Passiv neues Embedding speichern wenn neuer Winkel erkannt.
+
+        Bedingungen (ALLE muessen erfuellt sein):
+        1. Feature aktiviert (_cl_enabled)
+        2. Person erkannt (matched_name != None)
+        3. Similarity im Fenster: 0.55 <= sim <= 0.92
+           (unter 0.55 = unsicher, ueber 0.92 = bereits bekannter Winkel)
+        4. SCRFD Confidence >= 0.70 (Gesicht gut sichtbar)
+        5. Mindestens 30s seit letzter Speicherung
+        6. Neues Embedding ist divers (Cosine-Sim < 0.80 zu allen bestehenden)
+        7. Max 50 Embeddings pro Person (danach aelteste ersetzen)
+        """
+        import json as _json
+
+        if not self._cl_enabled:
+            return
+        if not matched_name:
+            return
+        if matched_sim < self._cl_min_sim or matched_sim > self._cl_max_sim:
+            return
+        if scrfd_conf < self._cl_min_scrfd:
+            return
+
+        now = time.time()
+        if (now - self._cl_last_save) < self._cl_interval_sec:
+            return
+
+        # Embedding normalisieren
+        norm = np.linalg.norm(embedding)
+        if norm > 0:
+            emb_norm = embedding / norm
+        else:
+            return
+
+        # Diversitaets-Check gegen bestehende DB
+        with self._face_db_lock:
+            existing = self._face_db.get(matched_name, [])
+            for db_emb in existing:
+                sim_to_existing = float(np.dot(emb_norm, db_emb))
+                if sim_to_existing >= self._cl_diversity_thresh:
+                    # Zu aehnlich zu bestehendem Embedding → kein neuer Winkel
+                    return
+
+        # === Neuer Winkel erkannt — speichern! ===
+        self._cl_last_save = now
+
+        try:
+            embeddings_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                "data", "face_embeddings.json"
+            )
+            db = {}
+            if os.path.exists(embeddings_path):
+                with open(embeddings_path, 'r') as f:
+                    db = _json.load(f)
+
+            # Zaehle bestehende Eintraege fuer diese Person
+            person_keys = [k for k in db if k.split('#')[0].lower() == matched_name]
+            n_existing = len(person_keys)
+
+            if n_existing >= self._cl_max_embeddings:
+                # Aeltestes Snap-Embedding ersetzen (nicht das Haupt-Embedding)
+                snap_keys = sorted([k for k in person_keys if '#' in k])
+                if snap_keys:
+                    del db[snap_keys[0]]
+                    logger.info(f"[CL] Max {self._cl_max_embeddings} erreicht, "
+                                f"aeltestes entfernt: {snap_keys[0]}")
+
+            # Neues Embedding hinzufuegen
+            cl_key = f"{matched_name}#cl_{int(now)}"
+            db[cl_key] = emb_norm.tolist()
+
+            # Atomar speichern
+            tmp = embeddings_path + ".tmp"
+            with open(tmp, 'w') as f:
+                _json.dump(db, f, indent=1, ensure_ascii=False)
+            os.replace(tmp, embeddings_path)
+
+            # In-Memory DB aktualisieren (ohne Disk-Reload)
+            with self._face_db_lock:
+                if matched_name in self._face_db:
+                    self._face_db[matched_name].append(emb_norm.copy())
+                else:
+                    self._face_db[matched_name] = [emb_norm.copy()]
+
+            logger.info(f"[CL] Neuer Winkel gespeichert: {cl_key} "
+                        f"(sim={matched_sim:.3f}, scrfd={scrfd_conf:.3f}, "
+                        f"total={n_existing + 1})")
+
+        except Exception as e:
+            logger.warning(f"[CL] Speichern fehlgeschlagen: {e}")
 
     # =====================================================================
     # Face Matching
