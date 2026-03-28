@@ -1,105 +1,64 @@
 # M.O.L.O.C.H. Übergabeprotokoll
-**Datum:** 2026-03-25, 19:25
-**Von:** Claude Opus 4.6 Session (Home-Fix + Tracker + Preview)
-**Service-Status:** GESTOPPT (manuell, RAM-Analyse)
+**Datum:** 2026-03-28, 11:15 CET
+**Von:** Claude Opus 4.6 Session (BBox-Analyse + SEGV-Fix + System-Audit)
+**Service-Status:** LAEUFT (20 FPS, stabil)
 **USE_TAPPAS:** 1 (aktiv)
 
 ---
 
-## Was wurde erledigt
+## Aktueller Code-Stand
+- **Branch**: main, Commit `ee47bf7`
+- **tappas_pipeline.py**: STABIL auf Stand von `38648c2` (NICHT veraendern ohne Grund!)
+- **Backup SSD2**: `/mnt/moloch-data/backups/moloch_20260328_084744`
 
-### 1. Home-Position vereinheitlicht (4 Dateien)
-EINE Quelle: `settings.json → ptz.home_pan / ptz.home_tilt`
-- `popup_tracker.py`: Save-Pfad tracker.* → ptz.*, IPC sendet Pan/Tilt mit
-- `moloch_service.py`: IPC-Handler liest Pan/Tilt aus Message, _save_settings(), Default tilt 0.0
-- `camera.py`: goto_home() nutzt _home_position Dict + neue set_home_position() Methode
-- `camera_manager.py` + `autonomous_tracker.py`: werden via Service korrekt versorgt
-- **Datenkette:** GUI → settings.json ptz.* → Service → CameraManager + Camera + Tracker
+## KRITISCH — SEGV Root Cause (heute gefunden)
+- `bbox.ymin()` auf Pose-Detections aufrufen → SEGV nach ~50 Sekunden
+- 16 Crashes heute, alle 43-70s nach Start, deterministisch
+- **REGEL**: NIEMALS `bbox.ymin()/ymax()/xmin()/xmax()` auf Detections mit HAILO_LANDMARKS
+- Pose-Detections NUR ueber `det.get_objects_typed(hailo.HAILO_LANDMARKS)` filtern + `continue`
 
-### 2. Tracker-Stabilität (3 Bugs gefixt)
-- **Orphan-Kill bei TAPPAS:** `camera_manager.py` — Bei USE_TAPPAS=1 wird Tracker NIE als orphaned gekillt. TAPPAS ist das Detektionssystem, Tracker muss permanent leben.
-- **Coast-Bug:** `autonomous_tracker.py` Zeile 1143 — Coast-Aktivierung prüft jetzt `error_magnitude` statt `abs(error_y)`. Vorher fror Kamera auf -35.8° ein.
-- **min_step_deg:** 2.0 → 0.5 — Residual-Korrektur funktioniert, Person bleibt zentriert.
+## OFFEN — Face-BBox zu gross (Hauptaufgabe fuer naechste Session)
 
-### 3. Tracking-Punkt korrigiert
-- `autonomous_tracker.py` Zeile 781 — Body-BBox Fallback: 15% → 8% von Oberkante. Bei großen BBoxen (nahe Person) lag der Punkt auf Schultern statt Kopf.
-- **Ergebnis:** Error von 60-100px → 8px, Tilt von -35.8° → +13.8°
+### Problem
+SCRFD Face-BBox ist ~25-30% groesser als Gesicht. Ursache: Doppelte Letterbox-Korrektur.
 
-### 4. Preview-Performance (panel_preview.py)
-- PhotoImage-Recycling via .paste() statt Neuerstellung pro Frame
-- SHM File-Descriptor persistent offen halten
-- Avatar-Intervall 110ms → 200ms (5fps statt 9fps)
-- **Commit:** 6c08921
+### Getestet und GESCHEITERT
+1. SO-Funktion `scrfd_10g` (ohne letterbox) → Landmarks kaputt
+2. `internal-offset=false` → kein Unterschied
+3. BBox in Probe schrumpfen → Landmarks verschieben sich
+4. `bbox.ymin()` in _on_buffer → SEGV
 
-### 5. Service GUI-Unabhängigkeit: BESTÄTIGT
-- Service = systemd headless, Panel = optionaler IPC-Client
-- Panel-Close hat keinen Effekt auf Service
+### Naechster Ansatz (ungetestet, API verifiziert)
+Face-BBox schrumpfen UND Landmark-Punkte mitrechnen:
+```python
+# In _on_pre_overlay (stabil, laeuft seit Wochen):
+bbox = det.get_bbox()
+shrink = 0.85
+cx, cy = bbox.xmin() + bbox.width()*0.5, bbox.ymin() + bbox.height()*0.5
+nw, nh = bbox.width()*shrink, bbox.height()*shrink
+new_bbox = hailo.HailoBBox(cx-nw*0.5, cy-nh*0.5, nw, nh)
+new_det = hailo.HailoDetection(new_bbox, "face", det.get_confidence())
 
----
-
-## Was ist OFFEN
-
-### KRITISCH: RAM-Verbrauch / Memory Leak
-- **Service verbraucht 3.2 GB RSS nach ~30s Laufzeit!** (Pi5 hat 4 GB)
-- Nach 15s: 384 MB (normal), nach 30s: 3208 MB (LEAK!)
-- System geht in Swap, wird unbenutzbar
-- **Verdächtige Quelle:** TAPPAS/GStreamer Pipeline, möglicherweise Frame-Buffer-Leak
-- **TODO:** `core/perception/tappas_pipeline.py` auf Buffer-Leaks prüfen
-- **TODO:** Python-seitige Frame-Kopien suchen (numpy arrays die nie freigegeben werden)
-- **TODO:** `tracemalloc` einschalten um Leak zu lokalisieren
-- **TODO:** Prüfen ob alte Legacy-Module (InferenceEngine, HailoManager) bei USE_TAPPAS trotzdem importiert werden und RAM fressen
-
-### Hintergrund-Services (unnötig?)
-- InfluxDB: 46 MB — wird das von MOLOCH genutzt? Wenn nein: deaktivieren
-- Docker: 49 MB — nur für Qdrant? Container prüfen
-- pcmanfm Desktop: 29 MB — braucht man das?
-
-### Tentakel-System (Smart Tracking ↔ MOLOCH)
-- Aktuell: Bei TAPPAS ist Guardian-Mode AN, aber Orphan-Check ist deaktiviert
-- Smart Tracking der Sonoff-Kamera wird NICHT genutzt (ST AUS)
-- Markus' Wunsch: ST soll grob tracken, MOLOCH übernimmt bei Gesichtserkennung
-- **TODO:** Tentakel-Flow mit TAPPAS integrieren (ST AN → Detection → Takeover → ST AUS → MOLOCH trackt → Release → ST AN)
-- **ACHTUNG:** Zwei PTZ-Systeme gleichzeitig (ST + Tracker) = Konflikt!
-
-### Coast-Schwellen (Tuning nach Test)
-- coast_threshold: 50 → 40px
-- coast_resume: 50 → 35px
-- Könnte noch Feintuning brauchen nach Langzeit-Test
-
----
-
-## Geänderte Dateien seit letztem stabilen Stand
-
-```
-core/gui/popups/popup_tracker.py   — Home Save-Pfad ptz.*
-core/gui/panel_preview.py         — PhotoImage-Recycling, persistent FD
-core/moloch_service.py            — IPC set_ptz_home, Defaults 0.0
-core/hardware/camera.py           — goto_home() + set_home_position()
-core/camera_manager.py            — Orphan-Kill TAPPAS-Guard
-core/mpo/autonomous_tracker.py    — Coast-Bug, min_step_deg, track_y
-config/settings.json              — ptz.home_tilt 0.0
+# Landmarks korrigieren (relativ zur neuen BBox):
+for sub in det.get_objects():
+    if hasattr(sub, 'get_points'):  # HailoLandmarks
+        pts = sub.get_points()
+        offset = (1.0 - shrink) / (2.0 * shrink)
+        new_pts = [hailo.HailoPoint((p.x() - offset*...) , ..., p.confidence()) for p in pts]
+        sub.set_points(new_pts)
+    new_det.add_object(sub)
 ```
 
----
+## Weitere offene Punkte
+- Pose Landmarks verstreut (POSE_POSTPROCESS_FUNC="filter" statt "filter_letterbox")
+- Hand/ReID Valves deaktiviert
+- NPU Load meldet 0.0 an CoreIntegrator
+- Scheduler flattert NAH→IDLE→NAH
+- Tracking-Suchgeschwindigkeit zu langsam
+- hailo-ollama fuer Gate 5.1 (Qwen2.5-1.5B)
 
-## Wichtige Commits (chronologisch)
-
-```
-a13c3a9  BACKUP vor Home-Position Vereinheitlichung
-caaab2f  BACKUP vor Tracker-Orphan-Fix
-58670ab  Fix Tracker: Coast-Bug, Orphan-Kill, Tracking-Punkt
-5d203d9  Fix Orphan-Kill: Bei TAPPAS Tracker nie als orphaned killen
-225678b  BACKUP vor Preview-Performance Quick Wins
-6c08921  Preview-Performance: PhotoImage-Recycling, persistent FD, Avatar 5fps
-```
-
----
-
-## Anweisungen für nächste Instanz
-
-1. **Lies CLAUDE.md** (immer zuerst)
-2. **Lies dieses Handoff** (logs/agent_handoff.md)
-3. **KRITISCH:** RAM-Leak finden und fixen BEVOR irgendwas anderes
-4. **Service ist GESTOPPT** — erst starten wenn RAM-Leak untersucht
-5. **Agenten-Toolbox:** `MOLOCH_AGENT_TOOLBOX.json` für Domain-spezifische Agenten
-6. **Regel 10 (Christian-Prinzip):** 1 Modul = 1 Aufgabe, Fail Isolation, Atomic Changes
+## Neue Dateien (heute erstellt)
+- `.claude/skills/moloch-dev.md` — Skill mit NEVER-DO Regeln
+- `docs/DANGER_MAP.md` — Datei-Risiko-Karte
+- `docs/TOOLS_PLAN.md` — 8 geplante Scripts
+- `scripts/preflight.py`, `postflight.py`, `smoke_test.py`, `danger_check.py`
