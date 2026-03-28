@@ -361,11 +361,11 @@ class NpuThreshPopup:
         )
         slider.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 5))
 
-        # Tooltip unter dem Slider
+        # Tooltip unter dem Slider (FG_DIM zu dunkel auf BG_FRAME → heller)
         if tooltip:
             tk.Label(
                 parent, text=tooltip, anchor=tk.W,
-                bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
+                bg=BG_FRAME, fg="#999999", font=FONT_SMALL,
             ).pack(fill=tk.X, padx=16, pady=(0, 2))
 
     # =========================================================================
