@@ -249,6 +249,157 @@ class SmoothedState:
 
 
 # =============================================================================
+# Routine Tracker — Tageszeit-Muster lernen (Gate 6)
+# =============================================================================
+
+class RoutineTracker:
+    """Lernt Tageszeit-Muster und erkennt Anomalien.
+
+    Speichert pro Stunde (0-23) typische Werte:
+    - presence_rate: Wie oft ist jemand da (0-1)
+    - avg_motion: Durchschnittliche Bewegung (0-1)
+    - dominant_face: Haeufigste erkannte Person
+    - avg_tension: Durchschnittliche System-Spannung
+
+    Lernt ueber Tage/Wochen und erkennt Abweichungen.
+    """
+
+    LEARN_RATE = 0.01   # EMA-Faktor pro Stunden-Update (~100 Tage bis konvergiert)
+    ANOMALY_THRESHOLD = 0.4  # Abweichung ab der Anomalie gemeldet wird
+
+    def __init__(self, persist_path: str = "/mnt/moloch-data/memory/routines.json"):
+        self._persist_path = persist_path
+        # Pro Stunde (0-23): gelerntes Profil
+        self._hourly_profile: Dict[int, Dict] = {}
+        # Aktuelle Stunden-Akkumulatoren
+        self._current_hour: int = -1
+        self._hour_samples: int = 0
+        self._hour_presence_sum: float = 0.0
+        self._hour_motion_sum: float = 0.0
+        self._hour_face_counts: Dict[str, int] = {}
+        self._load()
+
+    def _load(self):
+        """Profil von Disk laden."""
+        try:
+            import json
+            with open(self._persist_path, "r") as f:
+                data = json.load(f)
+            # Keys sind Strings in JSON → zu int konvertieren
+            self._hourly_profile = {int(k): v for k, v in data.items()}
+            _logger.info(f"[RoutineTracker] {len(self._hourly_profile)} Stunden-Profile geladen")
+        except FileNotFoundError:
+            _logger.info("[RoutineTracker] Kein Profil vorhanden — starte leer")
+        except Exception as e:
+            _logger.warning(f"[RoutineTracker] Laden fehlgeschlagen: {e}")
+
+    def _save(self):
+        """Profil auf Disk speichern."""
+        try:
+            import json, os
+            os.makedirs(os.path.dirname(self._persist_path), exist_ok=True)
+            with open(self._persist_path, "w") as f:
+                json.dump(self._hourly_profile, f, indent=2)
+        except Exception as e:
+            _logger.warning(f"[RoutineTracker] Speichern fehlgeschlagen: {e}")
+
+    def update(self, person_detected: bool, motion_level: float,
+               face_id: Optional[str]):
+        """Pro Frame aufrufen — akkumuliert Daten fuer aktuelle Stunde."""
+        import datetime
+        hour = datetime.datetime.now().hour
+
+        # Stunden-Wechsel: altes Profil lernen, Akkumulator reset
+        if hour != self._current_hour:
+            if self._current_hour >= 0 and self._hour_samples > 0:
+                self._learn_hour(self._current_hour)
+            self._current_hour = hour
+            self._hour_samples = 0
+            self._hour_presence_sum = 0.0
+            self._hour_motion_sum = 0.0
+            self._hour_face_counts = {}
+
+        self._hour_samples += 1
+        self._hour_presence_sum += 1.0 if person_detected else 0.0
+        self._hour_motion_sum += min(1.0, motion_level)
+        if face_id:
+            self._hour_face_counts[face_id] = self._hour_face_counts.get(face_id, 0) + 1
+
+    def _learn_hour(self, hour: int):
+        """EMA-Update des Stunden-Profils."""
+        if self._hour_samples == 0:
+            return
+        presence_rate = self._hour_presence_sum / self._hour_samples
+        avg_motion = self._hour_motion_sum / self._hour_samples
+        dominant_face = max(self._hour_face_counts, key=self._hour_face_counts.get) \
+            if self._hour_face_counts else None
+
+        lr = self.LEARN_RATE
+        if hour not in self._hourly_profile:
+            # Erster Datenpunkt: direkt uebernehmen
+            self._hourly_profile[hour] = {
+                "presence_rate": presence_rate,
+                "avg_motion": avg_motion,
+                "dominant_face": dominant_face,
+                "sample_days": 1,
+            }
+        else:
+            p = self._hourly_profile[hour]
+            p["presence_rate"] = (1 - lr) * p["presence_rate"] + lr * presence_rate
+            p["avg_motion"] = (1 - lr) * p["avg_motion"] + lr * avg_motion
+            if dominant_face:
+                p["dominant_face"] = dominant_face
+            p["sample_days"] = p.get("sample_days", 0) + 1
+
+        self._save()
+
+    def get_expected(self, hour: int = -1) -> Optional[Dict]:
+        """Erwartetes Profil fuer eine Stunde (default: jetzt)."""
+        if hour < 0:
+            import datetime
+            hour = datetime.datetime.now().hour
+        return self._hourly_profile.get(hour)
+
+    def check_anomaly(self, person_detected: bool, motion_level: float) -> Optional[str]:
+        """Pruefen ob aktueller State vom gelernten Profil abweicht.
+
+        Returns: Anomalie-Beschreibung oder None wenn normal.
+        """
+        import datetime
+        hour = datetime.datetime.now().hour
+        expected = self._hourly_profile.get(hour)
+        if not expected or expected.get("sample_days", 0) < 3:
+            return None  # Zu wenig Daten zum Vergleichen
+
+        # Presence-Anomalie: normalerweise da, jetzt weg (oder umgekehrt)
+        exp_presence = expected["presence_rate"]
+        actual_presence = 1.0 if person_detected else 0.0
+        if abs(actual_presence - exp_presence) > self.ANOMALY_THRESHOLD:
+            if actual_presence > exp_presence:
+                return f"Unerwartet: Person um {hour}:00 (normal: {exp_presence:.0%} Anwesenheit)"
+            else:
+                return f"Unerwartet: Niemand um {hour}:00 (normal: {exp_presence:.0%} Anwesenheit)"
+
+        # Motion-Anomalie: normalerweise ruhig, jetzt hektisch
+        exp_motion = expected["avg_motion"]
+        if motion_level > exp_motion + self.ANOMALY_THRESHOLD:
+            return f"Ungewoehnlich viel Bewegung um {hour}:00 (normal: {exp_motion:.2f}, jetzt: {motion_level:.2f})"
+
+        return None
+
+    def get_status(self) -> Dict:
+        import datetime
+        hour = datetime.datetime.now().hour
+        expected = self.get_expected(hour)
+        return {
+            "current_hour": hour,
+            "profiled_hours": len(self._hourly_profile),
+            "expected": expected,
+            "sample_days": expected.get("sample_days", 0) if expected else 0,
+        }
+
+
+# =============================================================================
 # PerceptionMemory — Hauptklasse (Singleton)
 # =============================================================================
 
@@ -266,9 +417,12 @@ class PerceptionMemory:
         self.entity_tracker = EntityTracker()
         self.attention_map = AttentionMap()
         self.smoothed_state = SmoothedState(window=10)
+        self.routine_tracker = RoutineTracker()  # Gate 6: Tageszeit-Muster
         self._lock = threading.Lock()
         self._tick_count = 0
-        _logger.info("[PerceptionMemory] Initialisiert (Entity+Attention+Smoothing)")
+        self._last_anomaly: Optional[str] = None
+        self._anomaly_cooldown: float = 0.0  # Nicht jedes Frame melden
+        _logger.info("[PerceptionMemory] Initialisiert (Entity+Attention+Smoothing+Routines)")
 
     def tick(self, detections: List[Dict], face_id: Optional[str] = None,
              face_similarity: float = 0.0, face_embedding: Optional[np.ndarray] = None,
@@ -310,6 +464,27 @@ class PerceptionMemory:
                 bbox_height_pct=bbox_height_pct,
             )
 
+            # 4. Routine Tracker (Gate 6: Tageszeit-Muster lernen)
+            primary = self.entity_tracker.get_primary_entity()
+            motion = primary.motion_level if primary else 0.0
+            self.routine_tracker.update(
+                person_detected=person_count > 0,
+                motion_level=motion,
+                face_id=face_id,
+            )
+
+            # Anomalie-Check (max 1x pro 30 Sekunden)
+            now = time.time()
+            if now - self._anomaly_cooldown > 30.0:
+                anomaly = self.routine_tracker.check_anomaly(
+                    person_detected=person_count > 0,
+                    motion_level=motion,
+                )
+                if anomaly and anomaly != self._last_anomaly:
+                    self._last_anomaly = anomaly
+                    self._anomaly_cooldown = now
+                    _logger.info(f"[ROUTINE-ANOMALIE] {anomaly}")
+
     def get_smoothed_scheduler_input(self) -> Dict:
         """Geglaettete Werte fuer den ModelScheduler.tick().
 
@@ -335,6 +510,8 @@ class PerceptionMemory:
                     "face_detected": self.smoothed_state.face_detected,
                     "bbox_height_pct": round(self.smoothed_state.bbox_height_pct, 3),
                 },
+                "routine": self.routine_tracker.get_status(),
+                "last_anomaly": self._last_anomaly,
             }
 
 
