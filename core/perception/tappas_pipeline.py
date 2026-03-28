@@ -1340,7 +1340,13 @@ class TappasPipeline:
         return Gst.PadProbeReturn.OK
 
     def _on_pre_overlay(self, pad, info, user_data):
-        """VOR hailooverlay: Pose-Duplikate entfernen, Landmarks auf YOLO-Person umhaengen."""
+        """VOR hailooverlay: Doppelte Person-BBox vermeiden.
+
+        Wenn Pose-Detection existiert (person MIT Landmarks): YOLO-Person entfernen,
+        Pose-Person behalten. Landmarks sind BBox-relativ → muessen auf ihrer
+        Original-Detection bleiben, sonst verstreut.
+        _on_buffer nutzt nur YOLO-Persons (skippt Pose per HAILO_LANDMARKS-Check).
+        """
         buffer = info.get_buffer()
         if buffer is None:
             return Gst.PadProbeReturn.OK
@@ -1348,23 +1354,18 @@ class TappasPipeline:
             roi = hailo.get_roi_from_buffer(buffer)
             all_dets = roi.get_objects_typed(hailo.HAILO_DETECTION)
 
-            # YOLO-Persons sammeln (ohne Landmarks)
-            yolo_persons = [d for d in all_dets
-                            if d.get_label() == "person"
-                            and not d.get_objects_typed(hailo.HAILO_LANDMARKS)]
+            # Pruefen ob Pose-Detection vorhanden
+            has_pose = any(d.get_label() == "person"
+                          and d.get_objects_typed(hailo.HAILO_LANDMARKS)
+                          for d in all_dets)
 
-            # Pose-Duplikate: person MIT Landmarks → Landmarks umhaengen, Detection entfernen
-            to_remove = []
-            for det in all_dets:
-                if det.get_label() == "person" and det.get_objects_typed(hailo.HAILO_LANDMARKS):
-                    landmarks = det.get_objects_typed(hailo.HAILO_LANDMARKS)
-                    if yolo_persons and landmarks:
-                        for lm in landmarks:
-                            yolo_persons[0].add_object(lm)
-                    to_remove.append(det)
-
-            for det in to_remove:
-                roi.remove_object(det)
+            if has_pose:
+                # YOLO-Person entfernen (Pose-Person mit Landmarks bleibt)
+                to_remove = [d for d in all_dets
+                             if d.get_label() == "person"
+                             and not d.get_objects_typed(hailo.HAILO_LANDMARKS)]
+                for det in to_remove:
+                    roi.remove_object(det)
 
         except Exception as e:
             self._overlay_err = getattr(self, '_overlay_err', 0) + 1
