@@ -69,8 +69,8 @@ WHOLE_BUFFER_SO = "/usr/lib/aarch64-linux-gnu/hailo/tappas/post_processes/croppi
 
 # --- Pose Estimation (YOLOv8s Pose) ---
 POSE_HEF = "/mnt/moloch-data/hailo/models/yolov8s_pose_h10.hef"
-POSE_POSTPROCESS_SO = "/usr/local/hailo/resources/so/libyolov8pose_postprocess.so"
-POSE_POSTPROCESS_FUNC = "filter"
+POSE_POSTPROCESS_SO = "/usr/lib/aarch64-linux-gnu/hailo/tappas/post_processes/libyolov8pose_post.so"
+POSE_POSTPROCESS_FUNC = "filter"  # NICHT filter_letterbox — kein hailocropper fuer Pose
 
 # --- Person ReID (RepVGG-A0, 512d Embedding) ---
 REID_HEF = "/mnt/moloch-data/hailo/models/repvgg_a0_person_reid_512.hef"
@@ -1107,15 +1107,8 @@ class TappasPipeline:
             f'queue name=pose_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
         )
 
-        pose_wrapper = (
-            f'queue name=pose_wrapper_input_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
-            f'hailocropper name=pose_wrapper_crop so-path={WHOLE_BUFFER_SO} function-name=create_crops '
-            f'use-letterbox=true resize-method=inter-area internal-offset=true '
-            f'hailoaggregator name=pose_wrapper_agg '
-            f'pose_wrapper_crop. ! queue name=pose_wrapper_bypass_q leaky=no max-size-buffers=20 max-size-bytes=0 max-size-time=0 ! pose_wrapper_agg.sink_0 '
-            f'pose_wrapper_crop. ! {pose_inner} ! pose_wrapper_agg.sink_1 '
-            f'pose_wrapper_agg. ! queue name=pose_wrapper_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
-        )
+        # pose_wrapper ENTFERNT — Pose nutzt pose_inner direkt (ohne hailocropper)
+        # Offizielle Hailo-Pipeline macht es genauso: kein Cropper fuer Pose
 
         # --- Stage 3: Tracker + Face Cropper (face_align + ArcFace) ---
         tracker = (
@@ -1261,7 +1254,7 @@ class TappasPipeline:
             f'input-selector name=scrfd_sel ! '
             # Pose Valve-Branch
             f'tee name=pose_tee ! '
-            f'valve name=pose_valve drop=true ! {pose_wrapper} ! pose_sel.sink_0 '
+            f'valve name=pose_valve drop=true ! {pose_inner} ! pose_sel.sink_0 '
             f'input-selector name=pose_sel ! '
             # Tracker
             f'{tracker} ! '
@@ -1333,7 +1326,7 @@ class TappasPipeline:
         return Gst.PadProbeReturn.OK
 
     def _on_pre_overlay(self, pad, info, user_data):
-        """VOR hailooverlay: Pose-Duplikate entfernen, Landmarks auf YOLO-Person umhaengen."""
+        """VOR hailooverlay: YOLO-Person-Duplikate entfernen wenn Pose-Detection vorhanden."""
         buffer = info.get_buffer()
         if buffer is None:
             return Gst.PadProbeReturn.OK
@@ -1341,23 +1334,17 @@ class TappasPipeline:
             roi = hailo.get_roi_from_buffer(buffer)
             all_dets = roi.get_objects_typed(hailo.HAILO_DETECTION)
 
-            # YOLO-Persons sammeln (ohne Landmarks)
-            yolo_persons = [d for d in all_dets
+            # Pose-Persons haben Landmarks, YOLO-Persons nicht
+            pose_persons = [d for d in all_dets
                             if d.get_label() == "person"
-                            and not d.get_objects_typed(hailo.HAILO_LANDMARKS)]
+                            and d.get_objects_typed(hailo.HAILO_LANDMARKS)]
 
-            # Pose-Duplikate: person MIT Landmarks → Landmarks umhaengen, Detection entfernen
-            to_remove = []
-            for det in all_dets:
-                if det.get_label() == "person" and det.get_objects_typed(hailo.HAILO_LANDMARKS):
-                    landmarks = det.get_objects_typed(hailo.HAILO_LANDMARKS)
-                    if yolo_persons and landmarks:
-                        for lm in landmarks:
-                            yolo_persons[0].add_object(lm)
-                    to_remove.append(det)
-
-            for det in to_remove:
-                roi.remove_object(det)
+            # Wenn Pose aktiv: YOLO-Person-Duplikate entfernen (Pose-Detection behalten)
+            if pose_persons:
+                for det in all_dets:
+                    if (det.get_label() == "person"
+                            and not det.get_objects_typed(hailo.HAILO_LANDMARKS)):
+                        roi.remove_object(det)
 
         except Exception as e:
             self._overlay_err = getattr(self, '_overlay_err', 0) + 1
