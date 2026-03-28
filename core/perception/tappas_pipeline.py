@@ -86,6 +86,10 @@ FACE_BBOX_SHRINK_X = 1.0   # X-Achse: keine Korrektur noetig
 FACE_BBOX_SHRINK_Y = 0.50  # Y-Achse: 50% kleiner (Letterbox-Doppelkorrektur)
 FACE_BBOX_Y_ANCHOR_BOTTOM = 1.0   # Bottom-Kante fix (Kinn bleibt), nur oben kuerzen
 
+# --- Debug-Overlay: Dicke BBoxen + Landmarks fuer Snapshot-Analyse ---
+# True = dicke Linien im SHM-Frame (fuer Claude-Referenzbilder)
+DEBUG_THICK_OVERLAY = True
+
 # --- Hand Landmark (PoC, Full-Frame) ---
 HAND_HEF = "/mnt/moloch-data/hailo/models/hand_landmark_lite.hef"
 
@@ -1355,9 +1359,23 @@ class TappasPipeline:
             all_dets = roi.get_objects_typed(hailo.HAILO_DETECTION)
 
             # Pruefen ob Pose-Detection vorhanden
-            has_pose = any(d.get_label() == "person"
-                          and d.get_objects_typed(hailo.HAILO_LANDMARKS)
-                          for d in all_dets)
+            pose_dets = [d for d in all_dets
+                         if d.get_label() == "person"
+                         and d.get_objects_typed(hailo.HAILO_LANDMARKS)]
+            has_pose = len(pose_dets) > 0
+
+            # DEBUG: Pose-Detection Zaehler (alle 100 Frames)
+            self._pose_dbg = getattr(self, '_pose_dbg', 0) + 1
+            if self._pose_dbg % 100 == 1:
+                n_all = len(all_dets)
+                n_pose = len(pose_dets)
+                n_lm = 0
+                if pose_dets:
+                    lms = pose_dets[0].get_objects_typed(hailo.HAILO_LANDMARKS)
+                    if lms:
+                        n_lm = len(lms[0].get_points())
+                labels = [d.get_label() for d in all_dets]
+                logger.info(f"[POSE-DBG] dets={n_all} pose={n_pose} lm_pts={n_lm} labels={labels}")
 
             if has_pose:
                 # YOLO-Person entfernen (Pose-Person mit Landmarks bleibt)
@@ -1658,6 +1676,10 @@ class TappasPipeline:
 
         frame = data.reshape(height, width, 3)
 
+        # Debug-Overlay: Dicke BBoxen + Landmarks zeichnen
+        if DEBUG_THICK_OVERLAY:
+            frame = self._draw_thick_overlay(frame)
+
         # Thread-safe: annotiertes Frame speichern
         with self._lock:
             self._annotated_frame = frame
@@ -1666,6 +1688,45 @@ class TappasPipeline:
         self._write_shm_frame(frame)
 
         return Gst.FlowReturn.OK
+
+    def _draw_thick_overlay(self, frame):
+        """Dicke BBoxen + Landmarks auf Frame zeichnen (Debug-Visualisierung).
+
+        Liest self._detections (thread-safe) und zeichnet:
+        - Person: gruene BBox, dick
+        - Face: cyan BBox + Face-ID Text
+        - SCRFD-Landmarks: rote Punkte (Augen, Nase, Mundwinkel)
+        """
+        try:
+            h, w = frame.shape[:2]
+            out = frame.copy()
+            with self._lock:
+                dets = list(self._detections)
+
+            for d in dets:
+                x1 = int(d["bbox"][0] * w)
+                y1 = int(d["bbox"][1] * h)
+                x2 = int(d["bbox"][2] * w)
+                y2 = int(d["bbox"][3] * h)
+                label = d["class"]
+                conf = d.get("confidence", 0)
+
+                if label == "person":
+                    # Person: gruene BBox
+                    cv2.rectangle(out, (x1, y1), (x2, y2), (0, 255, 0), 3)
+                    cv2.putText(out, f"person {conf:.0%}", (x1, y1 - 8),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                elif label == "face":
+                    # Face: cyan BBox
+                    cv2.rectangle(out, (x1, y1), (x2, y2), (255, 255, 0), 3)
+                    fid = d.get("face_id", "?")
+                    sim = d.get("face_similarity", 0)
+                    cv2.putText(out, f"face {conf:.0%} {fid}({sim:.2f})", (x1, y1 - 8),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+
+            return out
+        except Exception:
+            return frame
 
     def _on_bus_message(self, bus, message):
         """GStreamer Bus Messages verarbeiten. Raeumt auf bei ERROR/EOS."""
