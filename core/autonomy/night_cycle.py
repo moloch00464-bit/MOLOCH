@@ -143,6 +143,20 @@ class NightCycle:
             result["steps"]["stats"] = {"error": str(e)}
             logger.error(f"[NIGHT] Tages-Statistiken: {e}")
 
+        # Schritt 4: LLM-Reflexion via Qwen2.5-1.5B auf NPU (nur wenn verfuegbar)
+        try:
+            from core.autonomy.local_llm_bridge import get_llm_bridge
+            bridge = get_llm_bridge()
+            if bridge and bridge._hailo_genai_available:
+                reflection = self._generate_llm_reflection(date, result)
+                result["steps"]["llm_reflection"] = reflection
+                logger.info(f"[NIGHT] LLM-Reflexion: {len(reflection.get('text', ''))} Zeichen")
+            else:
+                result["steps"]["llm_reflection"] = {"skipped": "hailo_genai nicht verfuegbar"}
+        except Exception as e:
+            result["steps"]["llm_reflection"] = {"error": str(e)}
+            logger.error(f"[NIGHT] LLM-Reflexion: {e}")
+
         # Ergebnis speichern
         result["end_time"] = time.time()
         result["duration_s"] = round(result["end_time"] - result["start_time"], 1)
@@ -166,6 +180,48 @@ class NightCycle:
             pass
 
         logger.info(f"[NIGHT] Tagesverarbeitung abgeschlossen ({result['duration_s']}s)")
+
+    def _generate_llm_reflection(self, date: str, cycle_result: Dict) -> Dict[str, Any]:
+        """Tages-Reflexion via Qwen2.5-1.5B auf NPU generieren und speichern."""
+        from core.autonomy.local_llm_bridge import get_llm_bridge
+        bridge = get_llm_bridge()
+
+        # Kontext aus Tages-Ergebnissen zusammenbauen
+        episodes = cycle_result.get("steps", {}).get("episodes", {})
+        stats = cycle_result.get("steps", {}).get("stats", {})
+        events = stats.get("event_counts", {})
+
+        prompt_lines = [f"Datum: {date}"]
+        if episodes.get("count"):
+            prompt_lines.append(f"Episoden heute: {episodes['count']}")
+        if events:
+            top = sorted(events.items(), key=lambda x: x[1], reverse=True)[:5]
+            prompt_lines.append("Haeufigste Ereignisse: " + ", ".join(f"{k}={v}" for k, v in top))
+
+        prompt = "\n".join(prompt_lines) + "\n\nFasse den Tag in 2-3 Saetzen zusammen."
+        system = (
+            "Du bist M.O.L.O.C.H., ein autonomes KI-System. "
+            "Reflektiere knapp ueber den vergangenen Tag. Deutsch, praegnant."
+        )
+
+        text = bridge.generate(prompt=prompt, system=system, max_tokens=256, use_local=True)
+
+        reflection = {
+            "date": date,
+            "text": text or "",
+            "provider": bridge._last_provider,
+        }
+
+        # Auf SSD2 speichern
+        try:
+            os.makedirs(RESULTS_PATH, exist_ok=True)
+            path = os.path.join(RESULTS_PATH, f"reflection_{date}.txt")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text or "(keine Antwort)")
+        except Exception as e:
+            logger.warning(f"[NIGHT] Reflexion speichern: {e}")
+
+        return reflection
 
     def _summarize_episodes(self, date: str) -> Dict[str, Any]:
         """Episodic Memory des Tages zusammenfassen."""

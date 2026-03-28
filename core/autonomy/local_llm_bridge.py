@@ -5,10 +5,11 @@ M.O.L.O.C.H. Local LLM Bridge — Gate 7
 Einheitliche Schnittstelle fuer lokale + Cloud LLM Reasoning.
 
 Prioritaet:
-  1. hailo-ollama (Qwen2.5-1.5B auf NPU, 8GB LPDDR4) — offline, schnell
-  2. DeepSeek API (Cloud) — online, guenstig
-  3. Claude API (Cloud) — online, Fallback
-  4. Stille — kein Crash, kein Fehler, nur keine Antwort
+  1. hailo_platform.genai.LLM (Qwen2.5-1.5B direkt auf NPU) — offline, 0 Pi-RAM
+  2. hailo-ollama / ollama (falls installiert) — offline, Fallback
+  3. DeepSeek API (Cloud) — online, guenstig
+  4. Claude API (Cloud) — online, Fallback
+  5. Stille — kein Crash, kein Fehler, nur keine Antwort
 
 WICHTIG: Lokales LLM erfordert Vision-Pipeline PAUSE!
 NPU kann nicht gleichzeitig Vision + LLM. Schicht-3-Architektur
@@ -26,7 +27,11 @@ from typing import Optional, Dict, Callable
 
 logger = logging.getLogger("LocalLLMBridge")
 
-# hailo-ollama Konfiguration
+# hailo_platform.genai.LLM — Qwen2.5-1.5B direkt auf NPU
+QWEN_HEF = "/usr/local/hailo/resources/models/hailo10h/Qwen2.5-1.5B-Instruct.hef"
+QWEN_TIMEOUT = 60  # Sekunden (1.5B braucht ~10s First-Token)
+
+# hailo-ollama / ollama Fallback
 OLLAMA_MODEL = "qwen2.5:1.5b"
 OLLAMA_HOST = "http://localhost:11434"
 OLLAMA_TIMEOUT = 30  # Sekunden
@@ -37,16 +42,36 @@ class LocalLLMBridge:
 
     def __init__(self):
         self._lock = threading.Lock()
+        self._hailo_genai_available: bool = False
         self._ollama_available: Optional[bool] = None
         self._vision_pause_callback: Optional[Callable] = None
         self._vision_resume_callback: Optional[Callable] = None
         self._last_provider: str = "none"
         self._request_count: int = 0
+        self._check_hailo_genai()
         self._check_ollama()
-        logger.info(f"[LLM-BRIDGE] Init — hailo-ollama={'JA' if self._ollama_available else 'NEIN'}")
+        logger.info(
+            f"[LLM-BRIDGE] Init — hailo_genai={'JA' if self._hailo_genai_available else 'NEIN'}"
+            f" ollama={'JA' if self._ollama_available else 'NEIN'}"
+        )
+
+    def _check_hailo_genai(self):
+        """Pruefen ob hailo_platform.genai.LLM verfuegbar ist."""
+        try:
+            from hailo_platform import genai as _genai  # noqa: F401
+            if not hasattr(_genai, "LLM"):
+                self._hailo_genai_available = False
+                return
+            if not os.path.exists(QWEN_HEF):
+                logger.warning(f"[LLM-BRIDGE] HEF nicht gefunden: {QWEN_HEF}")
+                self._hailo_genai_available = False
+                return
+            self._hailo_genai_available = True
+        except ImportError:
+            self._hailo_genai_available = False
 
     def _check_ollama(self):
-        """Pruefen ob hailo-ollama installiert und erreichbar ist."""
+        """Pruefen ob hailo-ollama oder ollama installiert ist."""
         try:
             result = subprocess.run(
                 ["which", "hailo-ollama"], capture_output=True, timeout=5)
@@ -55,7 +80,6 @@ class LocalLLMBridge:
                 return
         except Exception:
             pass
-        # Alternativ: ollama direkt
         try:
             result = subprocess.run(
                 ["which", "ollama"], capture_output=True, timeout=5)
@@ -91,25 +115,69 @@ class LocalLLMBridge:
         with self._lock:
             self._request_count += 1
 
-        # 1. Lokal (hailo-ollama) wenn verfuegbar UND gewuenscht
+        # 1. hailo_platform.genai.LLM (Qwen2.5 direkt auf NPU) — PAUSIERT VISION!
+        if use_local and self._hailo_genai_available:
+            result = self._generate_hailo_genai(prompt, system, max_tokens)
+            if result:
+                return result
+
+        # 2. hailo-ollama / ollama (falls installiert) — PAUSIERT VISION!
         if use_local and self._ollama_available:
             result = self._generate_local(prompt, system, max_tokens)
             if result:
                 return result
 
-        # 2. DeepSeek API (Cloud)
+        # 3. DeepSeek API (Cloud)
         result = self._generate_deepseek(prompt, system, max_tokens)
         if result:
             return result
 
-        # 3. Claude API (Fallback)
+        # 4. Claude API (Fallback)
         result = self._generate_claude(prompt, system, max_tokens)
         if result:
             return result
 
-        # 4. Stille
+        # 5. Stille
         self._last_provider = "stille"
         return None
+
+    def _generate_hailo_genai(self, prompt: str, system: str,
+                              max_tokens: int) -> Optional[str]:
+        """Qwen2.5-1.5B direkt via hailo_platform.genai.LLM. PAUSIERT VISION!"""
+        if not self._hailo_genai_available:
+            return None
+
+        llm = None
+        try:
+            # Vision pausieren — VDevice freigeben damit genai.LLM ihn nutzen kann
+            if self._vision_pause_callback:
+                logger.info("[LLM-BRIDGE] Vision pausieren fuer hailo_genai.LLM...")
+                self._vision_pause_callback()
+                time.sleep(2.0)  # GStreamer Pipeline teardown abwarten
+
+            from hailo_platform import genai as _genai
+            full_prompt = f"{system}\n\n{prompt}".strip() if system else prompt
+            llm = _genai.LLM(hef_path=QWEN_HEF)
+            output = llm.run(full_prompt, max_new_tokens=max_tokens)
+            self._last_provider = "hailo_genai"
+            text = output.strip() if isinstance(output, str) else str(output).strip()
+            logger.info(f"[LLM-BRIDGE] hailo_genai: {len(text)} Zeichen generiert")
+            return text or None
+
+        except Exception as e:
+            logger.warning(f"[LLM-BRIDGE] hailo_genai Fehler: {e}")
+            return None
+        finally:
+            # LLM-Objekt schliessen — VDevice freigeben
+            if llm is not None:
+                try:
+                    del llm
+                except Exception:
+                    pass
+            # Vision IMMER wieder starten
+            if self._vision_resume_callback:
+                logger.info("[LLM-BRIDGE] Vision nach hailo_genai fortsetzen...")
+                self._vision_resume_callback()
 
     def _generate_local(self, prompt: str, system: str,
                         max_tokens: int) -> Optional[str]:
@@ -201,6 +269,7 @@ class LocalLLMBridge:
 
     def get_status(self) -> Dict:
         return {
+            "hailo_genai_available": self._hailo_genai_available,
             "ollama_available": self._ollama_available,
             "last_provider": self._last_provider,
             "request_count": self._request_count,

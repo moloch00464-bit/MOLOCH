@@ -1167,6 +1167,13 @@ class MolochService:
         self._preference_learner = None
         try:
             self._llm_bridge = get_llm_bridge()
+            # Vision-Callbacks registrieren: LLM pausiert/resumet TAPPAS Pipeline
+            if self._llm_bridge and USE_TAPPAS and self._inference:
+                self._llm_bridge.set_vision_callbacks(
+                    pause_fn=self._inference.stop,
+                    resume_fn=lambda: self._inference.start(),
+                )
+                logger.info("[INIT] LLM Bridge: Vision-Callbacks registriert (stop/start TAPPAS)")
             self._tentacle_bridge = get_tentacle_bridge()
             self._preference_learner = get_preference_learner()
             logger.info("[INIT] Gate 7-10 Module bereit (LLM/Tentacle/Preferences)")
