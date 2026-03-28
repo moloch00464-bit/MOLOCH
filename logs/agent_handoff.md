@@ -1,169 +1,116 @@
 # M.O.L.O.C.H. Übergabeprotokoll
-**Datum:** 2026-03-28, 16:25 CET
-**Von:** Claude Opus 4.6 — Tracking + BBox + Landmark + NPU Valve Session
-**Service-Status:** LAEUFT (20 FPS, ArcFace 0.78+ @thresh=0.65, Audit PASS)
+**Datum:** 2026-03-28, 16:40 CET
+**Von:** Claude Opus 4.6 — Mega-Session: Tracking + BBox + Landmarks + NPU
+**Service-Status:** LAEUFT (20 FPS, ArcFace 0.78+ @thresh=0.65, stabil)
 **USE_TAPPAS:** 1 (aktiv)
 
 ---
 
-## ERLEDIGT IN DIESER SESSION (12 Tasks)
+## ERLEDIGT IN DIESER SESSION (16 Aenderungen)
 
-### 1. Tracking Gain-Tuning + BBox-Smoothing ✅
-- camera.py: TRACKING_GAIN_PAN 0.7→0.4, TILT 0.5→0.3, MAX_STEP 30→15/20→12
-- 3-Frame Error-Smoothing eingebaut (Ringbuffer in process_detection)
-- Deadzone war schon vorhanden (0.05)
-- Commit: `803780c`
+### Tracking-System komplett ueberarbeitet
+1. **Gain-Tuning** — camera.py: 0.7→0.4, MaxStep 30→15, 3-Frame BBox-Smoothing
+2. **Aggressives Tracking** — autonomous_tracker.py: pan_gain 0.65, tilt_gain 0.50, max_step 25/18, Speed 1.0, Cooldown 50ms, EMA 0.70
+3. **Dead-Zone Ping-Pong behoben** — frozen 30→20px, coast 40→25px, resume 35→50px (vorher nur 5px Differenz)
+4. **Gesicht-Zentrierung** — Y-Referenz 0.33→0.40 (naeher an Bildmitte)
+5. **Park-Position = Tuer** — camera_home.json + Defaults: Pan 50, Tilt -20
 
-### 2. FaceAttr + Pose FPS im Panel ✅
-- panel_models.py: ("FaceAttr", "faceattr") zu TAPPAS_MODELS
-- status_key_map: "faceattr": "faceattr_active"
-- FPS-Detail zeigt jetzt scrfd, arcface, yolov8m, faceattr, pose
-- Commit: `5710c08`
+### Hybrid-Tracking (MOLOCH + Kamera Smart-Tracking)
+6. **Smart-Tracking Freigabe** — camera_manager.py Gate-0-Lock entfernt, eWeLink Cloud-API
+7. **Hybride Logik** — Kein Face → ST bleibt an (Sensoren schneller). Face → MOLOCH uebernimmt
+8. **Auto-ST** — Wenn MOLOCH BBox 20 Cycles >35% off-center → ST einschalten
+9. **STMovementLearner** — Rohpositionen + Velocity-Aufzeichnung (deg/s)
 
-### 3. Park-Position = Tür ✅
-- camera_home.json: Pan 50.0, Tilt -20.0 (aus ONVIF-Preset moloch_tuer)
-- camera.py + camera_manager.py Defaults angepasst
-- Commits: `ba1d05e`, `7698e52`
+### BBox + Landmarks (DURCHBRUCH)
+10. **Face-BBox aus Landmarks** — SCRFD 5-Punkt Landmarks sind korrekt, BBox wird daraus berechnet. Alter SHRINK_Y=0.50 Hack ersetzt. Padding: pad_x=0.25, pad_top=-0.10, pad_bot=0.50
+11. **Landmark-Transformation** — Nach BBox-Resize werden Landmarks korrekt umgerechnet (bbox-relativ → Frame → neue bbox-relativ)
+12. **Pose-Skeleton Fix** — POSE_POSTPROCESS_FUNC: "filter"→"filter_letterbox", Skeleton war Y-gestaucht
 
-### 4. Tension-Popup Kontrast ✅
-- popup_npu_thresh.py: Tooltip-Farbe FG_DIM #666→#999 (besser lesbar)
-- Commit: `4d48d60`
-
-### 5. Smart-Tracking Freigabe via eWeLink ✅
-- camera_manager.py: Gate-0-Lock entfernt
-- toggle_smart_tracking() nutzt jetzt Cloud-API (smartTraceEnable=1/0)
-- Ein/Aus per IPC oder Panel-Button
-- Commit: `3e5eac2`
-
-### 6. Hybrid-Tracking: ST + MOLOCH ✅
-- **Kernlogik:** Kein Gesicht → Smart-Tracking bleibt an (Kamera-Sensoren schneller)
-- Face erkannt → MOLOCH uebernimmt fuer Praezisions-Tracking
-- Auto-ST: Wenn MOLOCH BBox 20 Cycles lang >35% off-center → ST einschalten
-- ST wird erst abgeschaltet wenn Kamera settled + Face erkannt
-- Commits: `80e4795`, `80117bb`
-
-### 7. Aggressives Tracking (Vollgas) ✅
-- autonomous_tracker.py: pan_gain 0.65, tilt_gain 0.50, max_step 25/18
-- Speed 1.0, Cooldown 50ms, EMA alpha 0.70
-- Dead-Zone: frozen<20px, coast<25px, resume>50px (kein Ping-Pong mehr)
-- Commits: `18d3bc7`, `3093668`, `20de79d`
-
-### 8. STMovementLearner erweitert ✅
-- Rohpositionen aufzeichnen (Ringbuffer 500)
-- Pan/Tilt Geschwindigkeiten berechnen (deg/s)
-- get_learned_dynamics(): avg/max/median Velocity
-- Commit: `df24943`
-
-### 9. Gesicht-Zentrierung Y-Referenz ✅
-- frame_center_y: 0.33→0.40 (Gesicht naeher an Bildmitte statt oberes Drittel)
-- Commit: `20de79d`
-
-### 10. Face-BBox aus Landmarks berechnet ✅ (DURCHBRUCH!)
-- **Alter SHRINK_Y=0.50 Hack ersetzt** durch landmark-basierte BBox
-- SCRFD liefert 5 Landmarks (Augen, Nase, Mundwinkel) — die sind KORREKT
-- BBox wird jetzt aus Landmark-Extremen + Padding berechnet
-- Padding: 25% X, 10% oben (Stirn), 50% unten (Kinn)
-- Landmarks werden korrekt auf neue BBox umgerechnet (bbox-relativ → Frame → neue bbox-relativ)
-- ArcFace Similarity: 0.25→0.78+ (vorher kaputt wegen falscher Landmarks)
-- Commits: `bf9d06b`, `41c7d92`, `354ac27`, `559b54c`, `a88473f`, `bfbb1fa`
-
-### 11. Pose-Skeleton Letterbox-Fix ✅
-- POSE_POSTPROCESS_FUNC: "filter"→"filter_letterbox"
-- Skeleton war auf Y gestaucht (Schultern auf Huefthoehe)
-- Jetzt korrekte Koerperproportionen
-- Commit: `d573f44`
-
-### 12. BBox Doppelte Letterbox — Ursache verstanden ✅
-- Versuch "filter" statt "filter_letterbox" → GESCHEITERT (alles kaputt)
-- Grund: hailoaggregator macht create_flattened_bbox() nochmal wenn scaling_bbox nicht cleared
-- **Richtige Loesung:** _letterbox Postprocess BEHALTEN, BBox aus Landmarks ableiten
-- Revert: `a396aa5`
-
-### 13. NPU/MPO Popup aktualisiert ✅
-- Pose: False→True (laeuft in Pipeline)
-- Person-ReID: NEU hinzugefuegt
-- ArcFace Default: 0.6→0.65
-- Commit: `ee12677`
-
-### 14. ReID + Hand Valve-Gating freigeschaltet ✅
-- tappas_pipeline.py: reid_needed/hand_needed nicht mehr hardcoded False
-- Scheduler entscheidet dynamisch je nach Szenario (FERN/RUECKEN/MULTI)
-- model_orchestrator.py: person_reid in active_map + key-mapping reid
-- moloch_service.py: person_reid_active im Status-Dict
-- Panel-Checkbox funktioniert jetzt
-- Commits: `74769c2`, `dacc4ef`, `c675094`
-
-### 15. ArcFace Enrollment erfolgreich ✅
-- Live-Enrollment via IPC (15 Frames, frontal)
-- Similarity 0.78-0.93 (vorher 0.25 nach BBox-Aenderung)
-- Threshold von 0.55 auf 0.65 angehoben
+### NPU + Panel
+13. **ArcFace Threshold** — settings.json: 0.55→0.65 (Similarity jetzt 0.78-0.93)
+14. **ArcFace Enrollment** — Live-Enrollment 15 Frames frontal, 0.93 Similarity
+15. **Panel FaceAttr** — TAPPAS_MODELS + status_key_map + FPS-Detail
+16. **NPU Popup korrigiert** — Modelle zeigen echten Status (AKTIV/INAKTIV)
 
 ---
 
-## KRITISCH: SEGV Regel (IMMER GUELTIG!)
-- bbox.ymin()/xmin() auf Pose-Detections → SEGV nach ~50s
-- Gilt fuer _on_buffer UND _on_pre_overlay
+## KRITISCHE REGELN (IMMER GUELTIG!)
+
+### SEGV-Regel
+- `bbox.ymin()/xmin()` auf Pose-Detections → SEGV nach ~50s
 - NIEMALS bbox.*() auf Detections mit HAILO_LANDMARKS
 - Sicher: get_label(), get_confidence(), get_objects_typed()
 
----
+### Valve-Crash (cv2::resize)
+- ReID + Hand Valve kann NICHT zur Laufzeit geoeffnet werden
+- Crash: `cv2::resize Assertion failed !ssize.empty()` in kompiliertem SO
+- Betrifft: librepvgg_reid_postprocess.so, hand_landmark SO
+- Ursache: SO bekommt leeren Frame beim Valve-Wechsel
+- **reid_needed = False, hand_needed = False** in tappas_pipeline.py ~Zeile 1569
+- Fix erfordert: Pipeline-String Aenderung (videoscale vor SO) oder TAPPAS-SO Update
 
-## BEKANNTE OFFENE PROBLEME
-
-### 1. Landmark-Flackern bei Kamerabewegung
-- ST bewegt Kamera dauerhaft → Landmarks springen leicht
-- Fix: Hysterese in ST/MOLOCH-Umschaltung (Face muss N Frames fehlen bevor ST uebernimmt)
-- Status: NICHT IMPLEMENTIERT
-
-### 2. Kamera Hot-Plug (aus CLAUDE.md)
-- Stecker raus → nur Reboot hilft
-- Status: OFFEN
-
-### 3. ArcFace Threshold
-- Aktuell 0.55, Similarity jetzt 0.78+ → Threshold KANN hoch auf 0.65+
-- Aber: Neu-Enrollment empfohlen weil BBox-Berechnung sich geaendert hat
-- Status: OFFEN (Threshold erhoehen nach Enrollment)
+### BBox Doppelte Letterbox
+- filter_letterbox/scrfd_10g_letterbox MUESSEN bleiben (entfernen = alles kaputt)
+- hailocropper internal-offset=true MUSS bleiben
+- Face-BBox wird in Python aus Landmarks berechnet (kompensiert Doppelkorrektur)
+- Pose nutzt filter_letterbox (korrigiert Skeleton-Skalierung)
 
 ---
 
-## AUFGABEN NAECHSTE SESSION
+## OFFENE PROBLEME
 
-### PRIO 1: Landmark-Flackern reduzieren
-- Hysterese: Face muss 5+ Frames fehlen bevor ST uebernimmt
-- EMA-Smoothing auf Landmark-Positionen (nicht nur BBox-Center)
+### 1. ReID + Hand Valve-Crash (BLOCKER fuer diese Modelle)
+- HEFs geladen im NPU-RAM, Valves geschlossen
+- Auch permanentes Oeffnen crasht (nicht nur dynamisches Schalten)
+- Moegliche Loesungen:
+  a) videoscale/videoconvert VOR dem SO im Pipeline-String
+  b) Initial-Frame durch Valve schicken bevor SO aktiv wird
+  c) TAPPAS SO Update abwarten
+- Dateien: core/perception/tappas_pipeline.py (Pipeline-String ~Zeile 1150-1170)
+
+### 2. Landmark-Flackern bei Kamerabewegung
+- ST bewegt Kamera → Landmarks springen
+- Fix: Hysterese in ST/MOLOCH-Umschaltung (Face muss N Frames fehlen)
 - Datei: core/mpo/autonomous_tracker.py (_should_moloch_track)
 
-### PRIO 2: ArcFace Neu-Enrollment
-- Alte Embeddings passen nicht optimal zur neuen landmark-basierten BBox
-- IPC: enrollment_start mit ~20 Frames
-- Danach Threshold auf 0.65+ hoch
-
-### PRIO 3: Face-BBox Padding feintunen
-- Aktuell: pad_top=-0.10, pad_bot=0.50, pad_x=0.25
+### 3. Face-BBox Padding Feintuning
+- Aktuell: pad_x=0.25, pad_top=-0.10, pad_bot=0.50
 - Evtl. noch anpassen nach visuellem Feedback
+- Datei: core/perception/tappas_pipeline.py ~Zeile 1435
 
-### PRIO 4: Verbleibende Gate-1 Tasks
-- G1-T03: Auto-Resume aus Manuell + Spruch
-- RTSP-Reconnect (Hot-Plug Bug)
-- Dev-Tools: gst_lint.py, config_guard.py, valve_test.py, baseline_capture.py
+### 4. ArcFace Instabilitaet bei Kamerabewegung
+- Similarity schwankt 0.43-0.93 je nach Kamera-Winkel/Bewegung
+- Frontal: 0.93, seitlich/bewegt: 0.43
+- Fix: Mehr Enrollment-Winkel ODER Threshold auf 0.50 senken
 
 ---
 
 ## SYSTEM-ZUSTAND
-FPS:            20 (stabil)
-NPU RAM:        ~55MB / 8192MB (<1%)
-ArcFace:        0.78+ Similarity (DEUTLICH BESSER als vorher 0.63)
-Tracking:       Hybrid ST+MOLOCH, Error 6-24px
-Pose:           Skeleton korrekt skaliert (Letterbox-Fix)
-Face-Landmarks: Korrekt positioniert (Augen, Nase, Mund)
-Face-BBox:      Aus Landmarks berechnet (kein Shrink-Hack mehr)
-Smart-Tracking: Via eWeLink freigeschaltet, Hybrid-Logik aktiv
 
-## GEAENDERTE DATEIEN DIESE SESSION
-- core/hardware/camera.py (Gains, Smoothing, Home-Position)
-- core/camera_manager.py (ST Toggle, Home-Default)
-- core/gui/panel_models.py (FaceAttr, Pose FPS)
-- core/gui/popups/popup_npu_thresh.py (Tooltip-Kontrast)
-- core/mpo/autonomous_tracker.py (Gains, Hybrid-ST, STMovementLearner, Zentrierung)
-- core/perception/tappas_pipeline.py (Face-BBox aus Landmarks, Pose Letterbox-Fix)
-- config/camera_home.json (Tuer-Position)
+```
+FPS:              20 (stabil)
+NPU RAM:          ~55MB / 8192MB (<1%)
+Aktive Modelle:   SCRFD, ArcFace, YOLOv8m, FaceAttr, Pose (5 von 7)
+Inaktive Modelle: Person-ReID, Hand Landmark (Valve-Crash)
+ArcFace:          0.78+ Similarity @thresh=0.65
+Tracking:         Hybrid ST+MOLOCH, Error 6-24px
+Smart-Tracking:   Via eWeLink freigeschaltet
+Pose-Skeleton:    Korrekt skaliert (Letterbox-Fix)
+Face-Landmarks:   Korrekt positioniert (Augen, Nase, Mund)
+Face-BBox:        Aus Landmarks berechnet
+```
+
+## GEAENDERTE DATEIEN
+
+| Datei | Aenderungen |
+|-------|-------------|
+| core/hardware/camera.py | Gains, Smoothing, Home-Position |
+| core/camera_manager.py | ST Toggle freigeschaltet, Home-Default |
+| core/gui/panel_models.py | FaceAttr, Pose FPS |
+| core/gui/popups/popup_npu_thresh.py | Modelle aktualisiert, ehrlicher Status |
+| core/mpo/autonomous_tracker.py | Gains, Hybrid-ST, Learner, Zentrierung, Dead-Zone |
+| core/perception/tappas_pipeline.py | Face-BBox aus Landmarks, Pose Letterbox, Valve-Status |
+| core/model_orchestrator.py | person_reid in active_map |
+| core/moloch_service.py | person_reid_active im Status-Dict |
+| config/camera_home.json | Tuer-Position (50, -20) |
+| config/settings.json | ArcFace Threshold 0.65 |
