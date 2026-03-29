@@ -219,6 +219,42 @@ def _detect_search_intent(text: str) -> Optional[str]:
     return None
 
 
+def _detect_search_permission(text: str) -> Optional[str]:
+    """Erkennt Erlaubnis/Verbot fuer autonome Internet-Suche.
+
+    Returns: 'grant' bei Erlaubnis, 'revoke' bei Verbot, None sonst.
+    """
+    tl = text.lower().strip()
+
+    # Erlaubnis-Muster
+    grant_patterns = [
+        r"du\s+darfst\s+(?:jetzt\s+)?(?:ins?\s+)?(?:netz|internet|online)",
+        r"geh\s+(?:mal\s+)?(?:ins?\s+)?(?:netz|internet|online)",
+        r"(?:schau|such)\s+(?:mal\s+)?(?:autonom|selbst|eigenst[aä]ndig)",
+        r"autonome?\s+suche\s+(?:an|ein|aktivier)",
+        r"du\s+kannst\s+(?:jetzt\s+)?(?:ins?\s+)?(?:netz|internet)",
+        r"internet\s+(?:an|ein|frei)",
+    ]
+    for p in grant_patterns:
+        if re.search(p, tl):
+            return "grant"
+
+    # Verbots-Muster
+    revoke_patterns = [
+        r"(?:bleib|geh)\s+(?:mal\s+)?offline",
+        r"kein\s+internet\s+mehr",
+        r"nicht\s+(?:mehr\s+)?(?:ins?\s+)?(?:netz|internet|online)",
+        r"autonome?\s+suche\s+(?:aus|stop|deaktiv|ab)",
+        r"h[oö]r\s+auf\s+zu\s+suchen",
+        r"internet\s+(?:aus|stop)",
+    ]
+    for p in revoke_patterns:
+        if re.search(p, tl):
+            return "revoke"
+
+    return None
+
+
 def _clean_query(raw: str) -> str:
     """Suchbegriff bereinigen: Fuellwoerter weg, Laenge begrenzen."""
     import re as _re
@@ -301,6 +337,44 @@ def _perception_to_text() -> str:
             if dur > 60:
                 mins = int(dur // 60)
                 lines.append(f"Anwesend seit: {mins} Min")
+
+        # Kameraposition + Blickrichtung (aus Status-JSON)
+        try:
+            import json as _json
+            _status_raw = open("/dev/shm/moloch_status.json").read()
+            _status = _json.loads(_status_raw)
+            ptz = _status.get("ptz", {})
+            pan = ptz.get("current_pan")
+            tracker_state = ptz.get("tracker_state", "")
+            arbiter_mode = _status.get("ptz_arbiter_mode", "")
+
+            # Pan-Winkel → Raumzone (kalibriert auf Sonoff CAM-PT2, Pan invertiert)
+            if pan is not None:
+                if -25 <= pan <= 25:
+                    zone_name = "Tuer/Eingang"
+                elif 25 < pan <= 110:
+                    zone_name = "Schreibtisch/Arbeitsbereich"
+                elif pan > 110:
+                    zone_name = "Wohnzimmer/rechts"
+                elif -110 <= pan < -25:
+                    zone_name = "Werkstatt/links"
+                else:
+                    zone_name = f"Pan {pan:.0f}°"
+                lines.append(f"Blickrichtung: {zone_name}")
+
+            # Tracker-Zustand
+            if tracker_state == "tracking":
+                lines.append("Kamera: verfolgt Ziel aktiv")
+            elif tracker_state == "searching":
+                lines.append("Kamera: sucht aktiv")
+            elif tracker_state == "idle":
+                lines.append("Kamera: ruhig/geparkt")
+
+            # Arbiter-Modus
+            if arbiter_mode == "moloch_manuell":
+                lines.append("Steuerung: Markus kontrolliert die Kamera")
+        except Exception:
+            pass
 
         if not lines:
             return ""
@@ -618,6 +692,18 @@ class VoicePipeline:
 
         # Init
         self._init_deepseek()
+
+        # Autonome Suche: TTS-Subscriber fuer Ergebnisse
+        try:
+            from core.moloch_event_bus import get_event_bus
+            get_event_bus().subscribe(
+                "autonomous_search.result",
+                self._on_autonomous_search_result,
+                priority=5,
+            )
+        except Exception:
+            pass
+
         logger.info(f"[VOICE] Pipeline init: deepseek={self._claude_available}, "
                     f"piper={self._piper_available}, voice={self._current_voice}")
 
@@ -1108,6 +1194,27 @@ class VoicePipeline:
                 self._speak(spotify_response)
             self._whisper_status = "Idle"
             return
+
+        # 1.7 Autonome Suche Erlaubnis (VOR Cloud API)
+        permission_cmd = _detect_search_permission(text)
+        if permission_cmd:
+            try:
+                from core.net.autonomous_search import get_autonomous_search
+                searcher = get_autonomous_search()
+                if permission_cmd == "grant":
+                    searcher.grant_permission()
+                    response = "Verstanden. Ich schaue mich mal um im Netz."
+                else:
+                    searcher.revoke_permission()
+                    response = "Alles klar, ich bleibe offline."
+                logger.info(f"[VOICE] Search permission: {permission_cmd}")
+                self._emit_message("MOLOCH", response)
+                if self._voice_enabled:
+                    self._speak(response)
+                self._whisper_status = "Idle"
+                return
+            except Exception as e:
+                logger.error(f"[VOICE] Search permission fehlgeschlagen: {e}")
 
         # STUFE 3: Claude API in SEPARATEM Thread (blockiert NICHT Stufe 1+2)
         self._whisper_status = "Idle"  # Stufe 1+2 fertig, Pipeline frei
@@ -1668,6 +1775,27 @@ class VoicePipeline:
             self._whisper_status = "Idle"
             return
 
+        # Autonome Suche Erlaubnis (VOR Cloud API)
+        permission_cmd = _detect_search_permission(text)
+        if permission_cmd:
+            try:
+                from core.net.autonomous_search import get_autonomous_search
+                searcher = get_autonomous_search()
+                if permission_cmd == "grant":
+                    searcher.grant_permission()
+                    response = "Verstanden. Ich schaue mich mal um im Netz."
+                else:
+                    searcher.revoke_permission()
+                    response = "Alles klar, ich bleibe offline."
+                logger.info(f"[VOICE] Search permission (text): {permission_cmd}")
+                self._emit_message("MOLOCH", response)
+                if self._voice_enabled:
+                    self._speak(response)
+                self._whisper_status = "Idle"
+                return
+            except Exception as e:
+                logger.error(f"[VOICE] Search permission fehlgeschlagen: {e}")
+
         # STUFE 3: Claude API in SEPARATEM Thread (blockiert NICHT Stufe 1+2)
         self._whisper_status = "Idle"  # Stufe 1+2 fertig, Pipeline frei
         api_thread = threading.Thread(
@@ -1761,6 +1889,35 @@ class VoicePipeline:
         finally:
             with self._api_lock:
                 self._api_in_flight = False
+
+    # =========================================================================
+    # Autonome Suche — TTS Ergebnis-Handler
+    # =========================================================================
+
+    def _on_autonomous_search_result(self, event: Dict):
+        """Autonome Suchergebnisse via TTS ankuendigen.
+
+        Nur wenn speak=True im Payload und kein API-Call laeuft.
+        """
+        try:
+            payload = event.get("payload", {})
+            if not payload.get("speak"):
+                return
+            # Nicht unterbrechen wenn Gespraech laeuft
+            with self._api_lock:
+                if self._api_in_flight:
+                    logger.debug("[VOICE] Suchergebnis zurueckgehalten (API laeuft)")
+                    return
+            summary = payload.get("summary", "")
+            source = payload.get("source", "Web")
+            if not summary:
+                return
+            text = f"Ich habe etwas gefunden. Laut {source}: {summary[:150]}"
+            self._emit_message("MOLOCH", text)
+            if self._voice_enabled:
+                self._speak(text)
+        except Exception as e:
+            logger.error(f"[VOICE] Search result TTS fehlgeschlagen: {e}")
 
     # =========================================================================
     # Piper TTS
