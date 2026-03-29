@@ -1,7 +1,7 @@
 {
   "version": 1,
   "thresholds": {
-    "scrfd_conf": 0.4,
+    "scrfd_conf": 0.5,
     "scrfd_nms": 0.45,
     "arcface_thresh": 0.65,
     "yolo_conf": 0.5,
