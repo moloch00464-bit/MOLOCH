@@ -236,6 +236,17 @@ class TalkChatModule:
             command=self._toggle_voice_output,
         ).pack(side=tk.LEFT, padx=5)
 
+        # LLM-Provider Laempchen: NPU (lokal) | API (Cloud)
+        self._lbl_llm_api = tk.Label(
+            row, text="\u25CF API", fg=FG_DIM, bg=BG_FRAME, font=FONT_SMALL,
+        )
+        self._lbl_llm_api.pack(side=tk.RIGHT, padx=(2, 5))
+
+        self._lbl_llm_npu = tk.Label(
+            row, text="\u25CF NPU", fg=FG_DIM, bg=BG_FRAME, font=FONT_SMALL,
+        )
+        self._lbl_llm_npu.pack(side=tk.RIGHT, padx=2)
+
     def _toggle_voice_output(self):
         """Voice Output umschalten."""
         enabled = self._voice_enabled.get()
@@ -302,6 +313,18 @@ class TalkChatModule:
                 voice_on = voice.get("voice_enabled", False)
                 if self._voice_enabled.get() != voice_on:
                     self._voice_enabled.set(voice_on)
+
+                # LLM-Provider Laempchen aktualisieren
+                llm = status.get("llm_provider", "none")
+                if llm.startswith("lokal"):
+                    self._lbl_llm_npu.config(fg=ACCENT_GREEN)   # Gruen = NPU aktiv
+                    self._lbl_llm_api.config(fg=FG_DIM)
+                elif llm.startswith("api"):
+                    self._lbl_llm_npu.config(fg=FG_DIM)
+                    self._lbl_llm_api.config(fg=STATUS_YELLOW)  # Gelb = Cloud
+                else:
+                    self._lbl_llm_npu.config(fg=FG_DIM)
+                    self._lbl_llm_api.config(fg=FG_DIM)         # Grau = offline
         except Exception:
             pass  # Polling darf NIEMALS sterben
 
