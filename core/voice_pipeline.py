@@ -1369,8 +1369,17 @@ class VoicePipeline:
         except Exception as e:
             logger.debug(f"[VOICE] Lokales LLM nicht verfuegbar: {e}")
 
+        # Provider-Tracking: LLM-Bridge informieren welcher Provider genutzt wird
+        def _update_provider(name: str):
+            try:
+                from core.autonomy.local_llm_bridge import get_llm_bridge
+                get_llm_bridge()._last_provider = name
+            except Exception:
+                pass
+
         if local_text and len(local_text) > 5:
             text = local_text
+            _update_provider("lokal_qwen")
         else:
             # STUFE 3: DeepSeek API Call — Timeout 15s, kein Retry
             try:
@@ -1392,8 +1401,10 @@ class VoicePipeline:
                 )
                 r.raise_for_status()
                 text = r.json()["choices"][0]["message"]["content"].strip()
+                _update_provider("api_deepseek")
             except Exception as e:
                 logger.error(f"[VOICE] DeepSeek API Fehler: {e}")
+                _update_provider("stille")
                 with self._lock:
                     if self._conversation and self._conversation[-1].get("role") == "user":
                         self._conversation.pop()
@@ -1889,6 +1900,12 @@ class VoicePipeline:
         finally:
             with self._api_lock:
                 self._api_in_flight = False
+            # LLM-Indikator zuruecksetzen — Gespraechsturn beendet
+            try:
+                from core.autonomy.local_llm_bridge import get_llm_bridge
+                get_llm_bridge()._last_provider = "none"
+            except Exception:
+                pass
 
     # =========================================================================
     # Autonome Suche — TTS Ergebnis-Handler
