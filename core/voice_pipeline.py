@@ -405,16 +405,43 @@ def _load_capabilities_block() -> str:
         # Gates
         for gid, info in caps.get("gates", {}).items():
             lines.append(f"- {gid}: {info.get('name', '?')} [{info.get('status', '?')}] ({info.get('modules_available', 0)}/{info.get('modules_total', 0)} Module)")
-        # Hardware
+        # Hardware (kompatibel mit altem + neuem Format)
         hw = caps.get("hardware", {})
         if hw:
-            lines.append(f"- CPU: {hw.get('cpu_model', '?')}, RAM: {hw.get('ram_gb', '?')} GB")
-            lines.append(f"- Hailo NPU: {'verfuegbar' if hw.get('hailo_device') else 'nicht gefunden'}")
-        # Aktive NPU-Modelle
-        npu = [m for m in caps.get("npu_models", []) if m.get("active_in_pipeline")]
-        if npu:
-            names = ", ".join(m.get("description", m.get("name", "?")) for m in npu)
+            # Neues Format (capability_monitor v1.1): hardware.brain.device
+            brain = hw.get("brain", {})
+            cpu = brain.get("device", hw.get("cpu_model", "?"))
+            ram = brain.get("ram_gb", hw.get("ram_gb", "?"))
+            lines.append(f"- CPU: {cpu}, RAM: {ram} GB")
+            npu_info = hw.get("npu", {})
+            npu_online = npu_info.get("online", hw.get("hailo_device", False))
+            lines.append(f"- Hailo NPU: {'verfuegbar' if npu_online else 'nicht gefunden'}")
+            if hw.get("kuehlung"):
+                lines.append(f"- Kuehlung: {hw['kuehlung']}")
+            if hw.get("stromversorgung"):
+                lines.append(f"- Stromversorgung: {hw['stromversorgung']}")
+            # Lokale LLM-Modelle aus hardware.local_llm
+            llm_hw = hw.get("local_llm", {})
+            if llm_hw.get("hailo_ollama_installed"):
+                for m in llm_hw.get("models", []):
+                    lines.append(f"- Lokales LLM ({m.get('rolle', '?')}): {m.get('name', '?')} — {m.get('beschreibung', '?')}")
+                lines.append("- WICHTIG: Du kannst jetzt LOKAL denken, ohne Cloud! Dein eigenes Gehirn auf der NPU!")
+        # Aktive NPU-Modelle (altes Format)
+        npu_models = [m for m in caps.get("npu_models", []) if m.get("active_in_pipeline")]
+        if npu_models:
+            names = ", ".join(m.get("description", m.get("name", "?")) for m in npu_models)
             lines.append(f"- Aktive NPU-Pipeline: {names}")
+        # Aktive Vision-Modelle (neues Format)
+        vision = [m for m in caps.get("vision_models", []) if m.get("active")]
+        if vision and not npu_models:
+            names = ", ".join(m.get("task", m.get("name", "?")) for m in vision)
+            lines.append(f"- Aktive NPU-Pipeline: {names}")
+        # Lokale LLM-Modelle (altes Format, Top-Level)
+        llm = caps.get("local_llm", {})
+        if llm.get("hailo_ollama") and not hw.get("local_llm"):
+            for m in llm.get("models", []):
+                lines.append(f"- Lokales LLM ({m.get('rolle', '?')}): {m.get('name', '?')} — {m.get('beschreibung', '?')}")
+            lines.append("- WICHTIG: Du kannst jetzt LOKAL denken, ohne Cloud! Dein eigenes Gehirn auf der NPU!")
         # Voice-Modelle
         voices = caps.get("voice_models", [])
         if voices:

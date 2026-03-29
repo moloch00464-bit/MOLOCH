@@ -28,6 +28,11 @@ core/audio/                                    — Audio Subsystem
 - Spotify: spotifyd Service, Track-Index in /mnt/moloch-data/memory/spotify/
 - Spotify API NUR fuer Playback, lokaler Index ist EINZIGE Quelle
 - Claude API: System-Prompt mit Memory-Kontext angereichert
+- Lokale LLMs (hailo-ollama auf Port 8000, NEU seit 2026-03-29):
+  - qwen2.5-instruct:1.5b — Kommunikation/Konversation auf Deutsch
+  - deepseek_r1_distill_qwen:1.5b — Internes Reasoning/Selbstdiagnose
+  - Fallback-Kette: Lokal (NPU) → DeepSeek API → Claude API → Stille
+  - ACHTUNG: Lokales LLM pausiert Vision fuer 5-10s (NPU VDevice-Konflikt)
 
 ## Bekannte Bugs in deinem Bereich
 - Silence-Level Sensor fehlt (Gate 1 Task G1-T07)

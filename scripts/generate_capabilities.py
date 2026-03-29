@@ -217,6 +217,23 @@ def check_hardware() -> dict:
         except Exception:
             hw[name] = None
 
+    # Kuehlung und Stromversorgung
+    hw["kuehlung"] = "Noctua NF-A2x20 PWM (30% reicht fuer 48\u00b0C unter Volllast)"
+    hw["stromversorgung"] = "Pico Power 5 USV mit 7.5V Akku (Schutz vor Stromausfall)"
+
+    # Lokale LLM-Modelle (hailo-ollama)
+    import shutil
+    hw["local_llm"] = {
+        "hailo_ollama_installed": shutil.which("hailo-ollama") is not None,
+        "port": 8000,
+        "models": [
+            {"name": "qwen2.5-instruct:1.5b", "rolle": "Kommunikation",
+             "beschreibung": "Lokales Sprachmodell fuer Konversation auf Deutsch"},
+            {"name": "deepseek_r1_distill_qwen:1.5b", "rolle": "Reasoning",
+             "beschreibung": "Lokales Denkmodell fuer Selbstdiagnose und Logik"},
+        ],
+    }
+
     return hw
 
 

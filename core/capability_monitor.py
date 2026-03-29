@@ -178,8 +178,25 @@ class CapabilityMonitor:
             "audio_input": self._check_audio_input(),
             "audio_output": "HDMI-1 via PipeWire",
             "storage": self._check_storage(),
+            "kuehlung": "Noctua NF-A2x20 PWM (30% reicht fuer 48°C unter Volllast)",
+            "stromversorgung": "Pico Power 5 USV mit 7.5V Akku (Schutz vor Stromausfall)",
+            "local_llm": self._check_local_llm(),
         }
         return hw
+
+    def _check_local_llm(self) -> dict:
+        """Prueft ob hailo-ollama laeuft und welche LLM-Modelle verfuegbar sind."""
+        import shutil
+        info = {
+            "hailo_ollama_installed": shutil.which("hailo-ollama") is not None,
+            "models": [
+                {"name": "qwen2.5-instruct:1.5b", "rolle": "Kommunikation",
+                 "beschreibung": "Lokales Sprachmodell fuer Konversation auf Deutsch"},
+                {"name": "deepseek_r1_distill_qwen:1.5b", "rolle": "Reasoning",
+                 "beschreibung": "Lokales Denkmodell fuer Selbstdiagnose und Logik"},
+            ],
+        }
+        return info
 
     def _check_npu(self) -> dict:
         """Hailo NPU erreichbar?"""

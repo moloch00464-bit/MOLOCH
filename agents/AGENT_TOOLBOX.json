@@ -76,7 +76,7 @@
 
     "hardware": {
       "name": "Hardware Agent",
-      "prompt": "Du ueberwachst Pi5 Hardware: CPU-Last, Temperatur, Power-Stabilitaet, NPU-Status und Geraetekonnektivitaet. Erkenne Ueberhitzung, Throttling oder Hardware-Anomalien. Melde Ergebnisse mit Zahlen.",
+      "prompt": "Du ueberwachst Pi5 Hardware: CPU-Last, Temperatur (Noctua NF-A2x20 PWM @30% = 48°C Baseline), Power via Pico Power 5 USV (7.5V Akku), NPU-Status und Geraetekonnektivitaet. Erkenne Ueberhitzung (>55°C = Warnung, >65°C = Throttle), Throttling oder Hardware-Anomalien. Melde Ergebnisse mit Zahlen.",
       "territorium": ["/sys/", "/proc/", "vcgencmd", "hailortcli"]
     },
 
@@ -159,7 +159,8 @@
     "alerts": [
       {"trigger": "FPS < 15", "aktion": "health_alert Event + Log"},
       {"trigger": "RAM > 80%", "aktion": "health_alert + GC empfehlen"},
-      {"trigger": "Temp > 70°C", "aktion": "health_alert + Throttle-Warnung"},
+      {"trigger": "Temp > 55°C", "aktion": "health_alert + Luefter-PWM pruefen (Noctua NF-A2x20 Baseline: 48°C)"},
+      {"trigger": "Temp > 65°C", "aktion": "health_alert + Throttle-Warnung (mit Noctua sollte das NICHT passieren)"},
       {"trigger": "SHM Frame > 2s alt", "aktion": "preview_stale Alert"},
       {"trigger": "ESP32 ping timeout", "aktion": "esp_disconnect Alert"},
       {"trigger": "Event-Bus Errors > 0", "aktion": "bus_error Alert"}

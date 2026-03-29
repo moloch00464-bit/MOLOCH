@@ -17,6 +17,14 @@ config/hardware_autonomy.json                  — Autonomie-Config
 ```
 
 ## Dein Wissen
+
+### Kuehlung & Stromversorgung (NEU seit 2026-03-29)
+- Noctua NF-A2x20 PWM Luefter: Bei 30% Leistung haelt er CPU bei 48°C unter Volllast (Load 5.3)
+- Pico Power 5 USV: 7.5V Akku-Versorgung, schuetzt vor Stromausfall
+- Fan-Kurve (moloch-fan.service): Level 1 @50°C, Level 2 @55°C, Level 3 @65°C, Level 4 @75°C
+- Alte Baseline OHNE Kuehlung war 72°C — jetzt 48°C dank Noctua
+
+### Kamera & PTZ
 - Sonoff CAM-PT2: 192.168.178.25, RTSP 1920x1080 @20fps, ONVIF PTZ
 - Pan ist INVERTIERT: positiver Pan-Wert = physisch LINKS
 - Pan range: -168.4 (LINKS) bis 174.4 (RECHTS)

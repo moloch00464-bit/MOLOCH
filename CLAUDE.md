@@ -13,6 +13,9 @@ BRAIN:   Raspberry Pi 5, 4GB RAM (NICHT 8GB!), 2x NVMe SSD
 NPU:     Hailo-10H (40 TOPS, 8GB LPDDR4, PCIe Gen3 x4, FW 5.1.1)
 KAMERA:  Sonoff CAM-PT2 (192.168.178.25, RTSP 1920x1080 @20fps, ONVIF PTZ)
 AUDIO:   SmartMic BT + ReSpeaker Lite USB, Piper TTS via HDMI
+KUEHL:   Noctua NF-A2x20 PWM (30% = 48°C bei Volllast)
+STROM:   Pico Power 5 USV (7.5V Akku, Schutz vor Stromausfall)
+LLM:     hailo-ollama (Port 8000) — Qwen2.5-1.5B + DeepSeek R1 Distill lokal auf NPU
 PI IP:   192.168.178.24, SSH User: molochzuhause
 ```
 
