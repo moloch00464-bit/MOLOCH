@@ -1450,6 +1450,36 @@ class MolochService:
         except Exception as e:
             logger.debug(f"[START] Event Trace Logger: {e}")
 
+        # Decision Engine Executor — decision_made Events ausfuehren (PTZ + Speak)
+        try:
+            from core.moloch_event_bus import get_event_bus as _get_eb
+            _dec_bus = _get_eb()
+
+            def _on_decision_made(event):
+                payload = event.get("payload", {})
+                action = payload.get("action", "silence")
+                params = payload.get("params", {})
+                reason = payload.get("reason", "")
+                if action == "ptz_move":
+                    target = params.get("target_zone")
+                    if target and self._cam:
+                        try:
+                            self._cam.ptz_goto(target)
+                            logger.info(f"[DECISION] PTZ → {target} ({reason})")
+                        except Exception as _e:
+                            logger.debug(f"[DECISION] PTZ Fehler: {_e}")
+                elif action == "speak" and self._voice_pipeline:
+                    try:
+                        self._voice_pipeline.trigger_spontaneous(reason)
+                        logger.info(f"[DECISION] Speak ausgeloest ({reason})")
+                    except Exception as _e:
+                        logger.debug(f"[DECISION] Speak Fehler: {_e}")
+
+            _dec_bus.subscribe("decision_made", _on_decision_made)
+            logger.info("[START] Decision Engine Executor registriert")
+        except Exception as e:
+            logger.warning(f"[START] Decision Engine Executor Fehler: {e}")
+
         # Inference Loop — bei TAPPAS mit 3s Delay (ONVIF muss zuerst verbinden fuer PTZ)
         if USE_TAPPAS:
             def _start_tappas_delayed():
@@ -1947,6 +1977,18 @@ class MolochService:
                 status["silence_level"] = bus.silence_level
             except Exception:
                 pass
+
+            # LLM-Provider Status (lokal_qwen / api_claude / stille / none)
+            try:
+                from core.autonomy.local_llm_bridge import get_llm_bridge
+                _llm = get_llm_bridge()
+                status["llm_provider"] = _llm._last_provider
+                status["llm_ollama_running"] = (
+                    _llm._is_ollama_running() if _llm._ollama_available else False
+                )
+            except Exception:
+                status["llm_provider"] = "none"
+                status["llm_ollama_running"] = False
 
             self._ipc.write_status(status)
 
