@@ -805,9 +805,9 @@ class VoicePipeline:
             self._use_wifi_mic = True
             self._wifi_rec_buf = bytearray()
             self._wifi_rec_active = True
-            # Ringpuffer vorher leeren: nur 500ms verwerfen (nicht 2000ms)
-            # Jitter-Buffer hat max 100ms Verzoegerung — 500ms reicht sicher
-            old_data = self._wifi_mic.get_audio_chunk(rate=16000, duration_ms=500)
+            # Ringpuffer leeren: nur 200ms verwerfen (nicht 500ms!)
+            # 500ms hat den ANFANG des gesprochenen Wortes abgeschnitten!
+            old_data = self._wifi_mic.get_audio_chunk(rate=16000, duration_ms=200)
             logger.info(f"[VOICE] WiFi-Mic Ringpuffer geleert: {len(old_data)} Bytes verworfen")
             self._wifi_rec_thread = threading.Thread(
                 target=self._wifi_drain_loop, daemon=True,
@@ -845,15 +845,19 @@ class VoicePipeline:
                 self._whisper_status = "Fehler"
 
     def _wifi_drain_loop(self):
-        """Drainct WiFi-Mic Ringpuffer waehrend PTT in Sammel-Buffer."""
+        """Drainct WiFi-Mic Ringpuffer waehrend PTT in Sammel-Buffer.
+
+        KRITISCH: Muss schneller lesen als Audio reinkommt (16kHz = 32KB/s).
+        100ms Chunks alle 80ms → leichter Overlap, keine Luecken.
+        """
         while self._wifi_rec_active:
             try:
-                chunk = self._wifi_mic.get_audio_chunk(rate=16000, duration_ms=50)
+                chunk = self._wifi_mic.get_audio_chunk(rate=16000, duration_ms=100)
                 if chunk:
                     self._wifi_rec_buf.extend(chunk)
             except Exception as e:
                 logger.warning(f"[VOICE] WiFi-Mic drain error: {e}")
-            time.sleep(0.01)  # ~100 Hz Drain-Rate, lueckenlos mit Jitter-Buffer
+            time.sleep(0.08)  # 80ms Sleep → 100ms Chunks = lueckenloser Drain
 
     def _write_pcm_as_wav(self, pcm_data: bytes, wav_path: str,
                           rate: int = 16000, channels: int = 1,
@@ -897,9 +901,11 @@ class VoicePipeline:
                 self._wifi_rec_thread.join(timeout=1)
                 self._wifi_rec_thread = None
 
-            # Letzte Daten noch drainen (400ms: Jitter-Buffer + Satzende-Padding)
+            # Letzte Daten noch drainen (600ms: Jitter-Buffer 150ms + Satzende-Padding)
+            # Warte kurz damit Jitter-Buffer restliche Pakete ausspielt
+            time.sleep(0.2)
             try:
-                final_chunk = self._wifi_mic.get_audio_chunk(rate=16000, duration_ms=400)
+                final_chunk = self._wifi_mic.get_audio_chunk(rate=16000, duration_ms=600)
                 if final_chunk:
                     self._wifi_rec_buf.extend(final_chunk)
             except Exception:
