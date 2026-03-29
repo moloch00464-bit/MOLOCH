@@ -535,7 +535,16 @@ def _load_capabilities_block() -> str:
             if llm_hw.get("hailo_ollama_installed"):
                 for m in llm_hw.get("models", []):
                     lines.append(f"- Lokales LLM ({m.get('rolle', '?')}): {m.get('name', '?')} — {m.get('beschreibung', '?')}")
-                lines.append("- WICHTIG: Du kannst jetzt LOKAL denken, ohne Cloud! Dein eigenes Gehirn auf der NPU!")
+                # Nur wenn ollama wirklich laeuft (nicht nur installiert)
+                try:
+                    import json as _jcap
+                    _st = _jcap.loads(open("/dev/shm/moloch_status.json").read())
+                    if _st.get("llm_ollama_running"):
+                        lines.append("- AKTIV: Dein lokales Gehirn laeuft auf der NPU (hailo-ollama Port 8000).")
+                    else:
+                        lines.append("- Lokale LLM-Modelle installiert aber NICHT aktiv. Du nutzt die Cloud-API.")
+                except Exception:
+                    lines.append("- Lokale LLM-Modelle installiert (Laufzeit-Status unbekannt).")
         # Aktive NPU-Modelle (altes Format)
         npu_models = [m for m in caps.get("npu_models", []) if m.get("active_in_pipeline")]
         if npu_models:
@@ -551,7 +560,16 @@ def _load_capabilities_block() -> str:
         if llm.get("hailo_ollama") and not hw.get("local_llm"):
             for m in llm.get("models", []):
                 lines.append(f"- Lokales LLM ({m.get('rolle', '?')}): {m.get('name', '?')} — {m.get('beschreibung', '?')}")
-            lines.append("- WICHTIG: Du kannst jetzt LOKAL denken, ohne Cloud! Dein eigenes Gehirn auf der NPU!")
+            # Laufzeit-check: nur wenn ollama wirklich aktiv ist
+            try:
+                import json as _jcap2
+                _st2 = _jcap2.loads(open("/dev/shm/moloch_status.json").read())
+                if _st2.get("llm_ollama_running"):
+                    lines.append("- AKTIV: Dein lokales Gehirn laeuft auf der NPU (hailo-ollama Port 8000).")
+                else:
+                    lines.append("- Lokale LLM-Modelle installiert aber NICHT aktiv. Du nutzt die Cloud-API.")
+            except Exception:
+                lines.append("- Lokale LLM-Modelle installiert (Laufzeit-Status unbekannt).")
         # Voice-Modelle
         voices = caps.get("voice_models", [])
         if voices:
