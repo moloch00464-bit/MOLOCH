@@ -2209,6 +2209,36 @@ class VoicePipeline:
         logger.info(f"[SPONTAN] Bedingungen erfuellt: spontaneous={spontaneous:.2f} tension={tension:.2f}")
         self._generate_spontaneous_comment(state)
 
+    def trigger_spontaneous(self, reason: str = "") -> None:
+        """Oeffentliche Methode: Decision Engine loest spontanen Kommentar aus.
+
+        Respektiert den bestehenden Cooldown (_last_spontaneous).
+        Nur ausfuehren wenn Voice aktiv und Cooldown abgelaufen.
+        """
+        if not self._voice_enabled:
+            return
+        now = time.time()
+        last = getattr(self, '_last_spontaneous', 0.0)
+        if now - last < 60.0:
+            logger.debug(f"[SPONTAN] trigger_spontaneous: Cooldown aktiv ({now - last:.0f}s < 60s)")
+            return
+        logger.info(f"[SPONTAN] Decision Engine loest Kommentar aus: {reason}")
+        # Minimalen State fuer _generate_spontaneous_comment zusammenstellen
+        state = {"reason": reason, "tension": 0.3, "dominance": 0.5}
+        try:
+            from core.core_integrator import get_core_integrator
+            ci = get_core_integrator()
+            state.update(ci.get_state())
+        except Exception:
+            pass
+        import threading
+        threading.Thread(
+            target=self._generate_spontaneous_comment,
+            args=(state,),
+            daemon=True,
+            name="SpontanDecision",
+        ).start()
+
     def _generate_spontaneous_comment(self, integrator_state: dict):
         """Spontanen Kommentar via DeepSeek API generieren und sprechen."""
         if not self._claude_available or not self._deepseek_key:
