@@ -533,18 +533,19 @@ def _load_capabilities_block() -> str:
             # Lokale LLM-Modelle aus hardware.local_llm
             llm_hw = hw.get("local_llm", {})
             if llm_hw.get("hailo_ollama_installed"):
-                for m in llm_hw.get("models", []):
-                    lines.append(f"- Lokales LLM ({m.get('rolle', '?')}): {m.get('name', '?')} — {m.get('beschreibung', '?')}")
-                # Nur wenn ollama wirklich laeuft (nicht nur installiert)
                 try:
                     import json as _jcap
                     _st = _jcap.loads(open("/dev/shm/moloch_status.json").read())
                     if _st.get("llm_ollama_running"):
-                        lines.append("- AKTIV: Dein lokales Gehirn laeuft auf der NPU (hailo-ollama Port 8000).")
+                        # Ollama laeuft: Modellnamen zeigen
+                        for m in llm_hw.get("models", []):
+                            lines.append(f"- Lokales LLM ({m.get('rolle', '?')}): {m.get('name', '?')}")
+                        lines.append("- AKTIV: Du denkst jetzt lokal auf der NPU (hailo-ollama).")
                     else:
-                        lines.append("- Lokale LLM-Modelle installiert aber NICHT aktiv. Du nutzt die Cloud-API.")
+                        # Ollama NICHT aktiv: Modellnamen NICHT zeigen — verhindert Halluzination
+                        lines.append("- WICHTIG: Du antwortest via DeepSeek Cloud-API. Du bist KEIN lokales Modell.")
                 except Exception:
-                    lines.append("- Lokale LLM-Modelle installiert (Laufzeit-Status unbekannt).")
+                    pass  # Kein falscher Kontext bei Fehler
         # Aktive NPU-Modelle (altes Format)
         npu_models = [m for m in caps.get("npu_models", []) if m.get("active_in_pipeline")]
         if npu_models:
@@ -558,18 +559,17 @@ def _load_capabilities_block() -> str:
         # Lokale LLM-Modelle (altes Format, Top-Level)
         llm = caps.get("local_llm", {})
         if llm.get("hailo_ollama") and not hw.get("local_llm"):
-            for m in llm.get("models", []):
-                lines.append(f"- Lokales LLM ({m.get('rolle', '?')}): {m.get('name', '?')} — {m.get('beschreibung', '?')}")
-            # Laufzeit-check: nur wenn ollama wirklich aktiv ist
             try:
                 import json as _jcap2
                 _st2 = _jcap2.loads(open("/dev/shm/moloch_status.json").read())
                 if _st2.get("llm_ollama_running"):
-                    lines.append("- AKTIV: Dein lokales Gehirn laeuft auf der NPU (hailo-ollama Port 8000).")
+                    for m in llm.get("models", []):
+                        lines.append(f"- Lokales LLM ({m.get('rolle', '?')}): {m.get('name', '?')}")
+                    lines.append("- AKTIV: Du denkst jetzt lokal auf der NPU (hailo-ollama).")
                 else:
-                    lines.append("- Lokale LLM-Modelle installiert aber NICHT aktiv. Du nutzt die Cloud-API.")
+                    lines.append("- WICHTIG: Du antwortest via DeepSeek Cloud-API. Du bist KEIN lokales Modell.")
             except Exception:
-                lines.append("- Lokale LLM-Modelle installiert (Laufzeit-Status unbekannt).")
+                pass
         # Voice-Modelle
         voices = caps.get("voice_models", [])
         if voices:
