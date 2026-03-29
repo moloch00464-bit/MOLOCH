@@ -238,12 +238,12 @@ class TalkChatModule:
 
         # LLM-Provider Laempchen: NPU (lokal) | API (Cloud)
         self._lbl_llm_api = tk.Label(
-            row, text="\u25CF API", fg=FG_DIM, bg=BG_FRAME, font=FONT_SMALL,
+            row, text="\u25CF API", fg=FG_DIM, bg=BG_FRAME, font=FONT_BUTTON,
         )
         self._lbl_llm_api.pack(side=tk.RIGHT, padx=(2, 5))
 
         self._lbl_llm_npu = tk.Label(
-            row, text="\u25CF NPU", fg=FG_DIM, bg=BG_FRAME, font=FONT_SMALL,
+            row, text="\u25CF NPU", fg=FG_DIM, bg=BG_FRAME, font=FONT_BUTTON,
         )
         self._lbl_llm_npu.pack(side=tk.RIGHT, padx=2)
 
