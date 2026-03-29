@@ -184,6 +184,10 @@ class MolochService:
         self._teach_last_trigger = 0.0        # Cooldown: min 30s zwischen Auto-Teaches
         self._teach_cooldown = 30.0           # Sekunden zwischen automatischen Teach-Versuchen
 
+        # Gesundheits-Cache (alle 30s aktualisiert, fuer LLM-Kontext)
+        self._health_cache: str = ""
+        self._health_cache_ts: float = 0.0
+
         # CameraManager (RTSP + Cloud + Tentakel + Autonomer Modus, Phase 4)
         self._cam = CameraManager(
             model_orchestrator=self._orchestrator,
@@ -1992,6 +1996,28 @@ class MolochService:
             except Exception:
                 status["llm_provider"] = "none"
                 status["llm_ollama_running"] = False
+
+            # Gesundheits-Zusammenfassung (alle 30s gecacht, fuer LLM-Kontext)
+            try:
+                import time as _time
+                _now = _time.time()
+                if _now - self._health_cache_ts > 30.0:
+                    from core.diagnostics import self_diagnose, collect_diagnostics
+                    _diag = collect_diagnostics()
+                    _warns = self_diagnose()
+                    _teile = []
+                    _fps = _diag.get("fps", 0.0)
+                    if 0 < _fps < 10:
+                        _teile.append(f"Sehleistung kritisch ({_fps:.0f} FPS)")
+                    elif 0 < _fps < 15:
+                        _teile.append(f"Sehleistung reduziert ({_fps:.0f} FPS)")
+                    if _warns:
+                        _teile.extend(_warns[:2])
+                    self._health_cache = "; ".join(_teile) if _teile else ""
+                    self._health_cache_ts = _now
+                status["health_summary"] = self._health_cache
+            except Exception:
+                status["health_summary"] = ""
 
             self._ipc.write_status(status)
 
