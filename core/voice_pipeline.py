@@ -57,16 +57,34 @@ def _sanitize_text(text: str) -> str:
 def _filter_hallucinations(text: str, wav_path: str) -> str:
     """Whisper-Halluzinationen herausfiltern.
 
-    1. Wiederholungs-Filter: Wort 3+ mal hintereinander → ab der 3. abschneiden.
-    2. Laengen-Filter: Mehr als 15 Woerter pro Sekunde Aufnahme → kuerzen.
+    1. Buchstaben-Muell: Woerter >25 Zeichen entfernen (Whisper-Artefakte)
+    2. Wiederholungs-Filter: Wort 3+ mal hintereinander → ab der 3. abschneiden
+    3. Stotter-Filter: Silben-Wiederholungen (z.B. "dadadada") entfernen
+    4. Laengen-Filter: Mehr als 15 Woerter pro Sekunde Aufnahme → kuerzen
     """
     if not text:
         return text
 
-    # 1. Wiederholungs-Filter (case-insensitive, Grossschreibung erhalten)
+    # 1. Buchstaben-Muell entfernen (Woerter >25 Zeichen = fast immer Halluzination)
+    words = text.split()
+    cleaned = []
+    for w in words:
+        if len(w) > 25:
+            logger.info(f"[HALLUZ] Buchstaben-Muell entfernt: '{w[:30]}...' ({len(w)} Zeichen)")
+        else:
+            cleaned.append(w)
+    text = ' '.join(cleaned)
+
+    # 2. Wiederholungs-Filter (case-insensitive, Grossschreibung erhalten)
     text = re.sub(r'\b(\w+)(\s+\1){2,}\b', r'\1', text, flags=re.IGNORECASE)
 
-    # 2. Laengen-Filter basierend auf WAV-Dauer
+    # 3. Stotter-Filter: Silben-Wiederholungen wie "dadadada", "hahahahaha"
+    text = re.sub(r'\b([a-zA-ZäöüÄÖÜß]{1,3})\1{3,}\b', '', text)
+
+    # Doppelte Leerzeichen aufraemen
+    text = re.sub(r'\s{2,}', ' ', text).strip()
+
+    # 4. Laengen-Filter basierend auf WAV-Dauer
     try:
         with wave.open(wav_path, 'rb') as wf:
             audio_duration_s = wf.getnframes() / wf.getframerate()
@@ -1675,6 +1693,7 @@ class VoicePipeline:
 
         try:
             self._whisper_status = "Denke..."
+            self._publish_event("whisper.processing")  # LED: THINKING (API denkt)
 
             # Internet-Suche pruefen (VOR Claude API)
             search_query = _detect_search_intent(text)

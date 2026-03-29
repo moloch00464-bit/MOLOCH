@@ -400,6 +400,7 @@ static const FarbEintrag FARBEN[] = {
     {"cyan",    0,   255, 255},
     {"magenta", 255, 0,   255},
     {"weiss",   255, 255, 255},
+    {"orange",  255, 80,  0  },
     {"aus",     0,   0,   0  },
     {NULL, 0, 0, 0}
 };
@@ -507,7 +508,7 @@ void setup() {
         http_setup();
         ota_setup();
         led_set(0, 255, 0); delay(500);
-        led_parse("LED:blau pulsierend langsam");
+        led_parse("LED:orange pulsierend langsam");
     } else {
         led_parse("LED:rot blinkend schnell");
     }

@@ -23,12 +23,12 @@ logger = logging.getLogger("RGBLed")
 
 # Zustand → LED Mapping (DeepSeek Spec)
 ZUSTAND_LED_MAP = {
-    "idle":             "LED:blau pulsierend langsam",
+    "idle":             "LED:orange pulsierend langsam",
     "person_erkannt":   "LED:gruen statisch",
     "markus_erkannt":   "LED:gelb statisch",
     "shadow_modus":     "LED:rot pulsierend schnell",
     "fehler":           "LED:rot blinkend schnell",
-    "nachtmodus":       "LED:blau pulsierend langsam",
+    "nachtmodus":       "LED:orange pulsierend langsam",
     "listening":        "LED:cyan pulsierend schnell",   # PTT aktiv — rotierendes Cyan
     "thinking":         "LED:gelb blinkend mittel",      # Whisper verarbeitet — Gelb blinkend
     "speaking":         "LED:magenta pulsierend mittel", # TTS spricht
