@@ -4,16 +4,19 @@ M.O.L.O.C.H. Local LLM Bridge — Gate 7
 ========================================
 Einheitliche Schnittstelle fuer lokale + Cloud LLM Reasoning.
 
-Prioritaet:
-  1. hailo_platform.genai.LLM (Qwen2.5-1.5B direkt auf NPU) — offline, 0 Pi-RAM
-  2. hailo-ollama / ollama (falls installiert) — offline, Fallback
-  3. DeepSeek API (Cloud) — online, guenstig
-  4. Claude API (Cloud) — online, Fallback
-  5. Stille — kein Crash, kein Fehler, nur keine Antwort
+Prioritaet (Fallback-Kette):
+  1. hailo-ollama (Port 8000) — Qwen2.5 oder DeepSeek R1 lokal auf NPU
+  2. DeepSeek API (Cloud) — online, guenstig
+  3. Claude API (Cloud) — online, Fallback
+  4. Stille — kein Crash, kein Fehler, nur keine Antwort
 
-WICHTIG: Lokales LLM erfordert Vision-Pipeline PAUSE!
-NPU kann nicht gleichzeitig Vision + LLM. Schicht-3-Architektur
-aus NPU_DREI_SCHICHTEN_ARCHITEKTUR.md beachten.
+Zwei Rollen:
+  - ask_external(prompt) → Qwen2.5 fuer Konversation (Deutsch)
+  - reason_internal(prompt) → DeepSeek R1 fuer Selbstdiagnose/Logik
+
+WICHTIG: hailo-ollama muss separat laufen (systemd oder manuell).
+Vision laeuft weiter waehrend hailo-ollama antwortet — hailo-ollama
+managed den NPU-Zugriff selbst via shared VDevice.
 
 Singleton: get_llm_bridge()
 """
@@ -27,14 +30,12 @@ from typing import Optional, Dict, Callable
 
 logger = logging.getLogger("LocalLLMBridge")
 
-# hailo_platform.genai.LLM — Qwen2.5-1.5B direkt auf NPU
-QWEN_HEF = "/usr/local/hailo/resources/models/hailo10h/Qwen2.5-1.5B-Instruct.hef"
-QWEN_TIMEOUT = 60  # Sekunden (1.5B braucht ~10s First-Token)
-
-# hailo-ollama / ollama Fallback
-OLLAMA_MODEL = "qwen2.5:1.5b"
-OLLAMA_HOST = "http://localhost:11434"
-OLLAMA_TIMEOUT = 30  # Sekunden
+# hailo-ollama Konfiguration
+OLLAMA_HOST = "http://localhost:8000"
+OLLAMA_MODEL_CHAT = "qwen2.5-instruct:1.5b"
+OLLAMA_MODEL_REASON = "deepseek_r1_distill_qwen:1.5b"
+OLLAMA_TIMEOUT_CHAT = 60      # Qwen antwortet in ~26s
+OLLAMA_TIMEOUT_REASON = 120   # DeepSeek R1 braucht ~80s (Chain-of-Thought)
 
 
 class LocalLLMBridge:
@@ -42,185 +43,178 @@ class LocalLLMBridge:
 
     def __init__(self):
         self._lock = threading.Lock()
-        self._hailo_genai_available: bool = False
         self._ollama_available: Optional[bool] = None
         self._vision_pause_callback: Optional[Callable] = None
         self._vision_resume_callback: Optional[Callable] = None
         self._last_provider: str = "none"
         self._request_count: int = 0
-        self._check_hailo_genai()
         self._check_ollama()
         logger.info(
-            f"[LLM-BRIDGE] Init — hailo_genai={'JA' if self._hailo_genai_available else 'NEIN'}"
-            f" ollama={'JA' if self._ollama_available else 'NEIN'}"
+            f"[LLM-BRIDGE] Init — hailo-ollama={'JA' if self._ollama_available else 'NEIN'}"
         )
 
-    def _check_hailo_genai(self):
-        """Pruefen ob hailo_platform.genai.LLM verfuegbar ist."""
-        try:
-            from hailo_platform import genai as _genai  # noqa: F401
-            if not hasattr(_genai, "LLM"):
-                self._hailo_genai_available = False
-                return
-            if not os.path.exists(QWEN_HEF):
-                logger.warning(f"[LLM-BRIDGE] HEF nicht gefunden: {QWEN_HEF}")
-                self._hailo_genai_available = False
-                return
-            self._hailo_genai_available = True
-        except ImportError:
-            self._hailo_genai_available = False
-
     def _check_ollama(self):
-        """Pruefen ob hailo-ollama oder ollama installiert ist."""
+        """Pruefen ob hailo-ollama installiert ist."""
         try:
             result = subprocess.run(
                 ["which", "hailo-ollama"], capture_output=True, timeout=5)
-            if result.returncode == 0:
-                self._ollama_available = True
-                return
+            self._ollama_available = result.returncode == 0
         except Exception:
-            pass
+            self._ollama_available = False
+
+    def _is_ollama_running(self) -> bool:
+        """Pruefen ob hailo-ollama Prozess laeuft (Port 8000 erreichbar)."""
         try:
-            result = subprocess.run(
-                ["which", "ollama"], capture_output=True, timeout=5)
-            if result.returncode == 0:
-                self._ollama_available = True
-                return
+            import requests
+            resp = requests.get(f"{OLLAMA_HOST}/api/tags", timeout=2)
+            return resp.status_code == 200
         except Exception:
-            pass
-        self._ollama_available = False
+            return False
 
     def set_vision_callbacks(self, pause_fn: Callable, resume_fn: Callable):
-        """Callbacks fuer Vision-Pipeline Pause/Resume registrieren.
-
-        KRITISCH: Lokales LLM braucht vollen NPU-Zugriff.
-        Vision muss pausiert werden bevor LLM laeuft.
-        """
+        """Callbacks fuer Vision-Pipeline Pause/Resume registrieren."""
         self._vision_pause_callback = pause_fn
         self._vision_resume_callback = resume_fn
         logger.info("[LLM-BRIDGE] Vision-Callbacks registriert")
 
-    def generate(self, prompt: str, system: str = "",
-                 max_tokens: int = 512, use_local: bool = False) -> Optional[str]:
-        """Text generieren — waehlt automatisch den besten Provider.
+    # === Oeffentliche Methoden: Zwei Rollen ===
 
-        Args:
-            prompt: User/System Prompt
-            system: System-Prompt (optional)
-            max_tokens: Maximale Antwortlaenge
-            use_local: True = lokales LLM erzwingen (pausiert Vision!)
+    def ask_external(self, prompt: str, system: str = "",
+                     max_tokens: int = 256) -> Optional[str]:
+        """Konversation: Qwen2.5 lokal → DeepSeek API → Claude API → None.
 
-        Returns: Generierter Text oder None bei Fehler
+        Fuer Echtzeit-Dialog mit Markus. Kurze Antworten, Deutsch.
         """
         with self._lock:
             self._request_count += 1
 
-        # 1. hailo_platform.genai.LLM (Qwen2.5 direkt auf NPU) — PAUSIERT VISION!
-        if use_local and self._hailo_genai_available:
-            result = self._generate_hailo_genai(prompt, system, max_tokens)
-            if result:
-                return result
+        # 1. hailo-ollama Qwen2.5 (lokal)
+        result = self._generate_ollama(prompt, system, max_tokens,
+                                       model=OLLAMA_MODEL_CHAT,
+                                       timeout=OLLAMA_TIMEOUT_CHAT)
+        if result:
+            return result
 
-        # 2. hailo-ollama / ollama (falls installiert) — PAUSIERT VISION!
-        if use_local and self._ollama_available:
-            result = self._generate_local(prompt, system, max_tokens)
-            if result:
-                return result
-
-        # 3. DeepSeek API (Cloud)
+        # 2. DeepSeek API (Cloud)
         result = self._generate_deepseek(prompt, system, max_tokens)
         if result:
             return result
 
-        # 4. Claude API (Fallback)
+        # 3. Claude API (Fallback)
         result = self._generate_claude(prompt, system, max_tokens)
         if result:
             return result
 
-        # 5. Stille
+        # 4. Stille
         self._last_provider = "stille"
         return None
 
-    def _generate_hailo_genai(self, prompt: str, system: str,
-                              max_tokens: int) -> Optional[str]:
-        """Qwen2.5-1.5B direkt via hailo_platform.genai.LLM. PAUSIERT VISION!"""
-        if not self._hailo_genai_available:
-            return None
+    def reason_internal(self, prompt: str, system: str = "",
+                        max_tokens: int = 512) -> Optional[str]:
+        """Internes Reasoning: DeepSeek R1 lokal → DeepSeek API → None.
 
-        llm = None
-        try:
-            # Vision pausieren — VDevice freigeben damit genai.LLM ihn nutzen kann
-            if self._vision_pause_callback:
-                logger.info("[LLM-BRIDGE] Vision pausieren fuer hailo_genai.LLM...")
-                self._vision_pause_callback()
-                time.sleep(2.0)  # GStreamer Pipeline teardown abwarten
+        Fuer Selbstdiagnose, Entscheidungen, Systemchecks. Nicht fuer TTS.
+        """
+        with self._lock:
+            self._request_count += 1
 
-            from hailo_platform import genai as _genai
-            full_prompt = f"{system}\n\n{prompt}".strip() if system else prompt
-            llm = _genai.LLM(hef_path=QWEN_HEF)
-            output = llm.run(full_prompt, max_new_tokens=max_tokens)
-            self._last_provider = "hailo_genai"
-            text = output.strip() if isinstance(output, str) else str(output).strip()
-            logger.info(f"[LLM-BRIDGE] hailo_genai: {len(text)} Zeichen generiert")
-            return text or None
+        # 1. hailo-ollama DeepSeek R1 (lokal)
+        result = self._generate_ollama(prompt, system, max_tokens,
+                                       model=OLLAMA_MODEL_REASON,
+                                       timeout=OLLAMA_TIMEOUT_REASON)
+        if result:
+            return result
 
-        except Exception as e:
-            logger.warning(f"[LLM-BRIDGE] hailo_genai Fehler: {e}")
-            return None
-        finally:
-            # LLM-Objekt schliessen — VDevice freigeben
-            if llm is not None:
-                try:
-                    del llm
-                except Exception:
-                    pass
-            # Vision IMMER wieder starten
-            if self._vision_resume_callback:
-                logger.info("[LLM-BRIDGE] Vision nach hailo_genai fortsetzen...")
-                self._vision_resume_callback()
+        # 2. DeepSeek API als Fallback
+        result = self._generate_deepseek(prompt, system, max_tokens)
+        if result:
+            return result
 
-    def _generate_local(self, prompt: str, system: str,
-                        max_tokens: int) -> Optional[str]:
-        """Lokales LLM via ollama API. PAUSIERT VISION!"""
+        # 3. Stille (kein Claude fuer internes Reasoning)
+        self._last_provider = "stille"
+        return None
+
+    def generate(self, prompt: str, system: str = "",
+                 max_tokens: int = 512, use_local: bool = False) -> Optional[str]:
+        """Legacy-Methode: Waehlt automatisch den besten Provider.
+
+        Bei use_local=True wird Qwen2.5 lokal bevorzugt.
+        """
+        if use_local:
+            return self.ask_external(prompt, system, max_tokens)
+        # Ohne use_local: Direkt Cloud
+        result = self._generate_deepseek(prompt, system, max_tokens)
+        if result:
+            return result
+        result = self._generate_claude(prompt, system, max_tokens)
+        if result:
+            return result
+        self._last_provider = "stille"
+        return None
+
+    # === Private: Provider-Implementierungen ===
+
+    def _generate_ollama(self, prompt: str, system: str,
+                         max_tokens: int, model: str,
+                         timeout: int) -> Optional[str]:
+        """hailo-ollama Chat API (Port 8000)."""
         if not self._ollama_available:
             return None
+        if not self._is_ollama_running():
+            logger.debug("[LLM-BRIDGE] hailo-ollama nicht erreichbar")
+            return None
 
         try:
-            # Vision pausieren (NPU freigeben)
-            if self._vision_pause_callback:
-                logger.info("[LLM-BRIDGE] Vision pausieren fuer lokales LLM...")
-                self._vision_pause_callback()
-                time.sleep(1.0)  # NPU-Freigabe abwarten
-
             import requests
-            payload = {
-                "model": OLLAMA_MODEL,
-                "prompt": prompt,
-                "system": system,
-                "stream": False,
-                "options": {"num_predict": max_tokens},
-            }
+            messages = []
+            if system:
+                messages.append({"role": "system", "content": system})
+            messages.append({"role": "user", "content": prompt})
+
             resp = requests.post(
-                f"{OLLAMA_HOST}/api/generate",
-                json=payload, timeout=OLLAMA_TIMEOUT)
+                f"{OLLAMA_HOST}/api/chat",
+                json={"model": model, "messages": messages, "stream": False,
+                      "options": {"num_predict": max_tokens}},
+                timeout=timeout)
             resp.raise_for_status()
             data = resp.json()
-            self._last_provider = "local_ollama"
-            return data.get("response", "").strip()
+            text = data.get("message", {}).get("content", "").strip()
+
+            # DeepSeek R1 <think> Block entfernen (nur Antwort behalten)
+            if "<think>" in text and "</think>" in text:
+                text = text.split("</think>")[-1].strip()
+
+            if not text:
+                return None
+
+            self._last_provider = f"lokal_{model.split(':')[0]}"
+            logger.info(f"[LLM-BRIDGE] {model}: {len(text)} Zeichen in {data.get('total_duration', 0) // 1_000_000}ms")
+            return text
 
         except Exception as e:
-            logger.warning(f"[LLM-BRIDGE] Lokales LLM Fehler: {e}")
+            logger.warning(f"[LLM-BRIDGE] hailo-ollama ({model}) Fehler: {e}")
             return None
-        finally:
-            # Vision IMMER wieder starten
-            if self._vision_resume_callback:
-                logger.info("[LLM-BRIDGE] Vision fortsetzen...")
-                self._vision_resume_callback()
+
+    def _load_api_key(self, provider: str) -> Optional[str]:
+        """API Key aus config/api_keys.json laden."""
+        keys_path = os.path.join(os.path.dirname(os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__)))), "config", "api_keys.json")
+        # Env-Var hat Vorrang
+        env_key = os.environ.get(f"{provider.upper()}_API_KEY")
+        if env_key:
+            return env_key
+        try:
+            import json
+            with open(keys_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get(provider, {}).get("api_key")
+        except Exception:
+            return None
 
     def _generate_deepseek(self, prompt: str, system: str,
                            max_tokens: int) -> Optional[str]:
         """DeepSeek API (Cloud, guenstig)."""
-        api_key = os.environ.get("DEEPSEEK_API_KEY")
+        api_key = self._load_api_key("deepseek")
         if not api_key:
             return None
         try:
@@ -236,7 +230,7 @@ class LocalLLMBridge:
                       "max_tokens": max_tokens},
                 timeout=15)
             resp.raise_for_status()
-            self._last_provider = "deepseek"
+            self._last_provider = "api_deepseek"
             return resp.json()["choices"][0]["message"]["content"].strip()
         except Exception as e:
             logger.debug(f"[LLM-BRIDGE] DeepSeek Fehler: {e}")
@@ -245,7 +239,7 @@ class LocalLLMBridge:
     def _generate_claude(self, prompt: str, system: str,
                          max_tokens: int) -> Optional[str]:
         """Claude API (Fallback)."""
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        api_key = self._load_api_key("anthropic")
         if not api_key:
             return None
         try:
@@ -261,7 +255,7 @@ class LocalLLMBridge:
                       "messages": [{"role": "user", "content": prompt}]},
                 timeout=15)
             resp.raise_for_status()
-            self._last_provider = "claude"
+            self._last_provider = "api_claude"
             return resp.json()["content"][0]["text"].strip()
         except Exception as e:
             logger.debug(f"[LLM-BRIDGE] Claude Fehler: {e}")
@@ -269,11 +263,14 @@ class LocalLLMBridge:
 
     def get_status(self) -> Dict:
         return {
-            "hailo_genai_available": self._hailo_genai_available,
-            "ollama_available": self._ollama_available,
+            "ollama_installed": self._ollama_available,
+            "ollama_running": self._is_ollama_running() if self._ollama_available else False,
             "last_provider": self._last_provider,
             "request_count": self._request_count,
-            "vision_callbacks": self._vision_pause_callback is not None,
+            "models": {
+                "chat": OLLAMA_MODEL_CHAT,
+                "reason": OLLAMA_MODEL_REASON,
+            },
         }
 
 

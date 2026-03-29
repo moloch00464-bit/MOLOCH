@@ -1224,47 +1224,63 @@ class VoicePipeline:
         except Exception as e:
             logger.debug(f"[VOICE] Personality-Zone nicht verfuegbar: {e}")
 
-        # DeepSeek API Call — Timeout 15s, kein Retry
+        # STUFE 2.5: Lokales LLM (hailo-ollama) — VOR Cloud API versuchen
+        local_text = None
         try:
-            import requests
-            api_msgs = [{"role": "system", "content": system}] + msgs
-            r = requests.post(
-                self._deepseek_url,
-                headers={
-                    "Authorization": f"Bearer {self._deepseek_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": self._deepseek_model,
-                    "messages": api_msgs,
-                    "max_tokens": 512,
-                    "temperature": 0.8,
-                },
-                timeout=15.0,
-            )
-            r.raise_for_status()
-            text = r.json()["choices"][0]["message"]["content"].strip()
-
-            try:
-                text = get_memory().extract_and_learn(text)
-            except Exception as e:
-                logger.error(f"[VOICE] extract_and_learn fehlgeschlagen: {e}")
-
-            try:
-                text = self._extract_spotify_commands(text)
-            except Exception as e:
-                logger.error(f"[VOICE] Spotify-Commands fehlgeschlagen: {e}")
-
-            with self._lock:
-                self._conversation.append({"role": "assistant", "content": text})
-            return text
-
+            from core.autonomy.local_llm_bridge import get_llm_bridge
+            bridge = get_llm_bridge()
+            if bridge._ollama_available and bridge._is_ollama_running():
+                logger.info("[VOICE] Versuche lokales LLM (Qwen2.5)...")
+                local_text = bridge.ask_external(
+                    prompt=user_text, system=system, max_tokens=256)
+                if local_text and len(local_text) > 5:
+                    logger.info(f"[VOICE] Lokales LLM: {len(local_text)} Zeichen")
         except Exception as e:
-            logger.error(f"[VOICE] DeepSeek API Fehler: {e}")
-            with self._lock:
-                if self._conversation and self._conversation[-1].get("role") == "user":
-                    self._conversation.pop()
-            return None
+            logger.debug(f"[VOICE] Lokales LLM nicht verfuegbar: {e}")
+
+        if local_text and len(local_text) > 5:
+            text = local_text
+        else:
+            # STUFE 3: DeepSeek API Call — Timeout 15s, kein Retry
+            try:
+                import requests
+                api_msgs = [{"role": "system", "content": system}] + msgs
+                r = requests.post(
+                    self._deepseek_url,
+                    headers={
+                        "Authorization": f"Bearer {self._deepseek_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": self._deepseek_model,
+                        "messages": api_msgs,
+                        "max_tokens": 512,
+                        "temperature": 0.8,
+                    },
+                    timeout=15.0,
+                )
+                r.raise_for_status()
+                text = r.json()["choices"][0]["message"]["content"].strip()
+            except Exception as e:
+                logger.error(f"[VOICE] DeepSeek API Fehler: {e}")
+                with self._lock:
+                    if self._conversation and self._conversation[-1].get("role") == "user":
+                        self._conversation.pop()
+                return None
+
+        try:
+            text = get_memory().extract_and_learn(text)
+        except Exception as e:
+            logger.error(f"[VOICE] extract_and_learn fehlgeschlagen: {e}")
+
+        try:
+            text = self._extract_spotify_commands(text)
+        except Exception as e:
+            logger.error(f"[VOICE] Spotify-Commands fehlgeschlagen: {e}")
+
+        with self._lock:
+            self._conversation.append({"role": "assistant", "content": text})
+        return text
 
     # =========================================================================
     # Direkte Spotify Voice Commands (OHNE Claude API)
