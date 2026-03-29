@@ -197,9 +197,15 @@ class KeywordHandler:
         if m:
             return m.group(1)
 
-        # Pattern: "das ist <NAME>" (aber nicht "das ist gut/ok/etc")
+        # Pattern: "das ist <NAME>" — deutsche Partikeln und Fuellwoerter ausschliessen
+        _no_enroll = {
+            "gut", "ok", "okay", "toll", "super", "richtig", "falsch", "egal",
+            # Haeufige deutsche Partikeln die als Namen erkannt wurden (false positives):
+            "wohl", "auch", "nicht", "ja", "nein", "doch", "schon", "mal", "halt",
+            "eben", "nun", "so", "nur", "noch", "sehr", "klar", "leider", "eigentlich",
+        }
         m = re.search(r"das ist\s+(\w+)", lower)
-        if m and m.group(1) not in ("gut", "ok", "okay", "toll", "super", "richtig", "falsch", "egal"):
+        if m and m.group(1) not in _no_enroll:
             return m.group(1)
 
         # Pattern: "enrollment <NAME>" / "enroll <NAME>"
