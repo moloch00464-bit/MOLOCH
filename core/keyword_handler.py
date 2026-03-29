@@ -113,6 +113,8 @@ class KeywordHandler:
             return self._action_enrollment(text, response)
         elif action == "diagnostics":
             return self._action_diagnostics()
+        elif action == "ptz_command":
+            return self._action_ptz_command(text)
         else:
             logger.warning(f"[KEYWORD] Unbekannte Aktion: {action}")
             return None
@@ -220,6 +222,76 @@ class KeywordHandler:
         except Exception as e:
             logger.error(f"[KEYWORD] Diagnostics fehlgeschlagen: {e}")
             return "Diagnose konnte nicht ausgefuehrt werden."
+
+    def _action_ptz_command(self, text: str) -> str:
+        """PTZ-Kamera per Sprache steuern.
+
+        Erkennt Richtungen (links/rechts/oben/unten) und benannte Positionen
+        (tuer/schreibtisch/wohnzimmer/werkstatt). Setzt Arbiter auf MANUELL.
+        """
+        lower = text.lower().strip()
+
+        # Persoenlichkeitszone fuer kontextuelle Antwort
+        zone = "guardian"
+        try:
+            from core.core_integrator import get_core_integrator
+            zone = get_core_integrator().get_personality_zone() or "guardian"
+        except Exception:
+            pass
+
+        # Benannte Positionen pruefen (zuerst — spezifischer als Richtungen)
+        named_positions = {
+            "tuer": ("ptz_goto", {"position": "tuer"}, "Blick zur Tuer."),
+            "tür": ("ptz_goto", {"position": "tuer"}, "Blick zur Tuer."),
+            "schreibtisch": ("ptz_goto", {"position": "schreibtisch"}, "Blick zum Schreibtisch."),
+            "wohnzimmer": ("ptz_goto", {"position": "wohnzimmer"}, "Ich schaue ins Wohnzimmer."),
+            "werkstatt": ("ptz_goto", {"position": "werkstatt"}, "Blick in die Werkstatt."),
+            "home position": ("ptz_goto", {"position": "home"}, "Ich gehe zur Home-Position."),
+            "zurueck": ("ptz_goto", {"position": "home"}, "Zurueck zur Home-Position."),
+            "park position": ("ptz_goto", {"position": "home"}, "Park-Position."),
+        }
+        for key, (cmd, params, antwort) in named_positions.items():
+            if key in lower:
+                self._send_ipc_command(cmd, **params)
+                self._set_arbiter_manuell()
+                return self._ptz_antwort(antwort, zone)
+
+        # Richtungen pruefen
+        richtungen = {
+            "links": ("ptz_move", {"direction": "left"}, "Ich schaue nach links."),
+            "rechts": ("ptz_move", {"direction": "right"}, "Ich schaue nach rechts."),
+            "oben": ("ptz_move", {"direction": "up"}, "Kamera hoch."),
+            "hoch": ("ptz_move", {"direction": "up"}, "Kamera hoch."),
+            "unten": ("ptz_move", {"direction": "down"}, "Kamera runter."),
+            "runter": ("ptz_move", {"direction": "down"}, "Kamera runter."),
+            "dreh dich": ("ptz_move", {"direction": "right"}, "Ich drehe mich."),
+        }
+        for key, (cmd, params, antwort) in richtungen.items():
+            if key in lower:
+                self._send_ipc_command(cmd, **params)
+                self._set_arbiter_manuell()
+                return self._ptz_antwort(antwort, zone)
+
+        logger.warning(f"[KEYWORD] PTZ-Richtung nicht erkannt: '{text[:60]}'")
+        return "Welche Richtung?"
+
+    def _ptz_antwort(self, basis: str, zone: str) -> str:
+        """Antwort je nach Persoenlichkeitszone anpassen."""
+        if zone == "shadow":
+            # Shadow: knapper, etwas sarkastisch
+            return basis.replace("Ich schaue", "Dreh").replace("Ich gehe", "Geh").replace("Blick", "Schau")
+        elif zone == "berserker":
+            return basis.upper().rstrip(".") + "."
+        return basis  # Guardian: sachlich
+
+    def _set_arbiter_manuell(self):
+        """PTZ-Arbiter auf MANUELL setzen (Markus hat Kontrolle, 30s Timeout)."""
+        try:
+            from core.ptz_arbiter import get_ptz_arbiter
+            get_ptz_arbiter().set_moloch_manuell("voice_command")
+            logger.info("[KEYWORD] PTZ Arbiter → MANUELL (voice_command)")
+        except Exception as e:
+            logger.debug(f"[KEYWORD] Arbiter setzen fehlgeschlagen: {e}")
 
     # =========================================================================
     # IPC Helper
