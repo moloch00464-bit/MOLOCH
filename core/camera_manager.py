@@ -931,6 +931,9 @@ class CameraManager:
     def ptz_goto(self, position):
         """PTZ zu vordefinierter Position fahren."""
         positions = {
+            'tuer': (0.0, 0.0),
+            'home': (0.0, 0.0),
+            'schreibtisch': (75.0, 10.0),
             'werkstatt': (0.0, -20.0),
             'wohnzimmer': (-90.0, 0.0),
         }
