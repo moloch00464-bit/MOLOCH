@@ -37,6 +37,13 @@ from typing import Optional, Dict, Any, List, Callable
 
 logger = logging.getLogger(__name__)
 
+# Motor-Learner: adaptiver Gain aus Bewegungsfeedback
+try:
+    from core.mpo.motor_learner import get_motor_learner as _get_motor_learner
+    _MOTOR_LEARNER_AVAILABLE = True
+except ImportError:
+    _MOTOR_LEARNER_AVAILABLE = False
+
 # Persistente letzte Face-Position (ueberlebt Reboot)
 import os as _os
 _LAST_FACE_POS_FILE = _os.path.expanduser("~/moloch/config/last_face_position.json")
@@ -450,6 +457,10 @@ class AutonomousTracker:
 
         # ST-Bewegungslernen: Kamera-Positionen aufzeichnen
         self._st_learner = STMovementLearner()
+
+        # Motor-Learner: adaptiver Gain (beobachtet, korrigiert Basis-Gains)
+        self._motor_learner = _get_motor_learner() if _MOTOR_LEARNER_AVAILABLE else None
+        self._motor_learner_cycle = 0   # Zaehler fuer periodischen Gain-Update
         # Gelernte Positionen laden (persistent)
         learned = _load_learned_positions()
         if learned:
@@ -480,6 +491,11 @@ class AutonomousTracker:
         self._prev_error_x = 0.0
         self._prev_error_y = 0.0
         self._prev_error_time = 0.0
+        # Motor-Learner: vorherigen Fehler + Delta merken (fuer record_step naechster Cycle)
+        self._ml_prev_error_x = 0.0
+        self._ml_prev_error_y = 0.0
+        self._ml_prev_delta_pan = 0.0
+        self._ml_prev_delta_tilt = 0.0
 
         # === COAST MODE: Kamera einfrieren wenn Ziel stabil ===
         self._stable_start_time = None    # Wann wurde Ziel zuletzt stabil (fuer Coast-Timer)
@@ -516,8 +532,17 @@ class AutonomousTracker:
             logger.warning(f"[TRACKER] CoreIntegrator nicht verfuegbar: {e}")
 
         # Basis-Parameter speichern (fuer dynamische Anpassung)
-        self._base_pan_gain = self.config.pan_gain
-        self._base_tilt_gain = self.config.tilt_gain
+        # Motor-Learner: gespeicherte Gains laden falls vorhanden
+        if self._motor_learner:
+            self._base_pan_gain  = self._motor_learner.get_base_pan_gain()
+            self._base_tilt_gain = self._motor_learner.get_base_tilt_gain()
+            logger.info(
+                f"[TRACKER] Motor-Learner Gains: "
+                f"pan={self._base_pan_gain:.3f} tilt={self._base_tilt_gain:.3f}"
+            )
+        else:
+            self._base_pan_gain = self.config.pan_gain
+            self._base_tilt_gain = self.config.tilt_gain
         self._base_max_step_pan = self.config.max_step_pan
         self._base_max_step_tilt = self.config.max_step_tilt
         self._base_move_cooldown = self.config.move_cooldown_ms
@@ -1528,6 +1553,26 @@ class AutonomousTracker:
                 f"pan_delta={pan_delta:+.2f}deg tilt_delta={tilt_delta:+.2f}deg "
                 f"speed={move_speed:.2f} err_pct={error_magnitude_pct:.3f}"
             )
+
+            # Motor-Learner: vorherigen Cycle auswerten (post_error = aktueller error)
+            if self._motor_learner and self._ml_prev_delta_pan != 0.0:
+                self._motor_learner.record_step(
+                    self._ml_prev_error_x, self._ml_prev_error_y,
+                    self._ml_prev_delta_pan, self._ml_prev_delta_tilt,
+                    error_x_norm, error_y_norm
+                )
+                # Alle 100 Moves: Basis-Gains aus Motor-Learner uebernehmen
+                self._motor_learner_cycle += 1
+                if self._motor_learner_cycle >= 100:
+                    self._motor_learner_cycle = 0
+                    self._base_pan_gain  = self._motor_learner.get_base_pan_gain()
+                    self._base_tilt_gain = self._motor_learner.get_base_tilt_gain()
+
+            # Aktuellen Fehler + Delta fuer naechsten Cycle merken
+            self._ml_prev_error_x  = error_x_norm
+            self._ml_prev_error_y  = error_y_norm
+            self._ml_prev_delta_pan  = pan_delta
+            self._ml_prev_delta_tilt = tilt_delta
 
         if self.stats["tracking_moves"] % 15 == 0:
             logger.info(f"TRACK: err=({error_x:+.0f},{error_y:+.0f})px err_pct={error_magnitude_pct:.3f} "
