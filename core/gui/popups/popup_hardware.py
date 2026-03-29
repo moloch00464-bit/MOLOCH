@@ -517,8 +517,19 @@ class HardwarePopup:
             pass
         return None, None
 
-    # Echte HEF-Groessen (MB, berechnet aus Dateigroesse auf Disk)
-    # Dateien auf /mnt/moloch-data/hailo/models/
+    # NPU-RAM Verbrauch pro Modell (MB, realistisch inkl. Aktivierungen)
+    # Quelle: Hailo NPU RAM Budget Analyse (CLAUDE.md + NPU_DREI_SCHICHTEN_ARCHITEKTUR.md)
+    _NPU_RAM_MB = {
+        # Vision (permanent in TAPPAS Pipeline)
+        "scrfd": 30, "arcface": 15, "yolov8m": 480, "yolo": 480,
+        "pose": 60, "hand_landmark": 8, "hand": 8, "face_attr": 20, "faceattr": 20,
+        "person_reid": 25,
+        # Speech (on-demand bei PTT)
+        "whisper": 155,
+        # LLM (on-demand via hailo-ollama)
+        "qwen2.5": 1750, "deepseek_r1": 1750,
+    }
+    # HEF-Dateien fuer Dateigroessen-Check
     _HEF_FILES = {
         "scrfd": "scrfd_10g.hef",
         "arcface": "arcface_mobilefacenet.hef",
@@ -529,26 +540,10 @@ class HardwarePopup:
         "person_reid": "resnet_v1_50_h10.hef",
     }
     _HEF_DIR = "/mnt/moloch-data/hailo/models"
-    _hef_size_cache = {}  # Einmal lesen, dann cachen
 
     def _get_hef_size_mb(self, model_name):
-        """Echte HEF-Dateigroesse in MB (gecached)."""
-        if model_name in self._hef_size_cache:
-            return self._hef_size_cache[model_name]
-        hef_file = self._HEF_FILES.get(model_name)
-        if hef_file:
-            path = os.path.join(self._HEF_DIR, hef_file)
-            try:
-                size_mb = os.path.getsize(path) / (1024 * 1024)
-                self._hef_size_cache[model_name] = round(size_mb, 1)
-                return self._hef_size_cache[model_name]
-            except OSError:
-                pass
-        # Fallback-Schaetzung
-        fallback = {"scrfd": 6, "arcface": 3, "yolov8m": 21,
-                     "pose": 14, "hand_landmark": 1, "face_attr": 7,
-                     "person_reid": 23}
-        return fallback.get(model_name, 5)
+        """NPU-RAM Verbrauch in MB (realistisch, nicht Dateigroesse)."""
+        return self._NPU_RAM_MB.get(model_name, 5)
 
     def _read_npu_temperature(self):
         """NPU-Temperatur via HailoRT Device (NICHT VDevice!).
@@ -673,6 +668,32 @@ class HardwarePopup:
                         npu_ram += ram
                         model_lines.append(
                             f"{extra:<12} {ram:5.1f} MB  (TAPPAS)")
+
+            # Whisper (permanent geladen nach erstem PTT)
+            whisper_loaded = status.get("whisper_loaded",
+                            status.get("recording", False))
+            if whisper_loaded:
+                ram = self._get_hef_size_mb("whisper")
+                npu_ram += ram
+                model_lines.append(
+                    f"{'whisper':<12} {ram:5.0f} MB  NPU-STT")
+
+            # Lokale LLMs (hailo-ollama, wenn laufend)
+            import shutil
+            if shutil.which("hailo-ollama"):
+                try:
+                    import requests
+                    r = requests.get("http://localhost:8000/api/tags", timeout=1)
+                    if r.status_code == 200:
+                        for m in r.json().get("models", []):
+                            name = m.get("name", "?").split(":")[0]
+                            short = name.replace("2.5-instruct", "").replace("_distill_qwen", "")
+                            ram = self._get_hef_size_mb(short)
+                            npu_ram += ram
+                            model_lines.append(
+                                f"{short:<12} {ram:5.0f} MB  LLM")
+                except Exception:
+                    pass  # hailo-ollama nicht laufend → nichts anzeigen
 
             if not model_lines:
                 model_lines = ["keine"]
@@ -870,7 +891,7 @@ class HardwarePopup:
             self._lbl_npu_temp.config(text="n/a (belegt)", fg=FG_DIM)
             self._draw_bar(self._canvas_npu_temp, 0)
 
-        # NPU RAM Balken (8GB NPU-RAM, Modelle belegen nur ~36MB)
+        # NPU RAM Balken (8GB NPU-RAM: Vision + Whisper + LLMs)
         npu_total_mb = 8192
         if npu_ram > 0:
             npu_pct = (npu_ram / npu_total_mb) * 100

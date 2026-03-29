@@ -1,13 +1,13 @@
 {
   "version": 1,
-  "generated": "2026-03-29T17:43:29",
-  "generation_ms": 4314.8,
+  "generated": "2026-03-29T18:51:54",
+  "generation_ms": 1666.3,
   "summary": {
     "core_modules": "38/38",
     "external_deps": "11/11",
-    "hef_models": "4/4",
+    "hef_models": "7/7",
     "voice_models": 8,
-    "tappas_active": false
+    "tappas_active": true
   },
   "gates": {
     "gate_0": {
@@ -44,9 +44,9 @@
     }
   },
   "feature_flags": {
-    "MOLOCH_USE_TAPPAS": false,
+    "MOLOCH_USE_TAPPAS": true,
     "MOLOCH_CAMERA_HOST": "192.168.178.25",
-    "MOLOCH_RTSP_URL_SET": false
+    "MOLOCH_RTSP_URL_SET": true
   },
   "hardware": {
     "ram_gb": 3.9,
@@ -335,7 +335,9 @@
       "description": "Person Detection",
       "exists": true,
       "active_in_pipeline": true,
-      "size_mb": 20.8
+      "size_mb": 20.8,
+      "npu_ram_mb": 585,
+      "kategorie": "vision"
     },
     {
       "name": "scrfd_10g",
@@ -343,7 +345,9 @@
       "description": "Face Detection",
       "exists": true,
       "active_in_pipeline": true,
-      "size_mb": 5.8
+      "size_mb": 5.8,
+      "npu_ram_mb": 0,
+      "kategorie": "vision"
     },
     {
       "name": "arcface_mobilefacenet",
@@ -351,7 +355,9 @@
       "description": "Face Recognition",
       "exists": true,
       "active_in_pipeline": true,
-      "size_mb": 2.5
+      "size_mb": 2.5,
+      "npu_ram_mb": 0,
+      "kategorie": "vision"
     },
     {
       "name": "yolov8s_pose_h10",
@@ -359,7 +365,39 @@
       "description": "Pose Estimation",
       "exists": true,
       "active_in_pipeline": false,
-      "size_mb": 13.0
+      "size_mb": 13.0,
+      "npu_ram_mb": 0,
+      "kategorie": "vision"
+    },
+    {
+      "name": "Whisper-Base",
+      "file": "Whisper-Base.hef",
+      "description": "Sprache-zu-Text (NPU)",
+      "exists": true,
+      "active_in_pipeline": true,
+      "size_mb": 130.5,
+      "npu_ram_mb": 155,
+      "kategorie": "speech"
+    },
+    {
+      "name": "Qwen2.5-1.5B-Instruct.hef",
+      "file": "Qwen2.5-1.5B-Instruct.hef",
+      "description": "Lokales Sprachmodell (Konversation)",
+      "exists": true,
+      "active_in_pipeline": true,
+      "size_mb": 0,
+      "npu_ram_mb": 1750,
+      "kategorie": "llm"
+    },
+    {
+      "name": "deepseek_r1_distill_qwen-1.5b",
+      "file": "deepseek_r1_distill_qwen-1.5b",
+      "description": "Lokales Denkmodell (Reasoning)",
+      "exists": true,
+      "active_in_pipeline": true,
+      "size_mb": 0,
+      "npu_ram_mb": 1750,
+      "kategorie": "llm"
     }
   ],
   "voice_models": [

@@ -94,14 +94,26 @@ EXTERNAL_DEPS = [
     ("rich", "Rich TUI"),
 ]
 
-# HEF-Modelle (aktiv + Pfad)
-HEF_MODELS = [
-    ("yolov8m_h10.hef", "Person Detection", True),
-    ("scrfd_10g.hef", "Face Detection", True),
-    ("arcface_mobilefacenet.hef", "Face Recognition", True),
-    ("yolov8s_pose_h10.hef", "Pose Estimation", False),
+# HEF-Modelle: Vision (aktiv in TAPPAS Pipeline)
+HEF_MODELS_VISION = [
+    ("yolov8m_h10.hef", "Person Detection", True, 585),
+    ("scrfd_10g.hef", "Face Detection", True, 0),      # RAM in YOLO enthalten
+    ("arcface_mobilefacenet.hef", "Face Recognition", True, 0),  # RAM in YOLO enthalten
+    ("yolov8s_pose_h10.hef", "Pose Estimation", False, 0),
 ]
 HEF_DIR = Path("/mnt/moloch-data/hailo/models")
+
+# HEF-Modelle: Speech (on-demand bei PTT)
+HEF_MODELS_SPEECH = [
+    ("Whisper-Base.hef", "Sprache-zu-Text (NPU)", True, 155),
+]
+HEF_DIR_SPEECH = Path("/usr/local/hailo/resources/models/hailo10h")
+
+# HEF-Modelle: LLM (on-demand via hailo-ollama)
+HEF_MODELS_LLM = [
+    ("Qwen2.5-1.5B-Instruct.hef", "Lokales Sprachmodell (Konversation)", True, 1750),
+    ("deepseek_r1_distill_qwen-1.5b", "Lokales Denkmodell (Reasoning)", True, 1750),
+]
 
 # Piper Voice Models
 VOICE_DIR = PROJECT_ROOT / "models" / "voices"
@@ -143,7 +155,8 @@ def test_core_modules() -> dict:
 def check_hef_models() -> list:
     """Pruefe welche HEF-Modelle auf der SSD vorhanden sind."""
     models = []
-    for filename, desc, active in HEF_MODELS:
+    # Vision-Modelle
+    for filename, desc, active, npu_ram_mb in HEF_MODELS_VISION:
         path = HEF_DIR / filename
         exists = path.exists()
         size_mb = round(path.stat().st_size / 1024 / 1024, 1) if exists else 0
@@ -154,6 +167,37 @@ def check_hef_models() -> list:
             "exists": exists,
             "active_in_pipeline": active and exists,
             "size_mb": size_mb,
+            "npu_ram_mb": npu_ram_mb,
+            "kategorie": "vision",
+        })
+    # Speech-Modelle (Whisper)
+    for filename, desc, active, npu_ram_mb in HEF_MODELS_SPEECH:
+        path = HEF_DIR_SPEECH / filename
+        exists = path.exists()
+        size_mb = round(path.stat().st_size / 1024 / 1024, 1) if exists else 0
+        models.append({
+            "name": filename.replace(".hef", ""),
+            "file": filename,
+            "description": desc,
+            "exists": exists,
+            "active_in_pipeline": active and exists,
+            "size_mb": size_mb,
+            "npu_ram_mb": npu_ram_mb,
+            "kategorie": "speech",
+        })
+    # LLM-Modelle (hailo-ollama)
+    import shutil
+    ollama_installed = shutil.which("hailo-ollama") is not None
+    for name, desc, active, npu_ram_mb in HEF_MODELS_LLM:
+        models.append({
+            "name": name,
+            "file": name,
+            "description": desc,
+            "exists": ollama_installed,
+            "active_in_pipeline": active and ollama_installed,
+            "size_mb": 0,
+            "npu_ram_mb": npu_ram_mb,
+            "kategorie": "llm",
         })
     return models
 
