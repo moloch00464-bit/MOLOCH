@@ -40,9 +40,10 @@ class WiFiMic:
     PACKET_16K = SEQ_HEADER_SIZE + CHUNK_16K  # 324 Bytes total
     PACKET_48K = SEQ_HEADER_SIZE + CHUNK_48K  # 964 Bytes total
 
-    # Jitter-Buffer: 100ms = 10 Pakete bei 16kHz (10ms pro Paket)
-    JITTER_BUF_SIZE = 10  # Max Pakete im Jitter-Buffer
-    JITTER_TIMEOUT_MS = 100  # Max Wartezeit bevor Ausspielen
+    # Jitter-Buffer: 150ms = 15 Pakete bei 16kHz (10ms pro Paket)
+    # Erhoet von 100ms/10 Paketen wegen WiFi-Bursts (Buffer war oft fast voll)
+    JITTER_BUF_SIZE = 15  # Max Pakete im Jitter-Buffer
+    JITTER_TIMEOUT_MS = 150  # Max Wartezeit bevor Ausspielen
 
     # UDP Socket Empfangspuffer: 1MB (default 208KB reicht nicht bei CPU-Last)
     UDP_RECV_BUF = 1048576
@@ -52,7 +53,8 @@ class WiFiMic:
     RING_48K_SIZE = 768000   # 4 Sekunden bei 48kHz Stereo 16-bit (192KB/s)
 
     # Timeout: Kein Paket seit X Sekunden → disconnected
-    HEALTH_TIMEOUT = 2.0
+    # Erhoet von 2s auf 5s — WiFi hat kurze Aussetzer, sofortiger Fallback verliert Audio
+    HEALTH_TIMEOUT = 5.0
 
     def __init__(self, esp_ip: str = "10.42.0.2",
                  port_16k: int = 12345, port_48k: int = 12346,

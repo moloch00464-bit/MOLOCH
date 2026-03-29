@@ -163,6 +163,7 @@ class MolochWhisper:
             if channels == 2:
                 audio = audio.reshape(-1, 2).mean(axis=1)
 
+            # int16/int32 → float32 normalisiert (wie Hailo simple_whisper_chat.py)
             audio = audio.astype(np.float32)
             if sample_width == 2:
                 audio /= 32768.0
@@ -173,24 +174,26 @@ class MolochWhisper:
                 import scipy.signal
                 audio = scipy.signal.resample(audio, int(len(audio) * 16000 / sample_rate))
 
-            # Audio-Preprocessing: DC-Offset entfernen + Normalisierung auf -3dBFS
+            # DC-Offset entfernen (WiFi-Mic kann DC-Shift haben)
             dc_offset = np.mean(audio)
             if abs(dc_offset) > 0.001:
                 audio = audio - dc_offset
                 logger.debug(f"DC-Offset entfernt: {dc_offset:.4f}")
 
+            # Sanfte Normalisierung: nur wenn zu leise, max +10dB
+            # (Aggressive -3dBFS Normalisierung entfernt — verursachte Artefakte)
             peak = np.max(np.abs(audio))
-            if peak > 0.001:
-                # -3dBFS = 10^(-3/20) ≈ 0.7079
-                target = 0.7079
-                gain = target / peak
-                if gain > 10.0:
-                    gain = 10.0  # Max 20dB Verstaerkung
+            if peak > 0.001 and peak < 0.1:
+                # Nur verstaerken wenn wirklich zu leise (<-20dBFS)
+                gain = min(0.5 / peak, 3.16)  # Max +10dB
                 audio = audio * gain
-                logger.debug(f"Normalisiert: Peak {peak:.4f} → {peak * gain:.4f} "
-                             f"(Gain {20 * np.log10(gain):.1f}dB)")
+                logger.debug(f"Leise Audio verstaerkt: Peak {peak:.4f} → {peak * gain:.4f}")
 
-            logger.debug(f"Loaded audio: {len(audio)} samples, {len(audio)/16000:.2f}s")
+            # Little-Endian float32 — KRITISCH fuer Hailo NPU (wie im Hailo-Beispiel)
+            audio = audio.astype('<f4')
+
+            logger.debug(f"Loaded audio: {len(audio)} samples, {len(audio)/16000:.2f}s, "
+                         f"peak={np.max(np.abs(audio)):.3f}")
             return audio
 
         except Exception as e:
@@ -225,13 +228,14 @@ class MolochWhisper:
                     text = self._transcribe_npu(audio_path, language, timeout_ms)
                     if text:
                         return text
-                    logger.warning("[Whisper] NPU: kein Ergebnis — Fallback auf CPU")
+                    logger.warning("[Whisper] NPU: kein Ergebnis (Stille oder zu kurz)")
+                    return ""
             else:
-                logger.warning("[Whisper] NPU init fehlgeschlagen — Fallback auf CPU")
+                logger.error("[Whisper] NPU init fehlgeschlagen — KEIN Fallback (nur NPU erlaubt)")
+                return ""
 
-        # Fallback: faster-whisper Small auf CPU
-        logger.warning("[Whisper] Fallback: faster-whisper Small auf CPU")
-        return self._transcribe_faster_whisper(audio_path, language)
+        # Kein CPU-Fallback: NPU ist Pflicht (CPU ist zu langsam und frisst RAM)
+        return ""
 
     def _transcribe_faster_whisper(self, audio_path: str, language: str) -> str:
         """Transkription mit faster-whisper Small auf CPU (Fallback wenn NPU fehlschlaegt).
@@ -339,16 +343,31 @@ class MolochWhisper:
 
             # Bekannte Whisper-Halluzinationen filtern (Stille/Hintergrundgeraeusch)
             halluzinationen = [
-                "Untertitel", "Danke", "Tschüss", "Tschüss!", "Auf Wiedersehen",
+                "Untertitel", "Untertitelung", "Untertitel von",
+                "Danke", "Danke.", "Danke!", "Danke schön",
+                "Tschüss", "Tschüss!", "Auf Wiedersehen",
                 "Bitte abonnieren", "Abonnieren", "Vielen Dank", "Vielen Dank!",
                 "Thank you", "Thanks", "Bye", "Goodbye", "Subscribe",
+                "Thank you for watching", "Thanks for watching",
                 "[Musik]", "[musik]", "[MUSIK]", "[Applaus]", "[applaus]",
-                "[Gelächter]", "(Musik)", "(Stille)",
+                "[Gelächter]", "(Musik)", "(Stille)", "...", "…",
+                "Ich weiß nicht.", "SWR 2021", "SWR 2022",
+                "Copyright", "www.", "http",
+                "Bis zum nächsten Mal", "Bis bald",
             ]
-            text_lower = text.lower().strip()
+            text_lower = text.lower().strip().rstrip(".")
             for h in halluzinationen:
-                if text_lower == h.lower().strip():
+                if text_lower == h.lower().strip().rstrip("."):
                     logger.info(f"Halluzination gefiltert: '{text}'")
+                    return ""
+
+            # Buchstaben-Muell: einzelne Woerter >25 Zeichen = Halluzination
+            words = text.split()
+            cleaned = [w for w in words if len(w) <= 25]
+            if len(cleaned) < len(words):
+                logger.info(f"Buchstaben-Muell entfernt: {len(words) - len(cleaned)} Woerter")
+                text = " ".join(cleaned).strip()
+                if not text:
                     return ""
 
             logger.info(f"NPU transcribed: {text[:50]}..." if len(text) > 50 else f"NPU transcribed: {text}")
