@@ -1464,6 +1464,9 @@ class MolochService:
                     target = params.get("target_zone")
                     if target and self._cam:
                         try:
+                            # Tracker pausieren (may_send_ptz=False), 30s auto-resume
+                            from core.ptz_arbiter import get_ptz_arbiter
+                            get_ptz_arbiter().set_moloch_manuell("decision_engine")
                             self._cam.ptz_goto(target)
                             logger.info(f"[DECISION] PTZ → {target} ({reason})")
                         except Exception as _e:
