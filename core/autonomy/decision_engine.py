@@ -37,6 +37,7 @@ COOLDOWNS = {
     "ptz_move": 30.0,        # 30s zwischen PTZ-Moves
     "speak": 60.0,           # 1 Minute zwischen Kommentaren
     "web_search": 300.0,     # 5 Minuten zwischen autonomen Websuchen
+    "reflect": 600.0,        # 10 Minuten zwischen NPU-Reflexionen
     "silence": 0.0,          # Kein Cooldown fuer Nichtstun
 }
 
@@ -182,6 +183,9 @@ class DecisionEngine:
 
         # --- Web Search ---
         candidates.append(self._score_web_search())
+
+        # --- Reflect (NPU Selbstreflexion) ---
+        candidates.append(self._score_reflect())
 
         return candidates
 
@@ -329,6 +333,30 @@ class DecisionEngine:
             params = {"trigger": "morning"}
 
         return {"action": "web_search", "score": score, "reason": reason, "params": params}
+
+    def _score_reflect(self) -> Dict[str, Any]:
+        """Utility-Score fuer NPU-Selbstreflexion (DeepSeek R1)."""
+        score = 0.0
+        reason = ""
+
+        # Hohe Tension → warum bin ich angespannt?
+        if self._tension > 0.7:
+            score = 0.45
+            reason = "high_tension_introspection"
+        # Shadow-Zone → was passiert mit mir?
+        elif self._dominance < -0.15:
+            score = 0.40
+            reason = "shadow_zone_awareness"
+        # Niemand da + ruhig → Leerlauf-Kontemplation
+        elif self._activity == "away" and self._tension < 0.3:
+            score = 0.38
+            reason = "idle_contemplation"
+        # Allein/Arbeiten + wenig Engagement → periodische Reflexion
+        elif self._activity in ("alone", "working") and self._engagement < 0.4:
+            score = 0.33
+            reason = "periodic_reflection"
+
+        return {"action": "reflect", "score": score, "reason": reason}
 
     # =====================================================================
     # Public API

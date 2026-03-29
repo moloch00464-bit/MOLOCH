@@ -1481,6 +1481,37 @@ class MolochService:
                         logger.info(f"[DECISION] Speak ausgeloest ({reason})")
                     except Exception as _e:
                         logger.debug(f"[DECISION] Speak Fehler: {_e}")
+                elif action == "reflect":
+                    try:
+                        from core.autonomy.introspection import get_introspection
+                        _svc = self  # Closure-Referenz
+
+                        def _do_reflect():
+                            result = get_introspection().reflect()
+                            if not result:
+                                return
+                            # Tension/Dominance nudgen via CoreIntegrator
+                            t_nudge = result.get("tension_nudge", 0.0)
+                            d_nudge = result.get("dominance_nudge", 0.0)
+                            if (t_nudge or d_nudge) and hasattr(_svc, "_core_integrator"):
+                                ci = _svc._core_integrator
+                                if ci and t_nudge:
+                                    ci.update_input("introspection", "respect_score",
+                                                    abs(t_nudge) if t_nudge < 0 else 0.0)
+                                if ci and d_nudge > 0:
+                                    ci.update_input("introspection", "voice_activity",
+                                                    abs(d_nudge))
+                            # Laut aussprechen wenn Kommentar vorhanden
+                            comment = result.get("comment")
+                            if comment and _svc._voice_pipeline:
+                                _svc._voice_pipeline.trigger_spontaneous(comment)
+                                logger.info(f"[DECISION] Reflexion laut: {comment[:60]}")
+
+                        threading.Thread(
+                            target=_do_reflect, daemon=True,
+                            name="Introspection").start()
+                    except Exception as _e:
+                        logger.debug(f"[DECISION] Reflect Fehler: {_e}")
 
             _dec_bus.subscribe("decision_made", _on_decision_made)
             logger.info("[START] Decision Engine Executor registriert")
