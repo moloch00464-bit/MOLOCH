@@ -654,6 +654,8 @@ class MolochConsole:
             "/say": self._cmd_say,
             "/face": self._cmd_face,
             "/vision": self._cmd_vision,
+            "/search": self._cmd_search,
+            "/net": self._cmd_net,
         }
 
     def _handle_interrupt(self, signum, frame):
@@ -716,6 +718,8 @@ class MolochConsole:
         self._print_line("/brain     - Brain-Kontext anzeigen")
         self._print_line("/vision    - Vision Pipeline Status")
         self._print_line("/face      - Face Recognition Befehle")
+        self._print_line("/search    - Websuche: /search <query>")
+        self._print_line("/net       - Internet/Autonome Suche Status")
         self._print_line("/clear     - Bildschirm leeren")
         self._print_line("/reset     - Konversation zuruecksetzen")
         self._print_line("/version   - Version anzeigen")
@@ -1048,6 +1052,81 @@ class MolochConsole:
         except Exception as e:
             self._print_line(f"Fehler: {e}")
 
+        self._print_line("")
+
+    def _cmd_search(self, args: str) -> None:
+        """Manuelle Websuche via Console."""
+        self._print_line("")
+        if not args.strip():
+            self._print_line("Usage: /search <query>")
+            self._print_line("Beispiel: /search Raspberry Pi 5 Specs")
+            self._print_line("")
+            return
+        try:
+            from core.net.internet_bridge import get_internet_bridge
+            bridge = get_internet_bridge()
+            if not bridge.online:
+                self._print_line("[OFFLINE] Keine Internetverbindung.")
+                self._print_line("")
+                return
+            self._print_line(f"Suche: {args.strip()}...")
+            results = bridge.search_web(args.strip())
+            if not results:
+                self._print_line("Keine Ergebnisse.")
+            else:
+                for i, r in enumerate(results, 1):
+                    src = r.get("source", "Web")
+                    self._print_line(f"  {i}. [{src}] {r.get('title', '?')}")
+                    self._print_line(f"     {r.get('text', '')[:150]}")
+        except Exception as e:
+            self._print_line(f"[FEHLER] Suche: {e}")
+        self._print_line("")
+
+    def _cmd_net(self, args: str) -> None:
+        """Internet-Status und autonome Suche steuern."""
+        self._print_line("")
+        try:
+            from core.net.internet_bridge import get_internet_bridge
+            from core.net.autonomous_search import get_autonomous_search
+            bridge = get_internet_bridge()
+            searcher = get_autonomous_search()
+
+            cmd = args.strip().lower()
+            if cmd == "on":
+                searcher.grant_permission()
+                self._print_line("[NET] Autonome Suche AKTIVIERT (TTL: 60min)")
+                self._print_line("")
+                return
+            elif cmd == "off":
+                searcher.revoke_permission()
+                self._print_line("[NET] Autonome Suche DEAKTIVIERT")
+                self._print_line("")
+                return
+
+            # Status anzeigen
+            net_status = bridge.get_network_status()
+            state = searcher.get_state()
+            self._print_line("Internet Status:")
+            self._print_line("-" * 40)
+            self._print_line(f"  Verbindung:     {net_status['status_text']}")
+            self._print_line(f"  Autonome Suche: {'AN' if state['permitted'] else 'AUS'}")
+            if state["permitted"]:
+                ttl_min = state.get("ttl_remaining", 0) / 60
+                self._print_line(f"  Verbleibend:    {ttl_min:.0f} min")
+            self._print_line(f"  Suchen gesamt:  {state.get('search_count', 0)}/{state.get('max_per_session', 20)}")
+            self._print_line(f"  Letzte Suche:   {state.get('last_query', 'keine')}")
+            # Letzte Ergebnisse
+            history = state.get("history", [])
+            if history:
+                self._print_line("")
+                self._print_line("  Letzte Funde:")
+                for h in history[-3:]:
+                    self._print_line(f"    - [{h.get('source', '?')}] {h.get('title', '?')[:60]}")
+            self._print_line("")
+            self._print_line("  /net on  — Autonome Suche aktivieren")
+            self._print_line("  /net off — Autonome Suche deaktivieren")
+        except Exception as e:
+            self._print_line(f"[FEHLER] Net-Status: {e}")
         self._print_line("")
 
     def _process_input(self, user_input: str) -> None:

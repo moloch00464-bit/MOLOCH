@@ -36,6 +36,7 @@ COOLDOWNS = {
     "light_change": 15.0,    # 15s zwischen LED-Aenderungen
     "ptz_move": 30.0,        # 30s zwischen PTZ-Moves
     "speak": 60.0,           # 1 Minute zwischen Kommentaren
+    "web_search": 300.0,     # 5 Minuten zwischen autonomen Websuchen
     "silence": 0.0,          # Kein Cooldown fuer Nichtstun
 }
 
@@ -142,6 +143,18 @@ class DecisionEngine:
             except Exception as e:
                 logger.debug(f"[DECISION] Event publish: {e}")
 
+        # Autonome Websuche ausfuehren wenn gewonnen
+        if best["action"] == "web_search":
+            try:
+                from core.net.autonomous_search import get_autonomous_search
+                threading.Thread(
+                    target=get_autonomous_search().trigger_search,
+                    daemon=True,
+                    name="WebSearch-Trigger",
+                ).start()
+            except Exception as e:
+                logger.debug(f"[DECISION] Web search trigger: {e}")
+
         return best
 
     def _score_all(self) -> List[Dict[str, Any]]:
@@ -166,6 +179,9 @@ class DecisionEngine:
 
         # --- Speak ---
         candidates.append(self._score_speak())
+
+        # --- Web Search ---
+        candidates.append(self._score_web_search())
 
         return candidates
 
@@ -276,6 +292,43 @@ class DecisionEngine:
             params = {"type": "greeting"}
 
         return {"action": "speak", "score": score, "reason": reason, "params": params}
+
+    def _score_web_search(self) -> Dict[str, Any]:
+        """Utility-Score fuer autonome Websuche."""
+        score = 0.0
+        reason = ""
+        params: Dict[str, Any] = {}
+
+        # Pruefen ob Suche erlaubt
+        try:
+            from core.net.autonomous_search import get_autonomous_search
+            if not get_autonomous_search().permitted:
+                return {"action": "web_search", "score": 0.0, "reason": "not_permitted"}
+        except Exception:
+            return {"action": "web_search", "score": 0.0, "reason": "module_unavailable"}
+
+        # Hohes Engagement + bekannte Person → Kontext-Suche
+        if self._engagement > 0.6 and self._face_id and self._face_id != "unknown":
+            score = 0.38
+            reason = "curious_during_engagement"
+            params = {"trigger": "engagement"}
+        # Allein + ruhige Phase → Hintergrund-Recherche
+        elif self._activity == "away" and self._tension < 0.3:
+            score = 0.35
+            reason = "idle_background_search"
+            params = {"trigger": "idle"}
+        # Hohe Tension + Guardian → Sicherheits-Check
+        elif self._tension > 0.6 and self._dominance > 0.15:
+            score = 0.42
+            reason = "security_check"
+            params = {"trigger": "security"}
+        # Morgens → Briefing
+        elif 6 <= self._hour <= 9:
+            score = 0.36
+            reason = "morning_briefing"
+            params = {"trigger": "morning"}
+
+        return {"action": "web_search", "score": score, "reason": reason, "params": params}
 
     # =====================================================================
     # Public API
