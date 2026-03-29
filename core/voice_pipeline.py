@@ -475,6 +475,24 @@ def _get_hardware_status() -> str:
     except Exception:
         pass
 
+    # Gecachte Gesundheits-Zusammenfassung + FPS-Koerpermetapher
+    try:
+        import json as _json2
+        with open("/dev/shm/moloch_status.json", encoding="utf-8") as _hf:
+            _hs = _json2.load(_hf)
+        _summary = _hs.get("health_summary", "")
+        if _summary:
+            result += f"\nGESUNDHEIT: {_summary}"
+        _fps_raw = _hs.get("fps", {})
+        _fps_val = (_fps_raw.get("total", 0) if isinstance(_fps_raw, dict)
+                    else float(_fps_raw or 0))
+        if 0 < _fps_val < 10:
+            result += "\nDeine Augen arbeiten schlecht — Bilder ruckeln stark."
+        elif 0 < _fps_val < 15:
+            result += "\nDeine Augen sind etwas traege."
+    except Exception:
+        pass
+
     return result
 
 
