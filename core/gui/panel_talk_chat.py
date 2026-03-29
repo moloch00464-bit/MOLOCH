@@ -319,12 +319,23 @@ class TalkChatModule:
                 if llm.startswith("lokal"):
                     self._lbl_llm_npu.config(fg=ACCENT_GREEN)   # Gruen = NPU aktiv
                     self._lbl_llm_api.config(fg=FG_DIM)
+                    self._llm_last_active = time.time()
+                    self._llm_last_seen = llm
                 elif llm.startswith("api"):
                     self._lbl_llm_npu.config(fg=FG_DIM)
                     self._lbl_llm_api.config(fg=STATUS_YELLOW)  # Gelb = Cloud
+                    self._llm_last_active = time.time()
+                    self._llm_last_seen = llm
                 else:
                     self._lbl_llm_npu.config(fg=FG_DIM)
                     self._lbl_llm_api.config(fg=FG_DIM)         # Grau = offline
+                # Auto-Dim: Provider unveraendert + kein aktiver Call > 10s → dim
+                if llm not in ("none", "") and not status.get("api_in_flight", False):
+                    _now = time.time()
+                    if llm == getattr(self, "_llm_last_seen", ""):
+                        if _now - getattr(self, "_llm_last_active", _now) > 10.0:
+                            self._lbl_llm_npu.config(fg=FG_DIM)
+                            self._lbl_llm_api.config(fg=FG_DIM)
         except Exception:
             pass  # Polling darf NIEMALS sterben
 
