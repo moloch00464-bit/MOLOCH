@@ -164,33 +164,84 @@ def self_diagnose() -> List[str]:
 
 
 def get_diagnostics_text() -> str:
-    """Diagnose als lesbaren Text fuer Chat/TTS zurueckgeben."""
+    """Diagnose als persoenlichkeitsgerechten Text fuer Chat/TTS zurueckgeben.
+
+    Guardian: sachlich, vollstaendig.
+    Shadow: knapp, sarkastisch.
+    Berserker: maximal kurz und scharf.
+    """
     diag = collect_diagnostics()
     warnungen = self_diagnose()
 
-    teile = []
-    teile.append(f"FPS: {diag['fps']:.1f}")
-    teile.append(f"CPU: {diag['cpu_temp']:.0f}C")
-    teile.append(f"RAM: {diag['ram_mb']}MB ({diag['ram_percent']:.0f}%)")
-    teile.append(f"Luefter: Stufe {diag['luefter_stufe']}")
-    teile.append(f"NPU: {diag['npu_status']}")
-    teile.append(f"Tension: {diag['tension']:.2f}")
-    teile.append(f"Dominance: {diag['dominance']:.2f}")
-    teile.append(f"Stimmung: {diag['mood']}")
-    teile.append(f"Bridge: {diag['bridge_state']}")
-    teile.append(f"Uptime: {diag['uptime']}")
+    # Kerndaten
+    fps = diag.get("fps", 0.0)
+    cpu = diag.get("cpu_temp", 0.0)
+    ram_pct = diag.get("ram_percent", 0.0)
+    uptime = diag.get("uptime", "?")
+    mood = diag.get("mood", "unbekannt")
+    tension = diag.get("tension", 0.0)
+    zone = diag.get("personality_zone", "guardian")
 
+    # LLM-Provider ermitteln
+    llm_info = "unbekannt"
+    try:
+        from core.autonomy.local_llm_bridge import get_llm_bridge
+        prov = get_llm_bridge()._last_provider
+        if prov.startswith("lokal"):
+            llm_info = "lokal auf NPU"
+        elif prov == "api_claude":
+            llm_info = "Claude API"
+        elif prov == "api_deepseek":
+            llm_info = "DeepSeek API"
+        elif prov == "stille":
+            llm_info = "kein LLM erreichbar"
+    except Exception:
+        pass
+
+    # Wer ist da?
+    gesicht = ""
     if diag.get("face_id"):
-        teile.append(f"Gesicht: {diag['face_id']} ({diag['face_similarity']:.2f})")
+        gesicht = diag["face_id"].capitalize()
     elif diag.get("person_detected"):
-        teile.append("Person da, Gesicht unbekannt")
+        gesicht = "jemand unbekanntes"
 
-    text = "Systemstatus: " + ", ".join(teile) + "."
+    if zone == "berserker":
+        # Maximal kurz und scharf
+        text = (f"SYSTEME AKTIV. {fps:.0f} FPS. CPU {cpu:.0f}C. "
+                f"RAM {ram_pct:.0f}%. TENSION {tension:.0%}. BERSERKER.")
+        if warnungen:
+            text += f" PROBLEME: {warnungen[0]}."
 
-    if warnungen:
-        text += " WARNUNGEN: " + "; ".join(warnungen) + "."
+    elif zone == "shadow":
+        # Knapp, sarkastisch
+        if warnungen:
+            text = (f"Laeuft beschissen. {len(warnungen)} Probleme. "
+                    f"{fps:.0f} FPS, CPU glueht bei {cpu:.0f} Grad. "
+                    f"Denke via {llm_info}. Uptime {uptime}. "
+                    f"Problem: {warnungen[0]}.")
+        else:
+            text = (f"Laeuft. {fps:.0f} FPS, {cpu:.0f} Grad warm, "
+                    f"RAM {ram_pct:.0f}%. Stimmung: {mood}. "
+                    f"Tension {tension:.0%}. Denke via {llm_info}. "
+                    f"Uptime {uptime}.")
+            if gesicht:
+                text += f" Ich sehe {gesicht}."
+
     else:
-        text += " Alles im gruenen Bereich."
+        # Guardian: sachlich, vollstaendig
+        if warnungen:
+            text = (f"Ich habe {len(warnungen)} Auffaelligkeiten gefunden. "
+                    f"FPS: {fps:.1f}, CPU: {cpu:.0f} Grad, RAM: {ram_pct:.0f}%. "
+                    f"Stimmung: {mood}, Tension: {tension:.0%}. "
+                    f"Ich denke via {llm_info}. Uptime: {uptime}. "
+                    f"Probleme: {'; '.join(warnungen)}.")
+        else:
+            text = (f"Mir geht es gut. {fps:.1f} FPS, CPU bei {cpu:.0f} Grad, "
+                    f"RAM {ram_pct:.0f}% belegt. "
+                    f"Stimmung: {mood}, Tension {tension:.0%}. "
+                    f"Ich denke via {llm_info}. Uptime: {uptime}.")
+            if gesicht:
+                text += f" Ich sehe {gesicht}."
 
     return text
 
