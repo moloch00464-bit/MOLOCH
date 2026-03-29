@@ -7,8 +7,8 @@ Einheitliche Schnittstelle fuer lokale + Cloud LLM Reasoning.
 Prioritaet (Fallback-Kette):
   1. hailo-ollama (Port 8000) — Qwen2.5 oder DeepSeek R1 lokal auf NPU
   2. DeepSeek API (Cloud) — online, guenstig
-  3. Claude API (Cloud) — online, Fallback
-  4. Stille — kein Crash, kein Fehler, nur keine Antwort
+  3. Stille — kein Crash, kein Fehler, nur keine Antwort
+  (Claude API wurde entfernt — nur DeepSeek als Cloud-Fallback)
 
 Zwei Rollen:
   - ask_external(prompt) → Qwen2.5 fuer Konversation (Deutsch)
@@ -81,31 +81,26 @@ class LocalLLMBridge:
 
     def ask_external(self, prompt: str, system: str = "",
                      max_tokens: int = 256) -> Optional[str]:
-        """Konversation: Qwen2.5 lokal → DeepSeek API → Claude API → None.
+        """Konversation: Qwen2.5 lokal → DeepSeek API → Stille.
 
         Fuer Echtzeit-Dialog mit Markus. Kurze Antworten, Deutsch.
         """
         with self._lock:
             self._request_count += 1
 
-        # 1. hailo-ollama Qwen2.5 (lokal)
+        # 1. hailo-ollama Qwen2.5 (lokal auf NPU)
         result = self._generate_ollama(prompt, system, max_tokens,
                                        model=OLLAMA_MODEL_CHAT,
                                        timeout=OLLAMA_TIMEOUT_CHAT)
         if result:
             return result
 
-        # 2. DeepSeek API (Cloud)
+        # 2. DeepSeek API (Cloud-Fallback)
         result = self._generate_deepseek(prompt, system, max_tokens)
         if result:
             return result
 
-        # 3. Claude API (Fallback)
-        result = self._generate_claude(prompt, system, max_tokens)
-        if result:
-            return result
-
-        # 4. Stille
+        # 3. Stille
         self._last_provider = "stille"
         return None
 
@@ -142,11 +137,8 @@ class LocalLLMBridge:
         """
         if use_local:
             return self.ask_external(prompt, system, max_tokens)
-        # Ohne use_local: Direkt Cloud
+        # Ohne use_local: DeepSeek Cloud direkt
         result = self._generate_deepseek(prompt, system, max_tokens)
-        if result:
-            return result
-        result = self._generate_claude(prompt, system, max_tokens)
         if result:
             return result
         self._last_provider = "stille"
@@ -234,31 +226,6 @@ class LocalLLMBridge:
             return resp.json()["choices"][0]["message"]["content"].strip()
         except Exception as e:
             logger.debug(f"[LLM-BRIDGE] DeepSeek Fehler: {e}")
-            return None
-
-    def _generate_claude(self, prompt: str, system: str,
-                         max_tokens: int) -> Optional[str]:
-        """Claude API (Fallback)."""
-        api_key = self._load_api_key("anthropic")
-        if not api_key:
-            return None
-        try:
-            import requests
-            resp = requests.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={"x-api-key": api_key,
-                         "anthropic-version": "2023-06-01",
-                         "content-type": "application/json"},
-                json={"model": "claude-haiku-4-5-20251001",
-                      "max_tokens": max_tokens,
-                      "system": system,
-                      "messages": [{"role": "user", "content": prompt}]},
-                timeout=15)
-            resp.raise_for_status()
-            self._last_provider = "api_claude"
-            return resp.json()["content"][0]["text"].strip()
-        except Exception as e:
-            logger.debug(f"[LLM-BRIDGE] Claude Fehler: {e}")
             return None
 
     def get_status(self) -> Dict:
