@@ -2058,6 +2058,20 @@ class MolochService:
             except Exception:
                 status["health_summary"] = ""
 
+            # Introspection Status (letzter NPU-Gedanke)
+            try:
+                from core.autonomy.introspection import get_introspection
+                status["introspection"] = get_introspection().get_state()
+            except Exception:
+                pass
+
+            # SpatialMemory (Objekte pro Zone)
+            if self._spatial_memory:
+                try:
+                    status["spatial"] = self._spatial_memory.get_status()
+                except Exception:
+                    pass
+
             self._ipc.write_status(status)
 
             # MolochSprache Retention-Tick (1x/Stunde Cleanup)
