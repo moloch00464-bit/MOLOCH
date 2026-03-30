@@ -376,6 +376,18 @@ def _perception_to_text() -> str:
         except Exception:
             pass
 
+        # SpatialMemory: Bekannte Objekte im Raum
+        try:
+            from core.awareness.room_map import get_spatial_memory
+            _sm = get_spatial_memory()
+            _map = _sm.get_full_map()
+            if _map:
+                _parts = [f"{z}: {', '.join(objs)}" for z, objs in _map.items() if objs]
+                if _parts:
+                    lines.append("Raumkarte: " + " | ".join(_parts))
+        except Exception:
+            pass
+
         if not lines:
             return ""
         return "\n".join(lines)
@@ -1386,6 +1398,16 @@ class VoicePipeline:
         hw_status = _get_hardware_status()
         if hw_status:
             system = system + "\n" + _sanitize_text(hw_status)
+
+        # Letzte Selbstreflexion (NPU Introspection)
+        try:
+            from core.autonomy.introspection import get_introspection
+            _intro_state = get_introspection().get_state()
+            _last_thought = _intro_state.get("last_thought")
+            if _last_thought:
+                system = system + f"\n\n--- LETZTER GEDANKE ---\n{_last_thought}"
+        except Exception:
+            pass
 
         # Internet-Status
         try:
