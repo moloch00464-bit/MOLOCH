@@ -147,12 +147,12 @@ class NightCycle:
         try:
             from core.autonomy.local_llm_bridge import get_llm_bridge
             bridge = get_llm_bridge()
-            if bridge and bridge._hailo_genai_available:
+            if bridge and bridge._ollama_available:
                 reflection = self._generate_llm_reflection(date, result)
                 result["steps"]["llm_reflection"] = reflection
                 logger.info(f"[NIGHT] LLM-Reflexion: {len(reflection.get('text', ''))} Zeichen")
             else:
-                result["steps"]["llm_reflection"] = {"skipped": "hailo_genai nicht verfuegbar"}
+                result["steps"]["llm_reflection"] = {"skipped": "hailo-ollama nicht verfuegbar"}
         except Exception as e:
             result["steps"]["llm_reflection"] = {"error": str(e)}
             logger.error(f"[NIGHT] LLM-Reflexion: {e}")
@@ -197,6 +197,27 @@ class NightCycle:
         if events:
             top = sorted(events.items(), key=lambda x: x[1], reverse=True)[:5]
             prompt_lines.append("Haeufigste Ereignisse: " + ", ".join(f"{k}={v}" for k, v in top))
+
+        # Tages-Introspections als Kontext einbauen
+        try:
+            import json as _json
+            _refl_path = f"/mnt/moloch-data/memory/reflections/{date}.jsonl"
+            if os.path.exists(_refl_path):
+                _thoughts = []
+                with open(_refl_path, "r") as f:
+                    for line in f:
+                        try:
+                            _entry = _json.loads(line.strip())
+                            if _entry.get("thought"):
+                                _thoughts.append(_entry["thought"][:80])
+                        except Exception:
+                            pass
+                if _thoughts:
+                    prompt_lines.append(f"Meine Gedanken heute ({len(_thoughts)}x):")
+                    for t in _thoughts[-5:]:  # Letzte 5 Gedanken
+                        prompt_lines.append(f"  - {t}")
+        except Exception:
+            pass
 
         prompt = "\n".join(prompt_lines) + "\n\nFasse den Tag in 2-3 Saetzen zusammen."
         system = (
