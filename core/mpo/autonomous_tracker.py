@@ -1462,6 +1462,32 @@ class AutonomousTracker:
         if time_since_move < self.config.move_cooldown_ms:
             return
 
+        # === STUCK-AT-LIMIT Erkennung: Kamera am mechanischen Anschlag?  ===
+        # Wenn Kamera > 8s am Pan/Tilt-Limit UND Error treibt weiter in die Grenze
+        # → wahrscheinlich Artefakt-Detection, kein echtes Ziel → SEARCH starten
+        pan_at_min = self.last_known_pan <= self.config.pan_limit_min + 3.0
+        pan_at_max = self.last_known_pan >= self.config.pan_limit_max - 3.0
+        tilt_at_max = self.last_known_tilt >= self.config.tilt_limit_max + 20.0  # Physiklimit > SW-Limit
+        error_drives_into_pan_limit = (pan_at_min and error_x_norm > 0.15) or (pan_at_max and error_x_norm < -0.15)
+        error_drives_into_tilt_limit = tilt_at_max and error_y_norm < -0.10
+        stuck_at_limit = error_drives_into_pan_limit or error_drives_into_tilt_limit
+
+        if stuck_at_limit:
+            if not getattr(self, '_stuck_limit_start', None):
+                self._stuck_limit_start = now
+            elif now - self._stuck_limit_start > 8.0:
+                logger.warning(
+                    f"[STUCK-LIMIT] >8s am Anschlag pos=({self.last_known_pan:+.1f},{self.last_known_tilt:+.1f}) "
+                    f"err_x={error_x_norm:+.3f} err_y={error_y_norm:+.3f} → SEARCH starten"
+                )
+                self._stuck_limit_start = None
+                self._smooth_x = None  # EMA-Filter zuruecksetzen
+                self._smooth_y = None
+                self._set_state(TrackerState.SEARCHING)
+                return
+        else:
+            self._stuck_limit_start = None
+
         # Anti-Overshoot: warte bis Kamera am letzten Ziel angekommen ist
         if self._target_pan is not None:
             dist = abs(self.last_known_pan - self._target_pan) + abs(self.last_known_tilt - self._target_tilt)
