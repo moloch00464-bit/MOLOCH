@@ -1242,7 +1242,10 @@ class AutonomousTracker:
 
                 # Auto-ST: Wenn MOLOCH die BBox nicht zentriert kriegt → ST einschalten
                 off_center = max(abs(detection.center_x - 0.5), abs(detection.center_y - 0.5))
-                if off_center > self._ST_AUTO_ERROR_THRESHOLD and not self._camera_smart_tracking_on:
+                # Cooldown: nach ST-AUS hat Moloch _ST_COOLDOWN_S Zeit sich einzupendeln
+                st_off_time = getattr(self, '_st_deactivate_time', 0.0)
+                in_cooldown = (time.time() - st_off_time) < self._ST_COOLDOWN_S
+                if off_center > self._ST_AUTO_ERROR_THRESHOLD and not self._camera_smart_tracking_on and not in_cooldown:
                     self._st_auto_fail_count = getattr(self, '_st_auto_fail_count', 0) + 1
                     if self._st_auto_fail_count >= self._ST_AUTO_CYCLES:
                         logger.info(f"[AUTO-ST] BBox {self._st_auto_fail_count}x off-center "
@@ -1885,6 +1888,7 @@ class AutonomousTracker:
     # Auto-ST-Aktivierung: Wenn MOLOCH-Tracking BBox nicht zentriert bekommt
     _ST_AUTO_ERROR_THRESHOLD = 0.35   # 35% off-center = wirklich weit weg (war 0.25 → zu schnell)
     _ST_AUTO_CYCLES = 20              # 20 Cycles = ~4s (war 10 → griff zu frueh ein)
+    _ST_COOLDOWN_S = 10.0             # Cooldown nach ST-AUS: Moloch hat 10s Zeit sich einzupendeln
 
     # Hysterese: ST erst nach N aufeinanderfolgenden face-losen Frames aktivieren
     _ST_NO_FACE_THRESHOLD = 8         # 8 Frames ohne Face (~0.4s) bevor ST uebernimmt
@@ -1965,6 +1969,8 @@ class AutonomousTracker:
                     self._st_settle_count = 0
                     self._st_prev_pan = self.last_known_pan
                     self._st_prev_tilt = self.last_known_tilt
+                else:
+                    self._st_deactivate_time = time.time()
                 logger.info(f"[SMART-TRACK] Kamera Smart-Tracking {'AN' if on else 'AUS'}")
         except Exception as e:
             logger.warning(f"[SMART-TRACK] Fehler: {e}")
