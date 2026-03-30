@@ -1204,6 +1204,26 @@ class VoicePipeline:
         except Exception as e:
             logger.error(f"[VOICE] Memory save_message(user) fehlgeschlagen: {e}")
 
+        # 1.4b Preference Learner: Implizites Feedback aus Sprache
+        try:
+            from core.autonomy.preference_learner import get_preference_learner
+            _pl = get_preference_learner()
+            _lower = text.strip().lower()
+            _POSITIVE = ("gut", "cool", "ja", "genau", "super", "perfekt",
+                         "danke", "passt", "weiter so", "richtig", "jawoll")
+            _NEGATIVE = ("nein", "stopp", "stop", "aus", "halt", "ruhe",
+                         "still", "nervt", "lass das", "hoer auf", "falsch")
+            if any(_lower == w or _lower.startswith(w + " ") for w in _POSITIVE):
+                _pl.reward("speech_frequency")
+                _pl.reward("reaction_speed")
+                logger.debug(f"[VOICE] Preference REWARD (positives Feedback)")
+            elif any(_lower == w or _lower.startswith(w + " ") for w in _NEGATIVE):
+                _pl.penalty("speech_frequency")
+                _pl.penalty("reaction_speed")
+                logger.debug(f"[VOICE] Preference PENALTY (negatives Feedback)")
+        except Exception:
+            pass
+
         # 1.5 Lokale Keyword-Erkennung (KEIN API Call noetig)
         keyword_response = self._handle_keyword(text)
         if keyword_response:
