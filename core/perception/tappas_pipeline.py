@@ -1392,7 +1392,7 @@ class TappasPipeline:
             f'queue name=cb_q leaky=downstream max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! '
             f'identity name=identity_callback ! '
             f'queue name=overlay_q leaky=downstream max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! '
-            f'hailooverlay name=hailo_overlay ! '
+            f'hailooverlay name=hailo_overlay qos=false ! '
             f'queue name=sink_convert_q leaky=downstream max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! '
             f'videoconvert n-threads=2 qos=false ! '
             f'video/x-raw, format=RGB ! '
@@ -1687,7 +1687,7 @@ class TappasPipeline:
         # Valve-Steuerung: Modelle ein/aus basierend auf Szenario
         scrfd_needed = (self._scheduler.is_model_active("scrfd")
                         or self._scheduler.get_scrfd_probe_needed())
-        pose_needed = True    # Pre-Overlay-Probe entfernt Duplikate + clampt BBox
+        pose_needed = False   # AUS — Pose-Detections (HAILO_LANDMARKS) blockieren hailooverlay nach ~60s
         # ReID: DEAKTIVIERT — libre_id.so::create_crops crasht mit leerem Crop (0x0 BBox)
         # Ursache: degenerierte Person-BBoxes → 0-Pixel Crop → cv2::resize ABRT
         # Landmarks-Strip Probe loest das Problem NICHT (anderer Crash-Grund)
@@ -1842,6 +1842,13 @@ class TappasPipeline:
         width = struct.get_value("width")
         height = struct.get_value("height")
 
+        # Resolution-Wechsel erkennen (Kamera-ST oder RTSP-Reconnect)
+        prev_res = getattr(self, '_appsink_last_res', None)
+        cur_res = (width, height)
+        if prev_res != cur_res:
+            logger.warning(f"[APPSINK] Resolution-Wechsel: {prev_res} → {cur_res} (Frame #{self._appsink_count})")
+            self._appsink_last_res = cur_res
+
         success, mapinfo = buf.map(Gst.MapFlags.READ)
         if not success:
             return Gst.FlowReturn.OK
@@ -1852,6 +1859,7 @@ class TappasPipeline:
 
         expected = width * height * 3
         if len(data) != expected:
+            logger.warning(f"[APPSINK] Size-Mismatch: expected={expected} got={len(data)} res={width}x{height}")
             return Gst.FlowReturn.OK
 
         frame = data.reshape(height, width, 3)
