@@ -43,12 +43,13 @@ import hailo
 from core.perception.perception_frame import PerceptionFrame, estimate_distance
 from core.perception.model_scheduler import ModelScheduler
 from core.perception.temporal_memory import get_perception_memory
+from core.perception.action_inference import get_action_inferrer
 from core.moloch_event_bus import get_event_bus, PRIO_PERCEPTION
 
 logger = logging.getLogger("TappasPipeline")
 
 # --- Modell-Pfade (SSD2) ---
-YOLO_HEF = "/mnt/moloch-data/hailo/models/yolov8m_h10.hef"
+YOLO_HEF = "/mnt/moloch-data/hailo/models/yolov11m_h10.hef"
 SCRFD_HEF = "/mnt/moloch-data/hailo/models/scrfd_10g.hef"
 ARCFACE_HEF = "/mnt/moloch-data/hailo/models/arcface_mobilefacenet.hef"
 FACE_ATTR_HEF = "/mnt/moloch-data/hailo/models/face_attr_resnet_v1_18.hef"
@@ -1499,6 +1500,18 @@ class TappasPipeline:
                 for det in to_remove:
                     roi.remove_object(det)
 
+                # Action Inference: Keypoints aus erstem Pose-Detection extrahieren
+                # Sicher: nur HAILO_LANDMARKS lesen, KEINE BBox-Methoden!
+                try:
+                    lm_list = pose_dets[0].get_objects_typed(hailo.HAILO_LANDMARKS)
+                    if lm_list:
+                        pts = lm_list[0].get_points()
+                        kps = [(p.x(), p.y(), p.confidence() if hasattr(p, 'confidence') else 1.0)
+                               for p in pts]
+                        get_action_inferrer().update(kps)
+                except Exception:
+                    pass  # Action Inference ist optional — kein Crash propagieren
+
         except Exception as e:
             self._overlay_err = getattr(self, '_overlay_err', 0) + 1
             if self._overlay_err % 100 == 1:
@@ -2167,6 +2180,12 @@ class TappasPipeline:
         # Perception Router: Szenario + aktive Modelle
         pf.scenario = self._scheduler.get_scenario()
         pf.active_models = sorted(self._scheduler.get_active_models())
+
+        # Action Inference (Temporal Pose Buffer)
+        try:
+            pf.person_action = get_action_inferrer()._last_action
+        except Exception:
+            pass
 
         return pf
 
