@@ -577,9 +577,21 @@ class SonoffCameraController:
             self.ptz_service.AbsoluteMove(request)
             self.last_move_time = time.time()
             self.logger.debug(f"AbsoluteMove: Pan={pan_deg:.1f}, Tilt={tilt_deg:.1f}")
+            # Watchdog: Erfolg melden
+            try:
+                from core.system_watchdog import get_watchdog
+                get_watchdog().report_onvif_success()
+            except Exception:
+                pass
             return True
 
         except Exception as e:
+            # Watchdog: Fehler melden
+            try:
+                from core.system_watchdog import get_watchdog
+                get_watchdog().report_onvif_error()
+            except Exception:
+                pass
             if "Invalid position" in str(e):
                 self.logger.warning(f"AbsoluteMove: Position out of range (Pan={pan_deg:.1f}, Tilt={tilt_deg:.1f})")
                 return False
