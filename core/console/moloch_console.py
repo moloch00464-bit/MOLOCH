@@ -1386,6 +1386,24 @@ class MolochConsole:
             except Exception:
                 pass
 
+            # Letzte NPU-Selbstreflexion
+            try:
+                from core.autonomy.introspection import get_introspection
+                _intro = get_introspection().get_state()
+                if _intro.get("last_thought"):
+                    system = system + f"\n\n--- LETZTER GEDANKE ---\n{_intro['last_thought']}"
+            except Exception:
+                pass
+
+            # Personality Zone
+            try:
+                from core.personality.personality_engine import get_personality_engine
+                zone_addon = get_personality_engine().get_zone_system_prompt_addon()
+                if zone_addon:
+                    system = system + zone_addon
+            except Exception:
+                pass
+
             api_msgs = [{"role": "system", "content": system}] + self.conversation_history
             r = requests.post(
                 DEEPSEEK_URL,
