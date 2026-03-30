@@ -58,7 +58,7 @@ FACE_ATTR_HEF = "/mnt/moloch-data/hailo/models/face_attr_resnet_v1_18.hef"
 YOLO_POSTPROCESS_SO = "/usr/local/hailo/resources/so/libyolo_hailortpp_postprocess.so"
 YOLO_POSTPROCESS_FUNC = "filter_letterbox"
 SCRFD_POSTPROCESS_SO = "/usr/local/hailo/resources/so/libscrfd.so"
-SCRFD_POSTPROCESS_FUNC = "scrfd_10g"  # NICHT letterbox — Cropper macht das bereits
+SCRFD_POSTPROCESS_FUNC = "scrfd_10g_letterbox"
 SCRFD_CONFIG_JSON = "/usr/local/hailo/resources/json/scrfd.json"
 ARCFACE_POSTPROCESS_SO = "/usr/local/hailo/resources/so/libface_recognition_post.so"
 ARCFACE_POSTPROCESS_FUNC = "filter"
@@ -81,8 +81,14 @@ REID_POSTPROCESS_FUNC = "filter"
 REID_CROP_SO = "/usr/lib/aarch64-linux-gnu/hailo/tappas/post_processes/cropping_algorithms/libre_id.so"
 REID_CROP_FUNC = "create_crops"
 
-# Doppelte Letterbox-Korrektur geloest: SO nutzt jetzt scrfd_10g (ohne letterbox),
-# Cropper macht use-letterbox=true allein → keine Shrink-Kompensation mehr noetig.
+# --- Face-BBox Letterbox-Doppelkorrektur ---
+# hailocropper (use-letterbox=true) + SO (scrfd_10g_letterbox) korrigieren BEIDE die
+# Letterbox-Y-Achse. Ergebnis: Face-BBox ~25-30% zu gross in Y-Richtung.
+# SO auf scrfd_10g umstellen geht NICHT — hailooverlay crasht bei out-of-range Coords.
+# Stattdessen: nachtraeglich in Python korrigieren (pre-overlay + _on_buffer).
+# Letterbox: 1280x720 → 640x640 = 140px Padding oben+unten → Faktor = 720/640 = 1.125
+# Doppel-Korrektur verdoppelt das → Y muss um Faktor 0.78 geschrumpft werden (empirisch).
+FACE_BBOX_Y_SHRINK = 0.78  # Y-Achse Schrumpf-Faktor (doppelte Letterbox kompensieren)
 
 # --- Debug-Overlay: Dicke BBoxen + Landmarks fuer Snapshot-Analyse ---
 # True = dicke Linien im SHM-Frame (fuer Claude-Referenzbilder)
@@ -1511,12 +1517,10 @@ class TappasPipeline:
             has_pose = len(pose_dets) > 0
 
             if has_pose:
-                # ACHTUNG: NIEMALS bbox-Methoden auf Pose-Detections aufrufen → SEGV!
-                # YOLO-Person entfernen (Pose-Person mit Landmarks bleibt)
-                to_remove = [d for d in all_dets
-                             if d.get_label() == "person"
-                             and not d.get_objects_typed(hailo.HAILO_LANDMARKS)]
-                for det in to_remove:
+                # Pose-Detections entfernen: hailooverlay (C-Code) crashed/haengt
+                # wenn es bbox-Daten von Pose-Detections liest (Race Condition mit NPU).
+                # YOLO-Person behalten fuer Overlay, Pose-Person komplett raus.
+                for det in pose_dets:
                     roi.remove_object(det)
 
                 # Action Inference: Keypoints aus erstem Pose-Detection extrahieren
@@ -1578,6 +1582,13 @@ class TappasPipeline:
             y1 = max(0.0, min(1.0, bbox.ymin()))
             x2 = max(0.0, min(1.0, bbox.xmax()))
             y2 = max(0.0, min(1.0, bbox.ymax()))
+
+            # Face-BBox Y-Korrektur: doppelte Letterbox-Korrektur kompensieren
+            if label == "face":
+                cy = (y1 + y2) / 2.0
+                h_half = (y2 - y1) / 2.0 * FACE_BBOX_Y_SHRINK
+                y1 = max(0.0, cy - h_half)
+                y2 = min(1.0, cy + h_half)
 
             entry = {
                 "class": label,
