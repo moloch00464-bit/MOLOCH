@@ -385,6 +385,17 @@ class TappasPipeline:
         else:
             logger.warning("[OVERLAY-PROBE] overlay_q Element nicht gefunden")
 
+        # ReID Pre-Clean Probe: HAILO_LANDMARKS aus Person-Detections entfernen
+        # VOR libre_id.so::create_crops — verhindert cv2::resize Crash mit Pose-Detections
+        reid_pre = self._pipeline.get_by_name("reid_pre_clean")
+        if reid_pre:
+            reid_pre_pad = reid_pre.get_static_pad("src")
+            if reid_pre_pad:
+                reid_pre_pad.add_probe(Gst.PadProbeType.BUFFER, self._reid_landmarks_strip_probe, None)
+                logger.info("[REID-PROBE] Landmarks-Strip Probe auf reid_pre_clean registriert")
+        else:
+            logger.warning("[REID-PROBE] reid_pre_clean Element nicht gefunden")
+
         # appsink — Frames abholen damit Pipeline nicht blockiert
         appsink = self._pipeline.get_by_name("sink")
         if appsink:
@@ -605,6 +616,26 @@ class TappasPipeline:
             if sink1:
                 self._hand_selector.set_property("active-pad", sink1)
             logger.debug("[HAND-GATE] Hand deaktiviert (Valve zu, sink_1 Bypass)")
+
+    def _reid_landmarks_strip_probe(self, pad, info, user_data):
+        """GStreamer Pad-Probe: HAILO_LANDMARKS aus Person-Detections entfernen.
+
+        libre_id.so::create_crops crasht mit cv2::resize wenn Pose-Landmarks
+        in den Detections sind. Diese Probe entfernt sie VOR dem hailocropper.
+        Da GStreamer tee den Buffer kopiert, betrifft das nur den ReID-Branch.
+        """
+        buf = info.get_buffer()
+        if buf is None:
+            return Gst.PadProbeReturn.OK
+        try:
+            roi = hailo.get_roi_from_buffer(buf)
+            if roi:
+                for det in roi.get_objects_typed(hailo.HAILO_DETECTION):
+                    for lm in list(det.get_objects_typed(hailo.HAILO_LANDMARKS)):
+                        det.remove_object(lm)
+        except Exception:
+            pass
+        return Gst.PadProbeReturn.OK
 
     def _apply_ocr_gate(self, enabled: bool):
         """OCR NPU-Gating via GStreamer valve + input-selector."""
@@ -1221,6 +1252,7 @@ class TappasPipeline:
 
         reid_cropper = (
             f'queue name=reid_crop_input_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'identity name=reid_pre_clean ! '
             f'hailocropper name=reid_cropper so-path={REID_CROP_SO} function-name={REID_CROP_FUNC} '
             f'use-letterbox=true internal-offset=true resize-method=bilinear '
             f'hailoaggregator name=reid_crop_agg '
@@ -1285,28 +1317,19 @@ class TappasPipeline:
             f'fattr_crop_agg. ! queue name=fattr_crop_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
         )
 
-        # --- Stage 5: Hand Landmark (Valve-gated, PoC Full-Frame) ---
-        hand_inner = (
+        # --- Stage 5: Hand Landmark (Valve-gated, direkt Full-Frame ohne hailocropper) ---
+        # libwhole_buffer.so::create_crops crasht wenn HAILO_LANDMARKS (Pose) in Detections.
+        # Fix: ganzen Frame auf 224x224 skalieren und direkt in hailonet schieben.
+        hand_direct = (
             f'queue name=hand_scale_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
             f'videoscale name=hand_videoscale n-threads=2 qos=false ! '
-            f'queue name=hand_convert_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
-            f'video/x-raw, pixel-aspect-ratio=1/1 ! '
+            f'video/x-raw,width=224,height=224,pixel-aspect-ratio=1/1 ! '
             f'videoconvert name=hand_videoconvert n-threads=2 ! '
             f'queue name=hand_hailonet_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
             f'hailonet name=hand_hailonet hef-path={HAND_HEF} batch-size=1 '
             f'vdevice-group-id={VDEVICE_GROUP_ID} '
             f'force-writable=true ! '
-            f'queue name=hand_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
-        )
-
-        hand_wrapper = (
-            f'queue name=hand_wrapper_input_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
-            f'hailocropper name=hand_wrapper_crop so-path={WHOLE_BUFFER_SO} function-name=create_crops '
-            f'use-letterbox=true resize-method=inter-area internal-offset=true '
-            f'hailoaggregator name=hand_wrapper_agg '
-            f'hand_wrapper_crop. ! queue name=hand_wrapper_bypass_q leaky=no max-size-buffers=20 max-size-bytes=0 max-size-time=0 ! hand_wrapper_agg.sink_0 '
-            f'hand_wrapper_crop. ! {hand_inner} ! hand_wrapper_agg.sink_1 '
-            f'hand_wrapper_agg. ! queue name=hand_wrapper_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
+            f'queue name=hand_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0'
         )
 
         # --- Stage 8: PaddleOCR (Text-Erkennung, 2-Stage: Detection → Crop → Recognition) ---
@@ -1406,7 +1429,7 @@ class TappasPipeline:
             f'{face_attr_cropper} ! '
             # Hand Detection Valve-Branch (PoC, nach Face Attr)
             f'tee name=hand_tee ! '
-            f'valve name=hand_valve drop=true ! {hand_wrapper} ! hand_sel.sink_0 '
+            f'valve name=hand_valve drop=true ! {hand_direct} ! hand_sel.sink_0 '
             f'input-selector name=hand_sel ! '
             # OCR Valve-Branch (Text-Erkennung, default OFF)
             f'tee name=ocr_tee ! '
@@ -1554,57 +1577,6 @@ class TappasPipeline:
             if label == "face" and conf < self.scrfd_conf_val:
                 continue
 
-            # --- Face-BBox aus Landmarks berechnen ---
-            # SCRFD BBox ist durch doppelte Letterbox-Korrektur auf Y zu gross.
-            # Loesung: BBox direkt aus den 5 Landmarks ableiten (Augen, Nase, Mund).
-            if label == "face":
-                old_xmin = bbox.xmin()
-                old_ymin = bbox.ymin()
-                ow, oh = bbox.width(), bbox.height()
-
-                try:
-                    lm_list = det.get_objects_typed(hailo.HAILO_LANDMARKS)
-                    if lm_list:
-                        lm_obj = lm_list[0]
-                        pts = lm_obj.get_points()
-                        if len(pts) >= 5:
-                            # Landmarks in Frame-Space umrechnen
-                            frame_xs = [pt.x() * ow + old_xmin for pt in pts]
-                            frame_ys = [pt.y() * oh + old_ymin for pt in pts]
-
-                            # BBox aus Landmark-Extremen + Padding
-                            # Landmarks: Augen (oben), Nase (mitte), Mund (unten)
-                            # lm_h = Abstand Augen→Mund. pad_top/bot relativ zu lm_h.
-                            pad_x   = 0.25  # 25% lm_w links/rechts
-                            pad_top = 0.50  # 50% lm_h UEBER Augen → Stirn einschliessen
-                            pad_bot = 0.30  # 30% lm_h UNTER Mund → Kinn einschliessen
-                            lm_w = max(frame_xs) - min(frame_xs)
-                            lm_h = max(frame_ys) - min(frame_ys)
-
-                            nx1 = max(0.0, min(frame_xs) - lm_w * pad_x)
-                            ny1 = max(0.0, min(frame_ys) - lm_h * pad_top)
-                            nx2 = min(1.0, max(frame_xs) + lm_w * pad_x)
-                            ny2 = min(1.0, max(frame_ys) + lm_h * pad_bot)
-                            nw = nx2 - nx1
-                            nh = ny2 - ny1
-
-                            if nw > 0.01 and nh > 0.01:
-                                new_bbox = hailo.HailoBBox(nx1, ny1, nw, nh)
-                                det.set_bbox(new_bbox)
-
-                                # Landmarks auf neue BBox umrechnen
-                                new_pts = []
-                                for fx, fy, pt in zip(frame_xs, frame_ys, pts):
-                                    rx = max(0.0, min(1.0, (fx - nx1) / nw))
-                                    ry = max(0.0, min(1.0, (fy - ny1) / nh))
-                                    new_pts.append(hailo.HailoPoint(rx, ry, pt.confidence()))
-                                det.remove_object(lm_obj)
-                                det.add_object(hailo.HailoLandmarks(
-                                    lm_obj.get_landmarks_type(), new_pts, lm_obj.get_threshold()))
-                                bbox = new_bbox
-                except Exception:
-                    pass  # Keine Landmarks → alte BBox behalten
-
             # Normalisierte BBox [0.0-1.0] mit Clamp (Safety-Net gegen Letterbox-Ueberlauf)
             x1 = max(0.0, min(1.0, bbox.xmin()))
             y1 = max(0.0, min(1.0, bbox.ymin()))
@@ -1709,10 +1681,10 @@ class TappasPipeline:
         scrfd_needed = (self._scheduler.is_model_active("scrfd")
                         or self._scheduler.get_scrfd_probe_needed())
         pose_needed = True    # Pre-Overlay-Probe entfernt Duplikate + clampt BBox
-        # ReID/Hand: DEAKTIVIERT — cv2::resize Crash in kompilierten SOs
-        # beim Oeffnen der Valve (auch permanent). Braucht Fix im Pipeline-String.
-        reid_needed = False
-        hand_needed = False
+        # ReID: Pad-Probe entfernt HAILO_LANDMARKS vor libre_id.so (Fix fuer cv2::resize Crash)
+        # Hand: direkte Pipeline ohne libwhole_buffer.so (kein Cropper-Crash mehr)
+        reid_needed = self._scheduler.is_model_active("reid")
+        hand_needed = self._scheduler.is_model_active("hand")
         self._apply_scrfd_gate(enabled=scrfd_needed)
         self._apply_pose_gate(enabled=pose_needed)
         self._apply_reid_gate(enabled=reid_needed)
