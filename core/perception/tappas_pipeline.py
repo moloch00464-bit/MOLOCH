@@ -1490,45 +1490,31 @@ class TappasPipeline:
         return Gst.PadProbeReturn.OK
 
     def _on_pre_overlay(self, pad, info, user_data):
-        """VOR hailooverlay: Doppelte Person-BBox vermeiden.
+        """VOR hailooverlay: Alle Sub-Objekte strippen die SEGV verursachen.
 
-        Wenn Pose-Detection existiert (person MIT Landmarks): YOLO-Person entfernen,
-        Pose-Person behalten. Landmarks sind BBox-relativ → muessen auf ihrer
-        Original-Detection bleiben, sonst verstreut.
-        _on_buffer nutzt nur YOLO-Persons (skippt Pose per HAILO_LANDMARKS-Check).
+        hailooverlay (C-Code) crasht mit SEGV wenn es auf HAILO_MATRIX,
+        HAILO_LANDMARKS oder HAILO_CLASSIFICATION Daten trifft die noch
+        vom NPU beschrieben werden (Race Condition).
+        Loesung: Alles ausser BBox+Label+Confidence entfernen.
+        _on_buffer (identity callback) hat die Daten bereits vorher gelesen.
         """
         buffer = info.get_buffer()
         if buffer is None:
             return Gst.PadProbeReturn.OK
         try:
             roi = hailo.get_roi_from_buffer(buffer)
-            all_dets = roi.get_objects_typed(hailo.HAILO_DETECTION)
-
-            # Pruefen ob Pose-Detection vorhanden
-            pose_dets = [d for d in all_dets
-                         if d.get_label() == "person"
-                         and d.get_objects_typed(hailo.HAILO_LANDMARKS)]
-            has_pose = len(pose_dets) > 0
-
-            if has_pose:
-                # Pose-Detections entfernen: hailooverlay (C-Code) crashed/haengt
-                # wenn es bbox-Daten von Pose-Detections liest (Race Condition mit NPU).
-                # YOLO-Person behalten fuer Overlay, Pose-Person komplett raus.
-                for det in pose_dets:
+            for det in roi.get_objects_typed(hailo.HAILO_DETECTION):
+                # Pose-Detections komplett entfernen (BBox-Zugriff = SEGV)
+                if det.get_objects_typed(hailo.HAILO_LANDMARKS):
                     roi.remove_object(det)
-
-                # Action Inference: Keypoints aus erstem Pose-Detection extrahieren
-                # Sicher: nur HAILO_LANDMARKS lesen, KEINE BBox-Methoden!
-                try:
-                    lm_list = pose_dets[0].get_objects_typed(hailo.HAILO_LANDMARKS)
-                    if lm_list:
-                        pts = lm_list[0].get_points()
-                        kps = [(p.x(), p.y(), p.confidence() if hasattr(p, 'confidence') else 1.0)
-                               for p in pts]
-                        get_action_inferrer().update(kps)
-                except Exception:
-                    pass  # Action Inference ist optional — kein Crash propagieren
-
+                    continue
+                # Alle Sub-Objekte von normalen Detections strippen
+                for sub in list(det.get_objects_typed(hailo.HAILO_MATRIX)):
+                    det.remove_object(sub)
+                for sub in list(det.get_objects_typed(hailo.HAILO_UNIQUE_ID)):
+                    det.remove_object(sub)
+                for sub in list(det.get_objects_typed(hailo.HAILO_CLASSIFICATION)):
+                    det.remove_object(sub)
         except Exception as e:
             self._overlay_err = getattr(self, '_overlay_err', 0) + 1
             if self._overlay_err % 100 == 1:
