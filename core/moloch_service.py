@@ -23,6 +23,7 @@ GUI-Conversions:
 """
 
 import os
+import struct
 import sys
 import time
 import json
@@ -35,6 +36,7 @@ sys.path.insert(0, os.path.expanduser("~/moloch"))
 USE_TAPPAS = os.environ.get("MOLOCH_USE_TAPPAS", "0") == "1"
 
 from core.hardware.hailo_manager import get_hailo_manager
+from core.system_watchdog import get_watchdog
 from core.led_controller import LEDController
 from core.hardware.rgb_led_controller import get_rgb_led
 from core.ipc_router import IPCRouter
@@ -1677,6 +1679,19 @@ class MolochService:
         else:
             logger.info("[START] TAPPAS aktiv — ueberspringe RTSP Watchdog")
 
+        # System-Watchdog (zentral, ersetzt fragmentierte Einzel-Watchdogs)
+        self._system_watchdog = get_watchdog()
+        self._system_watchdog.configure(
+            inference=self._inference,
+            camera=None,  # Wird via get_camera_controller() bei Bedarf geholt
+            camera_manager=self._cam,
+            llm_bridge=getattr(self, '_llm_bridge', None),
+            on_pipeline_restart=self._watchdog_restart_pipeline,
+            on_onvif_reconnect=self._watchdog_reconnect_onvif,
+        )
+        self._system_watchdog.start()
+        logger.info("[START] System-Watchdog gestartet")
+
         # Spontane Kommentare Monitor starten (CoreIntegrator-gesteuert)
         if self._voice_pipeline:
             self._voice_pipeline.start_spontaneous_monitor()
@@ -1738,6 +1753,11 @@ class MolochService:
         """Sauberes Herunterfahren."""
         logger.info("M.O.L.O.C.H. Service wird gestoppt...")
         self.running = False
+
+        # System-Watchdog zuerst stoppen (verhindert Neustart-Versuche waehrend Shutdown)
+        if hasattr(self, '_system_watchdog') and self._system_watchdog:
+            self._system_watchdog.stop()
+
         self._cam.running = False
         self._inference.stop()
 
@@ -1847,6 +1867,66 @@ class MolochService:
 
 
     # =========================================================================
+    # Watchdog-Callbacks (aufgerufen von MolochWatchdog bei Problemen)
+    # =========================================================================
+
+    def _watchdog_restart_pipeline(self):
+        """Callback: Frame-Freeze erkannt — TAPPAS-Pipeline neustarten."""
+        if not USE_TAPPAS or not self._inference:
+            return
+        logger.warning("[WATCHDOG-CB] Pipeline-Neustart wegen Frame-Freeze...")
+        try:
+            self._inference.stop()
+            time.sleep(2)
+            import subprocess
+            rtsp_url = getattr(self._inference, '_rtsp_url', '')
+            if rtsp_url:
+                probe = subprocess.run(
+                    ["ffprobe", "-rtsp_transport", "tcp", "-v", "error",
+                     "-timeout", "5000000", rtsp_url],
+                    capture_output=True, timeout=8)
+                if probe.returncode != 0:
+                    logger.warning("[WATCHDOG-CB] RTSP nicht erreichbar — abgebrochen")
+                    return
+            self._inference.start()
+            logger.info("[WATCHDOG-CB] Pipeline-Neustart erfolgreich")
+        except Exception as e:
+            logger.error(f"[WATCHDOG-CB] Pipeline-Neustart fehlgeschlagen: {e}")
+
+    def _watchdog_reconnect_onvif(self):
+        """Callback: ONVIF-Verbindung verloren — Session neu aufbauen."""
+        logger.warning("[WATCHDOG-CB] ONVIF-Reconnect wird versucht...")
+        try:
+            from core.hardware.camera import get_camera_controller
+            cam = get_camera_controller()
+            if cam:
+                cam.connect()
+                logger.info("[WATCHDOG-CB] ONVIF-Reconnect erfolgreich")
+            else:
+                logger.warning("[WATCHDOG-CB] Kein CameraController verfuegbar")
+        except Exception as e:
+            logger.error(f"[WATCHDOG-CB] ONVIF-Reconnect fehlgeschlagen: {e}")
+
+    # =========================================================================
+    # SHM Frame-Age (fuer TAPPAS-Mode: liest Timestamp aus /dev/shm/moloch_frame)
+    # =========================================================================
+
+    def _read_shm_frame_age(self) -> float:
+        """Frame-Age aus SHM-Header lesen (24-Byte Header: h,w,c,seq als uint32 + ts als float64).
+        Gibt Sekunden seit letztem Frame zurueck, oder -1 bei Fehler."""
+        try:
+            with open("/dev/shm/moloch_frame", "rb") as f:
+                header = f.read(24)
+            if len(header) < 24:
+                return -1.0
+            _, _, _, _, ts = struct.unpack('<IIIId', header)
+            if ts <= 0:
+                return -1.0
+            return round(time.monotonic() - ts, 1)
+        except (OSError, struct.error):
+            return -1.0
+
+    # =========================================================================
     # Status-JSON (baut Dict aus Service-State, schreibt via IPCRouter)
     # =========================================================================
 
@@ -1878,8 +1958,9 @@ class MolochService:
                 "tentakel_enabled": self._cam._tentakel_enabled,
                 "teachen_enabled": self._teachen.enabled if self._teachen else False,
                 "power": self._power_monitor.get_status() if getattr(self, '_power_monitor', None) else {},
-                "frame_age": round(time.time() - self._cam._last_frame_write, 1) if self._cam._last_frame_write else -1,
+                "frame_age": self._read_shm_frame_age() if USE_TAPPAS else (round(time.time() - self._cam._last_frame_write, 1) if self._cam._last_frame_write else -1),
                 "frozen_restarts": self._cam._frozen_restart_count,
+                "watchdog": self._system_watchdog.get_status() if hasattr(self, '_system_watchdog') and self._system_watchdog else {},
                 "fps": {k: round(v, 1) for k, v in fps_snapshot.items()},
                 "thresholds": {
                     "scrfd_conf": getattr(_inf, 'scrfd_conf_val', 0.6),
