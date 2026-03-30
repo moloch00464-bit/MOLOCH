@@ -2,23 +2,23 @@
   "version": "1.0",
   "models": {
     "person_detector": {
-      "hef_path": "/mnt/moloch-data/hailo/models/yolov8m_h10.hef",
+      "hef_path": "/mnt/moloch-data/hailo/models/yolov11m_h10.hef",
       "input_size": [640, 640],
       "type": "detection",
-      "description": "YOLOv8m Person Detection"
+      "description": "YOLOv11m Person Detection"
     },
     "face_detector": {
-      "hef_path": "/mnt/moloch-data/hailo/models/scrfd_2.5g_h10.hef",
-      "input_size": [320, 320],
+      "hef_path": "/mnt/moloch-data/hailo/models/scrfd_10g.hef",
+      "input_size": [640, 640],
       "type": "detection",
-      "description": "SCRFD Face Detection"
+      "description": "SCRFD 10g Face Detection"
     },
     "face_embedding": {
-      "hef_path": "/mnt/moloch-data/hailo/models/arcface_mobilenet_v1_h10.hef",
+      "hef_path": "/mnt/moloch-data/hailo/models/arcface_mobilefacenet.hef",
       "input_size": [112, 112],
       "type": "embedding",
       "embedding_size": 512,
-      "description": "ArcFace MobileNet Face Embedding"
+      "description": "ArcFace MobileFaceNet Embedding"
     },
     "face_landmarks": {
       "hef_path": "/mnt/moloch-data/hailo/models/face_landmarks_h10.hef",
