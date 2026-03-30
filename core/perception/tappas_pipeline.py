@@ -372,14 +372,8 @@ class TappasPipeline:
             logger.warning("[FACE-ATTR] fattr_output_q Element nicht gefunden")
 
         # Pre-Overlay Probe: Pose-Duplikate entfernen + BBox clampen VOR hailooverlay
-        overlay_q = self._pipeline.get_by_name("overlay_q")
-        if overlay_q:
-            overlay_src = overlay_q.get_static_pad("src")
-            if overlay_src:
-                overlay_src.add_probe(Gst.PadProbeType.BUFFER, self._on_pre_overlay, None)
-                logger.info("[OVERLAY-PROBE] Pad-Probe auf overlay_q src registriert")
-        else:
-            logger.warning("[OVERLAY-PROBE] overlay_q Element nicht gefunden")
+        # Pre-Overlay Probe ENTFERNT — hailooverlay ist nicht mehr in Pipeline.
+        # Buffer-Manipulation durch Probes kann GStreamer-Flow blockieren.
 
         # ReID Pre-Clean Probe: HAILO_LANDMARKS aus Person-Detections entfernen
         # VOR libre_id.so::create_crops — verhindert cv2::resize Crash mit Pose-Detections
@@ -1523,10 +1517,19 @@ class TappasPipeline:
         return Gst.PadProbeReturn.OK
 
     def _on_buffer(self, pad, info, user_data):
-        """Pad-Probe auf identity element — extrahiert Detections + baut PerceptionFrame."""
+        """Pad-Probe auf identity element — extrahiert Detections + baut PerceptionFrame.
+
+        Jeder Frame bekommt eine monoton steigende frame_id (System-Direktive Regel 2).
+        Alle Detections sind an diese frame_id gebunden (Regel 3).
+        """
         buffer = info.get_buffer()
         if buffer is None:
             return Gst.PadProbeReturn.OK
+
+        # Frame-ID: monoton steigend, bindet Detections an exakt diesen Frame
+        self._frame_id = getattr(self, '_frame_id', 0) + 1
+        frame_id = self._frame_id
+        frame_ts = time.monotonic()
 
         roi = hailo.get_roi_from_buffer(buffer)
         hailo_detections = roi.get_objects_typed(hailo.HAILO_DETECTION)
