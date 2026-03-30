@@ -2369,6 +2369,15 @@ Sei natuerlich. Kein erzwungener Humor. Situationsbezogen."""
         if hw_status:
             system += "\n" + hw_status
 
+        # Letzte Selbstreflexion
+        try:
+            from core.autonomy.introspection import get_introspection
+            _intro = get_introspection().get_state()
+            if _intro.get("last_thought"):
+                system += f"\n\n--- DEIN LETZTER GEDANKE ---\n{_intro['last_thought']}"
+        except Exception:
+            pass
+
         # Personality Zone
         try:
             from core.personality.personality_engine import get_personality_engine
@@ -2378,6 +2387,10 @@ Sei natuerlich. Kein erzwungener Humor. Situationsbezogen."""
                 system += zone_addon
         except Exception:
             pass
+
+        # Grund der Entscheidung als User-Prompt einbauen
+        _reason = integrator_state.get("reason", "")
+        _user_prompt = f"Spontaner Kommentar jetzt. Anlass: {_reason}" if _reason else "Spontaner Kommentar jetzt."
 
         try:
             import requests
@@ -2391,7 +2404,7 @@ Sei natuerlich. Kein erzwungener Humor. Situationsbezogen."""
                     "model": self._deepseek_model,
                     "messages": [
                         {"role": "system", "content": system},
-                        {"role": "user", "content": "Spontaner Kommentar jetzt."},
+                        {"role": "user", "content": _user_prompt},
                     ],
                     "max_tokens": 80,
                     "temperature": 0.9,
