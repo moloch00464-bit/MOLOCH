@@ -1386,7 +1386,8 @@ class TappasPipeline:
             f'queue name=cb_q leaky=downstream max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! '
             f'identity name=identity_callback ! '
             f'queue name=overlay_q leaky=downstream max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! '
-            f'hailooverlay name=hailo_overlay qos=false ! '
+            # hailooverlay ENTFERNT — blockiert SHM nach ~25s (frozen, kein SEGV).
+            # BBoxen werden vom Panel aus IPC-Daten gezeichnet (saubere Trennung).
             f'queue name=sink_convert_q leaky=downstream max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! '
             f'videoconvert n-threads=2 qos=false ! '
             f'video/x-raw, format=RGB ! '
@@ -2127,7 +2128,14 @@ class TappasPipeline:
 
         # Perception Router: Szenario + aktive Modelle
         pf.scenario = self._scheduler.get_scenario()
-        pf.active_models = sorted(self._scheduler.get_active_models())
+        # Tatsaechlich laufende Modelle (nicht Scheduler-Vorschlag, sondern Valve-Realitaet)
+        real_active = []
+        if self.scrfd_active: real_active.extend(["scrfd", "arcface", "faceattr"])
+        if self.pose_active: real_active.append("pose")
+        if self.reid_active: real_active.append("reid")
+        if self.hand_active: real_active.append("hand")
+        real_active.append("yolo")  # YOLO laeuft immer
+        pf.active_models = sorted(real_active)
 
         # Action Inference (Temporal Pose Buffer)
         try:
