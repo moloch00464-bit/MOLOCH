@@ -228,7 +228,7 @@ class SpatialMemory:
 
 
 # =========================================================================
-# SINGLETON
+# SINGLETONS
 # =========================================================================
 
 _instance: Optional[RoomMap] = None
@@ -243,3 +243,17 @@ def get_room_map() -> RoomMap:
             if _instance is None:
                 _instance = RoomMap()
     return _instance
+
+
+_spatial_instance: Optional[SpatialMemory] = None
+_spatial_lock = threading.Lock()
+
+
+def get_spatial_memory() -> SpatialMemory:
+    """Singleton-Zugriff auf Spatial Memory."""
+    global _spatial_instance
+    if _spatial_instance is None:
+        with _spatial_lock:
+            if _spatial_instance is None:
+                _spatial_instance = SpatialMemory()
+    return _spatial_instance

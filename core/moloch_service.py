@@ -50,7 +50,7 @@ from core.perception.model_health import get_model_health
 from core.ptz_tracker import get_ptz_tracker
 from core.memory.episodic_memory import get_episodic_memory
 from core.music.music_memory import get_music_memory
-from core.awareness.room_map import get_room_map
+from core.awareness.room_map import get_room_map, get_spatial_memory
 from core.awareness.motion_analyzer import get_motion_analyzer
 from core.awareness.activity_analyzer import get_activity_analyzer
 from core.awareness.context_evaluator import get_context_evaluator
@@ -780,6 +780,12 @@ class MolochService:
                             except Exception:
                                 pass
 
+                        # SpatialMemory: Objekte in aktueller Zone merken
+                        if self._spatial_memory and _aw_zone:
+                            _aw_objects = getattr(pframe, 'objects', [])
+                            if _aw_objects:
+                                self._spatial_memory.update(_aw_zone, _aw_objects)
+
                         # MotionAnalyzer: BBox-Deltas
                         _aw_motion = "stationary"
                         if self._motion_analyzer:
@@ -1122,11 +1128,13 @@ class MolochService:
 
         # 9. Awareness Module (Gate 3: Situational Awareness)
         self._room_map = None
+        self._spatial_memory = None
         self._motion_analyzer = None
         self._activity_analyzer = None
         self._context_evaluator = None
         try:
             self._room_map = get_room_map()
+            self._spatial_memory = get_spatial_memory()
             self._motion_analyzer = get_motion_analyzer()
             self._activity_analyzer = get_activity_analyzer()
             self._context_evaluator = get_context_evaluator()
