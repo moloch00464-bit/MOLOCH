@@ -312,6 +312,11 @@ def _perception_to_text() -> str:
             obj_names = [o["class"] for o in frame.objects[:5]]
             lines.append(f"Objekte: {', '.join(obj_names)}")
 
+        # OCR — erkannter Text im Raum
+        ocr_texts = getattr(frame, 'ocr_texts', [])
+        if ocr_texts:
+            lines.append(f"Text im Bild: {', '.join(ocr_texts[:3])}")
+
         # Pose
         if frame.pose_count > 0:
             energy = frame.pose_energy
