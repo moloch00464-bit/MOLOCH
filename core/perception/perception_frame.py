@@ -52,6 +52,9 @@ class PerceptionFrame:
     hand_detected: bool = False
     hand_gesture: Optional[str] = None  # "thumbs_up" | "wave" | None
 
+    # === Action Inference (Temporal Pose Buffer) ===
+    person_action: Optional[str] = None  # "stehend" | "gehend" | "sitzend" | "winkend" | "zeigend" | None
+
     # === Head Pose ===
     head_pitch: Optional[float] = None  # Kopfneigung vertikal
     head_yaw: Optional[float] = None  # Kopfdrehung horizontal
@@ -103,6 +106,7 @@ class PerceptionFrame:
             "pose_energy": round(self.pose_energy, 3),
             "hand_detected": self.hand_detected,
             "hand_gesture": self.hand_gesture,
+            "person_action": self.person_action,
             "head_pitch": round(self.head_pitch, 1) if self.head_pitch is not None else None,
             "head_yaw": round(self.head_yaw, 1) if self.head_yaw is not None else None,
             "objects": self.objects,

@@ -2024,7 +2024,28 @@ class VoicePipeline:
     # =========================================================================
 
     def _speak(self, text: str):
-        """Text mit Piper TTS sprechen und ueber HDMI ausgeben.
+        """Einheitliche Sprachausgabe via Personality-Engine (Pitch, Modus-Stimme, Jitter).
+
+        Delegiert an personality_engine.speak() damit Chat und autonome Ausgaben
+        identisch klingen. Fallback auf _speak_direct() wenn Personality nicht verfuegbar.
+        """
+        try:
+            from core.personality.personality_engine import get_personality_engine
+            pe = get_personality_engine()
+            with self._lock:
+                self._speaking = True
+            try:
+                pe.speak(text)
+            finally:
+                with self._lock:
+                    self._speaking = False
+            return
+        except Exception as e:
+            logger.debug(f"[VOICE] Personality-Fallback auf _speak_direct: {e}")
+        self._speak_direct(text)
+
+    def _speak_direct(self, text: str):
+        """Direkte Piper TTS Ausgabe ohne Personality-Engine (Fallback).
 
         Buffer-before-Play: Komplett generieren, dann in einem Stueck abspielen.
         Kein Stottern zwischen Saetzen, ein einziger pw-play-Aufruf via PipeWire.
