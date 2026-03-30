@@ -274,7 +274,7 @@ class DecisionEngine:
         return {"action": "ptz_move", "score": score, "reason": reason, "params": params}
 
     def _score_speak(self) -> Dict[str, Any]:
-        """Utility-Score fuer spontanen Kommentar."""
+        """Utility-Score fuer spontanen Kommentar (skaliert mit PreferenceLearner)."""
         score = 0.0
         reason = ""
         params = {}
@@ -294,6 +294,17 @@ class DecisionEngine:
             score = 0.32
             reason = "welcome_back"
             params = {"type": "greeting"}
+
+        # PreferenceLearner: speech_frequency skaliert Score
+        # 0.5 = neutral (Score unveraendert), 0.0 = still, 1.0 = gespraechig
+        if score > 0:
+            try:
+                from core.autonomy.preference_learner import get_preference_learner
+                speech_pref = get_preference_learner().get_preference("speech_frequency")
+                # Skalierung: 0.0 → Score*0.5, 0.5 → Score*1.0, 1.0 → Score*1.3
+                score *= 0.5 + speech_pref * 0.8
+            except Exception:
+                pass
 
         return {"action": "speak", "score": score, "reason": reason, "params": params}
 
