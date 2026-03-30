@@ -1657,44 +1657,30 @@ class TappasPipeline:
             bbox_height_pct=smoothed["bbox_height_pct"],
         )
 
-        # Valve-Steuerung: Modelle ein/aus basierend auf Szenario
-        scrfd_needed = (self._scheduler.is_model_active("scrfd")
-                        or self._scheduler.get_scrfd_probe_needed())
-        pose_needed = False   # AUS — Pose-Detections (HAILO_LANDMARKS) blockieren hailooverlay nach ~60s
-        # ReID: DEAKTIVIERT — libre_id.so::create_crops crasht mit leerem Crop (0x0 BBox)
-        # Ursache: degenerierte Person-BBoxes → 0-Pixel Crop → cv2::resize ABRT
-        # Landmarks-Strip Probe loest das Problem NICHT (anderer Crash-Grund)
-        # Hand: direkte Pipeline ok, aber kein Scheduler-Szenario → bleibt False
-        reid_needed = False
-        hand_needed = self._scheduler.is_model_active("hand")
-        self._apply_scrfd_gate(enabled=scrfd_needed)
-        self._apply_pose_gate(enabled=pose_needed)
-        self._apply_reid_gate(enabled=reid_needed)
-        self._apply_hand_gate(enabled=hand_needed)
+        # Valve-Steuerung: ALLE sicheren Modelle PERMANENT AN.
+        # NPU hat 8GB RAM, nutzt <1% — kein Grund fuer dynamisches Gating.
+        # Valve-Umschalten verursacht Race Conditions, SEGV, Geister-Detections.
+        # Scheduler entscheidet nur noch welche ERGEBNISSE genutzt werden, nicht
+        # welche Modelle laufen. (Refactor 2026-03-30)
+        #
+        # Pose + ReID bleiben AUS (crashen hailooverlay / libre_id.so).
+        if not getattr(self, '_valves_initialized', False):
+            self._apply_scrfd_gate(enabled=True)   # SCRFD immer AN
+            self._apply_pose_gate(enabled=False)    # Pose AUS (SEGV in hailooverlay)
+            self._apply_reid_gate(enabled=False)    # ReID AUS (libre_id.so crash)
+            self._apply_hand_gate(enabled=False)    # Hand AUS (kein stabiler Use-Case)
+            self._valves_initialized = True
 
-        # Model-Active-Flags aktualisieren (fuer Panel/Status-JSON)
-        self.scrfd_active = scrfd_needed
-        self.arcface_active = self._scheduler.is_model_active("arcface")
-        self.pose_active = pose_needed
-        self.reid_active = reid_needed
-        self.hand_active = hand_needed
+        # Model-Active-Flags: immer aktiv (ausser Pose/ReID/Hand)
+        self.scrfd_active = True
+        self.arcface_active = True
+        self.pose_active = False
+        self.reid_active = False
+        self.hand_active = False
 
-        # Teach-Modus: Scheduler auf ALL_ACTIVE erzwingen
-        if self._sched_force_all:
-            self._apply_scrfd_gate(enabled=True)
-            self.scrfd_active = True
-            self.arcface_active = True
-
-        # Ergebnisse unterdruecken wenn Modelle inaktiv
-        if not self.scrfd_active:
-            faces = []
-            best_face_conf = 0.0
-            best_face_bbox = None
-            face_id = None
-            face_similarity = 0.0
-        elif not self.arcface_active:
-            face_id = None
-            face_similarity = 0.0
+        # Ergebnisse: SCRFD + ArcFace laufen immer — keine Unterdrueckung noetig.
+        # Scheduler-Szenario wird weiterhin berechnet (fuer Tracking-Strategie etc.),
+        # aber Valves werden NICHT mehr geschaltet.
 
         # OCR-Texte extrahieren (nur wenn OCR aktiv)
         ocr_texts = []
