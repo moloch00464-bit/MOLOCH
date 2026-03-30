@@ -58,7 +58,7 @@ FACE_ATTR_HEF = "/mnt/moloch-data/hailo/models/face_attr_resnet_v1_18.hef"
 YOLO_POSTPROCESS_SO = "/usr/local/hailo/resources/so/libyolo_hailortpp_postprocess.so"
 YOLO_POSTPROCESS_FUNC = "filter_letterbox"
 SCRFD_POSTPROCESS_SO = "/usr/local/hailo/resources/so/libscrfd.so"
-SCRFD_POSTPROCESS_FUNC = "scrfd_10g_letterbox"
+SCRFD_POSTPROCESS_FUNC = "scrfd_10g"  # NICHT letterbox — Cropper macht das bereits
 SCRFD_CONFIG_JSON = "/usr/local/hailo/resources/json/scrfd.json"
 ARCFACE_POSTPROCESS_SO = "/usr/local/hailo/resources/so/libface_recognition_post.so"
 ARCFACE_POSTPROCESS_FUNC = "filter"
@@ -81,12 +81,8 @@ REID_POSTPROCESS_FUNC = "filter"
 REID_CROP_SO = "/usr/lib/aarch64-linux-gnu/hailo/tappas/post_processes/cropping_algorithms/libre_id.so"
 REID_CROP_FUNC = "create_crops"
 
-# --- Face-BBox Letterbox-Korrektur (doppelte Korrektur kompensieren) ---
-# Letterbox betrifft NUR Y-Achse (140px Padding oben/unten bei 16:9→1:1).
-# X bleibt unveraendert, nur Y wird geschrumpft.
-FACE_BBOX_SHRINK_X = 1.0   # X-Achse: keine Korrektur noetig
-FACE_BBOX_SHRINK_Y = 0.50  # Y-Achse: 50% kleiner (Letterbox-Doppelkorrektur)
-FACE_BBOX_Y_ANCHOR_BOTTOM = 0.0   # Zentriert schrumpfen (Augen+Mund bleiben in BBox)
+# Doppelte Letterbox-Korrektur geloest: SO nutzt jetzt scrfd_10g (ohne letterbox),
+# Cropper macht use-letterbox=true allein → keine Shrink-Kompensation mehr noetig.
 
 # --- Debug-Overlay: Dicke BBoxen + Landmarks fuer Snapshot-Analyse ---
 # True = dicke Linien im SHM-Frame (fuer Claude-Referenzbilder)
@@ -1163,7 +1159,7 @@ class TappasPipeline:
         yolo_wrapper = (
             f'queue name=yolo_wrapper_input_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
             f'hailocropper name=yolo_wrapper_crop so-path={WHOLE_BUFFER_SO} function-name=create_crops '
-            f'use-letterbox=true resize-method=inter-area internal-offset=true '
+            f'use-letterbox=true resize-method=inter-area internal-offset=false '
             f'hailoaggregator name=yolo_wrapper_agg '
             f'yolo_wrapper_crop. ! queue name=yolo_wrapper_bypass_q leaky=no max-size-buffers=20 max-size-bytes=0 max-size-time=0 ! yolo_wrapper_agg.sink_0 '
             f'yolo_wrapper_crop. ! {yolo_inner} ! yolo_wrapper_agg.sink_1 '
@@ -1190,7 +1186,7 @@ class TappasPipeline:
         scrfd_wrapper = (
             f'queue name=scrfd_wrapper_input_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
             f'hailocropper name=scrfd_wrapper_crop so-path={WHOLE_BUFFER_SO} function-name=create_crops '
-            f'use-letterbox=true resize-method=inter-area internal-offset=true '
+            f'use-letterbox=true resize-method=inter-area internal-offset=false '
             f'hailoaggregator name=scrfd_wrapper_agg '
             f'scrfd_wrapper_crop. ! queue name=scrfd_wrapper_bypass_q leaky=no max-size-buffers=20 max-size-bytes=0 max-size-time=0 ! scrfd_wrapper_agg.sink_0 '
             f'scrfd_wrapper_crop. ! {scrfd_inner} ! scrfd_wrapper_agg.sink_1 '
@@ -1217,7 +1213,7 @@ class TappasPipeline:
         pose_wrapper = (
             f'queue name=pose_wrapper_input_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
             f'hailocropper name=pose_wrapper_crop so-path={WHOLE_BUFFER_SO} function-name=create_crops '
-            f'use-letterbox=true resize-method=inter-area internal-offset=true '
+            f'use-letterbox=true resize-method=inter-area internal-offset=false '
             f'hailoaggregator name=pose_wrapper_agg '
             f'pose_wrapper_crop. ! queue name=pose_wrapper_bypass_q leaky=no max-size-buffers=20 max-size-bytes=0 max-size-time=0 ! pose_wrapper_agg.sink_0 '
             f'pose_wrapper_crop. ! {pose_inner} ! pose_wrapper_agg.sink_1 '
@@ -1254,7 +1250,7 @@ class TappasPipeline:
             f'queue name=reid_crop_input_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
             f'identity name=reid_pre_clean ! '
             f'hailocropper name=reid_cropper so-path={REID_CROP_SO} function-name={REID_CROP_FUNC} '
-            f'use-letterbox=true internal-offset=true resize-method=bilinear '
+            f'use-letterbox=true internal-offset=false resize-method=bilinear '
             f'hailoaggregator name=reid_crop_agg '
             f'reid_cropper. ! queue name=reid_crop_bypass_q leaky=no max-size-buffers=20 max-size-bytes=0 max-size-time=0 ! reid_crop_agg.sink_0 '
             f'reid_cropper. ! {reid_inner} ! reid_crop_agg.sink_1 '
@@ -1282,7 +1278,7 @@ class TappasPipeline:
         face_cropper = (
             f'queue name=face_crop_input_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
             f'hailocropper name=face_cropper so-path={FACE_CROP_SO} function-name={FACE_CROP_FUNC} '
-            f'use-letterbox=true no-scaling-bbox=true internal-offset=true resize-method=bilinear '
+            f'use-letterbox=true no-scaling-bbox=true internal-offset=false resize-method=bilinear '
             f'hailoaggregator name=face_crop_agg '
             f'face_cropper. ! queue name=face_crop_bypass_q leaky=no max-size-buffers=20 max-size-bytes=0 max-size-time=0 ! face_crop_agg.sink_0 '
             f'face_cropper. ! {arcface_inner} ! face_crop_agg.sink_1 '
@@ -1310,7 +1306,7 @@ class TappasPipeline:
         face_attr_cropper = (
             f'queue name=fattr_crop_input_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
             f'hailocropper name=fattr_cropper so-path={FACE_CROP_SO} function-name={FACE_CROP_FUNC} '
-            f'use-letterbox=true no-scaling-bbox=true internal-offset=true resize-method=bilinear '
+            f'use-letterbox=true no-scaling-bbox=true internal-offset=false resize-method=bilinear '
             f'hailoaggregator name=fattr_crop_agg '
             f'fattr_cropper. ! queue name=fattr_crop_bypass_q leaky=no max-size-buffers=20 max-size-bytes=0 max-size-time=0 ! fattr_crop_agg.sink_0 '
             f'fattr_cropper. ! {face_attr_inner} ! fattr_crop_agg.sink_1 '
@@ -1370,13 +1366,13 @@ class TappasPipeline:
         ocr_wrapper = (
             f'queue name=ocr_wrapper_input_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
             f'hailocropper name=ocr_det_crop so-path={WHOLE_BUFFER_SO} function-name=create_crops '
-            f'use-letterbox=true resize-method=inter-area internal-offset=true '
+            f'use-letterbox=true resize-method=inter-area internal-offset=false '
             f'hailoaggregator name=ocr_det_agg '
             f'ocr_det_crop. ! queue name=ocr_det_bypass_q leaky=no max-size-buffers=20 max-size-bytes=0 max-size-time=0 ! ocr_det_agg.sink_0 '
             f'ocr_det_crop. ! {ocr_det_inner} ! '
             # Crop-Stage: schneidet erkannte Text-Regionen aus
             f'hailocropper name=ocr_text_crop so-path={OCR_POSTPROCESS_SO} function-name={OCR_CROP_FUNC} '
-            f'use-letterbox=true internal-offset=true '
+            f'use-letterbox=true internal-offset=false '
             f'hailoaggregator name=ocr_text_agg '
             f'ocr_text_crop. ! queue name=ocr_text_bypass_q leaky=no max-size-buffers=20 max-size-bytes=0 max-size-time=0 ! ocr_text_agg.sink_0 '
             f'ocr_text_crop. ! {ocr_rec_inner} ! ocr_text_agg.sink_1 '

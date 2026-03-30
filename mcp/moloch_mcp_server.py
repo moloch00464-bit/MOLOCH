@@ -23,7 +23,6 @@ import os
 import subprocess
 import struct
 import mmap
-import base64
 import tempfile
 from pathlib import Path
 from mcp.server.fastmcp import FastMCP
@@ -123,16 +122,16 @@ def moloch_snapshot() -> str:
             return "FEHLER: Frame leer (Service gestartet? Kamera verbunden?)"
 
         data = np.frombuffer(mm[24:24 + h * w * c], dtype=np.uint8).reshape(h, w, c)
-        frame = cv2.resize(data, (1280, 720), interpolation=cv2.INTER_LANCZOS4)
+        frame = cv2.resize(data, (640, 360), interpolation=cv2.INTER_AREA)
         mm.close()
         os.close(fd)
 
-        ok, buf = cv2.imencode('.png', frame)
+        out_path = "/tmp/moloch_snapshot.jpg"
+        ok = cv2.imwrite(out_path, frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
         if not ok:
-            return "FEHLER: PNG-Encoding fehlgeschlagen"
+            return "FEHLER: JPEG-Encoding fehlgeschlagen"
 
-        b64 = base64.b64encode(buf.tobytes()).decode()
-        return f"data:image/png;base64,{b64}\n[Frame {w}x{h}px, seq={seq}, ts={ts:.2f}]"
+        return f"Snapshot gespeichert: {out_path} [{w}x{h}px, seq={seq}, ts={ts:.2f}] — Lies die Datei mit Read-Tool um das Bild zu sehen."
 
     except ImportError:
         return "FEHLER: numpy/cv2 nicht verfügbar"
