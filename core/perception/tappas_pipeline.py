@@ -1681,9 +1681,11 @@ class TappasPipeline:
         scrfd_needed = (self._scheduler.is_model_active("scrfd")
                         or self._scheduler.get_scrfd_probe_needed())
         pose_needed = True    # Pre-Overlay-Probe entfernt Duplikate + clampt BBox
-        # ReID: Pad-Probe entfernt HAILO_LANDMARKS vor libre_id.so (Fix fuer cv2::resize Crash)
-        # Hand: direkte Pipeline ohne libwhole_buffer.so (kein Cropper-Crash mehr)
-        reid_needed = self._scheduler.is_model_active("reid")
+        # ReID: DEAKTIVIERT — libre_id.so::create_crops crasht mit leerem Crop (0x0 BBox)
+        # Ursache: degenerierte Person-BBoxes → 0-Pixel Crop → cv2::resize ABRT
+        # Landmarks-Strip Probe loest das Problem NICHT (anderer Crash-Grund)
+        # Hand: direkte Pipeline ok, aber kein Scheduler-Szenario → bleibt False
+        reid_needed = False
         hand_needed = self._scheduler.is_model_active("hand")
         self._apply_scrfd_gate(enabled=scrfd_needed)
         self._apply_pose_gate(enabled=pose_needed)
