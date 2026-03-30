@@ -60,6 +60,9 @@ class PerceptionFrame:
     objects: List[Dict] = field(default_factory=list)
     # [{"class": "couch", "confidence": 0.87}, ...]
 
+    # === OCR (PaddleOCR — Text im Raum) ===
+    ocr_texts: List[str] = field(default_factory=list)  # Erkannte Texte
+
     # === Perception Router ===
     person_bbox_height: float = 0.0  # Groesste Person-BBox Hoehe (0.0-1.0)
     scenario: str = "IDLE"  # Aktuelles Szenario (IDLE/FERN/MITTEL/NAH/RUECKEN/MULTI/NACHT)
@@ -103,6 +106,7 @@ class PerceptionFrame:
             "head_pitch": round(self.head_pitch, 1) if self.head_pitch is not None else None,
             "head_yaw": round(self.head_yaw, 1) if self.head_yaw is not None else None,
             "objects": self.objects,
+            "ocr_texts": self.ocr_texts,
             "person_bbox_height": round(self.person_bbox_height, 3),
             "scenario": self.scenario,
             "active_models": self.active_models,

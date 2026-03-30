@@ -94,6 +94,14 @@ DEBUG_THICK_OVERLAY = False
 # --- Hand Landmark (PoC, Full-Frame) ---
 HAND_HEF = "/mnt/moloch-data/hailo/models/hand_landmark_lite.hef"
 
+# --- PaddleOCR (Text im Raum lesen, 2-Stage: Detection + Recognition) ---
+OCR_DET_HEF = "/mnt/moloch-data/hailo/models/zoo/ocr/ocr_det.hef"
+OCR_REC_HEF = "/mnt/moloch-data/hailo/models/zoo/ocr/ocr.hef"
+OCR_POSTPROCESS_SO = "/usr/local/hailo/resources/so/libocr_postprocess.so"
+OCR_DET_FUNC = "paddleocr_det"
+OCR_CROP_FUNC = "crop_text_regions_filter"
+OCR_REC_FUNC = "paddleocr_recognize"
+
 VDEVICE_GROUP_ID = "SHARED"
 
 # YOLO Klassen-Whitelist (nur diese werden verarbeitet, Rest ignoriert)
@@ -252,6 +260,12 @@ class TappasPipeline:
         self._hand_valve = None
         self._hand_selector = None
 
+        # --- OCR Valve-Gating ---
+        self._ocr_valve = None
+        self._ocr_selector = None
+        self._ocr_enabled = False
+        self._last_ocr_texts: List[str] = []  # Letzte erkannte Texte
+
         # GStreamer einmal initialisieren
         if not Gst.is_initialized():
             Gst.init(None)
@@ -329,6 +343,18 @@ class TappasPipeline:
             logger.info("[HAND-GATE] Initial: Valve=drop (sicherer Start)")
         else:
             logger.warning("[HAND-GATE] Valve oder Selector NICHT gefunden — kein Gating!")
+
+        # OCR Valve + Selector (default: OFF — OCR nur auf Anfrage)
+        self._ocr_valve = self._pipeline.get_by_name("ocr_valve")
+        self._ocr_selector = self._pipeline.get_by_name("ocr_sel")
+        if self._ocr_valve and self._ocr_selector:
+            self._ocr_valve.set_property("drop", True)
+            ocr_sink1 = self._ocr_selector.get_static_pad("sink_1")
+            if ocr_sink1:
+                self._ocr_selector.set_property("active-pad", ocr_sink1)
+            logger.info("[OCR-GATE] Initial: Valve=drop (OCR default OFF)")
+        else:
+            logger.warning("[OCR-GATE] Valve oder Selector NICHT gefunden — kein OCR-Gating!")
 
         # Identity Callback (Pad-Probe fuer Detection-Auswertung)
         identity = self._pipeline.get_by_name("identity_callback")
@@ -578,6 +604,33 @@ class TappasPipeline:
             if sink1:
                 self._hand_selector.set_property("active-pad", sink1)
             logger.debug("[HAND-GATE] Hand deaktiviert (Valve zu, sink_1 Bypass)")
+
+    def _apply_ocr_gate(self, enabled: bool):
+        """OCR NPU-Gating via GStreamer valve + input-selector."""
+        if self._ocr_valve is None or self._ocr_selector is None:
+            return
+        if enabled:
+            sink0 = self._ocr_selector.get_static_pad("sink_0")
+            if sink0:
+                self._ocr_selector.set_property("active-pad", sink0)
+            self._ocr_valve.set_property("drop", False)
+            self._ocr_enabled = True
+            logger.info("[OCR-GATE] OCR aktiviert (Valve auf, sink_0)")
+        else:
+            self._ocr_valve.set_property("drop", True)
+            sink1 = self._ocr_selector.get_static_pad("sink_1")
+            if sink1:
+                self._ocr_selector.set_property("active-pad", sink1)
+            self._ocr_enabled = False
+            logger.info("[OCR-GATE] OCR deaktiviert (Valve zu, sink_1 Bypass)")
+
+    def set_ocr_enabled(self, enabled: bool):
+        """Oeffentliche API: OCR ein-/ausschalten zur Laufzeit."""
+        self._apply_ocr_gate(enabled)
+
+    def get_ocr_texts(self) -> List[str]:
+        """Letzte erkannte OCR-Texte zurueckgeben."""
+        return list(self._last_ocr_texts)
 
     def _update_npu_scheduler(self, has_person: bool, has_face: bool):
         """Scheduler-Modus basierend auf aktuellen Detections aktualisieren."""
@@ -1255,6 +1308,59 @@ class TappasPipeline:
             f'hand_wrapper_agg. ! queue name=hand_wrapper_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
         )
 
+        # --- Stage 8: PaddleOCR (Text-Erkennung, 2-Stage: Detection → Crop → Recognition) ---
+        ocr_det_inner = (
+            f'queue name=ocr_det_scale_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'videoscale name=ocr_det_videoscale n-threads=2 qos=false ! '
+            f'queue name=ocr_det_convert_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'video/x-raw, pixel-aspect-ratio=1/1 ! '
+            f'videoconvert name=ocr_det_videoconvert n-threads=2 ! '
+            f'queue name=ocr_det_hailonet_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'hailonet name=ocr_det_hailonet hef-path={OCR_DET_HEF} batch-size=1 '
+            f'vdevice-group-id={VDEVICE_GROUP_ID} '
+            f'force-writable=true ! '
+            f'queue name=ocr_det_filter_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'hailofilter name=ocr_det_hailofilter so-path={OCR_POSTPROCESS_SO} '
+            f'function-name={OCR_DET_FUNC} qos=false ! '
+            f'queue name=ocr_det_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
+        )
+
+        # OCR Recognition (laeuft auf den gecropten Text-Regionen)
+        ocr_rec_inner = (
+            f'queue name=ocr_rec_scale_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'videoscale name=ocr_rec_videoscale n-threads=2 qos=false ! '
+            f'queue name=ocr_rec_convert_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'video/x-raw, pixel-aspect-ratio=1/1 ! '
+            f'videoconvert name=ocr_rec_videoconvert n-threads=2 ! '
+            f'queue name=ocr_rec_hailonet_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'hailonet name=ocr_rec_hailonet hef-path={OCR_REC_HEF} batch-size=1 '
+            f'vdevice-group-id={VDEVICE_GROUP_ID} '
+            f'force-writable=true ! '
+            f'queue name=ocr_rec_filter_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'hailofilter name=ocr_rec_hailofilter so-path={OCR_POSTPROCESS_SO} '
+            f'function-name={OCR_REC_FUNC} qos=false ! '
+            f'queue name=ocr_rec_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
+        )
+
+        # OCR Wrapper: Detection → Crop Text-Regionen → Recognition → Aggregation
+        ocr_wrapper = (
+            f'queue name=ocr_wrapper_input_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'hailocropper name=ocr_det_crop so-path={WHOLE_BUFFER_SO} function-name=create_crops '
+            f'use-letterbox=true resize-method=inter-area internal-offset=true '
+            f'hailoaggregator name=ocr_det_agg '
+            f'ocr_det_crop. ! queue name=ocr_det_bypass_q leaky=no max-size-buffers=20 max-size-bytes=0 max-size-time=0 ! ocr_det_agg.sink_0 '
+            f'ocr_det_crop. ! {ocr_det_inner} ! '
+            # Crop-Stage: schneidet erkannte Text-Regionen aus
+            f'hailocropper name=ocr_text_crop so-path={OCR_POSTPROCESS_SO} function-name={OCR_CROP_FUNC} '
+            f'use-letterbox=true internal-offset=true '
+            f'hailoaggregator name=ocr_text_agg '
+            f'ocr_text_crop. ! queue name=ocr_text_bypass_q leaky=no max-size-buffers=20 max-size-bytes=0 max-size-time=0 ! ocr_text_agg.sink_0 '
+            f'ocr_text_crop. ! {ocr_rec_inner} ! ocr_text_agg.sink_1 '
+            f'ocr_text_agg. ! queue name=ocr_text_agg_out_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'ocr_det_agg.sink_1 '
+            f'ocr_det_agg. ! queue name=ocr_wrapper_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
+        )
+
         # --- Callback + Overlay + appsink ---
         callback_and_sink = (
             f'queue name=cb_q leaky=downstream max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! '
@@ -1271,7 +1377,10 @@ class TappasPipeline:
         # source → yolo → tee(scrfd) → [valve→scrfd | bypass] → sel
         #        → tee(pose) → [valve→pose | bypass] → sel
         #        → tracker → tee(reid) → [valve→reid | bypass] → sel
-        #        → face_cropper → face_attr → callback → sink
+        #        → face_cropper → face_attr
+        #        → tee(hand) → [valve→hand | bypass] → sel
+        #        → tee(ocr) → [valve→ocr | bypass] → sel
+        #        → callback → sink
         #
         # Bypass-Queues am Ende (GStreamer Namens-Referenz)
         return (
@@ -1298,6 +1407,10 @@ class TappasPipeline:
             f'tee name=hand_tee ! '
             f'valve name=hand_valve drop=true ! {hand_wrapper} ! hand_sel.sink_0 '
             f'input-selector name=hand_sel ! '
+            # OCR Valve-Branch (Text-Erkennung, default OFF)
+            f'tee name=ocr_tee ! '
+            f'valve name=ocr_valve drop=true ! {ocr_wrapper} ! ocr_sel.sink_0 '
+            f'input-selector name=ocr_sel ! '
             f'{callback_and_sink} '
             # Bypass-Queues (Namens-Referenzen, am Ende der Pipeline-Description)
             f'scrfd_tee. ! queue name=scrfd_bypass_q leaky=downstream max-size-buffers=5 '
@@ -1307,7 +1420,9 @@ class TappasPipeline:
             f'reid_tee. ! queue name=reid_bypass_q leaky=downstream max-size-buffers=5 '
             f'max-size-bytes=0 max-size-time=0 ! reid_sel.sink_1 '
             f'hand_tee. ! queue name=hand_bypass_q leaky=downstream max-size-buffers=5 '
-            f'max-size-bytes=0 max-size-time=0 ! hand_sel.sink_1'
+            f'max-size-bytes=0 max-size-time=0 ! hand_sel.sink_1 '
+            f'ocr_tee. ! queue name=ocr_bypass_q leaky=downstream max-size-buffers=5 '
+            f'max-size-bytes=0 max-size-time=0 ! ocr_sel.sink_1'
         )
 
     # =====================================================================
@@ -1614,9 +1729,35 @@ class TappasPipeline:
             face_id = None
             face_similarity = 0.0
 
+        # OCR-Texte extrahieren (nur wenn OCR aktiv)
+        ocr_texts = []
+        if self._ocr_enabled:
+            try:
+                # PaddleOCR liefert erkannte Texte als HAILO_CLASSIFICATION auf Sub-ROIs
+                for det in hailo_detections:
+                    for sub_det in det.get_objects_typed(hailo.HAILO_CLASSIFICATION):
+                        text = sub_det.get_label()
+                        if text and len(text.strip()) > 1:
+                            ocr_texts.append(text.strip())
+                # Auch direkt auf ROI-Level (falls OCR ohne Person-Detection)
+                for cls in roi.get_objects_typed(hailo.HAILO_CLASSIFICATION):
+                    text = cls.get_label()
+                    if text and len(text.strip()) > 1 and text.strip() not in ocr_texts:
+                        # Face-Attr Labels (Male/Female/Smiling) rausfiltern
+                        if text not in ("Male", "Female", "Smiling", "Not Smiling"):
+                            ocr_texts.append(text.strip())
+                if ocr_texts:
+                    self._last_ocr_texts = ocr_texts
+                    logger.info(f"[OCR] Erkannt: {ocr_texts[:5]}")
+            except Exception as e:
+                logger.debug(f"[OCR] Extraktion: {e}")
+
         # PerceptionFrame bauen
         pf = self._build_pframe(persons, faces, best_face_conf,
                                 best_face_bbox, face_id, face_similarity)
+        # OCR-Texte ins PFrame schreiben
+        if ocr_texts:
+            pf.ocr_texts = ocr_texts
 
         # Thread-safe update (Frame kommt aus appsink — NACH hailooverlay)
         with self._lock:
