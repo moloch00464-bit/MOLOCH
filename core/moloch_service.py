@@ -918,14 +918,15 @@ class MolochService:
 
         Gleiche Logik wie in InferenceEngine._inference_loop():
         - Face hat IMMER Prioritaet (face_fed_to_tracker)
-        - BBoxen sind normalisiert (0-1) → skaliert auf 640x640 Pixel
+        - BBoxen sind normalisiert (0-1) → skaliert auf 1280x720 Pixel
         - Laeuft mit ~15 Hz (alle 66ms) um Tracker nicht zu ueberlasten
 
         WICHTIG: Loop ueberlebt Pipeline-Restart! Wartet wenn Pipeline offline.
         """
         FEED_INTERVAL = 0.066  # ~15 Hz
         OFFLINE_POLL = 1.0     # 1 Hz wenn Pipeline offline
-        FRAME_DIM = 640
+        FRAME_W = 1280
+        FRAME_H = 720
 
         while self.running:
             # Pipeline offline → langsam pollen
@@ -959,8 +960,8 @@ class MolochService:
                     cls = d.get("class", "")
                     bbox = d.get("bbox", [0, 0, 0, 0])
                     conf = d.get("confidence", 0)
-                    pixel_bbox = [bbox[0] * FRAME_DIM, bbox[1] * FRAME_DIM,
-                                  bbox[2] * FRAME_DIM, bbox[3] * FRAME_DIM]
+                    pixel_bbox = [bbox[0] * FRAME_W, bbox[1] * FRAME_H,
+                                  bbox[2] * FRAME_W, bbox[3] * FRAME_H]
                     entry = {"bbox": pixel_bbox, "confidence": conf, "class": cls}
                     if cls == "face":
                         face_dets.append(entry)
@@ -970,12 +971,12 @@ class MolochService:
                 if face_dets:
                     tracker.update_detection(
                         detections=face_dets,
-                        frame_width=FRAME_DIM, frame_height=FRAME_DIM
+                        frame_width=FRAME_W, frame_height=FRAME_H
                     )
                 elif person_dets:
                     tracker.update_detection(
                         detections=person_dets,
-                        frame_width=FRAME_DIM, frame_height=FRAME_DIM
+                        frame_width=FRAME_W, frame_height=FRAME_H
                     )
 
                 if self._cam._waiting_for_first_detection:
@@ -1910,6 +1911,17 @@ class MolochService:
                     status["face_confidence"] = round(getattr(pframe, 'face_confidence', 0.0), 3)
                     status["face_similarity"] = round(getattr(pframe, 'face_similarity', 0.0), 3)
                     status["mode"] = "tappas"
+                # Detektionen fuer Panel-BBox-Overlay (normalisierte Koordinaten [0-1])
+                if hasattr(_inf, 'get_detections'):
+                    raw_dets = _inf.get_detections()
+                    status["panel_detections"] = [
+                        {"class": d.get("class", "?"),
+                         "bbox": d.get("bbox", []),
+                         "confidence": round(d.get("confidence", 0.0), 2),
+                         "face_id": d.get("face_id"),
+                         "face_similarity": round(d.get("face_similarity", 0.0), 2)}
+                        for d in raw_dets if d.get("bbox")
+                    ]
                 if hasattr(self._inference, 'get_npu_sched_mode'):
                     status["npu_sched_mode"] = self._inference.get_npu_sched_mode()
 

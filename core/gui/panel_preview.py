@@ -23,7 +23,7 @@ import mmap
 import logging
 
 import numpy as np
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageDraw, ImageFont
 
 from core.gui.panel_styles import (
     BG_INPUT, BG_DARK, FG_DIM, FG_TEXT, STATUS_YELLOW, FONT_MONO, FONT_SMALL,
@@ -308,6 +308,43 @@ class PreviewModule:
                 # Auf Canvas-Groesse resizen (gekappt auf MAX_CANVAS)
                 if img.size != (self._canvas_w, self._canvas_h):
                     img = img.resize((self._canvas_w, self._canvas_h), Image.NEAREST)
+
+                # BBox-Overlay aus Status-JSON (normalisierte Koordinaten → Canvas-Pixel)
+                try:
+                    status = self._service.read_status()
+                    dets = status.get("panel_detections", [])
+                    if dets:
+                        draw = ImageDraw.Draw(img)
+                        cw, ch = self._canvas_w, self._canvas_h
+                        for d in dets:
+                            bbox = d.get("bbox", [])
+                            if len(bbox) != 4:
+                                continue
+                            x1, y1, x2, y2 = bbox
+                            px1 = int(x1 * cw)
+                            py1 = int(y1 * ch)
+                            px2 = int(x2 * cw)
+                            py2 = int(y2 * ch)
+                            cls = d.get("class", "?")
+                            face_id = d.get("face_id")
+                            # Farbe: Gesicht erkannt=Cyan, unbekannt=Gelb, Person=Gruen
+                            if cls == "face":
+                                color = (0, 220, 255) if face_id else (255, 220, 0)
+                                label = face_id or "?"
+                                conf = d.get("confidence", 0)
+                                sim = d.get("face_similarity", 0)
+                                if sim > 0:
+                                    label = f"{label} {sim:.2f}"
+                                else:
+                                    label = f"face {conf:.2f}"
+                            else:
+                                color = (0, 220, 80)
+                                label = f"{cls} {d.get('confidence', 0):.2f}"
+                            draw.rectangle([px1, py1, px2, py2], outline=color, width=2)
+                            draw.text((px1 + 2, max(0, py1 - 12)), label, fill=color)
+                        del draw
+                except Exception:
+                    pass  # BBox-Fehler darf Preview nie blockieren
 
                 # Anzeigen — PhotoImage recyclen statt neu erzeugen (spart GC-Druck)
                 try:
