@@ -15,9 +15,12 @@
     "recency": 4.0
   },
   "audio": {
-    "mic_gain": 1.27,
-    "agc_enabled": false,
-    "noise_gate_db": -40.0
+    "mic_gain": 1.57,
+    "noise_gate_db": -40.0,
+    "agc_enabled": true,
+    "wifi_samplerate": 16000,
+    "audio_source": "auto",
+    "wifi_software_gain": 1.57
   },
   "camera": {
     "ptz_speed": 15.0,
@@ -84,5 +87,11 @@
   "teach": {
     "mode_enabled": false,
     "cooldown": 30.0
+  },
+  "internet": {
+    "autonomous_search_interval": 300,
+    "autonomous_search_ttl": 3600,
+    "autonomous_search_city": "Nuernberg",
+    "autonomous_search_max_per_session": 20
   }
 }
