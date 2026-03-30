@@ -81,14 +81,8 @@ REID_POSTPROCESS_FUNC = "filter"
 REID_CROP_SO = "/usr/lib/aarch64-linux-gnu/hailo/tappas/post_processes/cropping_algorithms/libre_id.so"
 REID_CROP_FUNC = "create_crops"
 
-# --- Face-BBox Letterbox-Doppelkorrektur ---
-# hailocropper (use-letterbox=true) + SO (scrfd_10g_letterbox) korrigieren BEIDE die
-# Letterbox-Y-Achse. Ergebnis: Face-BBox ~25-30% zu gross in Y-Richtung.
-# SO auf scrfd_10g umstellen geht NICHT — hailooverlay crasht bei out-of-range Coords.
-# Stattdessen: nachtraeglich in Python korrigieren (pre-overlay + _on_buffer).
-# Letterbox: 1280x720 → 640x640 = 140px Padding oben+unten → Faktor = 720/640 = 1.125
-# Doppel-Korrektur verdoppelt das → Y muss um Faktor 0.78 geschrumpft werden (empirisch).
-FACE_BBOX_Y_SHRINK = 0.78  # Y-Achse Schrumpf-Faktor (doppelte Letterbox kompensieren)
+# Face-BBox: Native Hailo-Koordinaten sind KORREKT (hailocropper + scrfd_10g_letterbox).
+# Keine Python-seitige Korrektur noetig — Markus bestaetigt visuell (2026-03-30).
 
 # --- Debug-Overlay: Dicke BBoxen + Landmarks fuer Snapshot-Analyse ---
 # True = dicke Linien im SHM-Frame (fuer Claude-Referenzbilder)
@@ -1583,13 +1577,6 @@ class TappasPipeline:
             x2 = max(0.0, min(1.0, bbox.xmax()))
             y2 = max(0.0, min(1.0, bbox.ymax()))
 
-            # Face-BBox Y-Korrektur: doppelte Letterbox-Korrektur kompensieren
-            if label == "face":
-                cy = (y1 + y2) / 2.0
-                h_half = (y2 - y1) / 2.0 * FACE_BBOX_Y_SHRINK
-                y1 = max(0.0, cy - h_half)
-                y2 = min(1.0, cy + h_half)
-
             entry = {
                 "class": label,
                 "bbox": [x1, y1, x2, y2],
@@ -1846,7 +1833,7 @@ class TappasPipeline:
         prev_res = getattr(self, '_appsink_last_res', None)
         cur_res = (width, height)
         if prev_res != cur_res:
-            logger.warning(f"[APPSINK] Resolution-Wechsel: {prev_res} → {cur_res} (Frame #{self._appsink_count})")
+            logger.warning(f"[APPSINK] Resolution-Wechsel: {prev_res} → {cur_res}")
             self._appsink_last_res = cur_res
 
         success, mapinfo = buf.map(Gst.MapFlags.READ)
