@@ -1955,25 +1955,24 @@ class AutonomousTracker:
         return True
 
     def _enable_camera_smart_tracking(self, on: bool):
-        """Sonoff-eigenes Smart-Tracking ein/ausschalten (schnellerer Raum-Scan).
+        """Sonoff-eigenes Smart-Tracking — DEAKTIVIERT.
 
-        Wird aktiviert wenn Moloch Person verliert (Phase 2),
-        deaktiviert wenn Moloch wieder selbst trackt.
+        Smart Tracking kaempft mit Moloch-Tracking und verursacht:
+        - Nervöses Kamera-Hin-und-Her (Toggle-Schleife)
+        - Mögliche RTSP-Stream-Störungen bei jedem Umschalten
+        - Szenario-Wechsel die Valve-Transitions triggern
+        Bleibt AUS bis Moloch-Tracking stabil genug ist (2026-03-30).
         """
-        try:
-            if self.camera and hasattr(self.camera, 'cloud_bridge') and self.camera.cloud_bridge:
-                self.camera.cloud_bridge.set_smart_tracking(on)
-                self._camera_smart_tracking_on = on
-                if on:
-                    self._st_activate_time = time.time()
-                    self._st_settle_count = 0
-                    self._st_prev_pan = self.last_known_pan
-                    self._st_prev_tilt = self.last_known_tilt
-                else:
-                    self._st_deactivate_time = time.time()
-                logger.info(f"[SMART-TRACK] Kamera Smart-Tracking {'AN' if on else 'AUS'}")
-        except Exception as e:
-            logger.warning(f"[SMART-TRACK] Fehler: {e}")
+        # ST komplett deaktiviert — Moloch trackt allein
+        if self._camera_smart_tracking_on:
+            try:
+                if self.camera and hasattr(self.camera, 'cloud_bridge') and self.camera.cloud_bridge:
+                    self.camera.cloud_bridge.set_smart_tracking(False)
+                    logger.info("[SMART-TRACK] Kamera Smart-Tracking AUS (permanent deaktiviert)")
+            except Exception:
+                pass
+            self._camera_smart_tracking_on = False
+        return
 
     def _do_coast(self):
         """Coast - stop movement when target briefly lost."""
