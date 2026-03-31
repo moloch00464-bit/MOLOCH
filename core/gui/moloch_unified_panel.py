@@ -1635,7 +1635,7 @@ class MolochUnifiedPanel:
                     try:
                         logger.info(f"[TTS] Speaking voice response ({len(response)} chars)...")
                         _t_tts = time.time()
-                        self.tts.speak(response)
+                        self._speak(response)
                         _tts_dur = time.time() - _t_tts
                         logger.info("[TTS] Voice speak done")
                         _timing_logger.info(f"[5] TTS GENERIERUNG+PLAY: {_tts_dur:.3f}s  ({len(response)} chars)")
@@ -1804,10 +1804,20 @@ class MolochUnifiedPanel:
             # Meckern per TTS in der neuen (ungewollten) Stimme
             def complain():
                 try:
-                    self.tts.speak(opinion)
+                    self._speak(opinion)
                 except Exception:
                     pass
             threading.Thread(target=complain, daemon=True).start()
+
+    def _speak(self, text: str):
+        """Zentrale Sprachausgabe ueber PersonalityEngine. Fallback auf TTSEngine."""
+        try:
+            from core.personality.personality_engine import get_personality_engine
+            get_personality_engine().speak(text)
+        except Exception as e:
+            logger.warning(f"[PANEL] PersonalityEngine Fehler, Fallback: {e}")
+            if hasattr(self, 'tts') and self.tts and self.tts.available:
+                self.tts.speak(text)
 
     def _test_voice(self):
         """Play a test phrase with current voice."""
@@ -1829,7 +1839,7 @@ class MolochUnifiedPanel:
 
         def play():
             try:
-                self.tts.speak(phrase)
+                self._speak(phrase)
             except Exception as e:
                 logger.error(f"[VOICE] Test failed: {e}")
         threading.Thread(target=play, daemon=True).start()
@@ -2358,7 +2368,7 @@ class MolochUnifiedPanel:
                 if self.tts and hasattr(self.tts, 'speak'):
                     try:
                         logger.info(f"[TTS] Speaking chat response ({len(response)} chars)...")
-                        self.tts.speak(response)
+                        self._speak(response)
                         logger.info("[TTS] Chat speak done")
                         self._moloch_voice_autonomy(response)
                     except Exception as e:
