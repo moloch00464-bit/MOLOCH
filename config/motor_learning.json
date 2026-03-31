@@ -1,0 +1,7 @@
+{
+  "base_pan_gain": 1.0,
+  "base_tilt_gain": 0.85,
+  "ema_pan": 0.004,
+  "ema_tilt": -0.0589,
+  "ts": 1774940820.9653049
+}

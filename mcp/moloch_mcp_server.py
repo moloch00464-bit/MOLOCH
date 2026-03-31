@@ -178,7 +178,9 @@ def moloch_audit() -> str:
 
     Dauert ~30 Sekunden. Gibt PASS/FAIL/WARN für alle Subsysteme.
     """
-    audit_script = MOLOCH_DIR / "moloch_audit.py"
+    audit_script = MOLOCH_DIR / "scripts" / "moloch_audit.py"
+    if not audit_script.exists():
+        audit_script = MOLOCH_DIR / "moloch_audit.py"  # Fallback alter Pfad
     if not audit_script.exists():
         return f"FEHLER: {audit_script} nicht gefunden"
 
