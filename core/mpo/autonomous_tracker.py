@@ -1488,6 +1488,30 @@ class AutonomousTracker:
         else:
             self._stuck_limit_start = None
 
+        # === POSITIONS-FROZEN: Kamera physisch blockiert (Anschlag unter SW-Limit)? ===
+        # Prüft ob last_known_pan sich >8s nicht um mehr als 1° ändert bei grossem Error.
+        # Greift wenn physikalischer Anschlag (z.B. +108°) unter SW-Limit (170°) liegt.
+        if error_magnitude > 150:
+            prev_pan = getattr(self, '_posfrozen_last_pan', None)
+            posfrozen_start = getattr(self, '_posfrozen_start', None)
+            if prev_pan is None or abs(self.last_known_pan - prev_pan) > 1.0:
+                self._posfrozen_last_pan = self.last_known_pan
+                self._posfrozen_start = now
+            elif posfrozen_start is not None and now - posfrozen_start > 8.0:
+                logger.warning(
+                    f"[POS-FROZEN] >8s keine Bewegung bei error={error_magnitude:.0f}px "
+                    f"pos=({self.last_known_pan:+.1f},{self.last_known_tilt:+.1f}) → SEARCH"
+                )
+                self._posfrozen_last_pan = None
+                self._posfrozen_start = None
+                self._smooth_x = None
+                self._smooth_y = None
+                self._set_state(TrackerState.SEARCHING)
+                return
+        else:
+            self._posfrozen_last_pan = None
+            self._posfrozen_start = None
+
         # Anti-Overshoot: warte bis Kamera am letzten Ziel angekommen ist
         if self._target_pan is not None:
             dist = abs(self.last_known_pan - self._target_pan) + abs(self.last_known_tilt - self._target_tilt)
