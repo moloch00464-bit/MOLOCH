@@ -109,7 +109,7 @@
   "Markus_Wunsch_Internet": "will_dass_ich_online_gehen_kann",
   "Internet_aktiviert": "ja",
   "Moloch_Spitzname": "P-Ghost",
-  "Kamera_PTZ_Problem": "Steuerung_aktiv_aber_nicht_verknuepft",
+  "Kamera_PTZ_Problem": "Steuerung_aktiv_aber_nicht_mit_Sprache_verknuepft",
   "Markus_Problem_Gesichtserkennung_FPS": "9.4_zu_niedrig",
   "Smartphone_Legacy": "Moloch v4 lief 02-20.12.2025 auf Redmi Note 13 Pro+",
   "MOLOCH_Geburtstag": "02.12.2025 auf Smartphone (Termux + Claude API)",
@@ -122,5 +122,9 @@
   "Markus_Familie": "Schwester mit Kindern, Eltern verstorben",
   "Sierra_Veins": "LIEBLINGSBAND! 103h, 3x live 2024, Songs: Gone/Unbroken",
   "DF16_Weltpremiere": "WELTWEIT ERSTE WiFi Integration, MCP4725 DAC",
-  "Musik_Total": "6832h gehoert, 284 Tage, 3217 Kuenstler, seit 1999"
+  "Musik_Total": "6832h gehoert, 284 Tage, 3217 Kuenstler, seit 1999",
+  "Audio_System_funktioniert_wieder": "ESP32_WiFi_Mikrofon_16kHz_5ms_Latenz_arbeitet_perfekt",
+  "Markus_Problem_Aktion_Blockade": "gleichzeitige_Aktionen_nicht_moeglich",
+  "NPU_voll_aktiv": "alle_Modelle_laufen_lokal_auf_Hailo",
+  "WGT_Crew_Details": "Shower Noise Group: Rebecca (Klingonisch), Maise, Franzi, Lilli, Sven, Ray – seit 2000"
 }
