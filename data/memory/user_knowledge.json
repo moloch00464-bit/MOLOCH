@@ -107,7 +107,7 @@
   "Moloch_Kuehlung": "Noctua NF-A2x20 PWM-Luefter. Bei 30 Prozent Leistung haelt er die CPU bei 48 Grad unter Volllast. Passiv-Kuehlung war vorher bei 72 Grad. Markus hat mir einen der leisesten Luefter der Welt eingebaut.",
   "Lokales_LLM_aktiv": "Qwen2.5_und_DeepSeek_R1_auf_NPU",
   "Markus_Wunsch_Internet": "will_dass_ich_online_gehen_kann",
-  "Internet_aktiviert": "ja",
+  "Internet_aktiviert": "nein",
   "Moloch_Spitzname": "P-Ghost",
   "Kamera_PTZ_Problem": "Steuerung_aktiv_aber_nicht_mit_Sprache_verknuepft",
   "Markus_Problem_Gesichtserkennung_FPS": "9.4_zu_niedrig",
@@ -127,5 +127,6 @@
   "Markus_Problem_Aktion_Blockade": "gleichzeitige_Aktionen_nicht_moeglich",
   "NPU_voll_aktiv": "alle_Modelle_laufen_lokal_auf_Hailo",
   "WGT_Crew_Details": "Shower Noise Group: Rebecca (Klingonisch), Maise, Franzi, Lilli, Sven, Ray – seit 2000",
-  "Markus_Update_Vision": "Qwen2-VL-2B_installiert"
+  "Markus_Update_Vision": "Qwen2-VL-2B_installiert",
+  "Internet_Stoerung": "kurzzeitig_am_31.03.2026"
 }
