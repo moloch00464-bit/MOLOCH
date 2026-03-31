@@ -45,6 +45,9 @@ from core.perception.model_scheduler import ModelScheduler
 from core.perception.temporal_memory import get_perception_memory
 from core.perception.action_inference import get_action_inferrer
 from core.moloch_event_bus import get_event_bus, PRIO_PERCEPTION
+from core.perception.vision_workers import WorkItem, ResultCollector
+from core.perception.roi_dispatcher import ROIDispatcher
+from core.perception.face_pipeline import FaceWorker
 
 logger = logging.getLogger("TappasPipeline")
 
@@ -290,69 +293,6 @@ class TappasPipeline:
             logger.error(f"Pipeline-Erstellen fehlgeschlagen: {e}")
             raise RuntimeError(f"GStreamer Pipeline Error: {e}")
 
-        # SCRFD Valve + Selector (echtes NPU-Gating)
-        self._scrfd_valve = self._pipeline.get_by_name("scrfd_valve")
-        self._scrfd_selector = self._pipeline.get_by_name("scrfd_sel")
-        if self._scrfd_valve and self._scrfd_selector:
-            # Initial-State VOR PLAYING: Valve zu, Bypass aktiv (sicherer Startzustand)
-            self._scrfd_valve.set_property("drop", True)
-            sink1 = self._scrfd_selector.get_static_pad("sink_1")
-            if sink1:
-                self._scrfd_selector.set_property("active-pad", sink1)
-            logger.info("[SCRFD-GATE] Initial: Valve=drop (sicherer Start)")
-            # NACH PLAYING (200ms): Scheduler-Modus anwenden (z.B. Teach → Valve auf)
-            GLib.timeout_add(200, self._init_scrfd_gate)
-        else:
-            logger.warning("[SCRFD-GATE] Valve oder Selector NICHT gefunden — kein Gating!")
-
-        # Pose Valve + Selector
-        self._pose_valve = self._pipeline.get_by_name("pose_valve")
-        self._pose_selector = self._pipeline.get_by_name("pose_sel")
-        if self._pose_valve and self._pose_selector:
-            self._pose_valve.set_property("drop", True)
-            pose_sink1 = self._pose_selector.get_static_pad("sink_1")
-            if pose_sink1:
-                self._pose_selector.set_property("active-pad", pose_sink1)
-            logger.info("[POSE-GATE] Initial: Valve=drop (sicherer Start)")
-        else:
-            logger.warning("[POSE-GATE] Valve oder Selector NICHT gefunden — kein Gating!")
-
-        # ReID Valve + Selector
-        self._reid_valve = self._pipeline.get_by_name("reid_valve")
-        self._reid_selector = self._pipeline.get_by_name("reid_sel")
-        if self._reid_valve and self._reid_selector:
-            self._reid_valve.set_property("drop", True)
-            reid_sink1 = self._reid_selector.get_static_pad("sink_1")
-            if reid_sink1:
-                self._reid_selector.set_property("active-pad", reid_sink1)
-            logger.info("[REID-GATE] Initial: Valve=drop (sicherer Start)")
-        else:
-            logger.warning("[REID-GATE] Valve oder Selector NICHT gefunden — kein Gating!")
-
-        # Hand Valve + Selector
-        self._hand_valve = self._pipeline.get_by_name("hand_valve")
-        self._hand_selector = self._pipeline.get_by_name("hand_sel")
-        if self._hand_valve and self._hand_selector:
-            self._hand_valve.set_property("drop", True)
-            hand_sink1 = self._hand_selector.get_static_pad("sink_1")
-            if hand_sink1:
-                self._hand_selector.set_property("active-pad", hand_sink1)
-            logger.info("[HAND-GATE] Initial: Valve=drop (sicherer Start)")
-        else:
-            logger.warning("[HAND-GATE] Valve oder Selector NICHT gefunden — kein Gating!")
-
-        # OCR Valve + Selector (default: OFF — OCR nur auf Anfrage)
-        self._ocr_valve = self._pipeline.get_by_name("ocr_valve")
-        self._ocr_selector = self._pipeline.get_by_name("ocr_sel")
-        if self._ocr_valve and self._ocr_selector:
-            self._ocr_valve.set_property("drop", True)
-            ocr_sink1 = self._ocr_selector.get_static_pad("sink_1")
-            if ocr_sink1:
-                self._ocr_selector.set_property("active-pad", ocr_sink1)
-            logger.info("[OCR-GATE] Initial: Valve=drop (OCR default OFF)")
-        else:
-            logger.warning("[OCR-GATE] Valve oder Selector NICHT gefunden — kein OCR-Gating!")
-
         # Identity Callback (Pad-Probe fuer Detection-Auswertung)
         identity = self._pipeline.get_by_name("identity_callback")
         if identity is None:
@@ -360,31 +300,7 @@ class TappasPipeline:
         pad = identity.get_static_pad("src")
         pad.add_probe(Gst.PadProbeType.BUFFER, self._on_buffer, None)
 
-        # Face Attributes Probe: Tensor NACH hailonet, VOR Aggregator abgreifen
-        # fattr_output_q ist die Queue zwischen hailonet und aggregator
-        fattr_out_q = self._pipeline.get_by_name("fattr_output_q")
-        if fattr_out_q:
-            fattr_src_pad = fattr_out_q.get_static_pad("src")
-            if fattr_src_pad:
-                fattr_src_pad.add_probe(Gst.PadProbeType.BUFFER, self._on_face_attr_buffer, None)
-                logger.info("[FACE-ATTR] Pad-Probe auf fattr_output_q src registriert")
-        else:
-            logger.warning("[FACE-ATTR] fattr_output_q Element nicht gefunden")
-
-        # Pre-Overlay Probe: Pose-Duplikate entfernen + BBox clampen VOR hailooverlay
-        # Pre-Overlay Probe ENTFERNT — hailooverlay ist nicht mehr in Pipeline.
-        # Buffer-Manipulation durch Probes kann GStreamer-Flow blockieren.
-
-        # ReID Pre-Clean Probe: HAILO_LANDMARKS aus Person-Detections entfernen
-        # VOR libre_id.so::create_crops — verhindert cv2::resize Crash mit Pose-Detections
-        reid_pre = self._pipeline.get_by_name("reid_pre_clean")
-        if reid_pre:
-            reid_pre_pad = reid_pre.get_static_pad("src")
-            if reid_pre_pad:
-                reid_pre_pad.add_probe(Gst.PadProbeType.BUFFER, self._reid_landmarks_strip_probe, None)
-                logger.info("[REID-PROBE] Landmarks-Strip Probe auf reid_pre_clean registriert")
-        else:
-            logger.warning("[REID-PROBE] reid_pre_clean Element nicht gefunden")
+        # Phase 2: Keine Valve-Elemente mehr — alle Modelle ausser YOLO laufen als Worker
 
         # appsink — Frames abholen damit Pipeline nicht blockiert
         appsink = self._pipeline.get_by_name("sink")
@@ -417,7 +333,22 @@ class TappasPipeline:
         )
         self._loop_thread.start()
 
-        logger.info("TAPPAS Pipeline gestartet")
+        # --- Phase 2: HailoRT-Direct Worker starten ---
+        try:
+            self._face_worker = FaceWorker()
+            self._roi_dispatcher = ROIDispatcher()
+            self._result_collector = ResultCollector()
+            self._result_collector.register_worker(self._face_worker)
+            self._roi_dispatcher.register_worker(self._face_worker, every_n_frames=2)
+            self._result_collector.start_all()
+            logger.info("[WORKERS] FaceWorker gestartet (HailoRT-Direct, jeden 2. Frame)")
+        except Exception as e:
+            logger.error("[WORKERS] FaceWorker Start fehlgeschlagen: %s", e)
+            self._face_worker = None
+            self._roi_dispatcher = None
+            self._result_collector = None
+
+        logger.info("TAPPAS Pipeline gestartet (YOLO-Only + FaceWorker)")
 
     def stop(self):
         """Pipeline sauber beenden. Funktioniert auch wenn _running schon False (z.B. nach Bus-Error)."""
@@ -438,11 +369,20 @@ class TappasPipeline:
         if self._loop_thread and self._loop_thread.is_alive():
             self._loop_thread.join(timeout=5.0)
 
+        # Worker stoppen (Phase 2)
+        if getattr(self, '_result_collector', None):
+            try:
+                self._result_collector.stop_all()
+                logger.info("[WORKERS] Alle Worker gestoppt")
+            except Exception as e:
+                logger.error("[WORKERS] Stop-Fehler: %s", e)
+
         self._pipeline = None
         self._loop = None
         self._loop_thread = None
-        self._scrfd_valve = None
-        self._scrfd_selector = None
+        self._face_worker = None
+        self._roi_dispatcher = None
+        self._result_collector = None
 
         # SHM-Frame loeschen damit Panel "Kein Signal" zeigt statt Frozen Frame
         self._cleanup_shm()
@@ -1113,11 +1053,13 @@ class TappasPipeline:
     # =====================================================================
 
     def _build_pipeline_string(self) -> str:
-        """Komplette Multi-Model Pipeline (YOLO + SCRFD + Tracker + ArcFace)."""
+        """YOLO-Only Pipeline — alle anderen Modelle laufen als HailoRT-Direct Worker.
+
+        Phase 2: Radikal vereinfacht. SCRFD/ArcFace/Pose/ReID/Hand/OCR/FaceAttr
+        sind aus der GStreamer-Kette entfernt und laufen in vision_workers.py Threads.
+        """
 
         # --- Source: RTSP → H264 depay → decode → scale → RGB ---
-        # retry=5: rtspsrc versucht 5x reconnect bei Verbindungsverlust
-        # timeout=5000000: 5s Timeout (Microsekunden)
         source = (
             f'rtspsrc location="{self._rtsp_url}" name=source latency=300 protocols=tcp '
             f'retry=5 timeout=5000000 tcp-timeout=5000000 ! '
@@ -1160,61 +1102,7 @@ class TappasPipeline:
             f'yolo_wrapper_agg. ! queue name=yolo_wrapper_output_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
         )
 
-        # --- Stage 2: SCRFD Face Detection ---
-        scrfd_inner = (
-            f'queue name=scrfd_scale_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'videoscale name=scrfd_videoscale n-threads=2 qos=false ! '
-            f'queue name=scrfd_convert_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'video/x-raw, pixel-aspect-ratio=1/1 ! '
-            f'videoconvert name=scrfd_videoconvert n-threads=2 ! '
-            f'queue name=scrfd_hailonet_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'hailonet name=scrfd_hailonet hef-path={SCRFD_HEF} batch-size=1 '
-            f'vdevice-group-id={VDEVICE_GROUP_ID} '
-            f'force-writable=true ! '
-            f'queue name=scrfd_hailofilter_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'hailofilter name=scrfd_hailofilter so-path={SCRFD_POSTPROCESS_SO} '
-            f'function-name={SCRFD_POSTPROCESS_FUNC} config-path={SCRFD_CONFIG_JSON} qos=false ! '
-            f'queue name=scrfd_output_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
-        )
-
-        scrfd_wrapper = (
-            f'queue name=scrfd_wrapper_input_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'hailocropper name=scrfd_wrapper_crop so-path={WHOLE_BUFFER_SO} function-name=create_crops '
-            f'use-letterbox=true resize-method=inter-area internal-offset=false '
-            f'hailoaggregator name=scrfd_wrapper_agg '
-            f'scrfd_wrapper_crop. ! queue name=scrfd_wrapper_bypass_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! scrfd_wrapper_agg.sink_0 '
-            f'scrfd_wrapper_crop. ! {scrfd_inner} ! scrfd_wrapper_agg.sink_1 '
-            f'scrfd_wrapper_agg. ! queue name=scrfd_wrapper_output_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
-        )
-
-        # --- Stage 2b: Pose Estimation (YOLOv8s Pose, Valve-gated) ---
-        pose_inner = (
-            f'queue name=pose_scale_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'videoscale name=pose_videoscale n-threads=2 qos=false ! '
-            f'queue name=pose_convert_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'video/x-raw, pixel-aspect-ratio=1/1 ! '
-            f'videoconvert name=pose_videoconvert n-threads=2 ! '
-            f'queue name=pose_hailonet_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'hailonet name=pose_hailonet hef-path={POSE_HEF} batch-size=1 '
-            f'vdevice-group-id={VDEVICE_GROUP_ID} '
-            f'force-writable=true ! '
-            f'queue name=pose_hailofilter_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'hailofilter name=pose_hailofilter so-path={POSE_POSTPROCESS_SO} '
-            f'function-name={POSE_POSTPROCESS_FUNC} qos=false ! '
-            f'queue name=pose_output_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
-        )
-
-        pose_wrapper = (
-            f'queue name=pose_wrapper_input_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'hailocropper name=pose_wrapper_crop so-path={WHOLE_BUFFER_SO} function-name=create_crops '
-            f'use-letterbox=true resize-method=inter-area internal-offset=false '
-            f'hailoaggregator name=pose_wrapper_agg '
-            f'pose_wrapper_crop. ! queue name=pose_wrapper_bypass_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! pose_wrapper_agg.sink_0 '
-            f'pose_wrapper_crop. ! {pose_inner} ! pose_wrapper_agg.sink_1 '
-            f'pose_wrapper_agg. ! queue name=pose_wrapper_output_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
-        )
-
-        # --- Stage 3: Tracker + Face Cropper (face_align + ArcFace) ---
+        # --- Tracker (haelt Person-IDs ueber Frames stabil) ---
         tracker = (
             f'hailotracker name=hailo_face_tracker class-id=-1 '
             f'kalman-dist-thr=0.7 iou-thr=0.8 init-iou-thr=0.9 '
@@ -1223,221 +1111,24 @@ class TappasPipeline:
             f'queue name=tracker_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
         )
 
-        # --- Stage 3b: Person ReID (Valve-gated, nach Tracker) ---
-        reid_inner = (
-            f'queue name=reid_scale_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'videoscale name=reid_videoscale n-threads=2 qos=false ! '
-            f'queue name=reid_convert_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'video/x-raw, pixel-aspect-ratio=1/1 ! '
-            f'videoconvert name=reid_videoconvert n-threads=2 ! '
-            f'queue name=reid_hailonet_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'hailonet name=reid_hailonet hef-path={REID_HEF} batch-size=1 '
-            f'vdevice-group-id={VDEVICE_GROUP_ID} '
-            f'force-writable=true ! '
-            f'queue name=reid_hailofilter_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'hailofilter name=reid_hailofilter so-path={REID_POSTPROCESS_SO} '
-            f'function-name={REID_POSTPROCESS_FUNC} qos=false ! '
-            f'queue name=reid_output_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
-        )
-
-        reid_cropper = (
-            f'queue name=reid_crop_input_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'identity name=reid_pre_clean ! '
-            f'hailocropper name=reid_cropper so-path={REID_CROP_SO} function-name={REID_CROP_FUNC} '
-            f'use-letterbox=true internal-offset=false resize-method=bilinear '
-            f'hailoaggregator name=reid_crop_agg '
-            f'reid_cropper. ! queue name=reid_crop_bypass_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! reid_crop_agg.sink_0 '
-            f'reid_cropper. ! {reid_inner} ! reid_crop_agg.sink_1 '
-            f'reid_crop_agg. ! queue name=reid_crop_output_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
-        )
-
-        arcface_inner = (
-            f'hailofilter so-path={FACE_ALIGN_SO} name=face_align_hailofilter use-gst-buffer=true qos=false ! '
-            f'queue name=face_align_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'queue name=arcface_scale_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'videoscale name=arcface_videoscale n-threads=2 qos=false ! '
-            f'queue name=arcface_convert_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'video/x-raw, pixel-aspect-ratio=1/1 ! '
-            f'videoconvert name=arcface_videoconvert n-threads=2 ! '
-            f'queue name=arcface_hailonet_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'hailonet name=arcface_hailonet hef-path={ARCFACE_HEF} batch-size=1 '
-            f'vdevice-group-id={VDEVICE_GROUP_ID} '
-            f'force-writable=true ! '
-            f'queue name=arcface_hailofilter_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'hailofilter name=arcface_hailofilter so-path={ARCFACE_POSTPROCESS_SO} '
-            f'function-name={ARCFACE_POSTPROCESS_FUNC} qos=false ! '
-            f'queue name=arcface_output_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
-        )
-
-        face_cropper = (
-            f'queue name=face_crop_input_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'hailocropper name=face_cropper so-path={FACE_CROP_SO} function-name={FACE_CROP_FUNC} '
-            f'use-letterbox=true no-scaling-bbox=true internal-offset=false resize-method=bilinear '
-            f'hailoaggregator name=face_crop_agg '
-            f'face_cropper. ! queue name=face_crop_bypass_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! face_crop_agg.sink_0 '
-            f'face_cropper. ! {arcface_inner} ! face_crop_agg.sink_1 '
-            f'face_crop_agg. ! queue name=face_crop_output_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
-        )
-
-        # --- Stage 4: Face Attributes (gender/smiling via face_attr_resnet_v1_18) ---
-        # Zweiter Face-Cropper: gleiche Detections, resize auf 178x218, kein Postprocess
-        face_attr_inner = (
-            f'queue name=fattr_scale_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'videoscale name=fattr_videoscale n-threads=2 qos=false ! '
-            f'queue name=fattr_convert_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'video/x-raw, pixel-aspect-ratio=1/1 ! '
-            f'videoconvert name=fattr_videoconvert n-threads=2 ! '
-            f'queue name=fattr_hailonet_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'hailonet name=fattr_hailonet hef-path={FACE_ATTR_HEF} batch-size=1 '
-            f'vdevice-group-id={VDEVICE_GROUP_ID} '
-            f'force-writable=true ! '
-            f'queue name=fattr_hailofilter_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'hailofilter name=fattr_hailofilter so-path={FACE_ATTR_POSTPROCESS_SO} '
-            f'function-name={FACE_ATTR_POSTPROCESS_FUNC} qos=false ! '
-            f'queue name=fattr_output_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
-        )
-
-        face_attr_cropper = (
-            f'queue name=fattr_crop_input_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'hailocropper name=fattr_cropper so-path={FACE_CROP_SO} function-name={FACE_CROP_FUNC} '
-            f'use-letterbox=true no-scaling-bbox=true internal-offset=false resize-method=bilinear '
-            f'hailoaggregator name=fattr_crop_agg '
-            f'fattr_cropper. ! queue name=fattr_crop_bypass_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! fattr_crop_agg.sink_0 '
-            f'fattr_cropper. ! {face_attr_inner} ! fattr_crop_agg.sink_1 '
-            f'fattr_crop_agg. ! queue name=fattr_crop_output_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
-        )
-
-        # --- Stage 5: Hand Landmark (Valve-gated, direkt Full-Frame ohne hailocropper) ---
-        # libwhole_buffer.so::create_crops crasht wenn HAILO_LANDMARKS (Pose) in Detections.
-        # Fix: ganzen Frame auf 224x224 skalieren und direkt in hailonet schieben.
-        hand_direct = (
-            f'queue name=hand_scale_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'videoscale name=hand_videoscale n-threads=2 qos=false ! '
-            f'video/x-raw,width=224,height=224,pixel-aspect-ratio=1/1 ! '
-            f'videoconvert name=hand_videoconvert n-threads=2 ! '
-            f'queue name=hand_hailonet_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'hailonet name=hand_hailonet hef-path={HAND_HEF} batch-size=1 '
-            f'vdevice-group-id={VDEVICE_GROUP_ID} '
-            f'force-writable=true ! '
-            f'queue name=hand_output_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0'
-        )
-
-        # --- Stage 8: PaddleOCR (Text-Erkennung, 2-Stage: Detection → Crop → Recognition) ---
-        ocr_det_inner = (
-            f'queue name=ocr_det_scale_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'videoscale name=ocr_det_videoscale n-threads=2 qos=false ! '
-            f'queue name=ocr_det_convert_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'video/x-raw, pixel-aspect-ratio=1/1 ! '
-            f'videoconvert name=ocr_det_videoconvert n-threads=2 ! '
-            f'queue name=ocr_det_hailonet_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'hailonet name=ocr_det_hailonet hef-path={OCR_DET_HEF} batch-size=1 '
-            f'vdevice-group-id={VDEVICE_GROUP_ID} '
-            f'force-writable=true ! '
-            f'queue name=ocr_det_filter_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'hailofilter name=ocr_det_hailofilter so-path={OCR_POSTPROCESS_SO} '
-            f'function-name={OCR_DET_FUNC} qos=false ! '
-            f'queue name=ocr_det_output_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
-        )
-
-        # OCR Recognition (laeuft auf den gecropten Text-Regionen)
-        ocr_rec_inner = (
-            f'queue name=ocr_rec_scale_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'videoscale name=ocr_rec_videoscale n-threads=2 qos=false ! '
-            f'queue name=ocr_rec_convert_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'video/x-raw, pixel-aspect-ratio=1/1 ! '
-            f'videoconvert name=ocr_rec_videoconvert n-threads=2 ! '
-            f'queue name=ocr_rec_hailonet_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'hailonet name=ocr_rec_hailonet hef-path={OCR_REC_HEF} batch-size=1 '
-            f'vdevice-group-id={VDEVICE_GROUP_ID} '
-            f'force-writable=true ! '
-            f'queue name=ocr_rec_filter_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'hailofilter name=ocr_rec_hailofilter so-path={OCR_POSTPROCESS_SO} '
-            f'function-name={OCR_REC_FUNC} qos=false ! '
-            f'queue name=ocr_rec_output_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
-        )
-
-        # OCR Wrapper: Detection → Crop Text-Regionen → Recognition → Aggregation
-        ocr_wrapper = (
-            f'queue name=ocr_wrapper_input_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'hailocropper name=ocr_det_crop so-path={WHOLE_BUFFER_SO} function-name=create_crops '
-            f'use-letterbox=true resize-method=inter-area internal-offset=false '
-            f'hailoaggregator name=ocr_det_agg '
-            f'ocr_det_crop. ! queue name=ocr_det_bypass_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! ocr_det_agg.sink_0 '
-            f'ocr_det_crop. ! {ocr_det_inner} ! '
-            # Crop-Stage: schneidet erkannte Text-Regionen aus
-            f'hailocropper name=ocr_text_crop so-path={OCR_POSTPROCESS_SO} function-name={OCR_CROP_FUNC} '
-            f'use-letterbox=true internal-offset=false '
-            f'hailoaggregator name=ocr_text_agg '
-            f'ocr_text_crop. ! queue name=ocr_text_bypass_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! ocr_text_agg.sink_0 '
-            f'ocr_text_crop. ! {ocr_rec_inner} ! ocr_text_agg.sink_1 '
-            f'ocr_text_agg. ! queue name=ocr_text_agg_out_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
-            f'ocr_det_agg.sink_1 '
-            f'ocr_det_agg. ! queue name=ocr_wrapper_output_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
-        )
-
-        # --- Callback + Overlay + appsink ---
+        # --- Callback + appsink (kein hailooverlay — Panel zeichnet BBoxen selbst) ---
         callback_and_sink = (
             f'queue name=cb_q leaky=downstream max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! '
             f'identity name=identity_callback ! '
-            f'queue name=overlay_q leaky=downstream max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! '
-            # hailooverlay ENTFERNT — blockiert SHM nach ~25s (frozen, kein SEGV).
-            # BBoxen werden vom Panel aus IPC-Daten gezeichnet (saubere Trennung).
             f'queue name=sink_convert_q leaky=downstream max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! '
             f'videoconvert n-threads=2 qos=false ! '
             f'video/x-raw, format=RGB ! '
             f'appsink name=sink emit-signals=true drop=true max-buffers=1 sync=false'
         )
 
-        # --- Pipeline-Topologie mit Valve-Gating ---
-        # source → yolo → tee(scrfd) → [valve→scrfd | bypass] → sel
-        #        → tee(pose) → [valve→pose | bypass] → sel
-        #        → tracker → tee(reid) → [valve→reid | bypass] → sel
-        #        → face_cropper → face_attr
-        #        → tee(hand) → [valve→hand | bypass] → sel
-        #        → tee(ocr) → [valve→ocr | bypass] → sel
-        #        → callback → sink
-        #
-        # Bypass-Queues am Ende (GStreamer Namens-Referenz)
+        # --- YOLO-Only Topologie (Phase 2: alle anderen Modelle als HailoRT-Direct Worker) ---
+        # source → yolo_wrapper → tracker → identity_callback → appsink
+        # SCRFD/ArcFace/Pose/ReID/Hand/OCR/FaceAttr → FaceWorker + zukuenftige Worker Threads
         return (
             f'{source} ! '
             f'{yolo_wrapper} ! '
-            # SCRFD Valve-Branch
-            f'tee name=scrfd_tee ! '
-            f'valve name=scrfd_valve drop=true ! {scrfd_wrapper} ! scrfd_sel.sink_0 '
-            f'input-selector name=scrfd_sel ! '
-            # Pose Valve-Branch
-            f'tee name=pose_tee ! '
-            f'valve name=pose_valve drop=true ! {pose_wrapper} ! pose_sel.sink_0 '
-            f'input-selector name=pose_sel ! '
-            # Tracker
             f'{tracker} ! '
-            # ReID Valve-Branch (nach Tracker, braucht Person-Detections)
-            f'tee name=reid_tee ! '
-            f'valve name=reid_valve drop=true ! {reid_cropper} ! reid_sel.sink_0 '
-            f'input-selector name=reid_sel ! '
-            # Face Recognition + Face Attributes
-            f'{face_cropper} ! '
-            f'{face_attr_cropper} ! '
-            # Hand Detection Valve-Branch (PoC, nach Face Attr)
-            f'tee name=hand_tee ! '
-            f'valve name=hand_valve drop=true ! {hand_direct} ! hand_sel.sink_0 '
-            f'input-selector name=hand_sel ! '
-            # OCR Valve-Branch (Text-Erkennung, default OFF)
-            f'tee name=ocr_tee ! '
-            f'valve name=ocr_valve drop=true ! {ocr_wrapper} ! ocr_sel.sink_0 '
-            f'input-selector name=ocr_sel ! '
-            f'{callback_and_sink} '
-            # Bypass-Queues (Namens-Referenzen, am Ende der Pipeline-Description)
-            f'scrfd_tee. ! queue name=scrfd_bypass_q leaky=downstream max-size-buffers=5 '
-            f'max-size-bytes=0 max-size-time=0 ! scrfd_sel.sink_1 '
-            f'pose_tee. ! queue name=pose_bypass_q leaky=downstream max-size-buffers=5 '
-            f'max-size-bytes=0 max-size-time=0 ! pose_sel.sink_1 '
-            f'reid_tee. ! queue name=reid_bypass_q leaky=downstream max-size-buffers=5 '
-            f'max-size-bytes=0 max-size-time=0 ! reid_sel.sink_1 '
-            f'hand_tee. ! queue name=hand_bypass_q leaky=downstream max-size-buffers=5 '
-            f'max-size-bytes=0 max-size-time=0 ! hand_sel.sink_1 '
-            f'ocr_tee. ! queue name=ocr_bypass_q leaky=downstream max-size-buffers=5 '
-            f'max-size-bytes=0 max-size-time=0 ! ocr_sel.sink_1'
+            f'{callback_and_sink}'
         )
 
     # =====================================================================
@@ -1517,51 +1208,36 @@ class TappasPipeline:
         return Gst.PadProbeReturn.OK
 
     def _on_buffer(self, pad, info, user_data):
-        """Pad-Probe auf identity element — extrahiert Detections + baut PerceptionFrame.
+        """Pad-Probe auf identity element — extrahiert YOLO-Detections + merged FaceWorker.
 
-        Jeder Frame bekommt eine monoton steigende frame_id (System-Direktive Regel 2).
-        Alle Detections sind an diese frame_id gebunden (Regel 3).
+        Phase 2: GStreamer liefert nur YOLO Person-Detections.
+        Face/Pose/ReID kommen von HailoRT-Direct Workern.
         """
         buffer = info.get_buffer()
         if buffer is None:
             return Gst.PadProbeReturn.OK
 
-        # Frame-ID: monoton steigend, bindet Detections an exakt diesen Frame
+        # Frame-ID: monoton steigend
         self._frame_id = getattr(self, '_frame_id', 0) + 1
         frame_id = self._frame_id
-        frame_ts = time.monotonic()
 
         roi = hailo.get_roi_from_buffer(buffer)
         hailo_detections = roi.get_objects_typed(hailo.HAILO_DETECTION)
 
         detections = []
         persons = []
-        faces = []
-        best_face_conf = 0.0
-        best_face_bbox = None
-        face_id = None
-        face_similarity = 0.0
 
+        # --- YOLO-Only: nur Person-Detections extrahieren ---
         for det in hailo_detections:
             label = det.get_label()
             conf = det.get_confidence()
+
+            if label not in YOLO_ALLOWED_CLASSES:
+                continue
+            if conf < self.yolo_conf_val:
+                continue
+
             bbox = det.get_bbox()
-
-            # Pose-Detection erkennen: person MIT Landmarks → Skip (YOLO hat sie schon)
-            if label == "person" and det.get_objects_typed(hailo.HAILO_LANDMARKS):
-                continue
-
-            # YOLO-Klassenfilter: nur erlaubte Klassen durchlassen
-            if label != "face" and label not in YOLO_ALLOWED_CLASSES:
-                continue
-
-            # Threshold-Filterung (Panel-Slider Werte anwenden)
-            if label in YOLO_ALLOWED_CLASSES and conf < self.yolo_conf_val:
-                continue
-            if label == "face" and conf < self.scrfd_conf_val:
-                continue
-
-            # Normalisierte BBox [0.0-1.0] mit Clamp (Safety-Net gegen Letterbox-Ueberlauf)
             x1 = max(0.0, min(1.0, bbox.xmin()))
             y1 = max(0.0, min(1.0, bbox.ymin()))
             x2 = max(0.0, min(1.0, bbox.xmax()))
@@ -1580,55 +1256,55 @@ class TappasPipeline:
             if track_ids:
                 entry["track_id"] = track_ids[0].get_id()
 
-            if label == "person":
-                persons.append(entry)
-            elif label == "face":
-                # ArcFace Embedding extrahieren
-                embeddings = det.get_objects_typed(hailo.HAILO_MATRIX)
-                if embeddings:
-                    emb_data = np.array(embeddings[0].get_data(), dtype=np.float32)
-                    entry["embedding"] = emb_data
-
-                    # Live-Enrollment: Embedding sammeln wenn aktiv
-                    if self._enroll_active:
-                        self._collect_enrollment_embedding(emb_data, conf)
-
-                    # Face-Matching gegen DB
-                    matched_name, matched_sim = self._match_face(emb_data)
-                    # Debug-Log (alle 50 Frames): SCRFD-Score vs ArcFace-Similarity klar trennen
-                    self._match_log_count = getattr(self, '_match_log_count', 0) + 1
-                    if self._match_log_count % 50 == 1:
-                        logger.info(f"[FACE-MATCH] SCRFD={conf:.3f} ArcFace={matched_sim:.3f} "
-                                    f"thresh={self.arcface_thresh_val:.2f} → "
-                                    f"{'✓ ' + matched_name if matched_name else '✗ kein Match'} "
-                                    f"(db={len(self._face_db)} emb={len(emb_data)})")
-                    if matched_name:
-                        entry["face_id"] = matched_name
-                        entry["face_similarity"] = matched_sim
-
-                    # Passives Continuous-Learning: neuen Winkel automatisch speichern
-                    if not self._enroll_active:
-                        self._continuous_learn(emb_data, matched_name, matched_sim, conf)
-
-                # Face Attributes aus Cache (befuellt von _on_face_attr_buffer Probe)
-                with self._face_attr_lock:
-                    if self._face_attr_cache:
-                        entry["gender"] = self._face_attr_cache.get("gender")
-                        entry["smiling"] = self._face_attr_cache.get("smiling", False)
-
-                faces.append(entry)
-
-                if conf > best_face_conf:
-                    best_face_conf = conf
-                    best_face_bbox = (x1, y1, x2, y2)
-
+            persons.append(entry)
             detections.append(entry)
 
-        # Bestes Face-Match fuer PerceptionFrame
-        for f in faces:
-            if f.get("face_similarity", 0) > face_similarity:
-                face_id = f.get("face_id")
-                face_similarity = f.get("face_similarity", 0)
+        # --- FaceWorker-Ergebnisse einmergen (HailoRT-Direct) ---
+        faces = []
+        best_face_conf = 0.0
+        best_face_bbox = None
+        face_id = None
+        face_similarity = 0.0
+
+        if getattr(self, '_result_collector', None):
+            face_result = self._result_collector.get_latest("FaceWorker")
+            # Debug-Log alle 100 Frames
+            _fc_dbg = getattr(self, '_face_dbg_count', 0) + 1
+            self._face_dbg_count = _fc_dbg
+            if _fc_dbg % 100 == 1:
+                _fw = getattr(self, '_face_worker', None)
+                _health = _fw.get_health() if _fw else {}
+                logger.info("[FACE-DEBUG] frame=%d result=%s health=%s dispatch=%s",
+                            frame_id,
+                            f"faces={face_result.data.get('face_count', '?')}" if face_result else "None",
+                            f"infer={_health.get('total_inferences', 0)} err={_health.get('total_errors', 0)} q={_health.get('queue_size', '?')}" if _health else "N/A",
+                            getattr(self, '_roi_dispatcher', {}).get_stats() if hasattr(getattr(self, '_roi_dispatcher', None), 'get_stats') else "N/A")
+            if face_result and face_result.data.get("faces"):
+                for face in face_result.data["faces"]:
+                    face_entry = {
+                        "class": "face",
+                        "bbox": face["bbox"],
+                        "confidence": face["confidence"],
+                        "face_id": face.get("face_id"),
+                        "face_similarity": face.get("similarity", 0),
+                        "embedding": face.get("embedding"),
+                        "gender": face.get("gender"),
+                        "smiling": face.get("emotion") == "happy" if face.get("emotion") else None,
+                        "track_id": None,
+                    }
+                    faces.append(face_entry)
+                    detections.append(face_entry)
+
+                    if face["confidence"] > best_face_conf:
+                        best_face_conf = face["confidence"]
+                        best_face_bbox = tuple(face["bbox"])
+
+                # Bestes Face-Match
+                for f in faces:
+                    sim = f.get("face_similarity", 0)
+                    if sim > face_similarity:
+                        face_id = f.get("face_id")
+                        face_similarity = sim
 
         # --- PerceptionMemory: Temporale Wahrnehmung aktualisieren ---
         max_person_height = 0.0
@@ -1661,67 +1337,23 @@ class TappasPipeline:
             bbox_height_pct=smoothed["bbox_height_pct"],
         )
 
-        # Valve-Steuerung: ALLE sicheren Modelle PERMANENT AN.
-        # NPU hat 8GB RAM, nutzt <1% — kein Grund fuer dynamisches Gating.
-        # Valve-Umschalten verursacht Race Conditions, SEGV, Geister-Detections.
-        # Scheduler entscheidet nur noch welche ERGEBNISSE genutzt werden, nicht
-        # welche Modelle laufen. (Refactor 2026-03-30)
-        #
-        # Pose + ReID bleiben AUS (crashen hailooverlay / libre_id.so).
-        if not getattr(self, '_valves_initialized', False):
-            self._apply_scrfd_gate(enabled=True)   # SCRFD immer AN
-            self._apply_pose_gate(enabled=False)    # Pose AUS (SEGV in hailooverlay)
-            self._apply_reid_gate(enabled=False)    # ReID AUS (libre_id.so crash)
-            self._apply_hand_gate(enabled=False)    # Hand AUS (kein stabiler Use-Case)
-            self._valves_initialized = True
-
-        # Model-Active-Flags: immer aktiv (ausser Pose/ReID/Hand)
-        self.scrfd_active = True
-        self.arcface_active = True
+        # Model-Active-Flags: SCRFD + ArcFace laufen jetzt als FaceWorker
+        self.scrfd_active = getattr(self, '_face_worker', None) is not None
+        self.arcface_active = self.scrfd_active
         self.pose_active = False
         self.reid_active = False
         self.hand_active = False
 
-        # Ergebnisse: SCRFD + ArcFace laufen immer — keine Unterdrueckung noetig.
-        # Scheduler-Szenario wird weiterhin berechnet (fuer Tracking-Strategie etc.),
-        # aber Valves werden NICHT mehr geschaltet.
-
-        # OCR-Texte extrahieren (nur wenn OCR aktiv)
-        ocr_texts = []
-        if self._ocr_enabled:
-            try:
-                # PaddleOCR liefert erkannte Texte als HAILO_CLASSIFICATION auf Sub-ROIs
-                for det in hailo_detections:
-                    for sub_det in det.get_objects_typed(hailo.HAILO_CLASSIFICATION):
-                        text = sub_det.get_label()
-                        if text and len(text.strip()) > 1:
-                            ocr_texts.append(text.strip())
-                # Auch direkt auf ROI-Level (falls OCR ohne Person-Detection)
-                for cls in roi.get_objects_typed(hailo.HAILO_CLASSIFICATION):
-                    text = cls.get_label()
-                    if text and len(text.strip()) > 1 and text.strip() not in ocr_texts:
-                        # Face-Attr Labels (Male/Female/Smiling) rausfiltern
-                        if text not in ("Male", "Female", "Smiling", "Not Smiling"):
-                            ocr_texts.append(text.strip())
-                if ocr_texts:
-                    self._last_ocr_texts = ocr_texts
-                    logger.info(f"[OCR] Erkannt: {ocr_texts[:5]}")
-            except Exception as e:
-                logger.debug(f"[OCR] Extraktion: {e}")
-
         # PerceptionFrame bauen
         pf = self._build_pframe(persons, faces, best_face_conf,
                                 best_face_bbox, face_id, face_similarity)
-        # OCR-Texte ins PFrame schreiben
-        if ocr_texts:
-            pf.ocr_texts = ocr_texts
 
-        # Thread-safe update (Frame kommt aus appsink — NACH hailooverlay)
+        # Thread-safe update
         with self._lock:
             self._detections = detections
             self._current_pframe = pf
 
-        # --- Perception Events auf Event Bus publishen (fuer Action Bridge) ---
+        # --- Perception Events publishen ---
         self._publish_perception_events(persons, faces, face_id, face_similarity)
 
         # FPS Tracking
@@ -1827,16 +1459,22 @@ class TappasPipeline:
 
         frame = data.reshape(height, width, 3)
 
-        # Debug-Overlay: Dicke BBoxen + Landmarks zeichnen
-        if DEBUG_THICK_OVERLAY:
-            frame = self._draw_thick_overlay(frame)
-
-        # Thread-safe: annotiertes Frame speichern
+        # Thread-safe: Frame speichern
         with self._lock:
             self._annotated_frame = frame
 
-        # SHM IPC: Annotiertes Frame (MIT BBoxen) fuer Panel Preview
+        # SHM IPC: Frame fuer Panel Preview
         self._write_shm_frame(frame)
+
+        # Phase 2: Frame an ROIDispatcher weiterleiten (fuer FaceWorker etc.)
+        # Frame ist RGB (von GStreamer videoconvert format=RGB)
+        if getattr(self, '_roi_dispatcher', None):
+            try:
+                with self._lock:
+                    yolo_dets = [d for d in self._detections if d.get("class") == "person"]
+                self._roi_dispatcher.dispatch(frame, yolo_dets, getattr(self, '_frame_id', 0))
+            except Exception as e:
+                logger.debug("[DISPATCH] Fehler: %s", e)
 
         return Gst.FlowReturn.OK
 
