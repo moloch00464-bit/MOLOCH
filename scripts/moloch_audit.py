@@ -1052,18 +1052,28 @@ def test_deepseek_api_key():
     except Exception as e:
         return False, f"Datei nicht lesbar: {e}"
 
-@auto_test("hailort.service laeuft", "npu")
+@auto_test("Hailo NPU Sharing OK", "npu")
 def test_hailort_service():
+    # Auf diesem System ist hailort.service masked (absichtlich):
+    # TAPPAS + hailo-ollama nutzen vdevice-group-id=SHARED direkt.
+    # Test: masked = OK (Design), active = OK, failed/inactive = FAIL
     try:
         out = subprocess.check_output(
-            "systemctl is-active hailort 2>&1",
+            "systemctl is-active hailort.service 2>&1 || systemctl show hailort.service --property=ActiveState 2>/dev/null | cut -d= -f2",
             shell=True, timeout=5
         ).decode().strip()
         if out == "active":
-            return True, "Multi-Process-Service aktiv"
-        return False, f"hailort.service nicht aktiv: {out}"
-    except:
-        return False, "systemctl fehlgeschlagen"
+            return True, "hailort.service aktiv (Multi-Process-Daemon)"
+        # masked = gewollter Zustand: TAPPAS nutzt SHARED VDevice direkt
+        mask_check = subprocess.check_output(
+            "systemctl show hailort.service --property=LoadState 2>/dev/null | cut -d= -f2",
+            shell=True, timeout=5
+        ).decode().strip()
+        if mask_check == "masked":
+            return True, "hailort.service masked (OK — SHARED VDevice via TAPPAS)"
+        return False, f"hailort.service unerwartet: {out}"
+    except Exception as e:
+        return False, f"systemctl Fehler: {e}"
 
 # ============================================================
 # AUTO-TESTS: WATCHDOG + SYSTEM HEALTH (v3.0)
