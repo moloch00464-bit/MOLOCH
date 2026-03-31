@@ -40,9 +40,9 @@ TMP_DIR = Path("/tmp")
 
 # Audio-Sink Routing
 # Leer = PipeWire Default (HDMI)
-# GPIO PWM Speaker: "alsa_output.platform-soc_audio.analog-mono"  (nach dtoverlay=audremap)
-# ReSpeaker 3.5mm:  "alsa_output.usb-Seeed_Studio_ReSpeaker_Lite_0000000001-00.analog-stereo"
-SPEAKER_SINK = "alsa_output.platform-soc_audio.analog-mono"
+# GPIO PWM Speaker (Pi5 audremap-pi5 Overlay, verifiziert): alsa_output.platform-rp1_audio_out_simple_card_0.stereo-fallback
+# ReSpeaker 3.5mm:  alsa_output.usb-Seeed_Studio_ReSpeaker_Lite_0000000001-00.analog-stereo
+SPEAKER_SINK = "alsa_output.platform-rp1_audio_out_simple_card_0.stereo-fallback"
 
 
 class VoiceModel:

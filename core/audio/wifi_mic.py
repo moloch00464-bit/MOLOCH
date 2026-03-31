@@ -53,8 +53,8 @@ class WiFiMic:
     RING_48K_SIZE = 768000   # 4 Sekunden bei 48kHz Stereo 16-bit (192KB/s)
 
     # Timeout: Kein Paket seit X Sekunden → disconnected
-    # Erhoet von 2s auf 5s — WiFi hat kurze Aussetzer, sofortiger Fallback verliert Audio
-    HEALTH_TIMEOUT = 5.0
+    # 12s: Nach Pi-Reboot braucht Hotspot ~10s bis ESP32 stabil verbunden ist
+    HEALTH_TIMEOUT = 12.0
 
     def __init__(self, esp_ip: str = "10.42.0.2",
                  port_16k: int = 12345, port_48k: int = 12346,
