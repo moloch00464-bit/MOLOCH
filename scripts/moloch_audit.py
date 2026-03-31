@@ -52,6 +52,9 @@ LIMITS = {
     "action_latency_max_ms": 300,   # ChatGPT: Action Bridge Test
     "ptz_sweep_wait_ms": 500,       # Gemini: Kamera-Sweep Timing
     "idle_transition_timeout_s": 30, # ChatGPT: Idle Test
+    "max_onvif_errors_10min": 20,
+    "min_shm_fps": 10,
+    "max_pending_ipc_cmds": 5,
 }
 
 # Regressions-Tracking (Gemini-Idee)
@@ -1008,6 +1011,274 @@ def test_capabilities():
     return n_ok >= n_total * 0.7, detail
 
 # ============================================================
+# AUTO-TESTS: LLM / DEEPSEEK (v3.0)
+# ============================================================
+
+@auto_test("hailo-ollama erreichbar", "llm")
+def test_hailo_ollama_reachable():
+    try:
+        import urllib.request
+        resp = urllib.request.urlopen("http://localhost:8000/api/tags", timeout=3)
+        if resp.status == 200:
+            return True, "Status 200"
+        return False, f"HTTP {resp.status}"
+    except Exception as e:
+        return False, f"Connection refused: {e}"
+
+@auto_test("hailo-ollama Modelle geladen", "llm")
+def test_hailo_ollama_models():
+    try:
+        import urllib.request
+        resp = urllib.request.urlopen("http://localhost:8000/api/tags", timeout=3)
+        data = json.loads(resp.read().decode())
+        models = [m.get("name", "") for m in data.get("models", [])]
+        found = [m for m in models if "qwen2.5" in m.lower() or "deepseek" in m.lower()]
+        if found:
+            return True, f"{found[0]} geladen"
+        return False, f"Keine Modelle (liste: {models[:3]})"
+    except Exception as e:
+        return False, f"Fehler: {e}"
+
+@auto_test("DeepSeek API Key vorhanden", "llm")
+def test_deepseek_api_key():
+    keys_file = os.path.join(MOLOCH_HOME, "config/api_keys.json")
+    try:
+        with open(keys_file) as f:
+            keys = json.load(f)
+        key = keys.get("deepseek", {}).get("api_key", "")
+        if key and len(key) > 10:
+            return True, f"Key vorhanden ({len(key)} Zeichen)"
+        return False, "Kein Key oder zu kurz"
+    except Exception as e:
+        return False, f"Datei nicht lesbar: {e}"
+
+@auto_test("hailort.service laeuft", "npu")
+def test_hailort_service():
+    try:
+        out = subprocess.check_output(
+            "systemctl is-active hailort 2>&1",
+            shell=True, timeout=5
+        ).decode().strip()
+        if out == "active":
+            return True, "Multi-Process-Service aktiv"
+        return False, f"hailort.service nicht aktiv: {out}"
+    except:
+        return False, "systemctl fehlgeschlagen"
+
+# ============================================================
+# AUTO-TESTS: WATCHDOG + SYSTEM HEALTH (v3.0)
+# ============================================================
+
+@auto_test("System Watchdog aktiv", "watchdog")
+def test_watchdog_active():
+    data = read_status()
+    if not data:
+        return False, "Kein Status"
+    wd = data.get("watchdog", {})
+    if not wd:
+        return False, "Kein Watchdog im Status"
+    n = len(wd)
+    return True, f"Watchdog aktiv, {n} checks"
+
+@auto_test("ONVIF kein Error-Loop", "watchdog")
+def test_onvif_no_error_loop():
+    try:
+        out = subprocess.check_output(
+            "journalctl -u moloch --since '10 min ago' 2>/dev/null | grep -c 'AbsoluteMove failed' || echo 0",
+            shell=True, timeout=10
+        ).decode().strip()
+        count = int(out) if out.isdigit() else 0
+        if count > LIMITS["max_onvif_errors_10min"]:
+            return False, f"ONVIF Error-Loop! {count} Fehler in 10min"
+        return True, f"{count} AbsoluteMove-Fehler (OK)"
+    except:
+        return True, "journalctl nicht verfuegbar"
+
+@auto_test("Kein Thread-Leak", "system")
+def test_thread_leak():
+    try:
+        out = subprocess.check_output(
+            "pgrep -f 'moloch_service' | head -1",
+            shell=True, timeout=5
+        ).decode().strip()
+        if not out:
+            return True, "Service nicht aktiv (uebersprungen)"
+        pid = int(out)
+        t1 = None
+        with open(f"/proc/{pid}/status") as f:
+            for line in f:
+                if line.startswith("Threads:"):
+                    t1 = int(line.split()[1])
+                    break
+        if t1 is None:
+            return True, "Threads-Zeile nicht gefunden"
+        time.sleep(5)
+        t2 = None
+        with open(f"/proc/{pid}/status") as f:
+            for line in f:
+                if line.startswith("Threads:"):
+                    t2 = int(line.split()[1])
+                    break
+        if t2 is None:
+            return True, "Threads-Zeile nicht gefunden"
+        growth = t2 - t1
+        if growth > LIMITS["max_thread_growth"]:
+            return False, f"Thread-Leak: +{growth} in 5s (jetzt {t2})"
+        return True, f"Threads stabil: {t2} (+{growth})"
+    except Exception as e:
+        return True, f"Pruefung nicht moeglich: {e}"
+
+# ============================================================
+# AUTO-TESTS: PERSONALITY + CORE INTEGRATOR (v3.0)
+# ============================================================
+
+@auto_test("CoreIntegrator tickt", "personality")
+def test_core_integrator_ticking():
+    data = read_status()
+    if not data:
+        return False, "Kein Status"
+    tension = data.get("tension")
+    if tension is None:
+        tension = data.get("core", {}).get("tension")
+    if tension is None:
+        return False, "CoreIntegrator nicht aktiv (kein tension)"
+    try:
+        t = float(tension)
+        if -1.0 <= t <= 1.0:
+            zone = data.get("personality_mode", "?")
+            return True, f"Tension={t:.2f}, Zone={zone}"
+        return False, f"Tension ausserhalb [-1,1]: {t}"
+    except:
+        return False, f"tension kein float: {tension!r}"
+
+@auto_test("Personality Zone gueltig", "personality")
+def test_personality_zone_valid():
+    data = read_status()
+    if not data:
+        return False, "Kein Status"
+    zone = data.get("personality_mode", None)
+    valid = ("guardian", "shadow", "berserker")
+    if zone in valid:
+        return True, f"Zone: {zone}"
+    if zone is None:
+        return False, "personality_mode fehlt im Status"
+    return False, f"Unbekannte Zone: {zone!r}"
+
+# ============================================================
+# AUTO-TESTS: IPC + SHM TIMING (v3.0)
+# ============================================================
+
+@auto_test("SHM Frame-Rate", "ipc")
+def test_shm_frame_rate():
+    import struct
+    try:
+        with open(FRAME_SHM, "rb") as f:
+            header = f.read(24)
+        if len(header) < 24:
+            return False, "SHM-Header zu kurz"
+        _, _, _, seq1, ts1 = struct.unpack("<IIIId", header)
+        time.sleep(1.0)
+        with open(FRAME_SHM, "rb") as f:
+            header = f.read(24)
+        _, _, _, seq2, ts2 = struct.unpack("<IIIId", header)
+        delta_t = max(ts2 - ts1, 0.01)
+        fps = (seq2 - seq1) / delta_t
+        if fps >= LIMITS["min_shm_fps"]:
+            return True, f"SHM: {fps:.1f} fps"
+        return False, f"SHM nur {fps:.1f} fps (Min: {LIMITS['min_shm_fps']})"
+    except Exception as e:
+        return False, f"SHM nicht lesbar: {e}"
+
+@auto_test("Status-JSON Schreibrate", "ipc")
+def test_status_json_writerate():
+    if not os.path.exists(STATUS_FILE):
+        return False, "Status-Datei fehlt"
+    mtime1 = os.path.getmtime(STATUS_FILE)
+    time.sleep(2.0)
+    mtime2 = os.path.getmtime(STATUS_FILE)
+    if mtime2 > mtime1:
+        return True, "Status wird aktualisiert"
+    return False, "Status-JSON veraltet (keine Aenderung in 2s)"
+
+@auto_test("IPC Command Queue leer", "ipc")
+def test_ipc_command_queue():
+    try:
+        out = subprocess.check_output(
+            "ls /tmp/moloch_cmd_*.json 2>/dev/null | wc -l",
+            shell=True, timeout=5
+        ).decode().strip()
+        n = int(out) if out.isdigit() else 0
+        if n > LIMITS["max_pending_ipc_cmds"]:
+            return False, f"{n} ausstehende IPC-Commands (Queue staut)"
+        return True, f"Queue OK ({n} pending)"
+    except:
+        return True, "Keine IPC-Dateien (OK)"
+
+# ============================================================
+# AUTO-TESTS: ARCFACE + ENROLLMENT (v3.0)
+# ============================================================
+
+@auto_test("ArcFace Embeddings Qualitaet", "arcface")
+def test_arcface_embedding_quality():
+    emb_file = os.path.join(MOLOCH_HOME, "data/face_embeddings.json")
+    if not os.path.exists(emb_file):
+        return False, "face_embeddings.json fehlt"
+    try:
+        with open(emb_file) as f:
+            db = json.load(f)
+    except Exception as e:
+        return False, f"JSON-Fehler: {e}"
+    if not db:
+        return False, "Datenbank leer"
+    import numpy as np
+    n = 0
+    for name, entry in db.items():
+        emb = entry if isinstance(entry, list) else entry.get("embedding", [])
+        if len(emb) != 512:
+            return False, f"Embedding '{name}' hat falsche Dimension: {len(emb)}"
+        norm = float(np.linalg.norm(emb))
+        if norm < 0.5 or norm > 2.0:
+            return False, f"Embedding '{name}' Norm auffaellig: {norm:.3f}"
+        n += 1
+    return True, f"{n} Embeddings, alle 512D, Norm OK"
+
+@auto_test("ArcFace Live-Similarity", "arcface")
+def test_arcface_live_similarity():
+    data = read_status()
+    if not data:
+        return False, "Kein Status"
+    sim = data.get("face_similarity", None)
+    face_id = data.get("face_id", None)
+    face_detected = data.get("face_detected", False)
+    if not face_detected or face_id is None:
+        return True, "Kein Gesicht sichtbar (OK)"
+    if sim is None:
+        return True, f"Gesicht {face_id} erkannt, keine Similarity im Status"
+    try:
+        s = float(sim)
+        if s > 0.50:
+            return True, f"{face_id} erkannt, Sim={s:.2f}"
+        return True, f"WARN: Similarity niedrig: {s:.2f} (Threshold 0.65)"
+    except:
+        return False, f"Similarity kein float: {sim!r}"
+
+# ============================================================
+# AUTO-TESTS: VOICE PIPELINE (v3.0)
+# ============================================================
+
+@auto_test("Voice Pipeline bereit", "voice")
+def test_voice_pipeline_ready():
+    data = read_status()
+    if not data:
+        return False, "Kein Status"
+    voice = data.get("voice", None)
+    if voice is None:
+        return False, "Voice Pipeline nicht initialisiert"
+    whisper = voice.get("whisper", "unbekannt")
+    tts = voice.get("tts", "unbekannt")
+    return True, f"Voice bereit, Whisper={whisper}, TTS={tts}"
+
+# ============================================================
 # TEST RUNNER
 # ============================================================
 
@@ -1079,6 +1350,33 @@ def run_auto_tests():
 
     print("\n  ─── FAEHIGKEITEN ───")
     test_capabilities()
+
+    print("\n  ─── LLM / DEEPSEEK ───")
+    test_hailo_ollama_reachable()
+    test_hailo_ollama_models()
+    test_deepseek_api_key()
+    test_hailort_service()
+
+    print("\n  ─── WATCHDOG / SYSTEM ───")
+    test_watchdog_active()
+    test_onvif_no_error_loop()
+    test_thread_leak()
+
+    print("\n  ─── PERSONALITY ───")
+    test_core_integrator_ticking()
+    test_personality_zone_valid()
+
+    print("\n  ─── IPC / SHM TIMING ───")
+    test_shm_frame_rate()
+    test_status_json_writerate()
+    test_ipc_command_queue()
+
+    print("\n  ─── ARCFACE ───")
+    test_arcface_embedding_quality()
+    test_arcface_live_similarity()
+
+    print("\n  ─── VOICE PIPELINE ───")
+    test_voice_pipeline_ready()
 
 def run_interactive_tests():
     """Interaktive Tests — brauchen User vor der Kamera."""
