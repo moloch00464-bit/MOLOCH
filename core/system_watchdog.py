@@ -33,13 +33,13 @@ logger = logging.getLogger("MolochWatchdog")
 SHM_FRAME_PATH = "/dev/shm/moloch_frame"
 
 # Schwellwerte
-FRAME_FREEZE_TIMEOUT = 30.0    # Sekunden ohne Frame → Pipeline-Neustart
+FRAME_FREEZE_TIMEOUT = 8.0     # Sekunden ohne Frame → Pipeline-Neustart
 ONVIF_FAIL_THRESHOLD = 5       # Fehler in Folge → ONVIF-Reconnect
 CPU_TEMP_WARN = 70.0           # °C — Warnung
 CPU_TEMP_CRITICAL = 80.0       # °C — LLM stoppen, Loop drosseln
 RAM_WARN_PERCENT = 85.0        # % — Warnung
 RAM_CRITICAL_PERCENT = 92.0    # % — LLM stoppen
-CHECK_INTERVAL = 5.0           # Sekunden zwischen Checks
+CHECK_INTERVAL = 3.0           # Sekunden zwischen Checks
 ONVIF_RECONNECT_COOLDOWN = 30.0  # Sekunden nach Reconnect-Versuch
 
 
