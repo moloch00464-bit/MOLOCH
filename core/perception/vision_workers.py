@@ -249,9 +249,15 @@ class ResultCollector:
         return results
 
     def get_latest(self, worker_name: str) -> Optional[WorkerResult]:
-        """Letztes Ergebnis eines bestimmten Workers."""
+        """Letztes Ergebnis eines bestimmten Workers (direkt vom Worker)."""
         with self._lock:
-            return self._latest.get(worker_name)
+            worker = self._workers.get(worker_name)
+            if worker:
+                result = worker.get_latest_result()
+                if result is not None:
+                    self._latest[worker_name] = result
+                return self._latest.get(worker_name)
+            return None
 
     def start_all(self):
         """Alle registrierten Worker starten."""
