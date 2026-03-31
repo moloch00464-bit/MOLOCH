@@ -48,6 +48,7 @@ from core.moloch_event_bus import get_event_bus, PRIO_PERCEPTION
 from core.perception.vision_workers import WorkItem, ResultCollector
 from core.perception.roi_dispatcher import ROIDispatcher
 from core.perception.face_pipeline import FaceWorker
+from core.perception.pose_worker import PoseWorker, ReIDWorker, HandWorker
 
 logger = logging.getLogger("TappasPipeline")
 
@@ -333,17 +334,35 @@ class TappasPipeline:
         )
         self._loop_thread.start()
 
-        # --- Phase 2: HailoRT-Direct Worker starten ---
+        # --- HailoRT-Direct Worker starten (Phase 2-5) ---
         try:
-            self._face_worker = FaceWorker()
             self._roi_dispatcher = ROIDispatcher()
             self._result_collector = ResultCollector()
+
+            # FaceWorker: SCRFD + ArcFace + FaceAttr (jeden 2. Frame)
+            self._face_worker = FaceWorker()
             self._result_collector.register_worker(self._face_worker)
             self._roi_dispatcher.register_worker(self._face_worker, every_n_frames=2)
+
+            # PoseWorker: YOLOv8s Pose (jeden 3. Frame)
+            self._pose_worker = PoseWorker()
+            self._result_collector.register_worker(self._pose_worker)
+            self._roi_dispatcher.register_worker(self._pose_worker, every_n_frames=3)
+
+            # ReIDWorker: Person ReID (jeden 5. Frame)
+            self._reid_worker = ReIDWorker()
+            self._result_collector.register_worker(self._reid_worker)
+            self._roi_dispatcher.register_worker(self._reid_worker, every_n_frames=5)
+
+            # HandWorker: Hand Landmarks (jeden 4. Frame)
+            self._hand_worker = HandWorker()
+            self._result_collector.register_worker(self._hand_worker)
+            self._roi_dispatcher.register_worker(self._hand_worker, every_n_frames=4)
+
             self._result_collector.start_all()
-            logger.info("[WORKERS] FaceWorker gestartet (HailoRT-Direct, jeden 2. Frame)")
+            logger.info("[WORKERS] 4 Worker gestartet: Face(2), Pose(3), Hand(4), ReID(5)")
         except Exception as e:
-            logger.error("[WORKERS] FaceWorker Start fehlgeschlagen: %s", e)
+            logger.error("[WORKERS] Worker-Start fehlgeschlagen: %s", e)
             self._face_worker = None
             self._roi_dispatcher = None
             self._result_collector = None
@@ -1268,17 +1287,6 @@ class TappasPipeline:
 
         if getattr(self, '_result_collector', None):
             face_result = self._result_collector.get_latest("FaceWorker")
-            # Debug-Log alle 100 Frames
-            _fc_dbg = getattr(self, '_face_dbg_count', 0) + 1
-            self._face_dbg_count = _fc_dbg
-            if _fc_dbg % 100 == 1:
-                _fw = getattr(self, '_face_worker', None)
-                _health = _fw.get_health() if _fw else {}
-                logger.info("[FACE-DEBUG] frame=%d result=%s health=%s dispatch=%s",
-                            frame_id,
-                            f"faces={face_result.data.get('face_count', '?')}" if face_result else "None",
-                            f"infer={_health.get('total_inferences', 0)} err={_health.get('total_errors', 0)} q={_health.get('queue_size', '?')}" if _health else "N/A",
-                            getattr(self, '_roi_dispatcher', {}).get_stats() if hasattr(getattr(self, '_roi_dispatcher', None), 'get_stats') else "N/A")
             if face_result and face_result.data.get("faces"):
                 for face in face_result.data["faces"]:
                     face_entry = {
@@ -1337,16 +1345,26 @@ class TappasPipeline:
             bbox_height_pct=smoothed["bbox_height_pct"],
         )
 
-        # Model-Active-Flags: SCRFD + ArcFace laufen jetzt als FaceWorker
+        # Model-Active-Flags: alle Worker-Modelle
         self.scrfd_active = getattr(self, '_face_worker', None) is not None
         self.arcface_active = self.scrfd_active
-        self.pose_active = False
-        self.reid_active = False
-        self.hand_active = False
+        self.pose_active = getattr(self, '_pose_worker', None) is not None
+        self.reid_active = getattr(self, '_reid_worker', None) is not None
+        self.hand_active = getattr(self, '_hand_worker', None) is not None
 
         # PerceptionFrame bauen
         pf = self._build_pframe(persons, faces, best_face_conf,
                                 best_face_bbox, face_id, face_similarity)
+
+        # Pose/Hand-Ergebnisse in PerceptionFrame einbauen
+        if getattr(self, '_result_collector', None):
+            pose_result = self._result_collector.get_latest("PoseWorker")
+            if pose_result and pose_result.data.get("poses"):
+                pf.pose_count = pose_result.data["pose_count"]
+
+            hand_result = self._result_collector.get_latest("HandWorker")
+            if hand_result and hand_result.data.get("hand_detected"):
+                pf.hand_detected = True
 
         # Thread-safe update
         with self._lock:

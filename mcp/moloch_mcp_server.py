@@ -127,7 +127,8 @@ def moloch_snapshot() -> str:
         os.close(fd)
 
         out_path = "/tmp/moloch_snapshot.jpg"
-        ok = cv2.imwrite(out_path, frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        # SHM Frame ist RGB (GStreamer format=RGB), cv2 erwartet BGR
+        ok = cv2.imwrite(out_path, cv2.cvtColor(frame, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 80])
         if not ok:
             return "FEHLER: JPEG-Encoding fehlgeschlagen"
 

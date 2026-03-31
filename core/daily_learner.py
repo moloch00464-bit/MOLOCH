@@ -292,14 +292,14 @@ class DailyLearner:
             filename = f"{timestamp}_c{int(confidence*100)}_a{angle}_l{light}_d{distance}.jpg"
             filepath = person_dir / filename
 
-            # Speichere Face-Crop (JPEG Quality 95)
-            cv2.imwrite(str(filepath), face_crop, [cv2.IMWRITE_JPEG_QUALITY, 95])
+            # Speichere Face-Crop (RGB→BGR fuer cv2, JPEG Quality 95)
+            cv2.imwrite(str(filepath), cv2.cvtColor(face_crop, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 95])
 
             # Speichere Full-Frame als Referenzbild
             if full_frame is not None:
                 full_filename = f"{timestamp}_c{int(confidence*100)}_a{angle}_l{light}_d{distance}_full.jpg"
                 full_filepath = person_dir / full_filename
-                cv2.imwrite(str(full_filepath), full_frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+                cv2.imwrite(str(full_filepath), cv2.cvtColor(full_frame, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 95])
 
             # Real-Time Learning: Embedding in Face-DB aufnehmen
             if embedding is not None:

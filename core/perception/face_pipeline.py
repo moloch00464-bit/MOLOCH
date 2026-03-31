@@ -161,11 +161,14 @@ class FaceWorker(BaseWorker):
             create_configured_model(vdevice, ARCFACE_HEF)
         logger.info("[FaceWorker] ArcFace geladen — Outputs: %s", self._arcface_out_names)
 
-        # FaceAttr: DEAKTIVIERT in Phase 2 (Input-Size 178x218 muss noch validiert werden)
-        # Wird in Phase 5 korrekt integriert.
-        # if os.path.exists(FACE_ATTR_HEF):
-        #     ...
-        logger.info("[FaceWorker] FaceAttr DEAKTIVIERT (Phase 2 — wird in Phase 5 integriert)")
+        # FaceAttr (Gender/Age/Emotion) — Input: 218x178x3 (HxWxC), Output: 80 Werte
+        if os.path.exists(FACE_ATTR_HEF):
+            try:
+                _, self._faceattr_configured, _, self._faceattr_out_names, self._faceattr_out_shapes = \
+                    create_configured_model(vdevice, FACE_ATTR_HEF)
+                logger.info("[FaceWorker] FaceAttr geladen — Input 218x178x3, Output %s", self._faceattr_out_names)
+            except Exception as e:
+                logger.warning("[FaceWorker] FaceAttr laden fehlgeschlagen (nicht-kritisch): %s", e)
 
         # Face-DB laden
         self._load_face_db()
@@ -328,7 +331,8 @@ class FaceWorker(BaseWorker):
         Input: 112x112 RGB (bereits aligned).
         face_attr_resnet_v1_18 erwartet 178x218x3 = 116412 bytes.
         """
-        # face_attr_resnet_v1_18: Input 178x218 (width x height)
+        # face_attr_resnet_v1_18: Input shape [218, 178, 3] = HxWxC
+        # cv2.resize erwartet (width, height) = (178, 218)
         attr_input = cv2.resize(aligned_112, (178, 218))
 
         bindings = self._faceattr_configured.create_bindings()
