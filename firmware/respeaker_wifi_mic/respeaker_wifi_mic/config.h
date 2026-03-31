@@ -48,6 +48,12 @@
 #define UDP_PORT_48K       12346  // 48kHz Stereo S16_LE (Stimmbiometrie)
 
 // =====================================================================
+// UDP Audio-Empfang — Pi sendet TTS-Audio an ESP32 zur Wiedergabe
+// =====================================================================
+#define UDP_SPEAKER_PORT   12347  // 48kHz Stereo S16_LE, Chunks a 960 Samples
+#define SPEAKER_BUF_CHUNKS   32   // Ring-Buffer: 32 x 960 Samples = ~320ms
+
+// =====================================================================
 // LED — WS2812 NeoPixel
 // =====================================================================
 #define LED_PIN             1     // GPIO 1 auf ReSpeaker Lite

@@ -6,7 +6,10 @@ M.O.L.O.C.H. can choose its own voice.
 
 import os
 import re
+import socket
+import struct
 import subprocess
+import threading
 import wave
 import logging
 from pathlib import Path
@@ -40,9 +43,13 @@ TMP_DIR = Path("/tmp")
 
 # Audio-Sink Routing
 # Leer = PipeWire Default (HDMI)
-# GPIO PWM Speaker (Pi5 audremap-pi5 Overlay, verifiziert): alsa_output.platform-rp1_audio_out_simple_card_0.stereo-fallback
-# ReSpeaker 3.5mm:  alsa_output.usb-Seeed_Studio_ReSpeaker_Lite_0000000001-00.analog-stereo
-SPEAKER_SINK = "alsa_output.platform-rp1_audio_out_simple_card_0.stereo-fallback"
+SPEAKER_SINK = ""  # Leer = HDMI (PipeWire Default)
+
+# ReSpeaker Wireless Speaker — sendet TTS-Audio parallel via UDP an ESP32
+# ESP32 spielt es via I2S TX → XMOS → 3,5mm Klinke ab
+RESPEAKER_IP   = "10.42.0.2"
+RESPEAKER_PORT = 12347        # UDP_SPEAKER_PORT in config.h
+RESPEAKER_ENABLED = True      # False = nur HDMI
 
 
 class VoiceModel:
@@ -163,8 +170,51 @@ class TTSEngine:
         cmd.append("-")
         return cmd
 
+    def _send_to_respeaker(self, raw_audio_22k_mono: bytes):
+        """Sendet TTS-Audio parallel via UDP an ESP32 (ReSpeaker 3,5mm Klinke).
+
+        Konvertiert 22050Hz Mono S16_LE → 48000Hz Stereo S16_LE via sox,
+        dann UDP-Chunks a 1920 Bytes (960 Stereo-Samples) mit 4B Seq-Header.
+        Laeuft in eigenem Thread damit HDMI-Ausgabe nicht blockiert wird.
+        """
+        if not RESPEAKER_ENABLED:
+            return
+
+        def _send():
+            try:
+                # Resample 22050Hz Mono → 48000Hz Stereo via sox
+                result = subprocess.run(
+                    ["sox", "-t", "raw", "-r", "22050", "-e", "signed",
+                     "-b", "16", "-c", "1", "-",
+                     "-t", "raw", "-r", "48000", "-c", "2", "-"],
+                    input=raw_audio_22k_mono,
+                    capture_output=True, timeout=30
+                )
+                stereo_48k = result.stdout
+                if not stereo_48k:
+                    return
+
+                # UDP senden: [4B seq][1920B Audio]
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                chunk_size = 1920
+                seq = 0
+                for off in range(0, len(stereo_48k), chunk_size):
+                    chunk = stereo_48k[off:off + chunk_size]
+                    packet = struct.pack("<I", seq) + chunk
+                    sock.sendto(packet, (RESPEAKER_IP, RESPEAKER_PORT))
+                    seq += 1
+                    # Timing: 1920 Bytes = 960 Stereo-Samples @ 48kHz = 20ms
+                    # Kein Sleep noetig — ESP32 Ring-Buffer puffert
+                sock.close()
+                logger.info(f"[TTS] ReSpeaker: {seq} UDP-Chunks gesendet")
+            except Exception as e:
+                logger.warning(f"[TTS] ReSpeaker UDP fehlgeschlagen: {e}")
+
+        threading.Thread(target=_send, daemon=True, name="TTS-ReSpeaker").start()
+
     def _play_raw(self, raw_audio: bytes, sample_rate: int):
-        """Play raw PCM direkt via pw-cat (PipeWire, kein ALSA-Konflikt)."""
+        """Play raw PCM via HDMI (pw-cat) + parallel an ReSpeaker senden."""
+        self._send_to_respeaker(raw_audio)
         subprocess.run(self._build_pw_cmd(sample_rate), input=raw_audio, check=True)
 
     def set_speed(self, speed: float):
@@ -249,34 +299,29 @@ class TTSEngine:
                 "--length-scale", str(LENGTH_SCALE),
                 "--output-raw"
             ]
-            pw_cmd = self._build_pw_cmd(sample_rate)
 
-            logger.info(f"[TTS] Pipe streaming: piper | pw-cat (sink={SPEAKER_SINK or 'default'})")
+            logger.info(f"[TTS] Piper → Buffer → HDMI+ReSpeaker")
 
+            # Piper komplett in RAM puffern (kein underrun, ReSpeaker parallel)
             piper_proc = subprocess.Popen(
                 piper_cmd,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL
             )
-            pw_proc = subprocess.Popen(
-                pw_cmd,
-                stdin=piper_proc.stdout,
-                stderr=subprocess.DEVNULL
-            )
+            raw_audio, _ = piper_proc.communicate(input=text.encode('utf-8'))
 
-            # Close piper stdout in parent so pw-play gets EOF wenn piper fertig
-            piper_proc.stdout.close()
+            if not raw_audio:
+                return False
 
-            # Text an piper stdin senden
-            piper_proc.stdin.write(text.encode('utf-8'))
-            piper_proc.stdin.close()
+            # Parallel: ReSpeaker (non-blocking Thread)
+            self._send_to_respeaker(raw_audio)
 
-            # Warten bis Playback fertig
-            pw_proc.wait()
-            piper_proc.wait()
+            # HDMI via pw-cat (blockierend bis fertig)
+            subprocess.run(self._build_pw_cmd(sample_rate),
+                           input=raw_audio, stderr=subprocess.DEVNULL)
 
-            logger.info("[TTS] Pipe streaming done")
+            logger.info("[TTS] Ausgabe fertig")
             return True
 
         except subprocess.CalledProcessError as e:

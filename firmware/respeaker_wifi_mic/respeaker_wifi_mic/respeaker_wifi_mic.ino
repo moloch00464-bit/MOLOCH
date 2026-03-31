@@ -55,9 +55,22 @@ static uint32_t udp_seq_num = 0;
 // DMA-Puffer: 480 Frames * 2 Kanaele * 4 Bytes (32-bit) = 3840 Bytes
 static uint8_t dma_buf[I2S_DMA_FRAMES * 2 * 4];
 
-// Ausgabe-Puffer
+// Ausgabe-Puffer (Mic → Pi)
 static int16_t out_16k[I2S_DMA_FRAMES / 3 + 1];   // 160 Samples max
 static int16_t out_48k[I2S_DMA_FRAMES * 2];        // 960 Samples max
+
+// Speaker Ring-Buffer (Pi → XMOS via I2S TX)
+// 48kHz Stereo S16_LE, Chunks a 960 Samples = 1920 Bytes
+#define SPK_CHUNK_BYTES   1920   // 960 Stereo-Samples * 2 Bytes
+#define SPK_BUF_CHUNKS    SPEAKER_BUF_CHUNKS
+static uint8_t  spk_ring[SPK_BUF_CHUNKS][SPK_CHUNK_BYTES];
+static volatile int spk_write_idx = 0;
+static volatile int spk_read_idx  = 0;
+static volatile int spk_fill      = 0;
+static SemaphoreHandle_t spk_sem  = NULL;
+
+static WiFiUDP udp_speaker;
+static TaskHandle_t speaker_task_handle = NULL;
 
 
 // =====================================================================
@@ -66,7 +79,7 @@ static int16_t out_48k[I2S_DMA_FRAMES * 2];        // 960 Samples max
 
 static bool i2s_init() {
     i2s_config_t i2s_config = {};
-    i2s_config.mode = (i2s_mode_t)(I2S_MODE_SLAVE | I2S_MODE_RX);
+    i2s_config.mode = (i2s_mode_t)(I2S_MODE_SLAVE | I2S_MODE_RX | I2S_MODE_TX);
     i2s_config.sample_rate = I2S_SAMPLE_RATE;
     i2s_config.bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT;
     i2s_config.channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT;
@@ -88,7 +101,7 @@ static bool i2s_init() {
     pin_config.mck_io_num = I2S_MCLK_PIN;
     pin_config.bck_io_num = I2S_BCLK_PIN;
     pin_config.ws_io_num = I2S_LRCK_PIN;
-    pin_config.data_out_num = I2S_PIN_NO_CHANGE;  // Kein TX vorerst
+    pin_config.data_out_num = I2S_DOUT_PIN;  // TX aktiv: ESP32 → XMOS (Speaker)
     pin_config.data_in_num = I2S_DIN_PIN;
 
     err = i2s_set_pin(I2S_NUM_0, &pin_config);
@@ -99,7 +112,7 @@ static bool i2s_init() {
 
     // MCLK-Frequenz Info
     float mclk_mhz = (float)(I2S_SAMPLE_RATE * I2S_MCLK_MULT) / 1000000.0f;
-    Serial.printf("[I2S] Slave RX aktiv\n");
+    Serial.printf("[I2S] Slave RX+TX aktiv (Mic + Speaker)\n");
     Serial.printf("[I2S] MCLK=%.3f MHz (Ziel) auf GPIO%d\n", mclk_mhz, I2S_MCLK_PIN);
     Serial.printf("[I2S] BCLK=GPIO%d (Input), WS=GPIO%d (Input), DIN=GPIO%d\n",
                   I2S_BCLK_PIN, I2S_LRCK_PIN, I2S_DIN_PIN);
@@ -238,6 +251,70 @@ static void audio_task(void* param) {
                 udp_audio.endPacket();
                 udp_seq_num++;
             }
+        }
+    }
+}
+
+
+// =====================================================================
+// Speaker UDP-Empfaenger + I2S TX Task
+// =====================================================================
+
+// UDP-Empfaenger: laeuft im Loop() Kontext via Polling
+static void speaker_udp_receive() {
+    int len = udp_speaker.parsePacket();
+    if (len <= 0) return;
+
+    // Paket lesen (Format: [4B seq][1920B S16_LE Stereo 48kHz])
+    uint8_t pkt[4 + SPK_CHUNK_BYTES];
+    int n = udp_speaker.read(pkt, sizeof(pkt));
+    if (n < 5) return;  // zu klein
+
+    int audio_bytes = n - 4;  // seq-Header abziehen
+    if (audio_bytes <= 0 || audio_bytes > SPK_CHUNK_BYTES) return;
+
+    // In Ring-Buffer schreiben wenn Platz da
+    if (spk_fill >= SPK_BUF_CHUNKS) return;  // Voll → verwerfen
+
+    memcpy(spk_ring[spk_write_idx], pkt + 4, audio_bytes);
+    // Rest mit Stille auffuellen wenn Chunk nicht voll
+    if (audio_bytes < SPK_CHUNK_BYTES)
+        memset(spk_ring[spk_write_idx] + audio_bytes, 0, SPK_CHUNK_BYTES - audio_bytes);
+
+    spk_write_idx = (spk_write_idx + 1) % SPK_BUF_CHUNKS;
+    spk_fill++;
+
+    // Speaker-Task wecken
+    if (spk_sem) xSemaphoreGive(spk_sem);
+}
+
+// I2S TX Task: liest aus Ring-Buffer und schreibt auf XMOS (GPIO43)
+static void speaker_task(void* param) {
+    Serial.println("[SPEAKER] Task gestartet");
+    // 32-bit TX Puffer: S16_LE Stereo → 32-bit links-ausgerichtet
+    static int32_t tx_buf[SPK_CHUNK_BYTES / 2];  // Samples als 32-bit
+
+    while (true) {
+        // Warten bis Daten im Buffer
+        xSemaphoreTake(spk_sem, pdMS_TO_TICKS(200));
+
+        while (spk_fill > 0) {
+            // Chunk aus Ring-Buffer lesen
+            uint8_t* chunk = spk_ring[spk_read_idx];
+            int samples = SPK_CHUNK_BYTES / 2;  // S16 → Anzahl 16-bit Samples
+
+            // S16_LE → I32 (links-ausgerichtet fuer XMOS 32-bit I2S)
+            const int16_t* src = (const int16_t*)chunk;
+            for (int i = 0; i < samples; i++) {
+                tx_buf[i] = ((int32_t)src[i]) << 16;
+            }
+
+            // Auf I2S TX schreiben (blockiert bis DMA-Puffer frei)
+            size_t written = 0;
+            i2s_write(I2S_NUM_0, tx_buf, samples * 4, &written, pdMS_TO_TICKS(100));
+
+            spk_read_idx = (spk_read_idx + 1) % SPK_BUF_CHUNKS;
+            spk_fill--;
         }
     }
 }
@@ -505,17 +582,26 @@ void setup() {
     if (WiFi.isConnected()) {
         udp_audio.begin(0);
         udp_led.begin(LED_UDP_PORT);
+        udp_speaker.begin(UDP_SPEAKER_PORT);
         http_setup();
         ota_setup();
         led_set(0, 255, 0); delay(500);
         led_parse("LED:orange pulsierend langsam");
+        Serial.printf("[SETUP] Speaker-UDP auf Port %d bereit\n", UDP_SPEAKER_PORT);
     } else {
         led_parse("LED:rot blinkend schnell");
     }
 
-    // Audio-Task (Core 1, Prioritaet 5)
+    // Semaphor fuer Speaker-Task
+    spk_sem = xSemaphoreCreateBinary();
+
+    // Audio-Capture Task (Core 1, Prioritaet 5)
     xTaskCreatePinnedToCore(audio_task, "audio", 8192, NULL, 5,
                             &audio_task_handle, 1);
+
+    // Speaker-Playback Task (Core 1, Prioritaet 4)
+    xTaskCreatePinnedToCore(speaker_task, "speaker", 4096, NULL, 4,
+                            &speaker_task_handle, 1);
 
     Serial.printf("[SETUP] Bereit! Modus: %s, UDP -> %s:%d\n",
                   audio_mode == 0 ? "16kHz Mono" : "48kHz Stereo",
@@ -534,6 +620,7 @@ void loop() {
         http_server.handleClient();
         ArduinoOTA.handle();
         led_udp_check();
+        speaker_udp_receive();
     }
 
     led_update();
