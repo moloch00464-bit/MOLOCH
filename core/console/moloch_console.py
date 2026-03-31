@@ -677,6 +677,16 @@ class MolochConsole:
             self._print_line("Interrupt received. Type /exit to quit.")
             print(CONSOLE_CONFIG["prompt"], end="", flush=True)
 
+    def _personality_speak(self, text: str):
+        """Sprachausgabe via PersonalityEngine (zentrale Stimme). Fallback auf MolochTTS."""
+        try:
+            from core.personality.personality_engine import get_personality_engine
+            get_personality_engine().speak(text)
+        except Exception as e:
+            logger.warning(f"[CONSOLE] PersonalityEngine Fehler, Fallback: {e}")
+            if self.tts:
+                self.tts.speak(text)
+
     def _print_header(self):
         """Print the console header."""
         width = CONSOLE_CONFIG["width"]
@@ -968,7 +978,7 @@ class MolochConsole:
 
         self._print_line("")
         self._print_line(f"[TTS] Spreche: {args[:50]}...")
-        self.tts.speak(args, blocking=True)
+        self._personality_speak(args)
         self._print_line("")
 
     def _cmd_face(self, args: str) -> None:
@@ -1323,7 +1333,7 @@ class MolochConsole:
             except Exception:
                 pass
             if self.tts.enabled:
-                self.tts.speak(keyword_response, blocking=True)
+                self._personality_speak(keyword_response)
             return
 
         # Direkte Spotify-Commands (OHNE Claude API)
@@ -1338,7 +1348,7 @@ class MolochConsole:
             except Exception:
                 pass
             if self.tts.enabled:
-                self.tts.speak(spotify_response, blocking=True)
+                self._personality_speak(spotify_response)
             return
 
         # Add user message to history
@@ -1455,7 +1465,7 @@ class MolochConsole:
 
             # SPEAK response via TTS (blocking so we wait for speech to finish)
             if self.tts.enabled:
-                self.tts.speak(assistant_message, blocking=True)
+                self._personality_speak(assistant_message)
 
             # Log
             logger.info(f"Response: {assistant_message[:100]}...")
