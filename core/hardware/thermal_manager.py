@@ -310,7 +310,6 @@ class ThermalManager:
 
         # Components (lazy loaded)
         self._timeline = None
-        self._tts = None
         self._tts_enabled = True
 
         # Recovery tracking
@@ -332,15 +331,6 @@ class ThermalManager:
                 logger.debug("Timeline not available")
         return self._timeline
 
-    def _get_tts(self):
-        """Get TTS instance (lazy load)."""
-        if self._tts is None:
-            try:
-                from core.tts import speak
-                self._tts = speak
-            except ImportError:
-                logger.debug("TTS not available")
-        return self._tts
 
     # =========================================================================
     # HARDWARE READ/WRITE
@@ -545,16 +535,14 @@ class ThermalManager:
         logger.info(f"THERMAL: {event_type} | {self._smoothed_temp:.1f}°C | Fan {self._fan_level}/{self._fan_max_state} | {self.state.value}")
 
     def _speak(self, message: str):
-        """Speak message via TTS (if enabled)."""
+        """Sprachausgabe via PersonalityEngine (zentrale Stimme)."""
         if not self._tts_enabled:
             return
-
-        tts = self._get_tts()
-        if tts:
-            try:
-                tts(message)
-            except Exception as e:
-                logger.error(f"TTS error: {e}")
+        try:
+            from core.personality.personality_engine import get_personality_engine
+            get_personality_engine().speak(message)
+        except Exception as e:
+            logger.warning(f"[THERMAL] TTS Fehler: {e}")
 
     # =========================================================================
     # THERMAL CHECK CYCLE

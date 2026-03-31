@@ -19,7 +19,7 @@
     "noise_gate_db": -40.0,
     "agc_enabled": true,
     "wifi_samplerate": 16000,
-    "audio_source": "auto",
+    "audio_source": "wifi",
     "wifi_software_gain": 1.57
   },
   "camera": {
