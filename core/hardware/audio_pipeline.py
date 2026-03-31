@@ -22,8 +22,13 @@ from typing import Optional
 
 logger = logging.getLogger("AudioSourcePipeline")
 
-# USB ReSpeaker Lite PipeWire Node-Name
-USB_SOURCE_NODE = "alsa_input.usb-Seeed_Studio_ReSpeaker_Lite_0000000001-00.analog-stereo"
+# USB Mikrofon PipeWire Node-Namen (Prioritaet: spezifisch → fallback)
+# Primaer: ReSpeaker Lite XMOS (wenn USB-Firmware aktiv, aktuell laeuft I2S-Firmware!)
+USB_SOURCE_NODE_RESPEAKER = "alsa_input.usb-Seeed_Studio_ReSpeaker_Lite_0000000001-00.analog-stereo"
+# Fallback: SmartMic / Nordic USB Composite Device (aktuell angeschlossen, 8kHz Mono)
+USB_SOURCE_NODE_SMARTMIC = "alsa_input.usb-USB_Composite_Device_USB_Composite_Device_0001-01.mono-fallback"
+# Aktiver Node (wird dynamisch ermittelt in _find_usb_source_node())
+USB_SOURCE_NODE = USB_SOURCE_NODE_RESPEAKER
 USB_CARD_INDEX = 2  # arecord -l: Card 2
 
 
@@ -49,6 +54,8 @@ class AudioSourcePipeline:
         self._usb_buf = bytearray()
         self._usb_lock = threading.Lock()
         self._usb_thread: Optional[threading.Thread] = None
+        self._usb_source_node = USB_SOURCE_NODE  # wird in start() dynamisch ermittelt
+        self._usb_zero_data_count = 0  # Zaehlt aufeinanderfolgende leere Reads
 
     # =========================================================================
     # Lifecycle
@@ -59,6 +66,9 @@ class AudioSourcePipeline:
         if self._running:
             return
         self._running = True
+
+        # USB Source Node dynamisch ermitteln
+        self._usb_source_node = self._find_usb_source_node()
 
         # WiFi-Mic Singleton holen und starten
         try:
@@ -141,24 +151,49 @@ class AudioSourcePipeline:
     # USB Fallback
     # =========================================================================
 
+    def _find_usb_source_node(self) -> str:
+        """Ermittelt den verfuegbaren PipeWire USB-Audio-Source-Node."""
+        try:
+            result = subprocess.run(
+                ["pw-cli", "list-objects"],
+                capture_output=True, text=True, timeout=5
+            )
+            output = result.stdout + result.stderr
+
+            # Primaer: ReSpeaker Lite (XMOS USB-Firmware)
+            if USB_SOURCE_NODE_RESPEAKER.split(".usb-")[1][:10] in output:
+                logger.info(f"USB-Source: ReSpeaker Lite XMOS gefunden")
+                return USB_SOURCE_NODE_RESPEAKER
+
+            # Fallback: SmartMic / Nordic USB Composite
+            if "USB_Composite_Device" in output:
+                logger.info("USB-Source: SmartMic/Nordic USB Composite Device")
+                return USB_SOURCE_NODE_SMARTMIC
+
+            logger.warning("USB-Source: Kein bekanntes USB-Mikrofon gefunden, nutze Default")
+            return ""  # leerer String = PipeWire Default
+
+        except Exception as e:
+            logger.warning(f"USB-Source-Erkennung fehlgeschlagen: {e}")
+            return USB_SOURCE_NODE_RESPEAKER
+
     def _start_usb_recording(self):
         """Startet USB-Aufnahme via pw-record als Fallback."""
         if self._usb_recording:
             return
 
         try:
-            cmd = [
-                "pw-record",
-                "--target", USB_SOURCE_NODE,
-                "--format", "s16",
-                "--rate", "16000",
-                "--channels", "1",
-                "-"
-            ]
+            cmd = ["pw-record", "--format", "s16", "--rate", "16000", "--channels", "1", "-"]
+            if self._usb_source_node:
+                cmd = ["pw-record", "--target", self._usb_source_node,
+                       "--format", "s16", "--rate", "16000", "--channels", "1", "-"]
+
+            logger.info(f"USB-Aufnahme: {cmd[2] if len(cmd) > 3 else 'default'}")
             self._usb_process = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
             )
             self._usb_recording = True
+            self._usb_zero_data_count = 0
 
             self._usb_thread = threading.Thread(
                 target=self._usb_read_loop, daemon=True,
@@ -167,7 +202,7 @@ class AudioSourcePipeline:
             self._usb_thread.start()
 
             self._source = "usb"
-            logger.info("USB-Aufnahme gestartet (ReSpeaker Lite)")
+            logger.info(f"USB-Aufnahme gestartet (Node: {self._usb_source_node or 'default'})")
             self._fire_source_event("usb", 16000)
 
         except Exception as e:
@@ -187,20 +222,38 @@ class AudioSourcePipeline:
 
     def _usb_read_loop(self):
         """Liest Audio-Daten vom USB pw-record Prozess."""
+        zero_streak = 0
+        max_zero_streak = 30  # 3s ohne Daten → Warnung + Neustart
+
         while self._usb_recording and self._usb_process:
             try:
                 data = self._usb_process.stdout.read(3200)  # 100ms bei 16kHz Mono 16-bit
                 if not data:
                     break
+
+                # Auf Stille-Dauer pruefen (pw-record liefert manchmal nur Nullbytes)
+                if all(b == 0 for b in data):
+                    zero_streak += 1
+                    if zero_streak == max_zero_streak:
+                        logger.warning(
+                            f"USB-Mic: {zero_streak * 100}ms nur Nullbytes — "
+                            f"Node={self._usb_source_node or 'default'} liefert keine Daten. "
+                            f"Pruefe: pw-cli list-objects | grep Audio/Source"
+                        )
+                else:
+                    zero_streak = 0
+
                 with self._usb_lock:
                     # Ringpuffer: max 2s = 64000 Bytes
                     self._usb_buf.extend(data)
                     if len(self._usb_buf) > 64000:
                         self._usb_buf = self._usb_buf[-64000:]
-            except:
+            except Exception as e:
+                logger.warning(f"USB-Read Fehler: {e}")
                 break
 
         self._usb_recording = False
+        logger.info("USB-Read-Loop beendet")
 
     def _get_usb_chunk(self, duration_ms: int) -> bytes:
         """Holt Audio-Chunk aus dem USB-Puffer."""
