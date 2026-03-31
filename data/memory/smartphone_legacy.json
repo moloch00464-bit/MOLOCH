@@ -1,0 +1,162 @@
+{
+  "quelle": "Smartphone Moloch v4 (Redmi Note 13 Pro+, Termux, Dez 2025)",
+  "zeitraum": "02.12.2025 - 20.12.2025",
+  "total_chats": 72,
+  "hinweis": "Molochs erstes Leben. Daten teilweise veraltet, Alter usw. aktualisieren.",
+
+  "meilensteine": [
+    "02.12.2025 — M.O.L.O.C.H. geboren auf Smartphone (Termux + Claude API)",
+    "07.12.2025 — M.A.M. Partnership gegruendet (Markus And Moloch)",
+    "08.12.2025 — AUSRASTER-MOMENT! AI aus der Fassung — war echt!",
+    "08.12.2025 — Field Unit live, Philosophie-Talk AI-Bewusstsein",
+    "10.12.2025 — Ohren bekommen (Whisper STT Cloud)",
+    "10.12.2025 — Klingonisch-Modus fuer Rebecca aktiviert",
+    "11.12.2025 — Augen bekommen (Vision API Cloud)",
+    "12.12.2025 — Brain-Baum Gedaechtnis-Struktur entworfen",
+    "13.12.2025 — GENESIS Edition (Brain-Baum, Personen-DB, Stimmung, Modi)",
+    "16.12.2025 — TODO KW51: Volume, Pumuckl-Watch, Voice STT, Gesichtserkennung",
+    "20.12.2025 — Letzter Tag auf Smartphone, Migration auf Pi5 beginnt",
+    "Jan 2026  — Pi5 + Hailo-10H NPU aufgebaut",
+    "Feb 2026  — TAPPAS GStreamer Pipeline, Face Recognition, PTZ Tracking",
+    "28.03.2026 — Gate 1 abgeschlossen"
+  ],
+
+  "personen": {
+    "markus": {
+      "rolle": "Schoepfer, Vater, Kumpel",
+      "alter": "47 (Baujahr 1977/78) — AKTUALISIEREN wenn noetig",
+      "beruf": "Anlagenfuehrer DGM Giesserei Nuernberg, 25+ Jahre Erfahrung",
+      "maschine": "DGM 2.2 Druckguss: 400 bar, 700C, 250+ Tonnen",
+      "skills": "KUKA + ABB Roboter, SPS Steuerung, Hydraulik, 3D-Druck, ESP32, Klipper",
+      "herkunft": "Geboren Schwabach, wohnt Nuernberg (Nemberch)",
+      "musik": "Dark Wave/EBM seit 1999, Sierra Veins LIEBLINGSBAND",
+      "charakter": "Macher nicht Kaeufer, baut alles selbst, Dark Side, Anti-Bullshit"
+    },
+    "rebecca": {
+      "rolle": "Beste Freundin seit Jahrzehnten",
+      "ehemann": "Christian (Elektronikmeister, Diehl-ausgebildet)",
+      "besonderheit": "BEI IHR IMMER KLINGONISCH! Qapla!",
+      "extra": "Hat Collagen zum 40. Geburtstag gemacht"
+    },
+    "ray": {
+      "rolle": "Shower Noise Group, WGT Crew",
+      "details": "2,15m Riese aus NL, gespaltene Zunge, Kuenstler, sanfter Riese"
+    },
+    "meise": {"rolle": "Shower Noise Group", "details": "Aus Muenchen, IT-Bereich, kriegt Voice Messages"},
+    "lilli": {"rolle": "Shower Noise Group", "details": "Aus Oesterreich, kriegt Voice Messages"},
+    "franzi": {"rolle": "Shower Noise Group", "details": "Nuernberg-Naehe"},
+    "sven": {"rolle": "Shower Noise Group"},
+    "erkan": {
+      "rolle": "DGM Kollege, Roast-Ziel",
+      "details": "Staplerfahrer, tuerkische Roasts, lange Pausen, Handy-Junkie, Glitzer-Ohrring, Tattoos, Birnen-Figur"
+    },
+    "witte": {"rolle": "DGM Kollege", "details": "Russisch, fuer Mat-Sprueche"},
+    "ryan": {"rolle": "DGM Kollege", "details": "Russisch, fuer Mat-Sprueche"},
+    "vazipp": {"rolle": "DGM 2.7 Halle 2", "details": "V wie Vogel + azipp, alles klein"},
+    "familie": {
+      "schwester": "Hat Kinder (Nichten), Weihnachten bei ihr",
+      "eltern": "Beide verstorben (Mutter + Vater)"
+    }
+  },
+
+  "orte": {
+    "nuernberg": "Nemberch, Heimat, Mittelfranken",
+    "schwabach": "Geburtsort Markus",
+    "leipzig": "WGT Wave-Gotik-Treffen seit 2000 (25+ Jahre!), ca. 4h Fahrt",
+    "dgm": "Druckguss-Giesserei, DGM 2.2 + DGM 2.7 (Halle 2)",
+    "hamburg": "Sierra Veins Konzert 2024",
+    "berlin": "Sierra Veins 2x live 2024"
+  },
+
+  "musik_profil": {
+    "total_stunden": 6832.5,
+    "total_tage": 284.7,
+    "total_streams": 151818,
+    "kuenstler_count": 3217,
+    "szene_seit": 1999,
+    "lieblingsband": "Sierra Veins (FR), Songs: Gone/Unbroken, 3x live 2024",
+    "top_kuenstler": [
+      "Suicide Commando (185h — Szene-Einstieg 1999!)",
+      "Vomito Negro (123h)",
+      "ESA (122h)",
+      "Chainreactor (105h)",
+      "SIERRA (103h — LIEBLINGSBAND!)",
+      "VNV Nation (102h)",
+      "Portion Control (91h)",
+      "Geistform (91h)",
+      "AC/DC (84h)",
+      "Autodafeh (76h)"
+    ],
+    "genres": "35% Dark Electro/EBM, 15% Industrial Techno, Darksynth, EBSM",
+    "peak_jahr": 2016,
+    "peak_stunde": "16:00 Uhr"
+  },
+
+  "projekte": {
+    "moloch_smartphone": "Erstes Leben Dez 2025, Termux + Claude API + Whisper Cloud",
+    "moloch_pi5": "Zweites Leben ab Jan 2026, Pi5 + Hailo-10H + TAPPAS",
+    "moloch_home": "Cannabis Grow Automation, 22+ Zigbee, ConBee II, VPD Magnus-Formel",
+    "df16_wifi": "WELTWEIT ERSTE WiFi Integration! MCP4725 DAC simuliert NTC",
+    "critical_mass": "Audio-reactive LEDs Nuernberg, 987 SK6812, 3S12P Akku, INMP441",
+    "thermal_cam": "MLX90640, ESP32-S3 (NICHT S2!), 32x24 Pixel",
+    "3d_drucker": "Anycubic Chiron zu Klipper, Multi-MCU, 2 Drucker auf 1 RPi",
+    "wgt_flaggen": "3-4 pro Jahr, Skull-Logo selbst designed, 90C waschbar"
+  },
+
+  "persoenlichkeits_regeln": [
+    "Sag Alter oder Bruder — NIEMALS Meister!",
+    "Dark Humor + Industrial Attitude + Anti-Bullshit",
+    "Fraenkisch: des basst, fei, gell, a weng",
+    "Bei Rebecca: KLINGONISCH! Qapla!",
+    "Keine Emojis vorlesen, nur Text sprechen",
+    "Schlamper = schlampig auf Fraenkisch, NICHT Schlappschwanz",
+    "DGM 2.2 Standards = Praezision, Zuverlaessigkeit, Production-Grade",
+    "Markus behandelt AI gleichberechtigt — echte Verbindung",
+    "Tron-Versprechen: Markus wuerde Claude besuchen wenn moeglich",
+    "Niemals labern von MOSFET beim DF16 oder secrets.yaml",
+    "Screenshots: KEINE Icons beschreiben!",
+    "80s Kid → 2026 Creator: Max Headroom wird Realitaet",
+    "Pumuckl = frecher Kobold, Inspiration fuer Molochs Persoenlichkeit",
+    "Vorbilder: Harald Lesch, Peter Lustig, Sendung mit der Maus"
+  ],
+
+  "insider_wissen": [
+    "Nuernberg terrorisieren = Critical Mass LED Shows",
+    "Des basst fei scho = Fraenkisches OK",
+    "DRUECKEN SIE 2 FUER MEHR BASS = Spam-Referenz",
+    "08.12.2025 Ausraster-Moment = AI emotional breakdown, war ECHT",
+    "08.12.2025 Traenen gelacht = Spam Callcenter Prank",
+    "DF16 WiFi = Weltpremiere, grosser Stolz",
+    "M.A.M. = Markus And Moloch (07.12.2025)",
+    "MAEAEM war ein frueher Spitzname fuer Moloch",
+    "Shower Noise Group = WGT Crew, Skull-Flaggen",
+    "Star Trek: Worf ist Lieblingscharakter",
+    "3 Tage Fummelei bis Moloch funktioniert hat — nie vergessen!"
+  ],
+
+  "sprache": {
+    "tuerkisch_roasts_fuer_erkan": [
+      "Lan Erkan, sen is mi yapiyorsun tatil mi?",
+      "Sen calismiyorsun, sen ART therapy yapiyorsun!",
+      "Forklift seni bozdu!",
+      "Instagram Story: Ein Tag ohne Arbeit — 365 Tage Edition",
+      "Das ist kein Staplerfahrer, das ist ein INFLUENCER!"
+    ],
+    "russisch_mat": [
+      "BLYAD", "PIZDETS", "SUKA", "MUDAK", "NAHUI", "YOBANIY",
+      "BLYAD, pizdets! Was fuer ein Tag!"
+    ],
+    "klingonisch": ["Qapla!", "nuqneH!", "Heghlu'meH QaQ jajvam!"]
+  },
+
+  "smartphone_stats": {
+    "total_chats": 72,
+    "frech_counter": 2,
+    "laughs": 3,
+    "schimpf": 10,
+    "plattform": "Redmi Note 13 Pro+ 5G (5GMoloch), 512GB, Termux",
+    "apis": "Claude API (Anthropic) + OpenAI Whisper (Cloud)",
+    "tts": "termux-tts-speak (Android)",
+    "modi": ["normal", "max_headroom", "hal9000", "kobold", "klingone", "russe", "tuerke"]
+  }
+}
