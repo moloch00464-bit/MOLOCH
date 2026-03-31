@@ -1124,94 +1124,94 @@ class TappasPipeline:
             f'rtph264depay name=source_depay ! '
             f'queue name=source_queue_decode leaky=downstream max-size-buffers=5 max-size-bytes=0 max-size-time=0 ! '
             f'avdec_h264 name=source_decode ! '
-            f'queue name=source_scale_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=source_scale_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'videoscale name=source_videoscale n-threads=2 ! '
-            f'queue name=source_convert_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=source_convert_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'videoconvert n-threads=3 name=source_convert qos=false ! '
             f'video/x-raw, pixel-aspect-ratio=1/1, format=RGB, width={self._width}, height={self._height} '
         )
 
         # --- Stage 1: YOLO Person Detection ---
         yolo_inner = (
-            f'queue name=yolo_scale_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=yolo_scale_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'videoscale name=yolo_videoscale n-threads=2 qos=false ! '
-            f'queue name=yolo_convert_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=yolo_convert_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'video/x-raw, pixel-aspect-ratio=1/1 ! '
             f'videoconvert name=yolo_videoconvert n-threads=2 ! '
-            f'queue name=yolo_hailonet_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=yolo_hailonet_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'hailonet name=yolo_hailonet hef-path={YOLO_HEF} batch-size=1 '
             f'vdevice-group-id={VDEVICE_GROUP_ID} '
             f'nms-score-threshold=0.3 nms-iou-threshold=0.45 '
             f'output-format-type=HAILO_FORMAT_TYPE_FLOAT32 '
             f'force-writable=true ! '
-            f'queue name=yolo_hailofilter_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=yolo_hailofilter_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'hailofilter name=yolo_hailofilter so-path={YOLO_POSTPROCESS_SO} '
             f'function-name={YOLO_POSTPROCESS_FUNC} qos=false ! '
-            f'queue name=yolo_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
+            f'queue name=yolo_output_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
         )
 
         yolo_wrapper = (
-            f'queue name=yolo_wrapper_input_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=yolo_wrapper_input_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'hailocropper name=yolo_wrapper_crop so-path={WHOLE_BUFFER_SO} function-name=create_crops '
             f'use-letterbox=true resize-method=inter-area internal-offset=false '
             f'hailoaggregator name=yolo_wrapper_agg '
-            f'yolo_wrapper_crop. ! queue name=yolo_wrapper_bypass_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! yolo_wrapper_agg.sink_0 '
+            f'yolo_wrapper_crop. ! queue name=yolo_wrapper_bypass_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! yolo_wrapper_agg.sink_0 '
             f'yolo_wrapper_crop. ! {yolo_inner} ! yolo_wrapper_agg.sink_1 '
-            f'yolo_wrapper_agg. ! queue name=yolo_wrapper_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
+            f'yolo_wrapper_agg. ! queue name=yolo_wrapper_output_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
         )
 
         # --- Stage 2: SCRFD Face Detection ---
         scrfd_inner = (
-            f'queue name=scrfd_scale_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=scrfd_scale_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'videoscale name=scrfd_videoscale n-threads=2 qos=false ! '
-            f'queue name=scrfd_convert_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=scrfd_convert_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'video/x-raw, pixel-aspect-ratio=1/1 ! '
             f'videoconvert name=scrfd_videoconvert n-threads=2 ! '
-            f'queue name=scrfd_hailonet_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=scrfd_hailonet_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'hailonet name=scrfd_hailonet hef-path={SCRFD_HEF} batch-size=1 '
             f'vdevice-group-id={VDEVICE_GROUP_ID} '
             f'force-writable=true ! '
-            f'queue name=scrfd_hailofilter_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=scrfd_hailofilter_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'hailofilter name=scrfd_hailofilter so-path={SCRFD_POSTPROCESS_SO} '
             f'function-name={SCRFD_POSTPROCESS_FUNC} config-path={SCRFD_CONFIG_JSON} qos=false ! '
-            f'queue name=scrfd_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
+            f'queue name=scrfd_output_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
         )
 
         scrfd_wrapper = (
-            f'queue name=scrfd_wrapper_input_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=scrfd_wrapper_input_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'hailocropper name=scrfd_wrapper_crop so-path={WHOLE_BUFFER_SO} function-name=create_crops '
             f'use-letterbox=true resize-method=inter-area internal-offset=false '
             f'hailoaggregator name=scrfd_wrapper_agg '
-            f'scrfd_wrapper_crop. ! queue name=scrfd_wrapper_bypass_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! scrfd_wrapper_agg.sink_0 '
+            f'scrfd_wrapper_crop. ! queue name=scrfd_wrapper_bypass_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! scrfd_wrapper_agg.sink_0 '
             f'scrfd_wrapper_crop. ! {scrfd_inner} ! scrfd_wrapper_agg.sink_1 '
-            f'scrfd_wrapper_agg. ! queue name=scrfd_wrapper_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
+            f'scrfd_wrapper_agg. ! queue name=scrfd_wrapper_output_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
         )
 
         # --- Stage 2b: Pose Estimation (YOLOv8s Pose, Valve-gated) ---
         pose_inner = (
-            f'queue name=pose_scale_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=pose_scale_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'videoscale name=pose_videoscale n-threads=2 qos=false ! '
-            f'queue name=pose_convert_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=pose_convert_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'video/x-raw, pixel-aspect-ratio=1/1 ! '
             f'videoconvert name=pose_videoconvert n-threads=2 ! '
-            f'queue name=pose_hailonet_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=pose_hailonet_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'hailonet name=pose_hailonet hef-path={POSE_HEF} batch-size=1 '
             f'vdevice-group-id={VDEVICE_GROUP_ID} '
             f'force-writable=true ! '
-            f'queue name=pose_hailofilter_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=pose_hailofilter_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'hailofilter name=pose_hailofilter so-path={POSE_POSTPROCESS_SO} '
             f'function-name={POSE_POSTPROCESS_FUNC} qos=false ! '
-            f'queue name=pose_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
+            f'queue name=pose_output_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
         )
 
         pose_wrapper = (
-            f'queue name=pose_wrapper_input_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=pose_wrapper_input_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'hailocropper name=pose_wrapper_crop so-path={WHOLE_BUFFER_SO} function-name=create_crops '
             f'use-letterbox=true resize-method=inter-area internal-offset=false '
             f'hailoaggregator name=pose_wrapper_agg '
-            f'pose_wrapper_crop. ! queue name=pose_wrapper_bypass_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! pose_wrapper_agg.sink_0 '
+            f'pose_wrapper_crop. ! queue name=pose_wrapper_bypass_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! pose_wrapper_agg.sink_0 '
             f'pose_wrapper_crop. ! {pose_inner} ! pose_wrapper_agg.sink_1 '
-            f'pose_wrapper_agg. ! queue name=pose_wrapper_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
+            f'pose_wrapper_agg. ! queue name=pose_wrapper_output_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
         )
 
         # --- Stage 3: Tracker + Face Cropper (face_align + ArcFace) ---
@@ -1220,159 +1220,159 @@ class TappasPipeline:
             f'kalman-dist-thr=0.7 iou-thr=0.8 init-iou-thr=0.9 '
             f'keep-new-frames=2 keep-tracked-frames=6 keep-lost-frames=8 '
             f'keep-past-metadata=true qos=false ! '
-            f'queue name=tracker_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
+            f'queue name=tracker_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
         )
 
         # --- Stage 3b: Person ReID (Valve-gated, nach Tracker) ---
         reid_inner = (
-            f'queue name=reid_scale_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=reid_scale_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'videoscale name=reid_videoscale n-threads=2 qos=false ! '
-            f'queue name=reid_convert_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=reid_convert_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'video/x-raw, pixel-aspect-ratio=1/1 ! '
             f'videoconvert name=reid_videoconvert n-threads=2 ! '
-            f'queue name=reid_hailonet_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=reid_hailonet_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'hailonet name=reid_hailonet hef-path={REID_HEF} batch-size=1 '
             f'vdevice-group-id={VDEVICE_GROUP_ID} '
             f'force-writable=true ! '
-            f'queue name=reid_hailofilter_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=reid_hailofilter_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'hailofilter name=reid_hailofilter so-path={REID_POSTPROCESS_SO} '
             f'function-name={REID_POSTPROCESS_FUNC} qos=false ! '
-            f'queue name=reid_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
+            f'queue name=reid_output_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
         )
 
         reid_cropper = (
-            f'queue name=reid_crop_input_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=reid_crop_input_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'identity name=reid_pre_clean ! '
             f'hailocropper name=reid_cropper so-path={REID_CROP_SO} function-name={REID_CROP_FUNC} '
             f'use-letterbox=true internal-offset=false resize-method=bilinear '
             f'hailoaggregator name=reid_crop_agg '
-            f'reid_cropper. ! queue name=reid_crop_bypass_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! reid_crop_agg.sink_0 '
+            f'reid_cropper. ! queue name=reid_crop_bypass_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! reid_crop_agg.sink_0 '
             f'reid_cropper. ! {reid_inner} ! reid_crop_agg.sink_1 '
-            f'reid_crop_agg. ! queue name=reid_crop_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
+            f'reid_crop_agg. ! queue name=reid_crop_output_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
         )
 
         arcface_inner = (
             f'hailofilter so-path={FACE_ALIGN_SO} name=face_align_hailofilter use-gst-buffer=true qos=false ! '
-            f'queue name=face_align_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
-            f'queue name=arcface_scale_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=face_align_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=arcface_scale_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'videoscale name=arcface_videoscale n-threads=2 qos=false ! '
-            f'queue name=arcface_convert_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=arcface_convert_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'video/x-raw, pixel-aspect-ratio=1/1 ! '
             f'videoconvert name=arcface_videoconvert n-threads=2 ! '
-            f'queue name=arcface_hailonet_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=arcface_hailonet_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'hailonet name=arcface_hailonet hef-path={ARCFACE_HEF} batch-size=1 '
             f'vdevice-group-id={VDEVICE_GROUP_ID} '
             f'force-writable=true ! '
-            f'queue name=arcface_hailofilter_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=arcface_hailofilter_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'hailofilter name=arcface_hailofilter so-path={ARCFACE_POSTPROCESS_SO} '
             f'function-name={ARCFACE_POSTPROCESS_FUNC} qos=false ! '
-            f'queue name=arcface_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
+            f'queue name=arcface_output_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
         )
 
         face_cropper = (
-            f'queue name=face_crop_input_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=face_crop_input_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'hailocropper name=face_cropper so-path={FACE_CROP_SO} function-name={FACE_CROP_FUNC} '
             f'use-letterbox=true no-scaling-bbox=true internal-offset=false resize-method=bilinear '
             f'hailoaggregator name=face_crop_agg '
-            f'face_cropper. ! queue name=face_crop_bypass_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! face_crop_agg.sink_0 '
+            f'face_cropper. ! queue name=face_crop_bypass_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! face_crop_agg.sink_0 '
             f'face_cropper. ! {arcface_inner} ! face_crop_agg.sink_1 '
-            f'face_crop_agg. ! queue name=face_crop_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
+            f'face_crop_agg. ! queue name=face_crop_output_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
         )
 
         # --- Stage 4: Face Attributes (gender/smiling via face_attr_resnet_v1_18) ---
         # Zweiter Face-Cropper: gleiche Detections, resize auf 178x218, kein Postprocess
         face_attr_inner = (
-            f'queue name=fattr_scale_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=fattr_scale_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'videoscale name=fattr_videoscale n-threads=2 qos=false ! '
-            f'queue name=fattr_convert_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=fattr_convert_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'video/x-raw, pixel-aspect-ratio=1/1 ! '
             f'videoconvert name=fattr_videoconvert n-threads=2 ! '
-            f'queue name=fattr_hailonet_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=fattr_hailonet_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'hailonet name=fattr_hailonet hef-path={FACE_ATTR_HEF} batch-size=1 '
             f'vdevice-group-id={VDEVICE_GROUP_ID} '
             f'force-writable=true ! '
-            f'queue name=fattr_hailofilter_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=fattr_hailofilter_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'hailofilter name=fattr_hailofilter so-path={FACE_ATTR_POSTPROCESS_SO} '
             f'function-name={FACE_ATTR_POSTPROCESS_FUNC} qos=false ! '
-            f'queue name=fattr_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
+            f'queue name=fattr_output_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
         )
 
         face_attr_cropper = (
-            f'queue name=fattr_crop_input_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=fattr_crop_input_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'hailocropper name=fattr_cropper so-path={FACE_CROP_SO} function-name={FACE_CROP_FUNC} '
             f'use-letterbox=true no-scaling-bbox=true internal-offset=false resize-method=bilinear '
             f'hailoaggregator name=fattr_crop_agg '
-            f'fattr_cropper. ! queue name=fattr_crop_bypass_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! fattr_crop_agg.sink_0 '
+            f'fattr_cropper. ! queue name=fattr_crop_bypass_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! fattr_crop_agg.sink_0 '
             f'fattr_cropper. ! {face_attr_inner} ! fattr_crop_agg.sink_1 '
-            f'fattr_crop_agg. ! queue name=fattr_crop_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
+            f'fattr_crop_agg. ! queue name=fattr_crop_output_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
         )
 
         # --- Stage 5: Hand Landmark (Valve-gated, direkt Full-Frame ohne hailocropper) ---
         # libwhole_buffer.so::create_crops crasht wenn HAILO_LANDMARKS (Pose) in Detections.
         # Fix: ganzen Frame auf 224x224 skalieren und direkt in hailonet schieben.
         hand_direct = (
-            f'queue name=hand_scale_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=hand_scale_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'videoscale name=hand_videoscale n-threads=2 qos=false ! '
             f'video/x-raw,width=224,height=224,pixel-aspect-ratio=1/1 ! '
             f'videoconvert name=hand_videoconvert n-threads=2 ! '
-            f'queue name=hand_hailonet_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=hand_hailonet_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'hailonet name=hand_hailonet hef-path={HAND_HEF} batch-size=1 '
             f'vdevice-group-id={VDEVICE_GROUP_ID} '
             f'force-writable=true ! '
-            f'queue name=hand_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0'
+            f'queue name=hand_output_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0'
         )
 
         # --- Stage 8: PaddleOCR (Text-Erkennung, 2-Stage: Detection → Crop → Recognition) ---
         ocr_det_inner = (
-            f'queue name=ocr_det_scale_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=ocr_det_scale_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'videoscale name=ocr_det_videoscale n-threads=2 qos=false ! '
-            f'queue name=ocr_det_convert_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=ocr_det_convert_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'video/x-raw, pixel-aspect-ratio=1/1 ! '
             f'videoconvert name=ocr_det_videoconvert n-threads=2 ! '
-            f'queue name=ocr_det_hailonet_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=ocr_det_hailonet_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'hailonet name=ocr_det_hailonet hef-path={OCR_DET_HEF} batch-size=1 '
             f'vdevice-group-id={VDEVICE_GROUP_ID} '
             f'force-writable=true ! '
-            f'queue name=ocr_det_filter_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=ocr_det_filter_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'hailofilter name=ocr_det_hailofilter so-path={OCR_POSTPROCESS_SO} '
             f'function-name={OCR_DET_FUNC} qos=false ! '
-            f'queue name=ocr_det_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
+            f'queue name=ocr_det_output_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
         )
 
         # OCR Recognition (laeuft auf den gecropten Text-Regionen)
         ocr_rec_inner = (
-            f'queue name=ocr_rec_scale_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=ocr_rec_scale_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'videoscale name=ocr_rec_videoscale n-threads=2 qos=false ! '
-            f'queue name=ocr_rec_convert_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=ocr_rec_convert_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'video/x-raw, pixel-aspect-ratio=1/1 ! '
             f'videoconvert name=ocr_rec_videoconvert n-threads=2 ! '
-            f'queue name=ocr_rec_hailonet_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=ocr_rec_hailonet_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'hailonet name=ocr_rec_hailonet hef-path={OCR_REC_HEF} batch-size=1 '
             f'vdevice-group-id={VDEVICE_GROUP_ID} '
             f'force-writable=true ! '
-            f'queue name=ocr_rec_filter_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=ocr_rec_filter_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'hailofilter name=ocr_rec_hailofilter so-path={OCR_POSTPROCESS_SO} '
             f'function-name={OCR_REC_FUNC} qos=false ! '
-            f'queue name=ocr_rec_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
+            f'queue name=ocr_rec_output_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
         )
 
         # OCR Wrapper: Detection → Crop Text-Regionen → Recognition → Aggregation
         ocr_wrapper = (
-            f'queue name=ocr_wrapper_input_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=ocr_wrapper_input_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'hailocropper name=ocr_det_crop so-path={WHOLE_BUFFER_SO} function-name=create_crops '
             f'use-letterbox=true resize-method=inter-area internal-offset=false '
             f'hailoaggregator name=ocr_det_agg '
-            f'ocr_det_crop. ! queue name=ocr_det_bypass_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! ocr_det_agg.sink_0 '
+            f'ocr_det_crop. ! queue name=ocr_det_bypass_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! ocr_det_agg.sink_0 '
             f'ocr_det_crop. ! {ocr_det_inner} ! '
             # Crop-Stage: schneidet erkannte Text-Regionen aus
             f'hailocropper name=ocr_text_crop so-path={OCR_POSTPROCESS_SO} function-name={OCR_CROP_FUNC} '
             f'use-letterbox=true internal-offset=false '
             f'hailoaggregator name=ocr_text_agg '
-            f'ocr_text_crop. ! queue name=ocr_text_bypass_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! ocr_text_agg.sink_0 '
+            f'ocr_text_crop. ! queue name=ocr_text_bypass_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! ocr_text_agg.sink_0 '
             f'ocr_text_crop. ! {ocr_rec_inner} ! ocr_text_agg.sink_1 '
-            f'ocr_text_agg. ! queue name=ocr_text_agg_out_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
+            f'ocr_text_agg. ! queue name=ocr_text_agg_out_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'ocr_det_agg.sink_1 '
-            f'ocr_det_agg. ! queue name=ocr_wrapper_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
+            f'ocr_det_agg. ! queue name=ocr_wrapper_output_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
         )
 
         # --- Callback + Overlay + appsink ---
