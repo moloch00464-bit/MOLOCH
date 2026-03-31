@@ -1795,6 +1795,14 @@ class MolochService:
             except Exception:
                 pass
 
+        # NPU-Extras stoppen (CLIP, OCR, VLM freigeben)
+        try:
+            from core.perception.npu_extras import get_npu_extras
+            get_npu_extras().stop()
+            logger.info("[STOP] NPU-Extras gestoppt")
+        except Exception:
+            pass
+
         # RGB-LED stoppen
         if self._rgb_led:
             try:
@@ -2684,6 +2692,69 @@ class MolochService:
             from core.spotify_controller import get_spotify
             year = cmd.get('year', 2020)
             get_spotify().play_from_year(int(year))
+
+        # ---- NPU-Extras: CLIP, OCR, VLM ----
+
+        elif action == 'npu_clip':
+            # CLIP-Embedding erzeugen (640d, aus aktuellem Frame)
+            def _do_clip():
+                try:
+                    from core.perception.npu_extras import get_npu_extras
+                    emb = get_npu_extras().clip_embed()
+                    if emb is not None:
+                        logger.info(f"[NPU-EXTRAS] CLIP: {emb.shape} OK")
+                    else:
+                        logger.warning("[NPU-EXTRAS] CLIP: kein Frame oder Fehler")
+                except Exception as e:
+                    logger.error(f"[NPU-EXTRAS] CLIP Fehler: {e}")
+            threading.Thread(target=_do_clip, daemon=True, name="NpuClip").start()
+
+        elif action == 'npu_ocr':
+            # OCR: Text im aktuellen Kamerabild erkennen
+            def _do_ocr():
+                try:
+                    from core.perception.npu_extras import get_npu_extras
+                    texte = get_npu_extras().ocr_read()
+                    if texte:
+                        for t in texte:
+                            logger.info(f"[NPU-EXTRAS] OCR: '{t['text']}' conf={t['confidence']:.2f}")
+                    else:
+                        logger.info("[NPU-EXTRAS] OCR: kein Text erkannt")
+                except Exception as e:
+                    logger.error(f"[NPU-EXTRAS] OCR Fehler: {e}")
+            threading.Thread(target=_do_ocr, daemon=True, name="NpuOcr").start()
+
+        elif action == 'npu_vlm_describe':
+            # VLM: Szene beschreiben (Qwen2-VL-2B)
+            prompt = cmd.get('prompt', 'Beschreibe was du siehst. Kurz und praezise, auf Deutsch.')
+            def _do_vlm():
+                try:
+                    from core.perception.npu_extras import get_npu_extras
+                    text = get_npu_extras().vlm_describe(prompt=prompt)
+                    if text:
+                        logger.info(f"[NPU-EXTRAS] VLM: {text[:120]}")
+                        # Ergebnis als Event publizieren
+                        try:
+                            from core.moloch_event_bus import get_event_bus
+                            get_event_bus().publish("vlm_description", {
+                                "text": text, "prompt": prompt
+                            })
+                        except Exception:
+                            pass
+                    else:
+                        logger.warning("[NPU-EXTRAS] VLM: keine Beschreibung")
+                except Exception as e:
+                    logger.error(f"[NPU-EXTRAS] VLM Fehler: {e}")
+            threading.Thread(target=_do_vlm, daemon=True, name="NpuVlm").start()
+
+        elif action == 'npu_extras_status':
+            # Status aller Extra-Modelle abfragen
+            try:
+                from core.perception.npu_extras import get_npu_extras
+                status = get_npu_extras().get_status()
+                logger.info(f"[NPU-EXTRAS] Status: {status}")
+            except Exception as e:
+                logger.error(f"[NPU-EXTRAS] Status Fehler: {e}")
 
     # ----------------------------------------------------------------
     # Settings Persistence
