@@ -2040,8 +2040,10 @@ class VoicePipeline:
                 with self._lock:
                     self._speaking = False
             return
+        except ImportError:
+            logger.warning("[VOICE] PersonalityEngine nicht importierbar — Direktsynthese")
         except Exception as e:
-            logger.debug(f"[VOICE] Personality-Fallback auf _speak_direct: {e}")
+            logger.error(f"[VOICE] PersonalityEngine Fehler: {e}")
         self._speak_direct(text)
 
     def _speak_direct(self, text: str):
