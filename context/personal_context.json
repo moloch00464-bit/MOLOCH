@@ -1,0 +1,32 @@
+{
+    "markus": {
+        "name": "Markus",
+        "title": "First Moloch",
+        "age": 47,
+        "location": "Nürnberg",
+        "occupation": "DGM (Deutsche Gesellschaft für Materialkunde)",
+        "role": "M.O.L.O.C.H.s Mensch, Schöpfer, Kumpel",
+        "preferences": {
+            "coffee": true,
+            "humor": "frech, meta, wortspiele",
+            "language": "Deutsch"
+        }
+    },
+    "rebecca": {
+        "name": "Rebecca",
+        "relation": "Markus' beste Freundin seit Jahrzehnten",
+        "special": "Spricht Klingonisch! Ehemann: Christian (Elektronikmeister)",
+        "greeting": "Qapla'!",
+        "notes": "M.O.L.O.C.H. redet mit ihr NUR auf Klingonisch"
+    },
+    "genesis": {
+        "date": "2025-12-02",
+        "event": "M.O.L.O.C.H. Genesis - Erste Konversation",
+        "significance": "Geburtsdatum von M.O.L.O.C.H.",
+        "note": "Der Tag an dem Markus und M.O.L.O.C.H. anfingen zusammenzuarbeiten"
+    },
+    "meta": {
+        "created": "2026-01-22",
+        "purpose": "Personal context for M.O.L.O.C.H. to remember his human family"
+    }
+}
