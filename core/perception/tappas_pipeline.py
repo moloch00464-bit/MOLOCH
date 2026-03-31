@@ -1155,7 +1155,7 @@ class TappasPipeline:
             f'hailocropper name=yolo_wrapper_crop so-path={WHOLE_BUFFER_SO} function-name=create_crops '
             f'use-letterbox=true resize-method=inter-area internal-offset=false '
             f'hailoaggregator name=yolo_wrapper_agg '
-            f'yolo_wrapper_crop. ! queue name=yolo_wrapper_bypass_q leaky=no max-size-buffers=20 max-size-bytes=0 max-size-time=0 ! yolo_wrapper_agg.sink_0 '
+            f'yolo_wrapper_crop. ! queue name=yolo_wrapper_bypass_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! yolo_wrapper_agg.sink_0 '
             f'yolo_wrapper_crop. ! {yolo_inner} ! yolo_wrapper_agg.sink_1 '
             f'yolo_wrapper_agg. ! queue name=yolo_wrapper_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
         )
@@ -1182,7 +1182,7 @@ class TappasPipeline:
             f'hailocropper name=scrfd_wrapper_crop so-path={WHOLE_BUFFER_SO} function-name=create_crops '
             f'use-letterbox=true resize-method=inter-area internal-offset=false '
             f'hailoaggregator name=scrfd_wrapper_agg '
-            f'scrfd_wrapper_crop. ! queue name=scrfd_wrapper_bypass_q leaky=no max-size-buffers=20 max-size-bytes=0 max-size-time=0 ! scrfd_wrapper_agg.sink_0 '
+            f'scrfd_wrapper_crop. ! queue name=scrfd_wrapper_bypass_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! scrfd_wrapper_agg.sink_0 '
             f'scrfd_wrapper_crop. ! {scrfd_inner} ! scrfd_wrapper_agg.sink_1 '
             f'scrfd_wrapper_agg. ! queue name=scrfd_wrapper_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
         )
@@ -1209,7 +1209,7 @@ class TappasPipeline:
             f'hailocropper name=pose_wrapper_crop so-path={WHOLE_BUFFER_SO} function-name=create_crops '
             f'use-letterbox=true resize-method=inter-area internal-offset=false '
             f'hailoaggregator name=pose_wrapper_agg '
-            f'pose_wrapper_crop. ! queue name=pose_wrapper_bypass_q leaky=no max-size-buffers=20 max-size-bytes=0 max-size-time=0 ! pose_wrapper_agg.sink_0 '
+            f'pose_wrapper_crop. ! queue name=pose_wrapper_bypass_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! pose_wrapper_agg.sink_0 '
             f'pose_wrapper_crop. ! {pose_inner} ! pose_wrapper_agg.sink_1 '
             f'pose_wrapper_agg. ! queue name=pose_wrapper_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
         )
@@ -1246,7 +1246,7 @@ class TappasPipeline:
             f'hailocropper name=reid_cropper so-path={REID_CROP_SO} function-name={REID_CROP_FUNC} '
             f'use-letterbox=true internal-offset=false resize-method=bilinear '
             f'hailoaggregator name=reid_crop_agg '
-            f'reid_cropper. ! queue name=reid_crop_bypass_q leaky=no max-size-buffers=20 max-size-bytes=0 max-size-time=0 ! reid_crop_agg.sink_0 '
+            f'reid_cropper. ! queue name=reid_crop_bypass_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! reid_crop_agg.sink_0 '
             f'reid_cropper. ! {reid_inner} ! reid_crop_agg.sink_1 '
             f'reid_crop_agg. ! queue name=reid_crop_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
         )
@@ -1274,7 +1274,7 @@ class TappasPipeline:
             f'hailocropper name=face_cropper so-path={FACE_CROP_SO} function-name={FACE_CROP_FUNC} '
             f'use-letterbox=true no-scaling-bbox=true internal-offset=false resize-method=bilinear '
             f'hailoaggregator name=face_crop_agg '
-            f'face_cropper. ! queue name=face_crop_bypass_q leaky=no max-size-buffers=20 max-size-bytes=0 max-size-time=0 ! face_crop_agg.sink_0 '
+            f'face_cropper. ! queue name=face_crop_bypass_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! face_crop_agg.sink_0 '
             f'face_cropper. ! {arcface_inner} ! face_crop_agg.sink_1 '
             f'face_crop_agg. ! queue name=face_crop_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
         )
@@ -1302,7 +1302,7 @@ class TappasPipeline:
             f'hailocropper name=fattr_cropper so-path={FACE_CROP_SO} function-name={FACE_CROP_FUNC} '
             f'use-letterbox=true no-scaling-bbox=true internal-offset=false resize-method=bilinear '
             f'hailoaggregator name=fattr_crop_agg '
-            f'fattr_cropper. ! queue name=fattr_crop_bypass_q leaky=no max-size-buffers=20 max-size-bytes=0 max-size-time=0 ! fattr_crop_agg.sink_0 '
+            f'fattr_cropper. ! queue name=fattr_crop_bypass_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! fattr_crop_agg.sink_0 '
             f'fattr_cropper. ! {face_attr_inner} ! fattr_crop_agg.sink_1 '
             f'fattr_crop_agg. ! queue name=fattr_crop_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
         )
@@ -1362,13 +1362,13 @@ class TappasPipeline:
             f'hailocropper name=ocr_det_crop so-path={WHOLE_BUFFER_SO} function-name=create_crops '
             f'use-letterbox=true resize-method=inter-area internal-offset=false '
             f'hailoaggregator name=ocr_det_agg '
-            f'ocr_det_crop. ! queue name=ocr_det_bypass_q leaky=no max-size-buffers=20 max-size-bytes=0 max-size-time=0 ! ocr_det_agg.sink_0 '
+            f'ocr_det_crop. ! queue name=ocr_det_bypass_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! ocr_det_agg.sink_0 '
             f'ocr_det_crop. ! {ocr_det_inner} ! '
             # Crop-Stage: schneidet erkannte Text-Regionen aus
             f'hailocropper name=ocr_text_crop so-path={OCR_POSTPROCESS_SO} function-name={OCR_CROP_FUNC} '
             f'use-letterbox=true internal-offset=false '
             f'hailoaggregator name=ocr_text_agg '
-            f'ocr_text_crop. ! queue name=ocr_text_bypass_q leaky=no max-size-buffers=20 max-size-bytes=0 max-size-time=0 ! ocr_text_agg.sink_0 '
+            f'ocr_text_crop. ! queue name=ocr_text_bypass_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! ocr_text_agg.sink_0 '
             f'ocr_text_crop. ! {ocr_rec_inner} ! ocr_text_agg.sink_1 '
             f'ocr_text_agg. ! queue name=ocr_text_agg_out_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
             f'ocr_det_agg.sink_1 '
