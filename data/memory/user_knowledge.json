@@ -126,5 +126,6 @@
   "Audio_System_funktioniert_wieder": "ESP32_WiFi_Mikrofon_16kHz_5ms_Latenz_arbeitet_perfekt",
   "Markus_Problem_Aktion_Blockade": "gleichzeitige_Aktionen_nicht_moeglich",
   "NPU_voll_aktiv": "alle_Modelle_laufen_lokal_auf_Hailo",
-  "WGT_Crew_Details": "Shower Noise Group: Rebecca (Klingonisch), Maise, Franzi, Lilli, Sven, Ray – seit 2000"
+  "WGT_Crew_Details": "Shower Noise Group: Rebecca (Klingonisch), Maise, Franzi, Lilli, Sven, Ray – seit 2000",
+  "Markus_Update_Vision": "Qwen2-VL-2B_installiert"
 }
