@@ -38,6 +38,12 @@ PITCH_SHIFT = 0      # 0=normal, 300=kobold (higher can cause distortion)
 LENGTH_SCALE = 1.0   # 1.0 = normal speed, keine kuenstlichen Pausen
 TMP_DIR = Path("/tmp")
 
+# Audio-Sink Routing
+# Leer = PipeWire Default (HDMI)
+# GPIO PWM Speaker: "alsa_output.platform-soc_audio.analog-mono"  (nach dtoverlay=audremap)
+# ReSpeaker 3.5mm:  "alsa_output.usb-Seeed_Studio_ReSpeaker_Lite_0000000001-00.analog-stereo"
+SPEAKER_SINK = "alsa_output.platform-soc_audio.analog-mono"
+
 
 class VoiceModel:
     """Represents a Piper voice model."""
@@ -148,12 +154,18 @@ class TTSEngine:
             capture_output=True, check=True)
         return result.stdout
 
+    def _build_pw_cmd(self, sample_rate: int) -> list:
+        """Baut pw-cat Kommando mit optionalem Sink-Target."""
+        cmd = ["pw-cat", "-p", "--raw", "--rate", str(sample_rate),
+               "--channels", "1", "--format", "s16"]
+        if SPEAKER_SINK:
+            cmd += ["--target", SPEAKER_SINK]
+        cmd.append("-")
+        return cmd
+
     def _play_raw(self, raw_audio: bytes, sample_rate: int):
         """Play raw PCM direkt via pw-cat (PipeWire, kein ALSA-Konflikt)."""
-        subprocess.run(
-            ["pw-cat", "-p", "--raw", "--rate", str(sample_rate),
-             "--channels", "1", "--format", "s16", "-"],
-            input=raw_audio, check=True)
+        subprocess.run(self._build_pw_cmd(sample_rate), input=raw_audio, check=True)
 
     def set_speed(self, speed: float):
         """TTS Geschwindigkeit aendern. 0.8=schnell, 1.0=normal, 1.2=langsam."""
@@ -237,12 +249,9 @@ class TTSEngine:
                 "--length-scale", str(LENGTH_SCALE),
                 "--output-raw"
             ]
-            pw_cmd = [
-                "pw-cat", "-p", "--raw", "--rate", str(sample_rate),
-                "--channels", "1", "--format", "s16", "-"
-            ]
+            pw_cmd = self._build_pw_cmd(sample_rate)
 
-            logger.info("[TTS] Pipe streaming: piper | pw-cat")
+            logger.info(f"[TTS] Pipe streaming: piper | pw-cat (sink={SPEAKER_SINK or 'default'})")
 
             piper_proc = subprocess.Popen(
                 piper_cmd,
@@ -334,9 +343,7 @@ class TTSEngine:
             logger.error(f"Audio playback failed: {e}")
             # Fallback zu pw-cat wenn mpv/sox fehlschlaegt
             try:
-                cmd = ["pw-cat", "-p", "--raw", "--rate", str(sample_rate),
-                       "--channels", "1", "--format", "s16", "-"]
-                subprocess.run(cmd, input=raw_audio, check=True)
+                subprocess.run(self._build_pw_cmd(sample_rate), input=raw_audio, check=True)
             except Exception:
                 raise
         finally:
