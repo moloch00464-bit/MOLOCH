@@ -85,9 +85,10 @@ class PreviewModule:
         # Watchdog: Letzter erfolgreicher Render (Gate0 Phase 9)
         self.last_render_time = 0.0
 
-        # SHM mmap-basiert (kein Inode-Tracking noetig)
+        # SHM mmap-basiert mit Inode-Tracking (Neustart-Erkennung)
         self._shm_mmap = None
         self._shm_fd_raw = -1
+        self._shm_inode = -1  # Inode beim letzten open — erkennt Pipeline-Neustart
 
         # Lag-Diagnostik: 30s Logging, alle 2s ein Eintrag
         self._lag_log_start = 0.0
@@ -150,12 +151,20 @@ class PreviewModule:
         )
 
     def _ensure_shm_mmap(self):
-        """SHM mmap oeffnen (lazy, einmalig). Return True wenn bereit."""
-        if self._shm_mmap is not None:
-            return True
+        """SHM mmap oeffnen. Erkennt Pipeline-Neustart via Inode-Wechsel."""
         try:
             if not os.path.exists(SHM_FRAME):
+                if self._shm_mmap is not None:
+                    self._close_shm_mmap()
                 return False
+            # Inode der aktuellen Datei pruefen — wechselt bei Pipeline-Neustart
+            cur_inode = os.stat(SHM_FRAME).st_ino
+            if self._shm_mmap is not None and cur_inode == self._shm_inode:
+                return True  # Gleiche Datei, mmap noch gueltig
+            # Datei neu oder Inode gewechselt → alten mmap schliessen und neu oeffnen
+            if self._shm_mmap is not None:
+                self._logger.info("[SHM] Inode-Wechsel erkannt — mmap neu oeffnen")
+                self._close_shm_mmap()
             fd = os.open(SHM_FRAME, os.O_RDONLY)
             size = os.fstat(fd).st_size
             if size < 24:
@@ -163,7 +172,8 @@ class PreviewModule:
                 return False
             self._shm_mmap = mmap.mmap(fd, size, access=mmap.ACCESS_READ)
             self._shm_fd_raw = fd
-            self._logger.info(f"[SHM] mmap Reader bereit: {size} Bytes")
+            self._shm_inode = cur_inode
+            self._logger.info(f"[SHM] mmap Reader bereit: {size} Bytes (inode={cur_inode})")
             return True
         except Exception as e:
             self._logger.warning(f"[SHM] mmap open: {e}")
@@ -183,6 +193,7 @@ class PreviewModule:
             except Exception:
                 pass
             self._shm_fd_raw = -1
+        self._shm_inode = -1
 
     def _read_shm_seq(self):
         """Nur Seq-Nummer lesen (4 Bytes ab Offset 12) — schneller Check ob neuer Frame.
