@@ -48,6 +48,10 @@ class LocalLLMBridge:
         self._vision_resume_callback: Optional[Callable] = None
         self._last_provider: str = "none"
         self._request_count: int = 0
+        # Circuit-Breaker: Ollama automatisch ueberbruecken wenn wiederholt offline
+        self._ollama_fail_count: int = 0
+        self._ollama_backoff_until: float = 0.0
+        self.OLLAMA_BACKOFF_SEC: int = 300  # 5 Minuten Cloud-Backoff
         self._check_ollama()
         logger.info(
             f"[LLM-BRIDGE] Init — hailo-ollama={'JA' if self._ollama_available else 'NEIN'}"
@@ -149,10 +153,25 @@ class LocalLLMBridge:
     def _generate_ollama(self, prompt: str, system: str,
                          max_tokens: int, model: str,
                          timeout: int) -> Optional[str]:
-        """hailo-ollama Chat API (Port 8000)."""
+        """hailo-ollama Chat API (Port 8000) mit Circuit-Breaker."""
         if not self._ollama_available:
             return None
+
+        # Circuit-Breaker: Backoff aktiv? → sofort zur Cloud
+        if time.monotonic() < self._ollama_backoff_until:
+            verbleibend = int(self._ollama_backoff_until - time.monotonic())
+            logger.info(f"[LLM] Ollama Backoff aktiv ({verbleibend}s), direkt Cloud")
+            return None
+
+        # Health-Check: nicht erreichbar → Fehlerzaehler erhoehen
         if not self._is_ollama_running():
+            self._ollama_fail_count += 1
+            if self._ollama_fail_count >= 3:
+                self._ollama_backoff_until = time.monotonic() + self.OLLAMA_BACKOFF_SEC
+                logger.warning(
+                    f"[LLM] Ollama {self._ollama_fail_count}x down → "
+                    f"{self.OLLAMA_BACKOFF_SEC}s Cloud-Backoff"
+                )
             logger.debug("[LLM-BRIDGE] hailo-ollama nicht erreichbar")
             return None
 
@@ -179,9 +198,28 @@ class LocalLLMBridge:
             if not text:
                 return None
 
+            # Erfolg: Circuit-Breaker zuruecksetzen
+            self._ollama_fail_count = 0
+            self._ollama_backoff_until = 0.0
             self._last_provider = f"lokal_{model.split(':')[0]}"
-            logger.info(f"[LLM-BRIDGE] {model}: {len(text)} Zeichen in {data.get('total_duration', 0) // 1_000_000}ms")
+            logger.info(
+                f"[LLM-BRIDGE] {model}: {len(text)} Zeichen in "
+                f"{data.get('total_duration', 0) // 1_000_000}ms"
+            )
             return text
+
+        except (requests.exceptions.ConnectionError,
+                requests.exceptions.Timeout) as e:
+            # Verbindungsfehler waehrend Generation → Fehlerzaehler
+            self._ollama_fail_count += 1
+            if self._ollama_fail_count >= 3:
+                self._ollama_backoff_until = time.monotonic() + self.OLLAMA_BACKOFF_SEC
+                logger.warning(
+                    f"[LLM] Ollama {self._ollama_fail_count}x Verbindungsfehler → "
+                    f"{self.OLLAMA_BACKOFF_SEC}s Cloud-Backoff"
+                )
+            logger.warning(f"[LLM-BRIDGE] hailo-ollama ({model}) Verbindungsfehler: {e}")
+            return None
 
         except Exception as e:
             logger.warning(f"[LLM-BRIDGE] hailo-ollama ({model}) Fehler: {e}")
@@ -229,9 +267,13 @@ class LocalLLMBridge:
             return None
 
     def get_status(self) -> Dict:
+        now = time.monotonic()
+        backoff_remaining = max(0.0, self._ollama_backoff_until - now)
         return {
             "ollama_installed": self._ollama_available,
             "ollama_running": self._is_ollama_running() if self._ollama_available else False,
+            "ollama_fail_count": self._ollama_fail_count,
+            "ollama_backoff_sec": round(backoff_remaining),
             "last_provider": self._last_provider,
             "request_count": self._request_count,
             "models": {
