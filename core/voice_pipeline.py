@@ -30,7 +30,7 @@ from core.longterm_memory import get_memory
 logger = logging.getLogger("VoicePipeline")
 
 # Audio Device Konfiguration
-MIC_DEVICE = "plughw:CARD=Lite,DEV=0"  # ReSpeaker Lite (Name statt Nummer = stabil)
+MIC_DEVICE = "respeaker"  # ALSA-Alias aus /etc/asound.conf → hw:2,0 via plug-Plugin (Rate-Konversion)
 SPEAKER_DEVICE = "plughw:1,0"  # HDMI-1 (Fallback, primaer pw-play)
 
 # Pfade
