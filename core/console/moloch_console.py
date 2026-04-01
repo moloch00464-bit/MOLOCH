@@ -511,11 +511,11 @@ class MolochTTS:
         try:
             if blocking:
                 # Wait for speech to complete
-                subprocess.run(cmd, shell=True, check=False)
+                subprocess.run(["/bin/bash", "-c", cmd], shell=False, check=False, timeout=30)
             else:
                 # Run in background thread
                 thread = threading.Thread(
-                    target=lambda: subprocess.run(cmd, shell=True, check=False),
+                    target=lambda: subprocess.run(["/bin/bash", "-c", cmd], shell=False, check=False, timeout=30),
                     daemon=True
                 )
                 thread.start()
