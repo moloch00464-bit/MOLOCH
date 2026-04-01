@@ -153,7 +153,7 @@ REGELN: 1 Datei = 1 Aufgabe. Nur ServiceProxy/IPC. Panel_styles.py NIE ändern (
 
 ## CODING-REGELN
 
-1. Git Backup VOR jeder Änderung: `git add -A && git commit -m "BACKUP vor [was]"`
+1. Git Backup VOR jeder Änderung: `git add core/ scripts/ agents/ config/settings.json && git commit -m "BACKUP vor [was]"`
 2. 1 Auftrag = 1 Datei. Nie mehrere gleichzeitig.
 3. Max 3 Sätze pro Auftrag. Problem, Lösung, Datei.
 4. Python, Kommentare Deutsch.
