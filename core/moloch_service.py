@@ -2572,6 +2572,9 @@ class MolochService:
         # ---- Voice Pipeline Commands ----
 
         elif action == 'ptt_start':
+            # MicModeController informieren: ESP32 auf 16kHz umschalten (auch wenn Musik laeuft)
+            from core.moloch_event_bus import get_event_bus
+            get_event_bus().publish("ptt.start", source="ipc", priority=2, payload={})
             if self._voice_pipeline:
                 self._voice_pipeline.start_recording()
                 logger.info("[IPC] PTT: Aufnahme gestartet")
@@ -2582,6 +2585,9 @@ class MolochService:
             if self._voice_pipeline:
                 self._voice_pipeline.stop_recording()
                 logger.info("[IPC] PTT: Aufnahme gestoppt, verarbeite...")
+            # MicModeController informieren: ESP32 zurueck in vorherigen Modus
+            from core.moloch_event_bus import get_event_bus
+            get_event_bus().publish("ptt.release", source="ipc", priority=2, payload={})
             if self._core_integrator:
                 self._core_integrator.update_input("voice", "voice_activity", 0.0)
 
