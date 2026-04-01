@@ -127,12 +127,22 @@ def moloch_snapshot() -> str:
         os.close(fd)
 
         out_path = "/tmp/moloch_snapshot.jpg"
-        # SHM Frame ist RGB (GStreamer format=RGB), cv2 erwartet BGR
-        ok = cv2.imwrite(out_path, cv2.cvtColor(frame, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 80])
+        # SHM Frame ist RGB (GStreamer format=RGB)
+        # Real-ESRGAN x2 Upscaling via NPU (lazy loaded)
+        try:
+            import sys
+            sys.path.insert(0, str(MOLOCH_DIR))
+            from core.perception.super_res_worker import get_super_res
+            frame_up = get_super_res().upscale(frame)
+        except Exception:
+            frame_up = frame  # Fallback: Original ohne Upscaling
+
+        ok = cv2.imwrite(out_path, cv2.cvtColor(frame_up, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 85])
         if not ok:
             return "FEHLER: JPEG-Encoding fehlgeschlagen"
 
-        return f"Snapshot gespeichert: {out_path} [{w}x{h}px, seq={seq}, ts={ts:.2f}] — Lies die Datei mit Read-Tool um das Bild zu sehen."
+        fh_out, fw_out = frame_up.shape[:2]
+        return f"Snapshot gespeichert: {out_path} [{fw_out}x{fh_out}px, seq={seq}, ts={ts:.2f}] — Lies die Datei mit Read-Tool um das Bild zu sehen."
 
     except ImportError:
         return "FEHLER: numpy/cv2 nicht verfügbar"

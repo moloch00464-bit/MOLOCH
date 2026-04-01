@@ -292,8 +292,13 @@ class DailyLearner:
             filename = f"{timestamp}_c{int(confidence*100)}_a{angle}_l{light}_d{distance}.jpg"
             filepath = person_dir / filename
 
-            # Speichere Face-Crop (RGB→BGR fuer cv2, JPEG Quality 95)
-            cv2.imwrite(str(filepath), cv2.cvtColor(face_crop, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 95])
+            # Face-Crop via Real-ESRGAN x2 hochskalieren (NPU)
+            try:
+                from core.perception.super_res_worker import get_super_res
+                face_save = get_super_res().upscale(face_crop)
+            except Exception:
+                face_save = face_crop
+            cv2.imwrite(str(filepath), cv2.cvtColor(face_save, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 95])
 
             # Speichere Full-Frame als Referenzbild
             if full_frame is not None:

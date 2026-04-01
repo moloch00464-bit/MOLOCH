@@ -1803,6 +1803,14 @@ class MolochService:
         except Exception:
             pass
 
+        # SuperRes stoppen
+        try:
+            from core.perception.super_res_worker import get_super_res
+            get_super_res().stop()
+            logger.info("[STOP] SuperRes gestoppt")
+        except Exception:
+            pass
+
         # RGB-LED stoppen
         if self._rgb_led:
             try:
@@ -1873,6 +1881,18 @@ class MolochService:
 
         logger.info("M.O.L.O.C.H. Service gestoppt")
 
+    def upscale_image(self, img_rgb: np.ndarray) -> np.ndarray:
+        """Bild via Real-ESRGAN x2 NPU hochskalieren.
+
+        Lazy-loaded — erster Aufruf lädt das Modell.
+        Bei Fehler: Original zurück (kein Crash).
+        """
+        try:
+            from core.perception.super_res_worker import get_super_res
+            return get_super_res().upscale(img_rgb)
+        except Exception as e:
+            logger.warning("[SuperRes] upscale_image fehlgeschlagen: %s", e)
+            return img_rgb
 
     # =========================================================================
     # Watchdog-Callbacks (aufgerufen von MolochWatchdog bei Problemen)
