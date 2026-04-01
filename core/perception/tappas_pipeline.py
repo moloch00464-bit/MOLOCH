@@ -50,6 +50,7 @@ from core.perception.roi_dispatcher import ROIDispatcher
 from core.perception.face_pipeline import FaceWorker
 from core.perception.pose_worker import PoseWorker, ReIDWorker, HandWorker
 from core.perception.person_attr_worker import PersonAttrWorker
+from core.perception.activity_worker import ActivityWorker
 
 logger = logging.getLogger("TappasPipeline")
 
@@ -365,8 +366,14 @@ class TappasPipeline:
             self._result_collector.register_worker(self._person_attr_worker)
             self._roi_dispatcher.register_worker(self._person_attr_worker, every_n_frames=6)
 
+            # ActivityWorker: r3d_18 Aktivitaetserkennung (Frame-Puffer + Inference alle 30 Frames)
+            self._activity_worker = ActivityWorker()
+            self._result_collector.register_worker(self._activity_worker)
+            # KEIN ROI-Dispatcher — push_frame() direkt in _on_appsink_sample()
+
             self._result_collector.start_all()
-            logger.info("[WORKERS] 5 Worker gestartet: Face(2), Pose(3), Hand(4), ReID(5), PersonAttr(6)")
+            self._activity_frame_counter = 0
+            logger.info("[WORKERS] 6 Worker gestartet: Face(2), Pose(3), Hand(4), ReID(5), PersonAttr(6), Activity(30)")
         except Exception as e:
             logger.error("[WORKERS] Worker-Start fehlgeschlagen: %s", e)
             self._face_worker = None
@@ -1377,6 +1384,10 @@ class TappasPipeline:
                 # Attribute der ersten erkannten Person nehmen
                 pf.person_attributes = attr_result.data["persons"][0].get("attribute", [])
 
+            activity_result = self._result_collector.get_latest("ActivityWorker")
+            if activity_result and activity_result.success and activity_result.data.get("activity"):
+                pf.person_action = activity_result.data["activity"]
+
         # Thread-safe update
         with self._lock:
             self._detections = detections
@@ -1511,6 +1522,22 @@ class TappasPipeline:
                 self._roi_dispatcher.dispatch(frame, yolo_dets, getattr(self, '_frame_id', 0))
             except Exception as e:
                 logger.debug("[DISPATCH] Fehler: %s", e)
+
+        # ActivityWorker: jeden Frame in Puffer, Inference alle 30 Frames
+        if getattr(self, '_activity_worker', None):
+            try:
+                self._activity_worker.push_frame(frame)
+                self._activity_frame_counter = getattr(self, '_activity_frame_counter', 0) + 1
+                if self._activity_frame_counter >= 30:
+                    self._activity_frame_counter = 0
+                    from core.perception.vision_workers import WorkItem
+                    self._activity_worker.submit(WorkItem(
+                        frame=None,
+                        frame_id=getattr(self, '_frame_id', 0),
+                        timestamp=0.0,
+                    ))
+            except Exception as e:
+                logger.debug("[ACTIVITY] Fehler: %s", e)
 
         return Gst.FlowReturn.OK
 
