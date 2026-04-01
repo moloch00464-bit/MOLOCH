@@ -40,13 +40,19 @@ class SuperResProcessor:
         self._out_shapes = {}
         self._loaded = False
         self._load_error: Optional[str] = None
+        self._last_load_attempt: float = 0.0  # time.monotonic()
 
     def _ensure_loaded(self) -> bool:
-        """Modell lazy laden beim ersten Aufruf."""
+        """Modell lazy laden beim ersten Aufruf. Retry nach 30s bei Fehler."""
+        import time
         if self._loaded:
             return True
-        if self._load_error:
+        # Bei vorherigem Fehler: erst nach 30s nochmals versuchen
+        if self._load_error and (time.monotonic() - self._last_load_attempt) < 30.0:
             return False
+        self._load_error = None  # Reset fuer naechsten Versuch
+        import time
+        self._last_load_attempt = time.monotonic()
         try:
             import hailo_platform as hp
             from hailo_platform.pyhailort._pyhailort import FormatType
