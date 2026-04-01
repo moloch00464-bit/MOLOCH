@@ -90,12 +90,11 @@ class SuperResProcessor:
                 h_orig, w_orig = img_rgb.shape[:2]
 
                 # Auf 512x512 skalieren (Modell-Input)
-                inp_bgr = cv2.resize(img_rgb, (MODEL_INPUT_SIZE, MODEL_INPUT_SIZE),
-                                     interpolation=cv2.INTER_LANCZOS4)
+                inp = cv2.resize(img_rgb, (MODEL_INPUT_SIZE, MODEL_INPUT_SIZE),
+                                 interpolation=cv2.INTER_LANCZOS4)
 
-                # uint8 → float32 [0,1]
-                inp_f32 = inp_bgr.astype(np.float32) / 255.0
-                inp_batch = np.ascontiguousarray(inp_f32[np.newaxis, ...])  # (1,512,512,3)
+                # Modell erwartet uint8 RGB ohne Batch-Dimension: (512,512,3)
+                inp_batch = np.ascontiguousarray(inp)  # (512,512,3) uint8
 
                 # Inference
                 bindings = self._configured.create_bindings()
