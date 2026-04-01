@@ -145,8 +145,27 @@ class YOLOWorldWorker(BaseWorker):
         if not os.path.exists(YOLO_WORLD_HEF):
             raise FileNotFoundError(f"YOLO-World HEF fehlt: {YOLO_WORLD_HEF}")
 
-        _, self._model, self._in_names, self._out_names, self._out_shapes = \
-            create_configured_model(vdevice, YOLO_WORLD_HEF)
+        import hailo_platform as hp
+        from hailo_platform.pyhailort._pyhailort import FormatType
+
+        model = vdevice.create_infer_model(YOLO_WORLD_HEF)
+        self._in_names = list(model.input_names)
+
+        # Text-Embedding-Input (input_layer2) als FLOAT32 setzen
+        # damit HailoRT die Quantisierung intern uebernimmt
+        for name in model.input_names:
+            if "input_layer2" in name:
+                model.input(name).set_format_type(FormatType.FLOAT32)
+                logger.info("[YOLOWorldWorker] Input %s → FLOAT32", name)
+
+        # Output ebenfalls FLOAT32
+        for name in model.output_names:
+            model.output(name).set_format_type(FormatType.FLOAT32)
+
+        self._model = model.configure()
+        self._out_names = list(model.output_names)
+        self._out_shapes = {n: list(model.output(n).shape) for n in model.output_names}
+
         logger.info("[YOLOWorldWorker] Modell geladen — Inputs: %s Outputs: %s",
                     self._in_names, self._out_names)
 
