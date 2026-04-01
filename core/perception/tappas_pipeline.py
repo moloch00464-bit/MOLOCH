@@ -1318,6 +1318,7 @@ class TappasPipeline:
                         "gender": face.get("gender"),
                         "smiling": face.get("emotion") == "happy" if face.get("emotion") else None,
                         "track_id": None,
+                        "landmarks": face.get("landmarks"),  # 5 SCRFD-Punkte [[x,y],...] normalisiert [0,1]
                     }
                     faces.append(face_entry)
                     detections.append(face_entry)
@@ -1384,6 +1385,27 @@ class TappasPipeline:
             hand_result = self._result_collector.get_latest("HandWorker")
             if hand_result and hand_result.data.get("hand_detected"):
                 pf.hand_detected = True
+                if hand_result.data.get("hand"):
+                    h = hand_result.data["hand"]
+                    detections.append({
+                        "class": "hand",
+                        "bbox": h.get("bbox", []),
+                        "confidence": 1.0,
+                        "keypoints": h.get("landmarks", []),
+                    })
+
+            if pose_result and pose_result.data.get("poses"):
+                for pose in pose_result.data["poses"]:
+                    kpts = pose.get("keypoints")
+                    if kpts is not None:
+                        import numpy as np
+                        kpts_list = kpts.tolist() if hasattr(kpts, "tolist") else kpts
+                        detections.append({
+                            "class": "pose",
+                            "bbox": pose.get("bbox_norm", []),
+                            "confidence": 1.0,
+                            "keypoints": kpts_list,  # 17×3 [x_norm, y_norm, vis]
+                        })
 
             attr_result = self._result_collector.get_latest("PersonAttrWorker")
             if attr_result and attr_result.data.get("persons"):
