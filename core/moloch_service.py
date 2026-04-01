@@ -647,6 +647,10 @@ class MolochService:
                             # Gesicht aber kein Match — NICHT markus resetten!
                             # Nur unknown_person setzen, markus bleibt stehen
                             self._core_integrator.feed_event("unknown_person", 0.3)
+                        else:
+                            # Niemand da — Tension-Inputs resetten, natürlicher Decay wirkt
+                            self._core_integrator.feed_event("unknown_person", 0.0)
+                            self._core_integrator.feed_event("person_detected", 0.0)
                     except Exception as e:
                         logger.debug(f"[TAPPAS-PERC] CoreIntegrator feed: {e}")
 
