@@ -1811,6 +1811,14 @@ class MolochService:
         except Exception:
             pass
 
+        # LowLight stoppen
+        try:
+            from core.perception.low_light_processor import get_low_light
+            get_low_light().stop()
+            logger.info("[STOP] LowLight gestoppt")
+        except Exception:
+            pass
+
         # RGB-LED stoppen
         if self._rgb_led:
             try:

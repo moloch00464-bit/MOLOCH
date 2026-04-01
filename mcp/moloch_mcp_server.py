@@ -288,5 +288,107 @@ def moloch_dmesg() -> str:
         return f"FEHLER: {e}"
 
 
+@mcp.tool()
+def moloch_npu_workers() -> str:
+    """Status aller NPU-Worker: FaceWorker, PoseWorker, ReID, Hand, SuperRes, LowLight.
+
+    Zeigt pro Worker: geladen, Inferences, Fehler, letzte Laufzeit, Queue-Größe.
+    """
+    import sys
+    sys.path.insert(0, str(MOLOCH_DIR))
+    lines = []
+    workers = [
+        ("SuperRes",  "core.perception.super_res_worker",  "get_super_res"),
+        ("LowLight",  "core.perception.low_light_processor", "get_low_light"),
+    ]
+    for label, mod_name, fn_name in workers:
+        try:
+            mod = __import__(mod_name, fromlist=[fn_name])
+            inst = getattr(mod, fn_name)()
+            loaded = inst.is_available() if hasattr(inst, "is_available") else "?"
+            lines.append(f"  {label:12s}: geladen={loaded}")
+            if label == "LowLight":
+                lines[-1] += f"  brightness={inst.get_brightness()}  aktiv={inst.is_active()}"
+        except Exception as e:
+            lines.append(f"  {label:12s}: FEHLER — {e}")
+
+    # FaceWorker/PoseWorker: aus Status-JSON
+    try:
+        import json
+        with open("/dev/shm/moloch_status.json") as f:
+            st = json.load(f)
+        wh = st.get("worker_health", {})
+        for name, info in wh.items():
+            inf = info.get("total_inferences", "?")
+            err = info.get("total_errors", "?")
+            ms  = info.get("last_inference_ms", "?")
+            run = info.get("running", "?")
+            lines.append(f"  {name:12s}: running={run}  inferences={inf}  errors={err}  last_ms={ms}")
+    except Exception:
+        lines.append("  [Pipeline-Worker nicht aus Status-JSON lesbar — Service läuft?]")
+
+    return "NPU Worker Status:\n" + "\n".join(lines)
+
+
+@mcp.tool()
+def moloch_npu_models() -> str:
+    """Verfügbare Hailo-10H Modelle: integriert vs. ausstehend (aus NPU-Roadmap).
+
+    Zeigt welche Modelle schon in MOLOCH laufen und welche als nächstes integrierbar wären.
+    """
+    roadmap = MOLOCH_DIR / "logs" / "npu_model_roadmap.md"
+    if not roadmap.exists():
+        return "Roadmap nicht gefunden: ~/moloch/logs/npu_model_roadmap.md"
+    try:
+        text = roadmap.read_text(encoding="utf-8")
+        # Nur die relevanten Sektionen zurückgeben (nicht alles)
+        sections = []
+        capture = False
+        for line in text.splitlines():
+            if line.startswith("## BEREITS INTEGRIERT") or \
+               line.startswith("## SOFORT INTEGRIERBAR") or \
+               line.startswith("## MITTELFRISTIG"):
+                capture = True
+            elif line.startswith("## LANGFRISTIG") or \
+                 line.startswith("## NICHT RELEVANT") or \
+                 line.startswith("## DOWNLOAD"):
+                capture = False
+            if capture:
+                sections.append(line)
+        return "\n".join(sections) if sections else text[:2000]
+    except Exception as e:
+        return f"FEHLER beim Lesen: {e}"
+
+
+@mcp.tool()
+def moloch_low_light() -> str:
+    """Low-Light Enhancement Status: aktuelle Helligkeit, ob NPU-Enhancement aktiv.
+
+    Zeigt ob zero_dce gerade Frames aufhellt und bei welcher Schwelle.
+    """
+    import sys
+    sys.path.insert(0, str(MOLOCH_DIR))
+    try:
+        from core.perception.low_light_processor import get_low_light, DARK_THRESHOLD
+        ll = get_low_light()
+        brightness = ll.get_brightness()
+        active = ll.is_active()
+        loaded = ll.is_available()
+
+        status = "AKTIV (NPU hebt Frame auf)" if active else "INAKTIV (genug Licht)"
+        brightness_str = f"{brightness}/255" if brightness >= 0 else "noch kein Frame"
+
+        return (
+            f"Low Light Enhancement (zero_dce)\n"
+            f"  Status:      {status}\n"
+            f"  Helligkeit:  {brightness_str}\n"
+            f"  Schwelle:    < {DARK_THRESHOLD}/255\n"
+            f"  Modell:      {'geladen' if loaded else 'noch nicht geladen (lazy)'}\n"
+            f"  HEF:         /mnt/moloch-data/hailo/models/zero_dce.hef\n"
+        )
+    except Exception as e:
+        return f"FEHLER: {e}"
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")
