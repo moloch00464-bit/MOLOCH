@@ -1644,6 +1644,23 @@ class MolochService:
             self._power_monitor = None
             logger.warning(f"[START] PowerMonitor fehlgeschlagen: {e}")
 
+        # System-Watchdog (Nervensystem — Schmerz → CoreIntegrator → Persönlichkeit)
+        try:
+            from core.system_watchdog import get_watchdog
+            self._watchdog = get_watchdog()
+            self._watchdog.set_core_integrator(self._core_integrator)
+            if self._voice_pipeline and hasattr(self._voice_pipeline, '_speak'):
+                self._watchdog.set_speak_callback(self._voice_pipeline._speak)
+            self._watchdog.configure(
+                inference=self._inference if hasattr(self, '_inference') else None,
+                camera=self._cam._cam if hasattr(self._cam, '_cam') else None,
+            )
+            self._watchdog.start()
+            logger.info("[START] System-Watchdog (Nervensystem) gestartet")
+        except Exception as e:
+            self._watchdog = None
+            logger.warning(f"[START] Watchdog fehlgeschlagen: {e}")
+
         # G1-T03: Auto-Resume Callback — TTS Spruch bei Manuell→Autonom
         try:
             from core.ptz_arbiter import get_ptz_arbiter
