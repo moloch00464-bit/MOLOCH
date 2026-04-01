@@ -159,8 +159,11 @@ class PerceptionManager:
                 return True
             try:
                 from hailo_platform import VDevice
-                self._vdevice = VDevice()
-                logger.info("[PERCEPTION] Connected to Hailo device")
+                from hailo_apps.python.core.common.defines import SHARED_VDEVICE_GROUP_ID
+                params = VDevice.create_params()
+                params.group_id = SHARED_VDEVICE_GROUP_ID
+                self._vdevice = VDevice(params)
+                logger.info("[PERCEPTION] Connected to Hailo device (group_id=SHARED)")
                 return True
             except Exception as e:
                 logger.error(f"[PERCEPTION] Failed to connect to Hailo: {e}")
