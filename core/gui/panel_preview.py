@@ -353,6 +353,38 @@ class PreviewModule:
                                 label = f"{cls} {d.get('confidence', 0):.2f}"
                             draw.rectangle([px1, py1, px2, py2], outline=color, width=2)
                             draw.text((px1 + 2, max(0, py1 - 12)), label, fill=color)
+
+                            # Face-Landmarks: 5 SCRFD-Punkte (gruen)
+                            if cls == "face" and d.get("landmarks"):
+                                for (lx, ly) in d["landmarks"]:
+                                    lpx, lpy = int(lx * cw), int(ly * ch)
+                                    draw.ellipse([lpx-3, lpy-3, lpx+3, lpy+3], fill=(0, 255, 100))
+
+                            # Pose-Skeleton: 17 COCO-Keypoints + Verbindungslinien (orange)
+                            elif cls == "pose" and d.get("keypoints"):
+                                COCO_PAIRS = [
+                                    (0,1),(0,2),(1,3),(2,4),(5,6),(5,7),(7,9),
+                                    (6,8),(8,10),(5,11),(6,12),(11,12),
+                                    (11,13),(13,15),(12,14),(14,16)
+                                ]
+                                kpts = d["keypoints"]
+                                for (a, b) in COCO_PAIRS:
+                                    if a < len(kpts) and b < len(kpts):
+                                        ka, kb = kpts[a], kpts[b]
+                                        if len(ka) > 2 and len(kb) > 2 and ka[2] > 0.3 and kb[2] > 0.3:
+                                            ax, ay = int(ka[0]*cw), int(ka[1]*ch)
+                                            bx, by = int(kb[0]*cw), int(kb[1]*ch)
+                                            draw.line([ax, ay, bx, by], fill=(255, 165, 0), width=2)
+                                for kp in kpts:
+                                    if len(kp) > 2 and kp[2] > 0.3:
+                                        kpx, kpy = int(kp[0]*cw), int(kp[1]*ch)
+                                        draw.ellipse([kpx-4, kpy-4, kpx+4, kpy+4], fill=(255, 165, 0))
+
+                            # Hand-Landmarks: 21 Punkte (magenta)
+                            elif cls == "hand" and d.get("keypoints"):
+                                for kp in d["keypoints"]:
+                                    kpx, kpy = int(kp[0]*cw), int(kp[1]*ch)
+                                    draw.ellipse([kpx-3, kpy-3, kpx+3, kpy+3], fill=(255, 0, 200))
                         del draw
                 except Exception:
                     pass  # BBox-Fehler darf Preview nie blockieren
