@@ -171,11 +171,12 @@ class WiFiMic:
 
     @property
     def connected(self) -> bool:
-        """True wenn 16kHz Stream verbunden."""
+        """True wenn 16kHz Stream verbunden (UDP-Pakete kommen an).
+        force_source="wifi" deaktiviert nur den USB-Auto-Fallback,
+        taeuscht aber nicht vor dass Pakete ankommen.
+        """
         if self._force_source == "usb":
             return False
-        if self._force_source == "wifi":
-            return True
         return self._connected_16k
 
     @property
