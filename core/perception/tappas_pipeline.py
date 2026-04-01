@@ -49,6 +49,7 @@ from core.perception.vision_workers import WorkItem, ResultCollector
 from core.perception.roi_dispatcher import ROIDispatcher
 from core.perception.face_pipeline import FaceWorker
 from core.perception.pose_worker import PoseWorker, ReIDWorker, HandWorker
+from core.perception.person_attr_worker import PersonAttrWorker
 
 logger = logging.getLogger("TappasPipeline")
 
@@ -359,8 +360,13 @@ class TappasPipeline:
             self._result_collector.register_worker(self._hand_worker)
             self._roi_dispatcher.register_worker(self._hand_worker, every_n_frames=4)
 
+            # PersonAttrWorker: Kleidung, Alter, Zubehoer (jeden 6. Frame)
+            self._person_attr_worker = PersonAttrWorker()
+            self._result_collector.register_worker(self._person_attr_worker)
+            self._roi_dispatcher.register_worker(self._person_attr_worker, every_n_frames=6)
+
             self._result_collector.start_all()
-            logger.info("[WORKERS] 4 Worker gestartet: Face(2), Pose(3), Hand(4), ReID(5)")
+            logger.info("[WORKERS] 5 Worker gestartet: Face(2), Pose(3), Hand(4), ReID(5), PersonAttr(6)")
         except Exception as e:
             logger.error("[WORKERS] Worker-Start fehlgeschlagen: %s", e)
             self._face_worker = None
@@ -1365,6 +1371,11 @@ class TappasPipeline:
             hand_result = self._result_collector.get_latest("HandWorker")
             if hand_result and hand_result.data.get("hand_detected"):
                 pf.hand_detected = True
+
+            attr_result = self._result_collector.get_latest("PersonAttrWorker")
+            if attr_result and attr_result.data.get("persons"):
+                # Attribute der ersten erkannten Person nehmen
+                pf.person_attributes = attr_result.data["persons"][0].get("attribute", [])
 
         # Thread-safe update
         with self._lock:

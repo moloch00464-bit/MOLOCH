@@ -59,6 +59,10 @@ class PerceptionFrame:
     head_pitch: Optional[float] = None  # Kopfneigung vertikal
     head_yaw: Optional[float] = None  # Kopfdrehung horizontal
 
+    # === Personen-Attribute (person_attr_resnet_v1_18) ===
+    person_attributes: List[str] = field(default_factory=list)
+    # Aktive Attribute der erkannten Person: ["rucksack", "brille", ...]
+
     # === Object Detection (YOLOv8m Nicht-Personen) ===
     objects: List[Dict] = field(default_factory=list)
     # [{"class": "couch", "confidence": 0.87}, ...]
@@ -109,6 +113,7 @@ class PerceptionFrame:
             "person_action": self.person_action,
             "head_pitch": round(self.head_pitch, 1) if self.head_pitch is not None else None,
             "head_yaw": round(self.head_yaw, 1) if self.head_yaw is not None else None,
+            "person_attributes": self.person_attributes,
             "objects": self.objects,
             "ocr_texts": self.ocr_texts,
             "person_bbox_height": round(self.person_bbox_height, 3),
