@@ -24,6 +24,8 @@ snapshots/
 data/
 logs/
 *.log
+config/last_face_position.json
+config/learned_patrol_positions.json
 
 # --- Images & Media ---
 *.jpg
