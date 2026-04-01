@@ -145,9 +145,10 @@ class YOLOWorldWorker(BaseWorker):
         if not os.path.exists(YOLO_WORLD_HEF):
             raise FileNotFoundError(f"YOLO-World HEF fehlt: {YOLO_WORLD_HEF}")
 
-        _, self._model, _, self._out_names, self._out_shapes = \
+        _, self._model, self._in_names, self._out_names, self._out_shapes = \
             create_configured_model(vdevice, YOLO_WORLD_HEF)
-        logger.info("[YOLOWorldWorker] Modell geladen — Outputs: %s", self._out_names)
+        logger.info("[YOLOWorldWorker] Modell geladen — Inputs: %s Outputs: %s",
+                    self._in_names, self._out_names)
 
         self._load_default_embeddings()
 
@@ -198,8 +199,6 @@ class YOLOWorldWorker(BaseWorker):
 
         # Bindings
         bindings = self._model.create_bindings()
-        inp_names = [n for n in self._model.input_names
-                     if hasattr(self._model, 'input_names')]
 
         # Input 1: Bild
         bindings.input("yolo_world_v2s/input_layer1").set_buffer(img_input)
