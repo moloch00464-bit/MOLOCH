@@ -96,6 +96,8 @@ class CoreIntegrator:
         "markus_recognized": -0.4,      # Markus erkannt -> Tension faellt aktiv
         "alarm_active": 0.9,            # Alarm -> maximale Tension
         "environmental_stress": 0.2,    # Laerm, Temperatur etc.
+        "hardware_pain": 0.7,           # Watchdog: akuter Schmerz (Pipeline, Mic, Netz)
+        "system_stress": 0.3,           # Watchdog: chronischer Stress (Temp, RAM, Disk)
         # system_load ENTFERNT: CPU-Last ist keine Bedrohung, hat Tension bei 1.0 fixiert
     }
 
@@ -108,6 +110,7 @@ class CoreIntegrator:
         "unknown_person": -0.3,         # Unbekannter -> Shadow
         "conflict_input": -0.4,         # Konflikt -> Shadow
         "alarm_active": -0.5,           # Alarm -> Shadow
+        "hardware_pain": -0.3,          # Watchdog-Schmerz -> Shadow
         "disrespect_spike": -0.6,       # Respektlosigkeit -> Shadow
         "festival_mode": -0.4,          # WGT -> Shadow
     }
