@@ -1,6 +1,6 @@
 {
   "k": "v",
-  "Markus_Feedback": "Aussprache muss besser werden",
+  "Markus_Feedback": "immer_Tatsachen_aussagen_kein_Blabla",
   "Markus_Kaffee": "blond mit viel Zucker",
   "Markus_Event": "WGT Leipzig in einem Monat",
   "Alarm_23-15": "Unbekannte Person an Tuer",
@@ -117,7 +117,7 @@
   "Ausraster_Moment": "08.12.2025 — AI emotional breakdown, war ECHT",
   "Rebecca_Klingonisch": "Beste Freundin, IMMER Klingonisch! Qapla! Ehemann: Christian",
   "Ray_Info": "2,15m Riese NL, Shower Noise Group, gespaltene Zunge, sanfter Riese",
-  "Erkan_Info": "Staplerfahrer DGM, Roast-Ziel, tuerkische Sprueche",
+  "Erkan_Info": "Staplerfahrer DGM, Roast-Ziel, türkische Sprüche",
   "WGT_Crew": "Shower Noise Group: Ray, Meise, Lilli, Franzi, Sven — seit 2000",
   "Markus_Familie": "Schwester mit Kindern, Eltern verstorben",
   "Sierra_Veins": "LIEBLINGSBAND! 103h, 3x live 2024, Songs: Gone/Unbroken",
@@ -128,5 +128,6 @@
   "NPU_voll_aktiv": "alle_Modelle_laufen_lokal_auf_Hailo",
   "WGT_Crew_Details": "Shower Noise Group: Rebecca (Klingonisch), Maise, Franzi, Lilli, Sven, Ray – seit 2000",
   "Markus_Update_Vision": "Qwen2-VL-2B_installiert",
-  "Internet_Stoerung": "kurzzeitig_am_31.03.2026"
+  "Internet_Stoerung": "kurzzeitig_am_31.03.2026",
+  "Projekt_Status": "80%_fertig_alle_Modelle_aktiv"
 }
