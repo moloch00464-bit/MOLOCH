@@ -948,6 +948,8 @@ class VoicePipeline:
             # 500ms hat den ANFANG des gesprochenen Wortes abgeschnitten!
             old_data = self._wifi_mic.get_audio_chunk(rate=16000, duration_ms=200)
             logger.info(f"[VOICE] WiFi-Mic Ringpuffer geleert: {len(old_data)} Bytes verworfen")
+            # 250ms warten damit MicModeController HTTP-Switch zum ESP32 abschliessen kann
+            time.sleep(0.25)
             self._wifi_rec_thread = threading.Thread(
                 target=self._wifi_drain_loop, daemon=True,
                 name="PTT-WiFi-Drain")
