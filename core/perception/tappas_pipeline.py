@@ -1477,6 +1477,13 @@ class TappasPipeline:
 
         frame = data.reshape(height, width, 3)
 
+        # Low Light Enhancement: wenn dunkel → NPU-Aufhellung (zero_dce)
+        try:
+            from core.perception.low_light_processor import get_low_light
+            frame = get_low_light().maybe_enhance(frame)
+        except Exception:
+            pass
+
         # Thread-safe: Frame speichern
         with self._lock:
             self._annotated_frame = frame
