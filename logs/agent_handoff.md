@@ -1,122 +1,102 @@
-# Agent Handoff — Session 2026-03-30 (BBox-Overlay + Tracker-Fix)
-**Datum:** 2026-03-30 | **Reboot:** gerade ausgelöst, noch nicht abgeschlossen
+# Agent Handoff — 2026-04-01
+# Session: ecstatic-banach (Claude Sonnet 4.6)
+# Status: VOLLSTAENDIG ABGESCHLOSSEN
 
 ---
 
-## Was in dieser Sitzung erledigt wurde
+## WAS DIESE SESSION ERLEDIGT HAT
 
-### ✅ BBox-Overlay im Panel (kein hailooverlay mehr nötig)
-- `moloch_service.py`: `panel_detections` in `moloch_status.json` eingefügt
-  - Alle Detektionen aus `get_detections()`: normalisierte BBoxen [0-1], `face_id`, `face_similarity`
-- `panel_preview.py`: PIL `ImageDraw` zeichnet BBoxen direkt auf den Frame
-  - Face erkannt (face_id) = **Cyan**, Face unbekannt = **Gelb**, Person = **Grün**
-  - Label: Name + Similarity (z.B. "markus 0.72") oder "face 0.77"
-  - In `except`-Block gewickelt → Preview-Freeze unmöglich
-- Commit: `ef4d1a1`
+### 1. Two-Stage Hybrid Pipeline (aus vorheriger Session fortgesetzt)
 
-### ✅ Tracker Stuck-at-Limit Fallback
-- `autonomous_tracker.py`: neue Erkennung in `_track_tracking_target()`
-- Bedingung: Kamera ≥ 8s am mechanischen Pan-/Tilt-Anschlag UND Error treibt weiter rein
-- Aktion: EMA-Filter (`_smooth_x`, `_smooth_y`) zurücksetzen + `SEARCHING` starten
-- Verhindert: Kamera dreht sich in Ecke durch Artefakt-Detection (Wand/Decke als Gesicht)
-- Commit: `8be3a67`
+Architektur: GStreamer nur noch YOLO, alle anderen Modelle als HailoRT-Direct Worker
+- core/perception/vision_workers.py — BaseWorker + ResultCollector
+- core/perception/roi_dispatcher.py — Frame-Verteilung
+- core/perception/face_pipeline.py — SCRFD + ArcFace + FaceAttr (Similarity 1.00)
+- core/perception/pose_worker.py — Pose, ReID, Hand
+- core/perception/tappas_pipeline.py — GStreamer 330 Zeilen → 50 Zeilen
+- scripts/enroll_face_worker.py — Enrollment identisch wie Live-Inference
+Commits: b1a5e7f, 31ff6cc, 6d8a5d1
 
----
+### 2. Real-ESRGAN x2 Super Resolution
 
-## Diagnose: Warum war Kamera in der Ecke?
+HEF: /mnt/moloch-data/hailo/models/real_esrgan_x2.hef (27MB)
+Datei: core/perception/super_res_worker.py (Singleton, SHARED VDevice)
+Integration: MCP moloch_snapshot() + daily_learner.py Face-Crops
+Format: uint8 Input 512x512x3 → float32 Output 1024x1024x3
+Commits: 694602c, 793f37a
 
-```
-Tracker war bei pos=(-166.4, +76.7)deg — mechanischer Anschlag beider Achsen
-Error konstant (+291, -149)px — nie konvergiert
-Ursache: False-Positive Detection (Wand/Decke/Fenster als Gesicht erkannt)
-Face-Conf: 0.77 (konstant) → SCRFD hat statisches Artefakt als Face klassifiziert
-Tracker konnte nicht erkennen dass er am Limit feststeckte → fuhr immer weiter rein
-Fix: STUCK-AT-LIMIT nach 8s → SEARCH Mode
-```
+### 3. Low Light Enhancement (zero_dce)
 
----
+HEF: /mnt/moloch-data/hailo/models/zero_dce.hef (856KB, 200 FPS)
+Datei: core/perception/low_light_processor.py (Singleton, SHARED VDevice)
+Integration: tappas_pipeline._on_appsink_sample() vor SHM-Write
+Logik: CPU-Brightness-Check < 80/255 → NPU Enhancement aktiv
+Commits: 08cf594, 5c0246b
 
-## System-Stand nach Reboot
+### 4. MCP-Server — 3 neue Tools
 
-```
-Branch:      main (Commit 8be3a67)
-Reboot:      gerade ausgelöst — noch nicht abgeschlossen
-FPS:         war 19.9 vor Reboot
-SEGV:        0 seit letztem Reboot
-hailooverlay: ENTFERNT aus Pipeline (blockierte SHM nach ~75s)
-BBox-Overlay: PIL-basiert aus Status-JSON (panel_detections)
-Pose:        AUS (Valve zu, Modell im RAM)
-ReID:        AUS
-Smart-Track: Permanent AUS
-```
+Datei: mcp/moloch_mcp_server.py
+- moloch_npu_workers() — Health aller NPU-Worker
+- moloch_npu_models() — Roadmap integriert vs. ausstehend
+- moloch_low_light() — Helligkeit + Enhancement-Status
+Commit: bc9019f
 
----
+### 5. NPU-Modell-Roadmap + Skills verbessert
 
-## Sofort nach Reboot prüfen
-
-1. `mcp moloch_status` → FPS=20, Frame Age <5s
-2. `mcp moloch_logs` → keine SEGV, keine CrashLoops
-3. **Visuell**: BBoxen im Panel? (Cyan/Gelb für Gesicht, Grün für Person)
-4. **Kamera**: Startet normal (nicht in Ecke)?
-5. Falls Stuck-Limit aktiv: `[STUCK-LIMIT]` in Logs sichtbar
+Roadmap: logs/npu_model_roadmap.md (alle 26 H10H-Kategorien dokumentiert)
+Skills:
+- .claude/skills/moloch-npu.md (NEU) — Worker-Architektur + Anleitung
+- .claude/skills/moloch-dev.md — 4 neue NEVER-Regeln + HailoRT-Template + RGB/BGR
+- .claude/skills/moloch-snapshot.md — SuperRes + LowLight erwaehnt
+Commit: 08cf594
 
 ---
 
-## Offene Bugs — NÄCHSTE SITZUNG
+## SERVICE-STATUS
 
-### 🔴 ArcFace Similarity niedrig (0.14–0.29)
-- Sollte ≥ 0.65 für Markus-Erkennung
-- **Diagnose-Idee**: Snapshot wenn Face im Bild → prüfen ob Face-Crop (112x112) plausibel ist
-- Mögliche Ursache: SCRFD-BBox korrekt aber ArcFace-Crop falsch zugeschnitten nach Pipeline-Refactor
-- Face-DB: mit gleicher GStreamer-Pipeline trainiert (sollte kompatibel sein)
-- Zu prüfen: `scrfd_10g_letterbox` Postprocess → liefert korrekte 112x112 Crops für ArcFace?
-
-### 🟡 ArcFace Re-Enrollment nötig?
-- Wenn Similarity dauerhaft <0.3 nach Diagnose → Face-DB neu aufbauen
-- Enrollment NUR via IPC `enrollment_start` (CLAUDE.md Regel 11 — NIEMALS offline)
-
-### 🟡 Voice-Zentralisierung
-- `moloch_console.py` ruft TTS direkt statt über `personality_engine.speak()`
-- Memory: `feedback_one_voice.md` — Agent 5 (Voice) zuständig
-
-### 🟡 PaddleOCR Integration
-- HEFs: `/mnt/moloch-data/hailo/models/zoo/ocr/`
-- Pipeline-Code vorhanden (mit Valves) → muss auf "permanent AN" umgebaut werden
-- Niedrige Priorität
-
-### 🟡 Pose + ReID reaktivieren
-- Pose: hailooverlay SEGV (Race mit NPU-Shared-Memory in C-Code)
-- ReID: libre_id.so crasht bei leeren BBoxen
-- Beide Modelle im RAM (Valves zu) — warten auf Root-Cause
+moloch.service: active (running)
+USE_TAPPAS: 1 (in /etc/systemd/system/moloch.service)
+GStreamer: YOLO-only, ~20 FPS
+Worker: FaceWorker, PoseWorker, ReIDWorker, HandWorker (alle aktiv)
+On-Demand: SuperResProcessor (lazy), LowLightProcessor (lazy, ab Dunkelheit)
 
 ---
 
-## Start-Checklist neue Sitzung
+## ALLE COMMITS DIESER SESSION
 
-1. `CLAUDE.md` lesen
-2. Diese Handoff-Datei lesen
-3. MCP Status → FPS=20, BBoxen sichtbar?
-4. **Ziel 1:** ArcFace Similarity debuggen (Face-Crop prüfen)
-5. **Ziel 2:** Ggf. Re-Enrollment via IPC
-6. **Ziel 3:** Voice-Zentralisierung (Agent 5)
+bc9019f feat: MCP NPU-Tools + LowLight stop()-Cleanup
+5c0246b feat: LowLight in tappas_pipeline._on_appsink_sample()
+08cf594 feat: LowLightProcessor + NPU Roadmap + Skills
+793f37a fix: SuperRes Input uint8 statt float32
+694602c feat: Real-ESRGAN x2 Super Resolution via Hailo-10H NPU
+6d8a5d1 feat: Phase 4+5 — Alle Worker + Blaustich-Fix + FaceAttr
+31ff6cc fix: ResultCollector.get_latest() direkt vom Worker
+b1a5e7f feat: Phase 2+3 — GStreamer YOLO-Only + FaceWorker live
 
 ---
 
-## Architektur-Notizen (stabil)
+## NAECHSTE PRIORITAETEN
 
-```
-GStreamer Pipeline (hailooverlay ENTFERNT):
-  rtspsrc → hailosrc → [YOLO|SCRFD|ArcFace|FaceAttr] → hailotracker → appsink
+1. person_attr_resnet_v1_18.hef — Kleidung/Alter/Rucksack (Aufwand: gering)
+   Download-URL in logs/npu_model_roadmap.md
+2. r3d_18.hef — Aktivitaetserkennung (sitzt/geht/laeuft)
+3. yolo_world_v2s.hef — Zero-Shot Objektsuche per Sprache
 
-BBox-Flow NEU (kein hailooverlay):
-  _on_buffer (Hailo API) → _detections[] (normalisiert [0-1])
-  → panel_detections in Status-JSON (via _write_status_json)
-  → panel_preview.py PIL.ImageDraw.rectangle()
+---
 
-Tracker-Feed (5 Hz):
-  get_detections() → pixel_bbox (×1280/720) → tracker.update_detection()
-  → _track_tracking_target() → AbsoluteMove
-  NEU: STUCK-AT-LIMIT Erkennung nach 8s
+## BEKANNTE BUGS (unveraendert)
 
-Valves: EINMALIG beim Start gesetzt, danach nie mehr geschaltet.
-```
+- Kamera Hot-Plug: nur Reboot hilft (kein RTSP-Reconnect)
+- hailo-ollama: kein systemd-Service, laeuft nicht beim Boot
+- MCP moloch_snapshot() gibt erst 1024x1024 nach MCP-Server-Neustart
+
+---
+
+## GELERNTE LEKTIONEN (in moloch-dev.md ergaenzt)
+
+1. HailoRT Input dtype: Vision-Modelle = uint8, NICHT float32
+2. np.ndarray Type-Hints nicht in moloch_service.py Signaturen (np nicht importiert)
+3. __pycache__ immer loeschen nach Code-Aenderungen
+4. Service laeuft von ~/moloch/, NIE vom Worktree
+5. GStreamer = RGB, cv2.imwrite() = BGR → COLOR_RGB2BGR vor imwrite()
+6. Stable Diffusion: KEIN H10H-HEF verfuegbar (definitiv verifiziert)

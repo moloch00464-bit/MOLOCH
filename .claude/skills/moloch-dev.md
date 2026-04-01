@@ -5,7 +5,7 @@ description: Entwicklungs-Skill fuer M.O.L.O.C.H. — Pre/Post-Flight Checks, Da
 
 # M.O.L.O.C.H. Entwicklungs-Skill
 # Wird bei jeder Claude Code Session geladen
-# Stand: 2026-03-28
+# Stand: 2026-04-01
 
 ---
 
@@ -132,6 +132,40 @@ jeden BACKUP-Commit. Sie gehoeren nach `/dev/shm/` oder `/tmp/`.
 # RICHTIG: subprocess.run(["cmd", user_input])
 ```
 
+### NEVER 9: HailoRT Input als float32 uebergeben wenn uint8 erwartet
+**Warum**: Jedes HEF hat ein fixes Input-Format. Wenn uint8 erwartet wird und
+float32 uebergeben wird: Buffer-Size-Mismatch (4x zu gross) → HailoRT Error.
+**Vor der Implementierung pruefen**:
+```python
+model = vdevice.create_infer_model(hef_path)
+print(model.input(model.input_names[0]).shape)   # Shape
+# dtype: uint8 fuer Vision-Modelle (SCRFD, YOLO, zero_dce, ESRGAN)
+#        float32 nur wenn explizit dokumentiert
+```
+Beweis: Real-ESRGAN: "Input buffer size 3145728 != expected 786432" → float32 statt uint8.
+
+### NEVER 10: np.ndarray als Type-Hint in moloch_service.py Methoden-Signaturen
+**Warum**: numpy ist in moloch_service.py NUR lokal importiert (Zeile 337).
+Type-Hints im Funktionskopf werden beim Parsen ausgewertet → NameError: 'np'.
+**Regel**: In moloch_service.py keine `np.ndarray` Type-Hints in Signaturen.
+Stattdessen ohne Hint oder mit String-Annotation `"np.ndarray"`.
+
+### NEVER 11: __pycache__ nach Code-Aenderungen ignorieren
+**Warum**: Service laeuft von ~/moloch/ (Haupt-Repo). Nach Code-Aenderungen
+laeuft der Service den alten Bytecode aus __pycache__ weiter — Aenderungen
+haben KEINEN Effekt bis der Cache geloescht wird.
+**Nach jeder Aenderung**:
+```bash
+find ~/moloch/core -name "__pycache__" -exec rm -rf {} + 2>/dev/null
+sudo systemctl restart moloch.service
+```
+
+### NEVER 12: Code im Worktree schreiben und Service testen
+**Warum**: Service laeuft IMMER von ~/moloch/ (Haupt-Repo), NICHT vom Worktree.
+Aenderungen im Worktree (.claude/worktrees/NAME/) sind fuer den Service unsichtbar.
+**Regel**: IMMER direkt in ~/moloch/ arbeiten oder Worktree-Aenderungen committen
+und in main mergen.
+
 ---
 
 ## 4. PRE-FLIGHT CHECKS (VOR jeder Code-Aenderung)
@@ -189,6 +223,70 @@ python3 ~/moloch/scripts/postflight.py
 ---
 
 ## 6. CODE-TEMPLATES
+
+### HailoRT On-Demand Processor (Vorlage: super_res_worker.py)
+
+```python
+# Pattern fuer synchrone On-Demand NPU-Verarbeitung (Snapshot, Enhancement etc.)
+class MyProcessor:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._vdevice = None
+        self._configured = None
+        self._out_names = []
+        self._out_shapes = {}
+        self._loaded = False
+        self._load_error = None
+
+    def _ensure_loaded(self) -> bool:
+        if self._loaded: return True
+        if self._load_error: return False
+        try:
+            import hailo_platform as hp
+            from hailo_platform.pyhailort._pyhailort import FormatType
+            params = hp.VDevice.create_params()
+            params.group_id = "SHARED"           # PFLICHT — kein neues VDevice!
+            self._vdevice = hp.VDevice(params)
+            model = self._vdevice.create_infer_model(HEF_PATH)
+            for n in model.output_names:         # Output auf float32 setzen
+                model.output(n).set_format_type(FormatType.FLOAT32)
+            self._configured = model.configure()
+            self._out_names = list(model.output_names)
+            self._out_shapes = {n: list(model.output(n).shape) for n in self._out_names}
+            self._loaded = True
+            return True
+        except Exception as e:
+            self._load_error = str(e)
+            return False
+
+    def process(self, img_rgb):
+        with self._lock:
+            if not self._ensure_loaded(): return img_rgb
+            try:
+                inp = preprocess(img_rgb)        # uint8 fuer Vision-Modelle
+                bindings = self._configured.create_bindings()
+                bindings.input().set_buffer(np.ascontiguousarray(inp))
+                out_buf = np.empty(self._out_shapes[self._out_names[0]], dtype=np.float32)
+                bindings.output(self._out_names[0]).set_buffer(out_buf)
+                self._configured.run([bindings], TIMEOUT_MS)
+                return postprocess(out_buf)
+            except Exception as e:
+                logger.error("Inference failed: %s", e)
+                return img_rgb                   # Fallback: Original
+```
+
+### GStreamer RGB vs cv2 BGR — Konvertierung
+
+```python
+# GStreamer format=RGB gibt RGB aus
+# cv2.imwrite() erwartet BGR
+# cv2.COLOR_RGB2BGR IMMER vor imwrite() anwenden!
+frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+cv2.imwrite(path, frame_bgr)
+
+# Umgekehrt: BGR-Bild fuer NPU-Modelle (trainiert auf RGB):
+frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+```
 
 ### Singleton Pattern (5+ Module nutzen dieses Pattern)
 
@@ -359,14 +457,22 @@ Reserve:                          ~5510 MB
 - Gesamt mit Pi5: ~20W unter Volllast → 27W Netzteil MUSS stabil sein
 - PCIe: Pi5 hat nur Gen2 x1 (~500MB/s), H10 will Gen3 x4 = Mismatch
 
-### Verfuegbare Modelle (noch nicht eingebaut)
-- **SigLIP/SigLIP2**: Zero-Shot Image Classification ("Was sehe ich?" ohne Training)
-- **Qwen2.5-VL-3B**: Vision-Language (Kamerabild → Textbeschreibung)
-- **PaddleOCR v5**: Text im Bild erkennen (Schilder, Bildschirme)
-- **YOLOv11/v12**: Neueste YOLO-Generationen
-- **Stable Diffusion**: Bildgenerierung am Edge
-- **DeepSeek-R1-Distill-Qwen-1.5B**: Reasoning
-- **Qwen2.5-Coder-1.5B**: Code-Generierung
+### Aktive NPU-Modelle (Stand 2026-04-01)
+
+Vollstaendige Roadmap: `~/moloch/logs/npu_model_roadmap.md`
+MCP: `moloch_npu_models()` | `moloch_npu_workers()` | `moloch_low_light()`
+
+Integriert: YOLO, SCRFD, ArcFace, FaceAttr, Pose, ReID, Hand,
+Real-ESRGAN x2 (Snapshot-Upscaling), zero_dce (Low-Light <80/255),
+CLIP, PaddleOCR, Qwen2-VL 2B
+
+Naechste Prioritaeten (HEF vorhanden, sofort integrierbar):
+- person_attr_resnet_v1_18 — Kleidungsfarbe, Alter, Rucksack
+- r3d_18 — Aktivitaetserkennung (sitzt/geht/laeuft)
+- yolo_world_v2s — Zero-Shot Objektsuche per Sprache
+- scdepthv3 — Tiefenschaetzung
+
+NICHT verfuegbar fuer H10H: ~~Stable Diffusion~~ (existiert NICHT als H10H-HEF!)
 
 ### hailo-ollama (fuer Gate 5.1)
 - Ollama-kompatibel + OpenAI-kompatibel auf Port 8000
