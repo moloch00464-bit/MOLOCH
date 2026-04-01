@@ -51,6 +51,7 @@ from core.perception.face_pipeline import FaceWorker
 from core.perception.pose_worker import PoseWorker, ReIDWorker, HandWorker
 from core.perception.person_attr_worker import PersonAttrWorker
 from core.perception.activity_worker import ActivityWorker
+from core.perception.yolo_world_worker import YOLOWorldWorker
 
 logger = logging.getLogger("TappasPipeline")
 
@@ -371,9 +372,14 @@ class TappasPipeline:
             self._result_collector.register_worker(self._activity_worker)
             # KEIN ROI-Dispatcher — push_frame() direkt in _on_appsink_sample()
 
+            # YOLOWorldWorker: Zero-Shot Objektsuche (alle 60 Frames via ROI-Dispatcher)
+            self._yolo_world_worker = YOLOWorldWorker()
+            self._result_collector.register_worker(self._yolo_world_worker)
+            self._roi_dispatcher.register_worker(self._yolo_world_worker, every_n_frames=60)
+
             self._result_collector.start_all()
             self._activity_frame_counter = 0
-            logger.info("[WORKERS] 6 Worker gestartet: Face(2), Pose(3), Hand(4), ReID(5), PersonAttr(6), Activity(30)")
+            logger.info("[WORKERS] 7 Worker gestartet: Face(2), Pose(3), Hand(4), ReID(5), PersonAttr(6), Activity(30), YOLOWorld(60)")
         except Exception as e:
             logger.error("[WORKERS] Worker-Start fehlgeschlagen: %s", e)
             self._face_worker = None
@@ -1387,6 +1393,14 @@ class TappasPipeline:
             activity_result = self._result_collector.get_latest("ActivityWorker")
             if activity_result and activity_result.success and activity_result.data.get("activity"):
                 pf.person_action = activity_result.data["activity"]
+
+            world_result = self._result_collector.get_latest("YOLOWorldWorker")
+            if world_result and world_result.success and world_result.data.get("detections"):
+                pf.objects = [
+                    {"class": d["label"], "confidence": round(d["score"], 3), "bbox": d["bbox"]}
+                    for d in world_result.data["detections"]
+                    if d.get("label") != "person"  # Personen bereits via YOLO
+                ]
 
         # Thread-safe update
         with self._lock:
