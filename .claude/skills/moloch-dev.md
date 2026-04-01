@@ -48,6 +48,9 @@ core/perception/model_scheduler.py # 152 LOC, kein Heartbeat
 core/memory/episodic_memory.py  # 286 LOC, Qdrant ohne Retry
 core/memory/person_reid.py      # 340 LOC, Threshold = Tracking
 config/settings.json            # Kein Schema, Crash bei Malformed
+core/perception/tappas_pipeline.py  # ROT: GStreamer + alle Worker-Starts
+core/perception/super_res_worker.py # ROT: SHARED VDevice, NPU-Konflikt moeglich
+core/perception/low_light_processor.py # ROT: SHARED VDevice, in jedem Frame
 ```
 
 **Regel**: Bei ROT-Dateien IMMER fragen:

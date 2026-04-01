@@ -1,9 +1,22 @@
 ---
 name: moloch-snapshot
-description: Kamera-Snapshot von MOLOCH holen und analysieren. Zeigt was MOLOCH gerade sieht.
+description: Kamera-Snapshot von MOLOCH holen und analysieren. Zeigt was MOLOCH gerade sieht. Nutzt automatisch Real-ESRGAN x2 Upscaling und Low-Light Enhancement.
 ---
 
-Hole das aktuelle Kamera-Bild aus dem SHM-Frame:
+Nutze das MCP-Tool — macht automatisch Upscaling + Low-Light:
+
+```
+moloch_snapshot()
+```
+
+Dann lies `/tmp/moloch_snapshot.jpg` und analysiere:
+- Welche BBoxen sind sichtbar (Person, Face, Pose)?
+- Sind Pose-Landmarks korrekt auf dem Koerper?
+- Stimmt die Face-BBox Groesse?
+- Gibt es Artefakte oder Probleme?
+- Ist das Bild klar oder noch dunkel (Low-Light aktiv)?
+
+Alternativ direkt aus SHM (ohne NPU-Processing):
 
 ```python
 import struct, mmap, os, cv2, numpy as np
@@ -18,8 +31,6 @@ cv2.imwrite('/tmp/moloch_snapshot.png', frame)
 mm.close(); os.close(fd)
 ```
 
-Dann lies `/tmp/moloch_snapshot.png` und analysiere:
-- Welche BBoxen sind sichtbar (Person, Face, Pose)?
-- Sind Pose-Landmarks korrekt auf dem Koerper?
-- Stimmt die Face-BBox Groesse?
-- Gibt es Artefakte oder Probleme?
+NPU-Verarbeitung im Snapshot:
+- Real-ESRGAN x2: 640x360 → 1024x1024 (schärfer)
+- Low-Light (zero_dce): automatisch wenn Helligkeit < 80/255
