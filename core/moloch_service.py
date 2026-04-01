@@ -1881,7 +1881,7 @@ class MolochService:
 
         logger.info("M.O.L.O.C.H. Service gestoppt")
 
-    def upscale_image(self, img_rgb: np.ndarray) -> np.ndarray:
+    def upscale_image(self, img_rgb):
         """Bild via Real-ESRGAN x2 NPU hochskalieren.
 
         Lazy-loaded — erster Aufruf lädt das Modell.
