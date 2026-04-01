@@ -2057,7 +2057,10 @@ class MolochService:
                          "bbox": d.get("bbox", []),
                          "confidence": round(d.get("confidence", 0.0), 2),
                          "face_id": d.get("face_id"),
-                         "face_similarity": round(d.get("face_similarity", 0.0), 2)}
+                         "face_similarity": round(d.get("face_similarity", 0.0), 2),
+                         "landmarks": d.get("landmarks"),   # Face: 5×[x,y] normalisiert
+                         "keypoints": d.get("keypoints"),   # Pose: 17×[x,y,vis] / Hand: 21×[x,y]
+                         }
                         for d in raw_dets if d.get("bbox")
                     ]
                 if hasattr(self._inference, 'get_npu_sched_mode'):
