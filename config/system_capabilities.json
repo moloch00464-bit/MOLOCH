@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-04-01T12:16:02",
-  "generation_ms": 1659.0,
+  "generated": "2026-04-01T22:35:56",
+  "generation_ms": 1940.8,
   "summary": {
     "core_modules": "37/38",
     "external_deps": "11/11",
@@ -54,11 +54,11 @@
     "hailo_device": true,
     "ssd1_code": {
       "total_gb": 457.9,
-      "free_gb": 383.2
+      "free_gb": 382.0
     },
     "ssd2_data": {
       "total_gb": 468.4,
-      "free_gb": 425.8
+      "free_gb": 425.7
     },
     "kuehlung": "Noctua NF-A2x20 PWM (30% reicht fuer 48°C unter Volllast)",
     "stromversorgung": "Pico Power 5 USV mit 7.5V Akku (Schutz vor Stromausfall)",

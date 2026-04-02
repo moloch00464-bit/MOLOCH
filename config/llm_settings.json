@@ -1,0 +1,20 @@
+{
+  "chat": {
+    "max_tokens": 256,
+    "local_model": "qwen2.5-instruct:1.5b",
+    "cloud_model": "deepseek-chat",
+    "timeout_local": 60,
+    "timeout_cloud": 15
+  },
+  "vision_query": {
+    "max_tokens": 128,
+    "include_face_id": true,
+    "include_pose": false,
+    "include_tension": true
+  },
+  "features": {
+    "personality_in_system_prompt": true,
+    "vision_context_in_prompt": true,
+    "inner_state_in_prompt": true
+  }
+}

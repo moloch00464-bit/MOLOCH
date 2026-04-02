@@ -4,7 +4,7 @@
     "scrfd_conf": 0.5,
     "scrfd_nms": 0.45,
     "arcface_thresh": 0.65,
-    "yolo_conf": 0.5,
+    "yolo_conf": 0.8,
     "pose_conf": 0.6,
     "hand_conf": 0.65
   },
@@ -16,11 +16,8 @@
   },
   "audio": {
     "mic_gain": 1.0,
-    "noise_gate_db": -40.0,
     "agc_enabled": true,
-    "wifi_samplerate": 16000,
-    "audio_source": "wifi",
-    "wifi_software_gain": 1.0
+    "noise_gate_db": -40.0
   },
   "camera": {
     "ptz_speed": 15.0,
@@ -44,7 +41,7 @@
     "thumbs_up_enabled": true,
     "stop_enabled": true,
     "point_enabled": true,
-    "sensitivity": 0.9
+    "sensitivity": 0.55
   },
   "tracker": {
     "dead_zone_pct": 0.25,
