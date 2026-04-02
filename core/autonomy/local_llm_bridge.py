@@ -84,10 +84,13 @@ class LocalLLMBridge:
     # === Oeffentliche Methoden: Zwei Rollen ===
 
     def ask_external(self, prompt: str, system: str = "",
-                     max_tokens: int = 256) -> Optional[str]:
+                     max_tokens: int = 256,
+                     temperature: float = 0.8,
+                     top_p: float = 0.95) -> Optional[str]:
         """Konversation: Qwen2.5 lokal → DeepSeek API → Stille.
 
         Fuer Echtzeit-Dialog mit Markus. Kurze Antworten, Deutsch.
+        temperature/top_p steuern Guardian- vs Shadow-Tonalität.
         """
         with self._lock:
             self._request_count += 1
@@ -95,7 +98,9 @@ class LocalLLMBridge:
         # 1. hailo-ollama Qwen2.5 (lokal auf NPU)
         result = self._generate_ollama(prompt, system, max_tokens,
                                        model=OLLAMA_MODEL_CHAT,
-                                       timeout=OLLAMA_TIMEOUT_CHAT)
+                                       timeout=OLLAMA_TIMEOUT_CHAT,
+                                       temperature=temperature,
+                                       top_p=top_p)
         if result:
             return result
 
@@ -152,7 +157,9 @@ class LocalLLMBridge:
 
     def _generate_ollama(self, prompt: str, system: str,
                          max_tokens: int, model: str,
-                         timeout: int) -> Optional[str]:
+                         timeout: int,
+                         temperature: float = 0.8,
+                         top_p: float = 0.95) -> Optional[str]:
         """hailo-ollama Chat API (Port 8000) mit Circuit-Breaker."""
         if not self._ollama_available:
             return None
@@ -185,7 +192,9 @@ class LocalLLMBridge:
             resp = requests.post(
                 f"{OLLAMA_HOST}/api/chat",
                 json={"model": model, "messages": messages, "stream": False,
-                      "options": {"num_predict": max_tokens}},
+                      "options": {"num_predict": max_tokens,
+                                  "temperature": temperature,
+                                  "top_p": top_p}},
                 timeout=timeout)
             resp.raise_for_status()
             data = resp.json()

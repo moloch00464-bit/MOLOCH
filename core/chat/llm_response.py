@@ -128,6 +128,34 @@ def build_system_prompt(mode: str, vision: Dict, state: Dict,
     return "".join(parts)
 
 
+def _get_llm_params(mode: str, vision: Dict, templates: Dict,
+                    settings: Dict, max_tokens_override: Optional[int]) -> Dict:
+    """LLM-Parameter basierend auf Modus + Stille-Selektion berechnen.
+
+    Stille Selektion (v1.1): Unbekannte Person → weniger Tokens, kühlere Antwort.
+    Guardian/Shadow/Berserker → unterschiedliche Temperatur + Top-P.
+    """
+    # Basis-Tokens aus Settings oder Default
+    chat_cfg = settings.get("chat", {})
+    base_tokens = max_tokens_override or chat_cfg.get("max_tokens", 256)
+
+    # Temperatur und Top-P aus Templates
+    params = templates.get("llm_params", {}).get(mode, {})
+    temperature = params.get("temperature", 0.8)
+    top_p = params.get("top_p", 0.95)
+
+    # Stille Selektion: Unbekannte Person → reduzierte Tokens
+    silence_cfg = templates.get("silence_selection", {})
+    unknown_max = silence_cfg.get("unknown_person_max_tokens", 60)
+    face_id = vision.get("face_id")
+    is_unknown = vision.get("person_detected") and (not face_id or face_id == "unknown")
+    if is_unknown:
+        base_tokens = min(base_tokens, unknown_max)
+        logger.debug("[LLM-RESPONSE] Stille Selektion: unbekannte Person → max_tokens=%d", base_tokens)
+
+    return {"max_tokens": base_tokens, "temperature": temperature, "top_p": top_p}
+
+
 def ask(user_text: str, max_tokens: Optional[int] = None) -> Optional[str]:
     """Hauptfunktion: Antwort vom LLM holen, personality-aware.
 
@@ -146,16 +174,22 @@ def ask(user_text: str, max_tokens: Optional[int] = None) -> Optional[str]:
     state = _get_inner_state()
 
     system = build_system_prompt(mode, vision, state, templates, settings)
+    params = _get_llm_params(mode, vision, templates, settings, max_tokens)
 
-    chat_cfg = settings.get("chat", {})
-    tokens = max_tokens or chat_cfg.get("max_tokens", 256)
-
-    logger.info(f"[LLM-RESPONSE] mode={mode} tension={state['tension']:.2f} tokens={tokens}")
+    logger.info(
+        f"[LLM-RESPONSE] mode={mode} tension={state['tension']:.2f} "
+        f"tokens={params['max_tokens']} temp={params['temperature']}"
+    )
 
     try:
         from core.autonomy.local_llm_bridge import get_llm_bridge
         bridge = get_llm_bridge()
-        answer = bridge.ask_external(user_text, system=system, max_tokens=tokens)
+        answer = bridge.ask_external(
+            user_text, system=system,
+            max_tokens=params["max_tokens"],
+            temperature=params["temperature"],
+            top_p=params["top_p"],
+        )
         if answer:
             logger.info(f"[LLM-RESPONSE] Antwort: {len(answer)} Zeichen via {bridge._last_provider}")
         return answer
