@@ -4,11 +4,18 @@ Noctua NF-A4x20 5V Luefter-Steuerung via PIO-PWM GPIO18 (Pin 12)
 Benoetigt in /boot/firmware/config.txt:
   dtoverlay=pwm-pio,gpio=18   (Pi5/RP1-nativ)
 
-Temperaturkurve:
-  <50°C   → 30%
-  50-65°C → 50%
-  65-75°C → 75%
-  >75°C   → 100%
+Temperaturkurve (2026-04-02 angepasst):
+  Ziel: Noctua dreht FRUEHER hoch, damit der Pi5 Active Cooler
+  (cooling_device0, Level 1 ab 50°C) gar nicht anspringen muss.
+  Der Noctua soll die CPU unter 50°C halten.
+
+  <42°C   → 25%  (leises Grundrauschen)
+  42-47°C → 40%  (praeventiv hochdrehen)
+  47-52°C → 60%  (CPU-Kuehler Schwelle naht)
+  52-60°C → 80%  (CPU-Kuehler sollte jetzt schon wieder ausgehen)
+  >60°C   → 100% (Notfall — alles rein)
+
+  Hysterese: 3°C nach unten (verhindert Oszillation)
 
 Fail-Safe: Bei Fehler wird Luefter auf 100% gesetzt.
 """
@@ -82,7 +89,7 @@ def pwm_init(chip_pfad, kanal_pfad):
         pass
 
     pwm_schreiben(f"{kanal_pfad}/period", PWM_PERIOD_NS)
-    pwm_schreiben(f"{kanal_pfad}/duty_cycle", int(PWM_PERIOD_NS * 0.30))
+    pwm_schreiben(f"{kanal_pfad}/duty_cycle", int(PWM_PERIOD_NS * 0.25))
     pwm_schreiben(f"{kanal_pfad}/enable", 1)
 
 
@@ -97,16 +104,49 @@ def temperatur_lesen():
     return float(wert)
 
 
+# Hysterese-Zustand: letzter Duty-Wert merken
+_letzter_duty_pct = 0.25
+
+
 def temp_zu_duty(temp):
-    """Temperatur → Duty-Cycle in Nanosekunden."""
-    if temp < 50.0:
-        return int(PWM_PERIOD_NS * 0.30)   # 30%
-    elif temp < 65.0:
-        return int(PWM_PERIOD_NS * 0.50)   # 50%
-    elif temp < 75.0:
-        return int(PWM_PERIOD_NS * 0.75)   # 75%
-    else:
-        return PWM_PERIOD_NS               # 100%
+    """
+    Temperatur → Duty-Cycle in Nanosekunden.
+
+    Aggressive Kurve: Noctua dreht ab 42°C hoch, damit der Pi5 Active
+    Cooler (cooling_device0 Level 1 ab 50°C) nicht anspringen muss.
+
+    Hysterese 3°C: Duty sinkt erst wenn Temp 3°C unter die Schwelle faellt.
+    """
+    global _letzter_duty_pct
+    HYSTERESE = 3.0
+
+    # Schwellen aufsteigend: (Schwelle, Duty%)
+    stufen = [
+        (60.0, 1.00),   # >60°C  → 100%
+        (52.0, 0.80),   # 52-60  → 80%
+        (47.0, 0.60),   # 47-52  → 60%
+        (42.0, 0.40),   # 42-47  → 40%
+    ]
+
+    # Aufwaerts: sofort hochschalten
+    for schwelle, duty_pct in stufen:
+        if temp >= schwelle:
+            _letzter_duty_pct = duty_pct
+            return int(PWM_PERIOD_NS * duty_pct)
+
+    # Unter 42°C: Grunddrehzahl, aber mit Hysterese
+    # Nur runterschalten wenn Temp 3°C unter der letzten Schwelle liegt
+    if _letzter_duty_pct > 0.25:
+        # Finde die Schwelle die zum letzten Duty gehoert
+        for schwelle, duty_pct in stufen:
+            if duty_pct == _letzter_duty_pct:
+                if temp >= (schwelle - HYSTERESE):
+                    # Noch nicht kalt genug — bleib auf aktuellem Level
+                    return int(PWM_PERIOD_NS * _letzter_duty_pct)
+                break
+
+    _letzter_duty_pct = 0.25
+    return int(PWM_PERIOD_NS * 0.25)   # 25% Grunddrehzahl
 
 
 def main():
