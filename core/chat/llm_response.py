@@ -113,7 +113,7 @@ def _build_inner_state_text(state: Dict, templates: Dict) -> str:
 
 def build_system_prompt(mode: str, vision: Dict, state: Dict,
                         templates: Dict, settings: Dict) -> str:
-    """Vollständigen System-Prompt zusammenbauen."""
+    """Vollständigen System-Prompt zusammenbauen (v1.2)."""
     base = templates.get("system_prompts", {}).get(mode, "")
 
     features = settings.get("features", {})
@@ -124,6 +124,11 @@ def build_system_prompt(mode: str, vision: Dict, state: Dict,
 
     if features.get("inner_state_in_prompt", True):
         parts.append(_build_inner_state_text(state, templates))
+
+    # Global Instructions: Emergenz + Intent + Stabilitaet (v1.2, alle Modi)
+    global_instr = templates.get("global_instructions", "")
+    if global_instr:
+        parts.append("\n" + global_instr)
 
     return "".join(parts)
 
