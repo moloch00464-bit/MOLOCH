@@ -509,8 +509,12 @@ class MolochService:
                 else:
                     db = {}
                 db[emb_key] = emb_normalized.tolist()
-                with open(emb_path, 'w') as f:
-                    json.dump(db, f, indent=2)
+                import tempfile as _tf_mod
+                with _tf_mod.NamedTemporaryFile("w", dir=os.path.dirname(emb_path),
+                                                delete=False, suffix=".tmp") as tf:
+                    json.dump(db, tf, indent=2)
+                    _tmp = tf.name
+                os.replace(_tmp, emb_path)
                 logger.info(f"[TEACH] Embedding gespeichert: {emb_key} (sim={sim_score:.3f})")
 
                 # Face-DB im RAM neu laden

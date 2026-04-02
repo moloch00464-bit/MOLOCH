@@ -51,10 +51,14 @@ _LEARNED_POSITIONS_FILE = _os.path.expanduser("~/moloch/config/learned_patrol_po
 
 def _save_last_face_pos(pan: float, tilt: float):
     """Letzte Face-Position auf Disk speichern (max alle 10s)."""
+    import tempfile
     try:
-        with open(_LAST_FACE_POS_FILE, "w") as f:
-            json.dump({"pan": round(pan, 1), "tilt": round(tilt, 1),
-                       "ts": time.time()}, f)
+        data = {"pan": round(pan, 1), "tilt": round(tilt, 1), "ts": time.time()}
+        dir_ = _os.path.dirname(_LAST_FACE_POS_FILE)
+        with tempfile.NamedTemporaryFile("w", dir=dir_, delete=False, suffix=".tmp") as tf:
+            json.dump(data, tf)
+            tmp = tf.name
+        _os.replace(tmp, _LAST_FACE_POS_FILE)
     except Exception:
         pass
 
@@ -72,9 +76,14 @@ def _load_last_face_pos() -> tuple:
 
 def _save_learned_positions(positions: list):
     """Gelernte Patrol-Positionen persistent speichern."""
+    import tempfile
     try:
-        with open(_LEARNED_POSITIONS_FILE, "w") as f:
-            json.dump({"positions": positions, "ts": time.time()}, f)
+        data = {"positions": positions, "ts": time.time()}
+        dir_ = _os.path.dirname(_LEARNED_POSITIONS_FILE)
+        with tempfile.NamedTemporaryFile("w", dir=dir_, delete=False, suffix=".tmp") as tf:
+            json.dump(data, tf)
+            tmp = tf.name
+        _os.replace(tmp, _LEARNED_POSITIONS_FILE)
     except Exception:
         pass
 
