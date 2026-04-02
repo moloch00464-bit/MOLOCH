@@ -2641,6 +2641,27 @@ class MolochService:
                 self._voice_pipeline.set_voice(voice_id)
                 logger.info(f"[IPC] Voice: {voice_id}")
 
+        elif action == 'set_tts_speed_offset':
+            # SELF-TUNE: User Speed Offset persistent in settings.json schreiben
+            offset = cmd.get('offset', 0.0)
+            offset = max(-0.3, min(0.3, float(offset)))  # Limit: ±0.3
+            try:
+                import tempfile
+                settings_path = os.path.expanduser("~/moloch/config/settings.json")
+                with open(settings_path, "r") as f:
+                    data = json.load(f)
+                if "tts" not in data:
+                    data["tts"] = {}
+                data["tts"]["user_speed_offset"] = round(offset, 2)
+                fd, tmp = tempfile.mkstemp(dir=os.path.dirname(settings_path), suffix=".tmp")
+                with os.fdopen(fd, 'w') as f:
+                    json.dump(data, f, indent=2)
+                    f.write("\n")
+                os.replace(tmp, settings_path)
+                logger.info(f"[IPC] TTS Speed Offset: {offset}")
+            except Exception as e:
+                logger.error(f"[IPC] TTS Speed Offset Fehler: {e}")
+
         elif action == 'voice_test':
             if self._voice_pipeline:
                 text = cmd.get('text', 'Moloch ist online.')

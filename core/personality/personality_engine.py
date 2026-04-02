@@ -292,19 +292,35 @@ class PersonalityEngine:
     def is_berserker(self) -> bool:
         return self.mode == PersonalityMode.BERSERKER
 
+    def _get_user_speed_offset(self) -> float:
+        """User Speed Offset aus settings.json lesen (SELF-TUNE Parameter)."""
+        try:
+            import json
+            settings_path = os.path.join(os.path.expanduser("~/moloch"), "config", "settings.json")
+            with open(settings_path, "r") as f:
+                data = json.load(f)
+            return float(data.get("tts", {}).get("user_speed_offset", 0.0))
+        except Exception:
+            return 0.0
+
     @property
     def voice_config(self) -> VoiceConfig:
         """Get current voice configuration.
 
         Voice Integrity (Blueprint 5.3): User-gewaehlte Stimme hat ABSOLUTE Prioritaet.
         Kein Auto-Reset bei Zone-Wechsel. Nur "Auto" folgt der Zone.
+
+        SELF-TUNE: user_speed_offset aus settings.json wird auf Zone-Speed addiert.
+        Negativ = schneller, Positiv = langsamer. User sagt "red schneller" → offset sinkt.
         """
+        offset = self._get_user_speed_offset()
+
         # User-Override hat absolute Prioritaet
         if self._user_voice_override:
             default = VOICE_CONFIGS[self.mode]
             return VoiceConfig(
                 voice_id=self._user_voice_override,
-                speed=default.speed,
+                speed=max(0.8, min(1.5, default.speed + offset)),
                 pitch_shift=default.pitch_shift,
                 prefix_sound=default.prefix_sound,
             )
@@ -313,11 +329,17 @@ class PersonalityEngine:
         key = "guardian" if self.is_guardian else ("berserker" if self.is_berserker else "shadow")
         profile = self._identity.get("personalities", {}).get(key, {}).get("voice_profile")
         if not profile:
-            return default
+            return VoiceConfig(
+                voice_id=default.voice_id,
+                speed=max(0.8, min(1.5, default.speed + offset)),
+                pitch_shift=default.pitch_shift,
+                prefix_sound=default.prefix_sound,
+            )
         voice_name = PIPER_VOICE_MAP.get(profile.get("voice", ""), default.voice_id)
+        base_speed = profile.get("speed", default.speed)
         return VoiceConfig(
             voice_id=voice_name,
-            speed=profile.get("speed", default.speed),
+            speed=max(0.8, min(1.5, base_speed + offset)),
             pitch_shift=int(profile.get("pitch_shift", 0)) * 100,  # semitones -> cents
             prefix_sound=default.prefix_sound,
         )
