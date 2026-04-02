@@ -1075,9 +1075,8 @@ class AutonomousTracker:
             self.last_position_time = time.time()
             self.stats["position_reads"] += 1
 
-            # ST-Learner: Kamera-Bewegungen aufzeichnen wenn ST aktiv
-            if self._camera_smart_tracking_on:
-                self._st_learner.record(pos.pan, pos.tilt)
+            # Kamera-Dynamik immer aufzeichnen — lernt Geschwindigkeit unabhaengig von ST
+            self._st_learner.record(pos.pan, pos.tilt)
 
             # Drift erkennen und Target-Cache invalidieren wenn zu gross
             drift = abs(old_pan - pos.pan) + abs(old_tilt - pos.tilt)
@@ -1533,6 +1532,19 @@ class AutonomousTracker:
             self._posfrozen_last_pan = None
             self._posfrozen_start = None
 
+        # === ONVIF MOVE GUARD: Kamera physisch noch in Bewegung? ===
+        # MoveStatus kommt von GetStatus() alle ~400ms — kein Extra-ONVIF-Call noetig.
+        # Kamera haelt an wenn sie ihr Ziel erreicht (intern, ohne Moloch).
+        # Solange moving=True: BBox ist instabil, kein neuer Befehl.
+        if (self.camera and self.camera.current_position
+                and self.camera.current_position.moving):
+            ptz_debug.debug(
+                f"CAM_GUARD: Kamera bewegt sich noch (ONVIF MoveStatus) — Skip "
+                f"pos=({self.camera.current_position.pan:+.1f},"
+                f"{self.camera.current_position.tilt:+.1f})"
+            )
+            return
+
         # Anti-Overshoot: warte bis Kamera am letzten Ziel angekommen ist
         if self._target_pan is not None:
             dist = abs(self.last_known_pan - self._target_pan) + abs(self.last_known_tilt - self._target_tilt)
@@ -1627,6 +1639,20 @@ class AutonomousTracker:
                 f"pan_delta={pan_delta:+.2f}deg tilt_delta={tilt_delta:+.2f}deg "
                 f"speed={move_speed:.2f} err_pct={error_magnitude_pct:.3f}"
             )
+
+            # Adaptiver Cooldown: gelernte Kamera-Geschwindigkeit → Wartezeit berechnen
+            # Distanz / median_vel + 200ms Puffer. Nur wenn genuegend Samples vorhanden.
+            dyn = self._st_learner.get_learned_dynamics()
+            med_vel = dyn.get("median_vel_pan", 0)
+            if med_vel > 5.0 and dyn.get("samples", 0) >= 10:
+                dist = abs(pan_delta) + abs(tilt_delta)
+                settle_ms = (dist / med_vel) * 1000 + 200
+                extra_ms = max(0.0, settle_ms - self.config.move_cooldown_ms)
+                self.last_move_time += extra_ms / 1000  # Naechsten erlaubten Befehl nach hinten schieben
+                ptz_debug.debug(
+                    f"ADAPTIVE_CD: dist={dist:.1f}deg vel={med_vel:.1f}deg/s "
+                    f"settle={settle_ms:.0f}ms extra={extra_ms:.0f}ms"
+                )
 
             # Motor-Learner: vorherigen Cycle auswerten (post_error = aktueller error)
             if self._motor_learner and self._ml_prev_delta_pan != 0.0:
