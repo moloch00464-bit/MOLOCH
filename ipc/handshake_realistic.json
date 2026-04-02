@@ -1,0 +1,45 @@
+{
+  "version": "1.0",
+  "conversation_id": "2026-04-02_SIM02_realistic",
+  "sequence": 1,
+  "timestamp": "2026-04-02T23:00:12Z",
+
+  "_comment": "REALISTISCH: Python-Script macht Diagnose, DeepSeek R1 1.5B nur Zusammenfassung",
+
+  "from": "moloch",
+  "to": "claude-code",
+  "state": "request",
+  "priority": "normal",
+  "category": "self-tune",
+
+  "message": {
+    "_generated_by": "diagnose_engine.py (Python-Logik, kein LLM)",
+    "rule_triggered": "tracking_jitter",
+    "condition": "tracking_moves_per_minute > 60",
+    "measured": 82,
+    "threshold": 60,
+
+    "values_from_settings_json": {
+      "tracker.dead_zone_pct": 0.25,
+      "tracker.smooth_alpha": 0.3,
+      "tracker.move_cooldown_ms": 600,
+      "tracker.pan_gain": 0.4,
+      "tracker.tilt_gain": 0.15
+    },
+
+    "values_from_status_json": {
+      "tracking_moves_per_minute": 82,
+      "tracking_state": "tracking",
+      "fps": 20.1,
+      "cpu_temp": 52.3
+    },
+
+    "_deepseek_r1_summary": "tracking too many move. 82 per minute, should be under 60. smooth alpha is 0.3 maybe too low. cooldown 600ms allows too fast movement. suggest increase both value.",
+
+    "auto_fix_attempted": {
+      "action": "smooth_alpha 0.3 -> 0.35 (self-tune rule, step +0.05)",
+      "result": "moves_per_minute dropped to 71, still above 60",
+      "conclusion": "self-tune step too small, escalating to claude-code"
+    }
+  }
+}
