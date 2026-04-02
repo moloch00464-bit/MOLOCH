@@ -2641,26 +2641,44 @@ class MolochService:
                 self._voice_pipeline.set_voice(voice_id)
                 logger.info(f"[IPC] Voice: {voice_id}")
 
-        elif action == 'set_tts_speed_offset':
-            # SELF-TUNE: User Speed Offset persistent in settings.json schreiben
-            offset = cmd.get('offset', 0.0)
-            offset = max(-0.3, min(0.3, float(offset)))  # Limit: ±0.3
-            try:
-                import tempfile
-                settings_path = os.path.expanduser("~/moloch/config/settings.json")
-                with open(settings_path, "r") as f:
-                    data = json.load(f)
-                if "tts" not in data:
-                    data["tts"] = {}
-                data["tts"]["user_speed_offset"] = round(offset, 2)
-                fd, tmp = tempfile.mkstemp(dir=os.path.dirname(settings_path), suffix=".tmp")
-                with os.fdopen(fd, 'w') as f:
-                    json.dump(data, f, indent=2)
-                    f.write("\n")
-                os.replace(tmp, settings_path)
-                logger.info(f"[IPC] TTS Speed Offset: {offset}")
-            except Exception as e:
-                logger.error(f"[IPC] TTS Speed Offset Fehler: {e}")
+        elif action == 'self_tune':
+            # SELF-TUNE: Beliebigen Parameter in settings.json aendern
+            # Format: {"action": "self_tune", "section": "tts", "key": "user_speed_offset", "value": -0.10}
+            # Optional: "min", "max" fuer Wertebereich-Validierung
+            section = cmd.get('section', '')
+            key = cmd.get('key', '')
+            value = cmd.get('value')
+            if not section or not key or value is None:
+                logger.warning("[SELF-TUNE] Fehlende Parameter: section, key, value")
+            else:
+                try:
+                    import tempfile
+                    # Wertebereich pruefen (falls angegeben)
+                    val_min = cmd.get('min')
+                    val_max = cmd.get('max')
+                    if isinstance(value, (int, float)):
+                        if val_min is not None:
+                            value = max(float(val_min), value)
+                        if val_max is not None:
+                            value = min(float(val_max), value)
+                        value = round(value, 3)
+
+                    settings_path = os.path.expanduser("~/moloch/config/settings.json")
+                    with open(settings_path, "r") as f:
+                        data = json.load(f)
+                    old_value = data.get(section, {}).get(key, "N/A")
+                    if section not in data:
+                        data[section] = {}
+                    data[section][key] = value
+                    # Atomar schreiben
+                    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(settings_path), suffix=".tmp")
+                    with os.fdopen(fd, 'w') as f:
+                        json.dump(data, f, indent=2)
+                        f.write("\n")
+                    os.replace(tmp, settings_path)
+                    logger.info(f"[SELF-TUNE] {section}.{key}: {old_value} -> {value}")
+                except Exception as e:
+                    logger.error(f"[SELF-TUNE] Fehler: {e}")
 
         elif action == 'voice_test':
             if self._voice_pipeline:
