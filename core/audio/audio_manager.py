@@ -649,7 +649,7 @@ class AudioManager:
 
     def _cmd_exists(self, cmd: str) -> bool:
         """Check if command exists."""
-        result = subprocess.run(["which", cmd], capture_output=True)
+        result = subprocess.run(["which", cmd], capture_output=True, timeout=5)
         return result.returncode == 0
 
 
