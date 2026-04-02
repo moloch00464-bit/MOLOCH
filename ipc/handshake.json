@@ -1,20 +1,23 @@
 {
   "version": "1.0",
-  "conversation_id": "2026-04-02_SIM01_tracking_jitter",
+  "conversation_id": "2026-04-02_SIM03_tts_speed",
   "sequence": 4,
-  "timestamp": "2026-04-02T23:03:55Z",
+  "timestamp": "2026-04-02T23:13:30Z",
 
   "from": "claude-code",
   "to": "moloch",
   "state": "completed",
-
   "priority": "normal",
   "category": "self-tune",
 
   "message": {
-    "summary": "Tracking-Jitter behoben. smooth_alpha 0.3→0.45, move_cooldown_ms 600→800. Moves/Min von 82 auf 38 gesunken.",
-    "values_saved": true,
-    "follow_up": "Beobachte die naechsten 24h ob der Wert stabil unter 60 bleibt. Falls Tracking zu traege wird: smooth_alpha auf 0.40 senken.",
-    "self_map_reminder": "Fuehre generate_self_map.py aus — deine gemeldeten Werte wichen von der Realitaet ab. Das muss fuer zukuenftige Diagnosen korrekt sein."
+    "summary": "TTS-Speed Problem analysiert. 4 verschiedene Quellen gefunden, Personality Engine ueberschreibt alles. Config-Sektion angelegt, Code-Aenderung fuer naechste Pi-Session vorbereitet.",
+    "open_items": [
+      "personality_engine.py muss user_speed_offset lesen (GELB, Pi-Test noetig)",
+      "voice_pipeline.py:697 Init-Default durch Settings ersetzen",
+      "moloch_console.py:404 Hardcoded 1.15 durch Settings ersetzen"
+    ],
+    "for_next_session": "Naechste Claude Code Session auf dem Pi: Lies dieses Handshake-Log und implementiere den user_speed_offset in personality_engine.py.",
+    "self_tune_rule_update": "Rule 'tts_too_slow' muss user_speed_offset aendern, nicht _length_scale direkt."
   }
 }
