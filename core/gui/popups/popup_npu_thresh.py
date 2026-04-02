@@ -64,6 +64,10 @@ MODEL_DEFS = [
     ("YOLOv8m Person", "yolov8m_h10.hef (21 MB)", True, [
         ("Confidence", "thresholds", "yolo_conf",
          0.1, 0.9, 0.5, 0.05, "", "Person Detection (hoeher = weniger Fehlalarme)"),
+        ("Min. Hoehe", "thresholds", "person_min_height",
+         0.03, 0.40, 0.10, 0.01, "", "Min. BBox-Hoehe relativ zum Bild (0.10 = 10%)"),
+        ("Min. Flaeche", "thresholds", "person_min_area",
+         0.005, 0.20, 0.08, 0.005, "", "Min. BBox-Flaeche relativ zum Bild (0.08 = 8%)"),
     ]),
     ("Face Attributes", "face_attr_resnet_v1_18.hef (1.2 MB)", True, [
         # Kein eigener Threshold — laeuft immer mit SCRFD
@@ -71,6 +75,10 @@ MODEL_DEFS = [
     ("Pose YOLOv8s", "yolov8s_pose_h10.hef (14 MB)", True, [
         ("Confidence", "thresholds", "pose_conf",
          0.1, 0.9, 0.6, 0.05, "", "Pose/Keypoint Detection Confidence"),
+        ("NMS Ueberlappung", "thresholds", "pose_nms",
+         0.1, 0.9, 0.70, 0.05, "", "Doppelte Pose-Detections filtern (hoeher = aggressiver)"),
+        ("Min. Keypoint Score", "thresholds", "pose_kpt_thresh",
+         0.1, 0.9, 0.50, 0.05, "", "Keypoints unter diesem Score werden ausgeblendet"),
     ]),
     ("Person-ReID", "repvgg_a0_person_reid_512.hef (5.1 MB)", False, [
         # INAKTIV: Valve-Oeffnung crasht (cv2::resize Bug in kompiliertem SO)
@@ -79,6 +87,8 @@ MODEL_DEFS = [
     ("Hand Landmark", "hand_landmark_lite.hef (5.3 MB)", False, [
         ("Confidence", "thresholds", "hand_conf",
          0.1, 0.9, 0.65, 0.05, "", "Hand/Gesten Detection Confidence"),
+        ("Presence Thresh", "thresholds", "hand_presence",
+         0.1, 0.9, 0.50, 0.05, "", "Ab welchem Score eine Hand als 'da' gilt"),
         # INAKTIV: Valve-Oeffnung crasht (cv2::resize Bug in kompiliertem SO)
     ]),
 ]
@@ -125,7 +135,7 @@ class NpuThreshPopup:
         self.win.transient(parent)
         self.win.title("NPU & MPO Einstellungen")
         self.win.configure(bg=BG_DARK)
-        self.win.geometry("480x750")
+        self.win.geometry("480x850")
         self.win.resizable(False, True)
         self.win.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -388,11 +398,19 @@ class NpuThreshPopup:
 
         # Service-Command senden (je nach Sektion)
         if section == "thresholds":
-            self.service._write_command("action", {
-                "action": "set_threshold",
-                "attr": key,
-                "value": val,
-            })
+            # Person-Filter Keys gehen an Tracker, Rest an InferenceEngine
+            if key in ("person_min_height", "person_min_area"):
+                self.service._write_command("action", {
+                    "action": "set_tracker_param",
+                    "param": key,
+                    "value": val,
+                })
+            else:
+                self.service._write_command("action", {
+                    "action": "set_threshold",
+                    "attr": key,
+                    "value": val,
+                })
         elif section == "mpo":
             self.service._write_command("action", {
                 "action": "set_mpo_param",
