@@ -21,16 +21,17 @@ from typing import Optional
 
 logger = logging.getLogger("RGBLed")
 
-# Zustand → LED Mapping (DeepSeek Spec)
+# Zustand → LED Mapping
 ZUSTAND_LED_MAP = {
-    "idle":             "LED:orange pulsierend langsam",
+    "verbinden":        "LED:blau blinkend mittel",      # Verbindet sich mit Pi / kein WiFi-Mic
+    "idle":             "LED:gruen statisch",             # WiFi-Mic verbunden, Moloch bereit
     "person_erkannt":   "LED:gruen statisch",
     "markus_erkannt":   "LED:gelb statisch",
     "shadow_modus":     "LED:rot pulsierend schnell",
     "fehler":           "LED:rot blinkend schnell",
     "nachtmodus":       "LED:orange pulsierend langsam",
-    "listening":        "LED:cyan pulsierend schnell",   # PTT aktiv — rotierendes Cyan
-    "thinking":         "LED:gelb blinkend mittel",      # Whisper verarbeitet — Gelb blinkend
+    "listening":        "LED:rot pulsierend schnell",    # PTT aktiv — Zuhören
+    "thinking":         "LED:gelb blinkend mittel",      # Whisper verarbeitet
     "speaking":         "LED:magenta pulsierend mittel", # TTS spricht
     "tracking":         "LED:gruen pulsierend mittel",
     "enrollment":       "LED:gelb blinkend mittel",
@@ -47,8 +48,9 @@ class RGBLedController:
         self._udp_port = udp_port
         self._event_bus = event_bus
         self._sock: Optional[socket.socket] = None
-        self._current_state = "idle"
+        self._current_state = "verbinden"
         self._current_mood = "guardian"  # guardian oder shadow
+        self._wifi_mic_connected = False  # True sobald WiFi-Mic UDP-Pakete ankommen
         self._lock = threading.Lock()
 
     # =========================================================================
@@ -67,13 +69,14 @@ class RGBLedController:
             self._event_bus.on("perception.person_detected", self._on_person)
             self._event_bus.on("perception.face_recognized", self._on_face)
             self._event_bus.on("audio.listening_start", self._on_listening)
-            self._event_bus.on("whisper.processing", self._on_thinking)    # Whisper denkt
+            self._event_bus.on("whisper.processing", self._on_thinking)
             self._event_bus.on("audio.speaking_start", self._on_speaking)
             self._event_bus.on("audio.speaking_end", self._on_idle)
+            self._event_bus.on("audio.mic_source_changed", self._on_mic_source_changed)
             logger.info("Event-Bus Subscriptions aktiv")
 
-        # Idle-Zustand setzen
-        self.set_state("idle")
+        # Blau blinkend bis WiFi-Mic verbindet
+        self.set_state("verbinden")
 
     def stop(self):
         """Aufraeumen."""
@@ -165,9 +168,27 @@ class RGBLedController:
             # Guardian Modus: Magenta pulsierend (Standard)
             self.set_state("speaking")
 
+    def _on_mic_source_changed(self, data):
+        """WiFi-Mic verbunden oder getrennt — LED entsprechend anpassen."""
+        source = data.get("source", "none")
+        if source == "wifi":
+            self._wifi_mic_connected = True
+            if self._current_state in ("idle", "verbinden"):
+                self._current_state = ""  # Reset damit set_state nicht skippt
+                self.set_state("idle")    # → Gruen statisch
+        else:
+            self._wifi_mic_connected = False
+            if self._current_state in ("idle", "verbinden"):
+                self._current_state = ""
+                self.set_state("verbinden")  # → Blau blinkend
+
     def _on_idle(self, data):
-        """Zurueck zu Idle."""
-        self.set_state("idle")
+        """Zurueck zu Idle — Gruen wenn WiFi-Mic verbunden, sonst Blau."""
+        self._current_state = ""  # Reset damit set_state nicht skippt
+        if self._wifi_mic_connected:
+            self.set_state("idle")
+        else:
+            self.set_state("verbinden")
 
 
 # =============================================================================
