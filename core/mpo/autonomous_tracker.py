@@ -286,10 +286,11 @@ class TrackingConfig:
     # -----------------------------------------------------------------------
     fov_horizontal: float = 110.0
     fov_vertical: float = 65.0
-    pan_gain: float = 0.65          # Voll aggressiv — schnell auf Ziel
-    tilt_gain: float = 0.50         # Tilt ebenso
-    max_step_pan: float = 25.0      # Grosse Spruenge erlaubt
-    max_step_tilt: float = 18.0     # Tilt auch
+    pan_gain: float = 0.45          # Reduziert (war 0.65) — weniger Ueberschwinger
+    tilt_gain: float = 0.40         # Reduziert (war 0.50)
+    max_step_pan: float = 15.0      # Kleinere Schritte (war 25.0) — Kamera laeuft nicht drüber
+    max_step_tilt: float = 12.0     # Tilt auch reduziert (war 18.0)
+    face_settle_time: float = 0.35  # Sekunden einfrieren wenn Gesicht frisch erkannt
     min_step_deg: float = 0.2       # Feinste Restkorrektur
     tracking_speed: float = 1.0     # Motoren Vollgas
     move_cooldown_ms: float = 50.0   # 50ms — 20 Updates/s maximal
@@ -483,7 +484,7 @@ class AutonomousTracker:
         # Anti-Overshoot: letztes Ziel tracken
         self._target_pan = None
         self._target_tilt = None
-        self._target_arrival_thresh = 5.0  # Grad - etwas toleranter (war 3.0, blockierte zu oft)
+        self._target_arrival_thresh = 10.0  # Grad — groesserer Puffer (war 5.0), Kamera muss wirklich stehen
         # EMA Glaettung fuer smooth tracking
         self._smooth_x = None
         self._smooth_y = None
@@ -491,6 +492,9 @@ class AutonomousTracker:
         self._prev_error_x = 0.0
         self._prev_error_y = 0.0
         self._prev_error_time = 0.0
+        # Face-Settle: kurz einfrieren wenn Gesicht frisch im Bild erscheint
+        self._prev_had_face = False
+        self._face_settle_start = None
         # Motor-Learner: vorherigen Fehler + Delta merken (fuer record_step naechster Cycle)
         self._ml_prev_error_x = 0.0
         self._ml_prev_error_y = 0.0
@@ -1391,6 +1395,23 @@ class AutonomousTracker:
         if debug_log:
             logger.info(f"[TRACK] error=({error_x:+.0f},{error_y:+.0f})px mag={error_magnitude:.0f}px "
                        f"state={self.state.value} pos=({self.last_known_pan:+.1f},{self.last_known_tilt:+.1f})deg")
+
+        # === FACE-SETTLE: Wenn Gesicht frisch im Person-BBox erscheint → kurz einfrieren ===
+        # Gibt der Face-BBox Zeit sich zu stabilisieren bevor wir auf sie korrigieren.
+        just_got_face = detection.has_face and not self._prev_had_face
+        self._prev_had_face = detection.has_face
+        if just_got_face:
+            self._face_settle_start = now
+            logger.debug("[FACE-SETTLE] Gesicht frisch erkannt — Settle-Timer gestartet")
+        if self._face_settle_start is not None:
+            if now - self._face_settle_start < self.config.face_settle_time:
+                ptz_debug.debug(
+                    f"FACE_SETTLE {now - self._face_settle_start:.2f}s "
+                    f"< {self.config.face_settle_time:.2f}s — kein Move"
+                )
+                return  # BBox stabilisiert sich, keine Kamerabewegung
+            else:
+                self._face_settle_start = None  # Settle abgeschlossen
 
         # SOFORT in TRACKING State — kein Dwell, kein Warten
         if self.state != TrackerState.TRACKING and self.state != TrackerState.FROZEN and self.state != TrackerState.COAST:
