@@ -23,6 +23,7 @@ Singleton: get_llm_bridge()
 
 import logging
 import os
+import requests
 import subprocess
 import threading
 import time
@@ -52,6 +53,8 @@ class LocalLLMBridge:
         self._ollama_fail_count: int = 0
         self._ollama_backoff_until: float = 0.0
         self.OLLAMA_BACKOFF_SEC: int = 300  # 5 Minuten Cloud-Backoff
+        # Wiederverwendbare HTTP-Session — verhindert RAM-Leak durch offene Sockets
+        self._http = requests.Session()
         self._check_ollama()
         logger.info(
             f"[LLM-BRIDGE] Init — hailo-ollama={'JA' if self._ollama_available else 'NEIN'}"
@@ -68,12 +71,15 @@ class LocalLLMBridge:
 
     def _is_ollama_running(self) -> bool:
         """Pruefen ob hailo-ollama Prozess laeuft (Port 8000 erreichbar)."""
+        resp = None
         try:
-            import requests
-            resp = requests.get(f"{OLLAMA_HOST}/api/tags", timeout=2)
+            resp = self._http.get(f"{OLLAMA_HOST}/api/tags", timeout=2)
             return resp.status_code == 200
         except Exception:
             return False
+        finally:
+            if resp is not None:
+                resp.close()
 
     def set_vision_callbacks(self, pause_fn: Callable, resume_fn: Callable):
         """Callbacks fuer Vision-Pipeline Pause/Resume registrieren."""
@@ -182,14 +188,14 @@ class LocalLLMBridge:
             logger.debug("[LLM-BRIDGE] hailo-ollama nicht erreichbar")
             return None
 
+        resp = None
         try:
-            import requests
             messages = []
             if system:
                 messages.append({"role": "system", "content": system})
             messages.append({"role": "user", "content": prompt})
 
-            resp = requests.post(
+            resp = self._http.post(
                 f"{OLLAMA_HOST}/api/chat",
                 json={"model": model, "messages": messages, "stream": False,
                       "options": {"num_predict": max_tokens,
@@ -234,6 +240,10 @@ class LocalLLMBridge:
             logger.warning(f"[LLM-BRIDGE] hailo-ollama ({model}) Fehler: {e}")
             return None
 
+        finally:
+            if resp is not None:
+                resp.close()
+
     def _load_api_key(self, provider: str) -> Optional[str]:
         """API Key aus config/api_keys.json laden."""
         keys_path = os.path.join(os.path.dirname(os.path.dirname(
@@ -256,13 +266,13 @@ class LocalLLMBridge:
         api_key = self._load_api_key("deepseek")
         if not api_key:
             return None
+        resp = None
         try:
-            import requests
             messages = []
             if system:
                 messages.append({"role": "system", "content": system})
             messages.append({"role": "user", "content": prompt})
-            resp = requests.post(
+            resp = self._http.post(
                 "https://api.deepseek.com/v1/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}"},
                 json={"model": "deepseek-chat", "messages": messages,
@@ -274,6 +284,9 @@ class LocalLLMBridge:
         except Exception as e:
             logger.debug(f"[LLM-BRIDGE] DeepSeek Fehler: {e}")
             return None
+        finally:
+            if resp is not None:
+                resp.close()
 
     def get_status(self) -> Dict:
         now = time.monotonic()

@@ -1031,7 +1031,11 @@ class AudioPopup:
         if self._vu_process:
             try:
                 self._vu_process.terminate()
-                self._vu_process.wait(timeout=2)
+                try:
+                    self._vu_process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    self._vu_process.kill()
+                    self._vu_process.wait()
             except Exception:
                 pass
             self._vu_process = None
@@ -1176,7 +1180,11 @@ class AudioPopup:
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 time.sleep(3)
                 proc.send_signal(signal.SIGINT)
-                proc.wait(timeout=3)
+                try:
+                    proc.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
             except Exception as e:
                 logger.error(f"[AUDIO] USB Mic Test failed: {e}")
                 self.win.after(0, self._mic_test_error,

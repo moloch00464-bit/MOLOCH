@@ -215,8 +215,12 @@ class AudioSourcePipeline:
         if self._usb_process:
             try:
                 self._usb_process.terminate()
-                self._usb_process.wait(timeout=2)
-            except:
+                try:
+                    self._usb_process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    self._usb_process.kill()
+                    self._usb_process.wait()
+            except Exception:
                 pass
             self._usb_process = None
 

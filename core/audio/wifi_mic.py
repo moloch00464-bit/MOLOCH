@@ -115,6 +115,8 @@ class WiFiMic:
         # Locks (ein Lock pro Stream, chunk-basiert = kurze Lock-Zeiten)
         self._lock_16k = threading.Lock()
         self._lock_48k = threading.Lock()
+        # Separater Lock fuer Empfangs-Zeitstempel (Health vs Recv Thread)
+        self._lock_ts = threading.Lock()
 
         # Threads
         self._thread_16k: Optional[threading.Thread] = None
@@ -385,7 +387,8 @@ class WiFiMic:
                 now = time.monotonic()
 
                 if rate == 16000:
-                    self._last_recv_16k = now
+                    with self._lock_ts:
+                        self._last_recv_16k = now
                     self._packets_recv_16k += 1
                     self._packets_total_16k += 1
                     if self._recv_start_16k == 0.0:
@@ -418,7 +421,8 @@ class WiFiMic:
 
                 else:
                     # 48kHz: direkt in Ringpuffer (kein Jitter-Buffer)
-                    self._last_recv_48k = now
+                    with self._lock_ts:
+                        self._last_recv_48k = now
                     self._packets_recv_48k += 1
                     self._packets_total_48k += 1
 
@@ -506,24 +510,29 @@ class WiFiMic:
 
     def _health_loop(self):
         """Prueft ob UDP-Pakete noch ankommen."""
-        initial_deadline = time.time() + 10
+        # Konsistent monotonic verwenden (kein mix mit time.time())
+        initial_deadline = time.monotonic() + 10
 
         while self._running:
             time.sleep(2)
             now = time.monotonic()
 
+            with self._lock_ts:
+                last_16k = self._last_recv_16k
+                last_48k = self._last_recv_48k
+
             if self._connected_16k:
-                if now - self._last_recv_16k > self.HEALTH_TIMEOUT:
+                if now - last_16k > self.HEALTH_TIMEOUT:
                     self._connected_16k = False
                     logger.warning("[16kHz] Keine Pakete seit 2s")
 
             if self._connected_48k:
-                if now - self._last_recv_48k > self.HEALTH_TIMEOUT:
+                if now - last_48k > self.HEALTH_TIMEOUT:
                     self._connected_48k = False
                     logger.warning("[48kHz] Keine Pakete seit 2s")
 
             # Fallback auf USB
-            if not self._connected_16k and time.time() > initial_deadline:
+            if not self._connected_16k and now > initial_deadline:
                 if self._source != "usb":
                     self._source = "usb"
                     logger.info("WiFi-Mic weg, Fallback USB")

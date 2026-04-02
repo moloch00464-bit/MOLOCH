@@ -309,7 +309,17 @@ class TTSEngine:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL
             )
-            raw_audio, _ = piper_proc.communicate(input=text.encode('utf-8'))
+            try:
+                raw_audio, _ = piper_proc.communicate(
+                    input=text.encode('utf-8'), timeout=10)
+            except subprocess.TimeoutExpired:
+                piper_proc.kill()
+                piper_proc.communicate()
+                logger.warning("[TTS] Piper Timeout nach 10s — Prozess beendet")
+                return False
+            except Exception:
+                piper_proc.kill()
+                raise
 
             if not raw_audio:
                 return False
