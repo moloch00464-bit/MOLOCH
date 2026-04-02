@@ -324,8 +324,12 @@ class DailyLearner:
                 "embedding_learned": learned
             }
             meta_path = filepath.with_suffix(".json")
-            with open(meta_path, 'w') as f:
-                json.dump(meta, f, indent=2)
+            import tempfile as _tf
+            with _tf.NamedTemporaryFile("w", dir=str(meta_path.parent),
+                                        delete=False, suffix=".tmp") as tf:
+                json.dump(meta, tf, indent=2)
+                _tmp = tf.name
+            import os as _os; _os.replace(_tmp, meta_path)
 
             logger.info(f"[DailyLearner] Snapshot: {filename}" +
                        (" + full_frame" if full_frame is not None else "") +

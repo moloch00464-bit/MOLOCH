@@ -424,8 +424,11 @@ class WhisperPopup:
                 },
             }
 
-            with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
+            import tempfile as _tf, os as _os
+            tmp = SETTINGS_PATH + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(settings, f, indent=2, ensure_ascii=False)
+            _os.replace(tmp, SETTINGS_PATH)
 
             self._lbl_save_status.config(text="Gespeichert!", fg=ACCENT_GREEN)
             self.win.after(2000, lambda: self._lbl_save_status.config(text=""))
