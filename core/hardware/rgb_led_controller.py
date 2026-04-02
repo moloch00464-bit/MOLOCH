@@ -63,16 +63,16 @@ class RGBLedController:
         logger.info(f"RGB-LED Controller gestartet (ESP: {self._esp_ip}:{self._udp_port})")
 
         # Event-Bus abonnieren
-        if self._event_bus and hasattr(self._event_bus, 'on'):
-            self._event_bus.on("mood.changed", self._on_mood_changed)
-            self._event_bus.on("zone.changed", self._on_zone_changed)
-            self._event_bus.on("perception.person_detected", self._on_person)
-            self._event_bus.on("perception.face_recognized", self._on_face)
-            self._event_bus.on("audio.listening_start", self._on_listening)
-            self._event_bus.on("whisper.processing", self._on_thinking)
-            self._event_bus.on("audio.speaking_start", self._on_speaking)
-            self._event_bus.on("audio.speaking_end", self._on_idle)
-            self._event_bus.on("audio.mic_source_changed", self._on_mic_source_changed)
+        if self._event_bus and hasattr(self._event_bus, 'subscribe'):
+            self._event_bus.subscribe("mood.changed", self._on_mood_changed)
+            self._event_bus.subscribe("zone.changed", self._on_zone_changed)
+            self._event_bus.subscribe("perception.person_detected", self._on_person)
+            self._event_bus.subscribe("perception.face_recognized", self._on_face)
+            self._event_bus.subscribe("audio.listening_start", self._on_listening)
+            self._event_bus.subscribe("whisper.processing", self._on_thinking)
+            self._event_bus.subscribe("audio.speaking_start", self._on_speaking)
+            self._event_bus.subscribe("audio.speaking_end", self._on_idle)
+            self._event_bus.subscribe("audio.mic_source_changed", self._on_mic_source_changed)
             logger.info("Event-Bus Subscriptions aktiv")
 
         # Blau blinkend bis WiFi-Mic verbindet
