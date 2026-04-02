@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "vision_enabled": false,
+  "vision_enabled": true,
   "thresholds": {
     "scrfd_conf": 0.5,
     "scrfd_nms": 0.45,
