@@ -284,6 +284,17 @@ class TappasPipeline:
             logger.warning("Pipeline laeuft bereits")
             return
 
+        # vision_enabled=false → Pipeline komplett ueberspringen (RAM sparen)
+        try:
+            import json, os
+            _cfg = os.path.expanduser("~/moloch/config/settings.json")
+            with open(_cfg) as _f:
+                if not json.load(_f).get("vision_enabled", True):
+                    logger.info("[TAPPAS] vision_enabled=false — Pipeline deaktiviert")
+                    return
+        except Exception:
+            pass  # Standardmaessig aktiv wenn settings nicht lesbar
+
         logger.info("Starte TAPPAS Multi-Model Pipeline...")
         logger.info(f"  RTSP: {self._rtsp_url.split('@')[1] if '@' in self._rtsp_url else self._rtsp_url}")
         logger.info(f"  Modelle: YOLO + SCRFD + ArcFace (vdevice-group-id={VDEVICE_GROUP_ID})")
