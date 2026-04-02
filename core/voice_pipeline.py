@@ -1202,6 +1202,7 @@ class VoicePipeline:
             logger.info("[VOICE] Keine Sprache erkannt")
             self._store_whisper_info(f"[Keine Sprache erkannt ({whisper_duration_ms:.0f}ms)]")
             self._whisper_status = "Idle"
+            self._publish_event("audio.speaking_end")  # LED zurueck zu IDLE
             return
 
         text = _sanitize_text(text)
@@ -1210,6 +1211,7 @@ class VoicePipeline:
             logger.info("[VOICE] Nach Halluzinations-Filter: leer — verwerfen")
             self._store_whisper_info("[Halluzination gefiltert]")
             self._whisper_status = "Idle"
+            self._publish_event("audio.speaking_end")  # LED zurueck zu IDLE
             return
         logger.info(f"[VOICE] Transkription ({whisper_duration_ms:.0f}ms): {text}")
         self._emit_message("Du", text)
@@ -1985,6 +1987,8 @@ class VoicePipeline:
         finally:
             with self._api_lock:
                 self._api_in_flight = False
+            # LED zurueck zu IDLE (Sicherheitsnetz — falls TTS nicht aufgerufen wurde)
+            self._publish_event("audio.speaking_end")
             # LLM-Indikator zuruecksetzen — Gespraechsturn beendet
             try:
                 from core.autonomy.local_llm_bridge import get_llm_bridge
