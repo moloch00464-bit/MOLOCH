@@ -75,8 +75,17 @@ class RGBLedController:
             self._event_bus.subscribe("audio.mic_source_changed", self._on_mic_source_changed)
             logger.info("Event-Bus Subscriptions aktiv")
 
-        # Blau blinkend bis WiFi-Mic verbindet
-        self.set_state("verbinden")
+        # Initialzustand: WiFiMic-Status direkt pruefen (Event koennte schon verpasst sein)
+        try:
+            from core.audio.wifi_mic import get_wifi_mic
+            if get_wifi_mic()._connected_16k:
+                self._wifi_mic_connected = True
+                self.set_state("idle")   # Gruen — schon verbunden
+                logger.info("LED-Start: WiFi-Mic bereits verbunden → gruen")
+            else:
+                self.set_state("verbinden")  # Blau blinkend
+        except Exception:
+            self.set_state("verbinden")
 
     def stop(self):
         """Aufraeumen."""
