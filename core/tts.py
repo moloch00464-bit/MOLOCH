@@ -158,7 +158,7 @@ class TTSEngine:
         ]
         result = subprocess.run(
             cmd, input=text.encode('utf-8'),
-            capture_output=True, check=True)
+            capture_output=True, check=True, timeout=30)
         return result.stdout
 
     def _build_pw_cmd(self, sample_rate: int) -> list:
@@ -215,7 +215,7 @@ class TTSEngine:
     def _play_raw(self, raw_audio: bytes, sample_rate: int):
         """Play raw PCM via HDMI (pw-cat) + parallel an ReSpeaker senden."""
         self._send_to_respeaker(raw_audio)
-        subprocess.run(self._build_pw_cmd(sample_rate), input=raw_audio, check=True)
+        subprocess.run(self._build_pw_cmd(sample_rate), input=raw_audio, check=True, timeout=120)
 
     def set_speed(self, speed: float):
         """TTS Geschwindigkeit aendern. 0.8=schnell, 1.0=normal, 1.2=langsam."""
@@ -329,7 +329,7 @@ class TTSEngine:
 
             # HDMI via pw-cat (blockierend bis fertig)
             subprocess.run(self._build_pw_cmd(sample_rate),
-                           input=raw_audio, stderr=subprocess.DEVNULL)
+                           input=raw_audio, stderr=subprocess.DEVNULL, timeout=120)
 
             logger.info("[TTS] Ausgabe fertig")
             return True
@@ -379,7 +379,7 @@ class TTSEngine:
                     str(pitched_file),
                     "pitch", str(PITCH_SHIFT)
                 ]
-                subprocess.run(sox_cmd, check=True, capture_output=True)
+                subprocess.run(sox_cmd, check=True, capture_output=True, timeout=30)
                 play_file = pitched_file
             else:
                 play_file = wav_file
@@ -392,15 +392,17 @@ class TTSEngine:
                 "--really-quiet",
                 str(play_file)
             ]
-            subprocess.run(mpv_cmd, check=True)
+            subprocess.run(mpv_cmd, check=True, timeout=120)
 
         except subprocess.CalledProcessError as e:
             logger.error(f"Audio playback failed: {e}")
             # Fallback zu pw-cat wenn mpv/sox fehlschlaegt
             try:
-                subprocess.run(self._build_pw_cmd(sample_rate), input=raw_audio, check=True)
+                subprocess.run(self._build_pw_cmd(sample_rate), input=raw_audio, check=True, timeout=120)
             except Exception:
                 raise
+        except subprocess.TimeoutExpired as e:
+            logger.error(f"[TTS] Playback Timeout: {e}")
         finally:
             # Cleanup temp files
             try:
