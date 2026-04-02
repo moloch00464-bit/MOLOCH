@@ -286,15 +286,15 @@ class TrackingConfig:
     # -----------------------------------------------------------------------
     fov_horizontal: float = 110.0
     fov_vertical: float = 65.0
-    pan_gain: float = 0.45          # Reduziert (war 0.65) — weniger Ueberschwinger
-    tilt_gain: float = 0.40         # Reduziert (war 0.50)
-    max_step_pan: float = 15.0      # Kleinere Schritte (war 25.0) — Kamera laeuft nicht drüber
-    max_step_tilt: float = 12.0     # Tilt auch reduziert (war 18.0)
+    pan_gain: float = 0.28          # Sanft (war 0.45→0.65) — Consumer-PTZ braucht kleine Schritte
+    tilt_gain: float = 0.28         # Gleich wie Pan (war 0.40)
+    max_step_pan: float = 12.0      # Max-Sprung begrenzt (war 15.0)
+    max_step_tilt: float = 10.0     # Tilt ebenfalls (war 12.0)
     face_settle_time: float = 0.35  # Sekunden einfrieren wenn Gesicht frisch erkannt
     min_step_deg: float = 0.2       # Feinste Restkorrektur
-    tracking_speed: float = 1.0     # Motoren Vollgas
-    move_cooldown_ms: float = 50.0   # 50ms — 20 Updates/s maximal
-    smooth_alpha: float = 0.70      # Fast direkte Reaktion, minimaler EMA-Filter
+    tracking_speed: float = 0.70    # Reduziert (war 1.0) — praeziseres Bremsen moeglich
+    move_cooldown_ms: float = 300.0  # 300ms (war 50ms) — Kamera bekommt Zeit zum Ankommen
+    smooth_alpha: float = 0.40      # Mehr EMA-Daempfung (war 0.70) — weniger Jitter waehrend Kamerabewegung
 
     # Kamera Hardware-Limits (SonoffCameraController clampt intern,
     # aber Tracker muss gecachte Position AUCH clampen!)
@@ -374,7 +374,7 @@ class TrackingConfig:
     # coast_resume_px:     COAST verlassen wenn error wieder groesser
     # tilt_boost_threshold_px: Tilt-Verstaerkung ab diesem Pixel-Error
     # tilt_boost_factor:   Multiplikator fuer Tilt-Delta bei grossem Error
-    frozen_threshold_px: float = 20.0      # < 20px -> FROZEN (war 30 → zu frueh eingefroren)
+    frozen_threshold_px: float = 30.0      # < 30px -> FROZEN (war 20 → zu klein, Micro-Ruckeln)
     coast_threshold_px: float = 25.0       # COAST bei < 25px (war 40)
     coast_resume_px: float = 50.0          # COAST aufwachen bei > 50px (war 35 → Ping-Pong mit frozen)
     tilt_boost_threshold_px: float = 80.0  # Tilt-Boost ab 80px tilt-Error
