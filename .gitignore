@@ -2,6 +2,9 @@
 # M.O.L.O.C.H. .gitignore
 # ===========================
 
+# --- Claude Code Internals ---
+.claude/
+
 # --- Credentials & Secrets ---
 API KEYS/
 config/api_keys.json

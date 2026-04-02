@@ -172,7 +172,7 @@ class CapabilityMonitor:
     def _scan_hardware(self) -> dict:
         """Prueft Hardware-Verfuegbarkeit."""
         hw = {
-            "brain": {"device": "Raspberry Pi 5", "ram_gb": 4, "ip": "192.168.178.24"},
+            "brain": {"device": "Raspberry Pi 5", "ram_gb": 4, "ip": "192.168.178.30"},
             "npu": self._check_npu(),
             "camera": self._check_camera(),
             "audio_input": self._check_audio_input(),

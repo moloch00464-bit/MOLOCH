@@ -16,7 +16,7 @@ AUDIO:   SmartMic BT + ReSpeaker Lite USB, Piper TTS via HDMI
 KUEHL:   Noctua NF-A2x20 PWM (30% = 48°C bei Volllast)
 STROM:   Pico Power 5 USV (7.5V Akku, Schutz vor Stromausfall)
 LLM:     hailo-ollama (Port 8000) — Qwen2.5-1.5B + DeepSeek R1 Distill lokal auf NPU
-PI IP:   192.168.178.24, SSH User: molochzuhause
+PI IP:   192.168.178.30, SSH User: molochzuhause
 ```
 
 ### WICHTIG — Hardware-Eigenheiten
@@ -197,7 +197,7 @@ Benannt nach Christian (FRANCOR CEO, RoboCup Rescue):
 
 | Gerät | IP | Protokoll |
 |-------|-----|-----------|
-| Pi5 (Brain) | 192.168.178.24 | SSH |
+| Pi5 (Brain) | 192.168.178.30 | SSH |
 | Sonoff CAM-PT2 | 192.168.178.25 | RTSP/ONVIF |
 
 ---
