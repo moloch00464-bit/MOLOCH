@@ -332,6 +332,9 @@ class PreviewModule:
                             if len(bbox) != 4:
                                 continue
                             x1, y1, x2, y2 = bbox
+                            # Geister-Detections filtern (BBox zu klein)
+                            if (x2 - x1) < 0.03 or (y2 - y1) < 0.03:
+                                continue
                             px1 = int(x1 * cw)
                             py1 = int(y1 * ch)
                             px2 = int(x2 * cw)
@@ -355,8 +358,10 @@ class PreviewModule:
                             draw.text((px1 + 2, max(0, py1 - 12)), label, fill=color)
 
                             # Face-Landmarks: 5 SCRFD-Punkte (gruen)
+                            # Format: flache Liste [x1,y1,x2,y2,...] von SCRFD
                             if cls == "face" and d.get("landmarks"):
-                                for (lx, ly) in d["landmarks"]:
+                                lm_flat = d["landmarks"]
+                                for lx, ly in zip(lm_flat[::2], lm_flat[1::2]):
                                     lpx, lpy = int(lx * cw), int(ly * ch)
                                     draw.ellipse([lpx-3, lpy-3, lpx+3, lpy+3], fill=(0, 255, 100))
 

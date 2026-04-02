@@ -2048,6 +2048,9 @@ class MolochService:
                     status["face_id"] = getattr(pframe, 'face_id', None)
                     status["face_confidence"] = round(getattr(pframe, 'face_confidence', 0.0), 3)
                     status["face_similarity"] = round(getattr(pframe, 'face_similarity', 0.0), 3)
+                    status["emotion"]   = getattr(pframe, 'emotion', None)
+                    status["gender"]    = getattr(pframe, 'gender', None)
+                    status["age_range"] = getattr(pframe, 'age_range', None)
                     status["mode"] = "tappas"
                 # Detektionen fuer Panel-BBox-Overlay (normalisierte Koordinaten [0-1])
                 if hasattr(_inf, 'get_detections'):

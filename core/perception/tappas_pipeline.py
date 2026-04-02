@@ -1327,7 +1327,9 @@ class TappasPipeline:
                         "face_similarity": face.get("similarity", 0),
                         "embedding": face.get("embedding"),
                         "gender": face.get("gender"),
-                        "smiling": face.get("emotion") == "happy" if face.get("emotion") else None,
+                        "age_range": face.get("age_range"),
+                        "emotion": face.get("emotion"),
+                        "smiling": face.get("emotion") in ("happy", "freudig") if face.get("emotion") else None,
                         "track_id": None,
                         "landmarks": face.get("landmarks"),  # 5 SCRFD-Punkte [[x,y],...] normalisiert [0,1]
                     }
@@ -1874,8 +1876,12 @@ class TappasPipeline:
             best_attr_face = max(faces, key=lambda f: f.get("confidence", 0))
             if best_attr_face.get("gender"):
                 pf.gender = best_attr_face["gender"]
-            if best_attr_face.get("smiling") is not None:
-                pf.emotion = "happy" if best_attr_face["smiling"] else "neutral"
+            if best_attr_face.get("age_range"):
+                pf.age_range = best_attr_face["age_range"]
+            if best_attr_face.get("emotion"):
+                pf.emotion = best_attr_face["emotion"]
+            elif best_attr_face.get("smiling") is not None:
+                pf.emotion = "freudig" if best_attr_face["smiling"] else "neutral"
 
         # Perception Router: Szenario + aktive Modelle
         pf.scenario = self._scheduler.get_scenario()
