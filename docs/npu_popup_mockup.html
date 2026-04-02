@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>NPU & MPO Einstellungen — Mockup</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0d1117; color: #c9d1d9; font-family: 'Courier New', monospace; padding: 20px; }
+  .window { background: #1a1a2e; border: 2px solid #16213e; border-radius: 8px; width: 480px; margin: 0 auto; }
+  .titlebar { background: #16213e; padding: 8px 12px; font-size: 14px; color: #e6e6e6; border-radius: 6px 6px 0 0; display: flex; justify-content: space-between; }
+  .titlebar .close { color: #ff4444; cursor: pointer; }
+  .section { margin: 8px 10px; border: 1px solid #2a2a4a; border-radius: 4px; padding: 8px; }
+  .section-title { color: #8b949e; font-size: 12px; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px; }
+  .status-row { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; font-size: 11px; }
+  .led-green { color: #00ff66; }
+  .led-red { color: #ff4444; }
+  .hef-info { color: #666; font-size: 10px; }
+  .slider-row { display: flex; align-items: center; padding: 3px 0; }
+  .slider-label { width: 180px; font-size: 12px; color: #8b949e; flex-shrink: 0; }
+  .slider-label.disabled { color: #444; }
+  .slider-track { flex: 1; height: 6px; background: #2a2a4a; border-radius: 3px; position: relative; margin: 0 8px; }
+  .slider-fill { height: 100%; background: #16213e; border-radius: 3px; position: relative; }
+  .slider-fill.active { background: #1e88e5; }
+  .slider-fill.disabled { background: #333; }
+  .slider-thumb { width: 14px; height: 14px; background: #e6e6e6; border-radius: 50%; position: absolute; right: -7px; top: -4px; }
+  .slider-thumb.disabled { background: #555; }
+  .slider-value { width: 65px; text-align: right; font-size: 12px; color: #ffd700; flex-shrink: 0; }
+  .slider-value.disabled { color: #555; }
+  .tooltip { font-size: 10px; color: #999; padding: 0 0 4px 16px; }
+  .tooltip.disabled { color: #444; }
+  .new-badge { background: #ff6600; color: white; font-size: 9px; padding: 1px 4px; border-radius: 3px; margin-left: 4px; }
+  .cb-row { display: flex; gap: 12px; padding: 4px 8px; font-size: 12px; }
+  .cb-row label { color: #c9d1d9; }
+  .btn-reset { background: #cc0000; color: white; border: none; padding: 6px 14px; font-family: 'Courier New'; font-size: 12px; cursor: pointer; border-radius: 4px; margin: 8px 10px; }
+  .btn-reset:hover { background: #ff2222; }
+  .feedback { color: #666; font-size: 11px; display: inline-block; margin-left: 10px; }
+  .bottom-bar { padding: 4px 10px 10px; display: flex; align-items: center; }
+  .divider { border-top: 1px solid #2a2a4a; margin: 4px 10px; }
+</style>
+</head>
+<body>
+
+<div class="window">
+  <div class="titlebar">
+    <span>NPU & MPO Einstellungen</span>
+    <span class="close">X</span>
+  </div>
+
+  <!-- SCRFD -->
+  <div class="section">
+    <div class="section-title">SCRFD 10G (Face)</div>
+    <div class="status-row"><span class="led-green">&#9679;</span> <span class="led-green">AKTIV</span> <span class="hef-info">scrfd_10g.hef (5.8 MB)</span></div>
+    <div class="slider-row">
+      <span class="slider-label">Confidence</span>
+      <div class="slider-track"><div class="slider-fill active" style="width:55%"><div class="slider-thumb"></div></div></div>
+      <span class="slider-value">0.50</span>
+    </div>
+    <div class="tooltip">Gesichtserkennung (hoeher = weniger Fehlalarme)</div>
+    <div class="slider-row">
+      <span class="slider-label">NMS Ueberlappung</span>
+      <div class="slider-track"><div class="slider-fill active" style="width:37%"><div class="slider-thumb"></div></div></div>
+      <span class="slider-value">0.40</span>
+    </div>
+    <div class="tooltip">Doppel-Detections filtern (hoeher = aggressiver)</div>
+  </div>
+
+  <!-- ArcFace -->
+  <div class="section">
+    <div class="section-title">ArcFace MobileFaceNet</div>
+    <div class="status-row"><span class="led-green">&#9679;</span> <span class="led-green">AKTIV</span> <span class="hef-info">arcface_mobilefacenet.hef (2.6 MB)</span></div>
+    <div class="slider-row">
+      <span class="slider-label">Aehnlichkeit</span>
+      <div class="slider-track"><div class="slider-fill active" style="width:58%"><div class="slider-thumb"></div></div></div>
+      <span class="slider-value">0.65</span>
+    </div>
+    <div class="tooltip">Wie aehnlich muss ein Gesicht sein? (hoeher = strenger)</div>
+  </div>
+
+  <!-- YOLOv8m Person -->
+  <div class="section">
+    <div class="section-title">YOLOv8m Person</div>
+    <div class="status-row"><span class="led-green">&#9679;</span> <span class="led-green">AKTIV</span> <span class="hef-info">yolov8m_h10.hef (21 MB)</span></div>
+    <div class="slider-row">
+      <span class="slider-label">Confidence</span>
+      <div class="slider-track"><div class="slider-fill active" style="width:50%"><div class="slider-thumb"></div></div></div>
+      <span class="slider-value">0.50</span>
+    </div>
+    <div class="tooltip">Person Detection (hoeher = weniger Fehlalarme)</div>
+    <div class="slider-row">
+      <span class="slider-label">Min. Hoehe <span class="new-badge">NEU</span></span>
+      <div class="slider-track"><div class="slider-fill active" style="width:19%"><div class="slider-thumb"></div></div></div>
+      <span class="slider-value">0.10</span>
+    </div>
+    <div class="tooltip">Min. BBox-Hoehe relativ zum Bild (0.10 = 10%)</div>
+    <div class="slider-row">
+      <span class="slider-label">Min. Flaeche <span class="new-badge">NEU</span></span>
+      <div class="slider-track"><div class="slider-fill active" style="width:38%"><div class="slider-thumb"></div></div></div>
+      <span class="slider-value">0.080</span>
+    </div>
+    <div class="tooltip">Min. BBox-Flaeche relativ zum Bild (0.08 = 8%)</div>
+  </div>
+
+  <!-- Face Attributes -->
+  <div class="section">
+    <div class="section-title">Face Attributes</div>
+    <div class="status-row"><span class="led-green">&#9679;</span> <span class="led-green">AKTIV</span> <span class="hef-info">face_attr_resnet_v1_18.hef (1.2 MB)</span></div>
+    <div style="padding: 4px 8px; font-size: 11px; color: #666;">Kein eigener Threshold — laeuft mit SCRFD</div>
+  </div>
+
+  <!-- Pose YOLOv8s -->
+  <div class="section">
+    <div class="section-title">Pose YOLOv8s</div>
+    <div class="status-row"><span class="led-green">&#9679;</span> <span class="led-green">AKTIV</span> <span class="hef-info">yolov8s_pose_h10.hef (14 MB)</span></div>
+    <div class="slider-row">
+      <span class="slider-label">Confidence</span>
+      <div class="slider-track"><div class="slider-fill active" style="width:63%"><div class="slider-thumb"></div></div></div>
+      <span class="slider-value">0.60</span>
+    </div>
+    <div class="tooltip">Pose/Keypoint Detection Confidence</div>
+    <div class="slider-row">
+      <span class="slider-label">NMS Ueberlappung <span class="new-badge">NEU</span></span>
+      <div class="slider-track"><div class="slider-fill active" style="width:75%"><div class="slider-thumb"></div></div></div>
+      <span class="slider-value">0.70</span>
+    </div>
+    <div class="tooltip">Doppelte Pose-Detections filtern (hoeher = aggressiver)</div>
+    <div class="slider-row">
+      <span class="slider-label">Min. Keypoint Score <span class="new-badge">NEU</span></span>
+      <div class="slider-track"><div class="slider-fill active" style="width:50%"><div class="slider-thumb"></div></div></div>
+      <span class="slider-value">0.50</span>
+    </div>
+    <div class="tooltip">Keypoints unter diesem Score werden ausgeblendet</div>
+  </div>
+
+  <!-- Person-ReID -->
+  <div class="section">
+    <div class="section-title">Person-ReID</div>
+    <div class="status-row"><span class="led-red">&#9679;</span> <span class="led-red">INAKTIV</span> <span class="hef-info">repvgg_a0_person_reid_512.hef (5.1 MB)</span></div>
+    <div style="padding: 4px 8px; font-size: 11px; color: #444;">Valve-Crash Bug — HEF geladen, Valve geschlossen</div>
+  </div>
+
+  <!-- Hand Landmark -->
+  <div class="section">
+    <div class="section-title">Hand Landmark</div>
+    <div class="status-row"><span class="led-red">&#9679;</span> <span class="led-red">INAKTIV</span> <span class="hef-info">hand_landmark_lite.hef (5.3 MB)</span></div>
+    <div class="slider-row">
+      <span class="slider-label disabled">Confidence</span>
+      <div class="slider-track"><div class="slider-fill disabled" style="width:69%"><div class="slider-thumb disabled"></div></div></div>
+      <span class="slider-value disabled">0.65</span>
+    </div>
+    <div class="tooltip disabled">Hand/Gesten Detection Confidence</div>
+    <div class="slider-row">
+      <span class="slider-label disabled">Presence Thresh <span class="new-badge">NEU</span></span>
+      <div class="slider-track"><div class="slider-fill disabled" style="width:50%"><div class="slider-thumb disabled"></div></div></div>
+      <span class="slider-value disabled">0.50</span>
+    </div>
+    <div class="tooltip disabled">Ab welchem Score eine Hand als 'da' gilt</div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- MPO -->
+  <div class="section">
+    <div class="section-title">Persoenlichkeits-Dynamik (MPO)</div>
+    <div class="slider-row">
+      <span class="slider-label">Tension Decay (tau)</span>
+      <div class="slider-track"><div class="slider-fill active" style="width:40%"><div class="slider-thumb"></div></div></div>
+      <span class="slider-value">300s</span>
+    </div>
+    <div class="tooltip">Wie schnell baut sich Anspannung ab</div>
+    <div class="slider-row">
+      <span class="slider-label">Dominance Drift</span>
+      <div class="slider-track"><div class="slider-fill active" style="width:18%"><div class="slider-thumb"></div></div></div>
+      <span class="slider-value">0.010/min</span>
+    </div>
+    <div class="tooltip">Drift-Geschwindigkeit Richtung Guardian</div>
+    <div class="slider-row">
+      <span class="slider-label">Hysterese Schwelle</span>
+      <div class="slider-track"><div class="slider-fill active" style="width:40%"><div class="slider-thumb"></div></div></div>
+      <span class="slider-value">0.15</span>
+    </div>
+    <div class="tooltip">Min. Dominance-Delta fuer Wechsel</div>
+    <div class="slider-row">
+      <span class="slider-label">Berserker Trigger</span>
+      <div class="slider-track"><div class="slider-fill active" style="width:67%"><div class="slider-thumb"></div></div></div>
+      <span class="slider-value">0.95</span>
+    </div>
+    <div class="tooltip">Tension-Level fuer Berserker-Aktivierung</div>
+    <div class="slider-row">
+      <span class="slider-label">Thermal Damping Start</span>
+      <div class="slider-track"><div class="slider-fill active" style="width:67%"><div class="slider-thumb"></div></div></div>
+      <span class="slider-value">70C</span>
+    </div>
+    <div class="tooltip">CPU-Temp ab der Tension gedaempft wird</div>
+  </div>
+
+  <!-- Gesten -->
+  <div class="section">
+    <div class="section-title">Gestenerkennung</div>
+    <div class="cb-row">
+      <label><input type="checkbox" checked> Winken</label>
+      <label><input type="checkbox" checked> Daumen hoch</label>
+      <label><input type="checkbox" checked> Stop/Halt</label>
+      <label><input type="checkbox" checked> Zeigen</label>
+    </div>
+    <div class="slider-row">
+      <span class="slider-label">Sensitivity</span>
+      <div class="slider-track"><div class="slider-fill active" style="width:50%"><div class="slider-thumb"></div></div></div>
+      <span class="slider-value">0.50</span>
+    </div>
+    <div class="tooltip">Gesten-Empfindlichkeit (hoeher = empfindlicher)</div>
+  </div>
+
+  <div class="bottom-bar">
+    <button class="btn-reset">RESET DEFAULTS</button>
+    <span class="feedback">Auto-Save aktiv</span>
+  </div>
+</div>
+
+<p style="text-align: center; margin-top: 20px; color: #666; font-size: 12px;">
+  MOLOCH NPU Popup Mockup — <span class="new-badge">NEU</span> markiert neue Slider (Person-Filter, Pose-NMS, Hand-Presence)
+</p>
+
+</body>
+</html>
