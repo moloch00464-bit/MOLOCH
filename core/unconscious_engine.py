@@ -127,20 +127,29 @@ class UnconsciousEngine:
 
         now = time.time()
 
-        # Werte extrahieren
+        # Werte extrahieren — Feldnamen aus moloch_status.json
         tension = float(status.get("tension", 0.0))
-        last_face_ts = float(status.get("last_seen_face", 0.0))
-        temp = float(status.get("system_temp", 0.0))
-        fps = float(status.get("fps", 20.0))
-        ram_mb = float(status.get("ram_mb", 0.0))
-        tracking_moves = float(status.get("tracking_moves_per_minute", 0.0))
-        tracking_state = str(status.get("tracking_state", ""))
+
+        # fps ist ein dict {'scrfd': X, 'yolov8m': X, 'total': X}
+        fps_raw = status.get("fps", 20.0)
+        fps = float(fps_raw.get("total", 20.0) if isinstance(fps_raw, dict) else fps_raw)
+
+        # CPU-Temp und RAM aus watchdog-dict
+        watchdog = status.get("watchdog", {})
+        temp = float(watchdog.get("cpu_temp", 0.0)) if isinstance(watchdog, dict) else 0.0
+        ram_pct = float(watchdog.get("ram_percent", 0.0)) if isinstance(watchdog, dict) else 0.0
+        ram_mb = ram_pct * 4096.0 / 100.0  # Pi5 hat 4096 MB
+
+        # Tracking-Zustand aus bridge-dict
+        bridge = status.get("bridge", {})
+        tracking_state = str(bridge.get("state", "")) if isinstance(bridge, dict) else ""
+        tracking_moves = float(bridge.get("moves_per_minute", 0.0)) if isinstance(bridge, dict) else 0.0
+
+        # Gesicht: direkt aus status
         face_sim = float(status.get("face_similarity", 0.0))
         face_id = str(status.get("face_id", ""))
-        npu_scenario = str(status.get("npu_scenario", ""))
-
-        face_age = now - last_face_ts if last_face_ts > 0 else 9999.0
-        face_active = face_age < FACE_TIMEOUT_S
+        face_active = bool(status.get("face_detected", False))
+        npu_scenario = str(status.get("npu_sched_mode", status.get("npu_stage", "")))
 
         # Trend-Tracking aktualisieren
         self._ram_history.append((now, ram_mb))
