@@ -2646,9 +2646,75 @@ class MolochService:
 
         elif action == 'chat_message':
             text = cmd.get('text', '').strip()
+            sender = cmd.get('sender', 'Du')
             if text and self._voice_pipeline:
-                self._voice_pipeline.process_text_message(text)
-                logger.info(f"[IPC] Chat: '{text[:50]}...'")
+                self._voice_pipeline.process_text_message(text, sender=sender)
+                logger.info(f"[IPC] Chat ({sender}): '{text[:50]}...'")
+
+        # === Claude-MCP Kommunikationskanäle ===
+
+        elif action == 'core_nudge':
+            # Emotionalen Input in CoreIntegrator injizieren
+            # Format: {"action": "core_nudge", "key": "curiosity", "value": 0.8}
+            key = cmd.get('key', '')
+            value = cmd.get('value', 0.0)
+            if key and self._core_integrator:
+                try:
+                    val = float(value)
+                    self._core_integrator.update_input("claude", key, val)
+                    logger.info(f"[IPC] Core-Nudge: claude.{key} = {val:.2f}")
+                    # Im Chat sichtbar machen
+                    if self._voice_pipeline:
+                        self._voice_pipeline._emit_message(
+                            "Claude", f"[nudge] {key} = {val:.2f}")
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"[IPC] Core-Nudge Fehler: {e}")
+
+        elif action == 'trigger_spontaneous':
+            # Spontanen Kommentar ausloesen (Moloch redet "von sich aus")
+            # Format: {"action": "trigger_spontaneous", "reason": "..."}
+            reason = cmd.get('reason', 'claude_impulse')
+            if self._voice_pipeline:
+                self._voice_pipeline._emit_message(
+                    "Claude", f"[provoke] {reason}")
+                self._voice_pipeline.trigger_spontaneous(reason)
+                logger.info(f"[IPC] Spontan-Trigger: {reason}")
+
+        elif action == 'trigger_reflect':
+            # Selbstreflexion ausloesen
+            if self._voice_pipeline:
+                self._voice_pipeline._emit_message(
+                    "Claude", "[reflect] Selbstreflexion angestossen...")
+            try:
+                from core.autonomy.introspection import get_introspection
+                _svc = self
+
+                def _do_reflect_ipc():
+                    result = get_introspection().reflect()
+                    if not result:
+                        logger.info("[IPC] Reflect: kein Ergebnis")
+                        return
+                    t_nudge = result.get("tension_nudge", 0.0)
+                    d_nudge = result.get("dominance_nudge", 0.0)
+                    if (t_nudge or d_nudge) and _svc._core_integrator:
+                        ci = _svc._core_integrator
+                        if t_nudge:
+                            ci.update_input("introspection", "respect_score",
+                                            abs(t_nudge) if t_nudge < 0 else 0.0)
+                        if d_nudge > 0:
+                            ci.update_input("introspection", "voice_activity",
+                                            abs(d_nudge))
+                    comment = result.get("comment")
+                    if comment and _svc._voice_pipeline:
+                        _svc._voice_pipeline.trigger_spontaneous(comment)
+                    logger.info(f"[IPC] Reflect fertig: {result}")
+
+                import threading
+                threading.Thread(target=_do_reflect_ipc, daemon=True,
+                                 name="IPC-Reflect").start()
+                logger.info("[IPC] Reflect gestartet")
+            except Exception as e:
+                logger.warning(f"[IPC] Reflect Fehler: {e}")
 
         elif action == 'toggle_voice_output':
             if self._voice_pipeline:

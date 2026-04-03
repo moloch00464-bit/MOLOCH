@@ -2,17 +2,25 @@
 """
 M.O.L.O.C.H. MCP Server
 ========================
-Gibt Claude Code direkten Zugriff auf MOLOCH Live-Daten.
+Gibt Claude Code direkten Zugriff auf MOLOCH Live-Daten + Kommunikation.
 
-Tools:
+Diagnose-Tools:
   moloch_status()         — Live System-Status (FPS, Temp, Face-ID, NPU)
   moloch_logs(n, filter)  — Letzte N Zeilen journalctl
   moloch_snapshot()       — Kamera-Frame aus SHM als Base64-PNG
   moloch_service(action)  — start/stop/restart/status
-  moloch_audit()          — Vollständiger Audit-Lauf
+  moloch_audit()          — Vollstaendiger Audit-Lauf
   moloch_read(path)       — Config/Log-Datei lesen (nur erlaubte Pfade)
   moloch_git_log(n)       — Letzte N Commits
   moloch_dmesg()          — Letzte dmesg Zeilen (NPU/GStreamer Fehler)
+
+Kommunikations-Kanaele (Claude <-> MOLOCH):
+  moloch_nudge(key, value)   — Emotionalen Input injizieren (Moloch merkt nichts)
+  moloch_provoke(reason)     — Spontanen Kommentar ausloesen (Moloch redet "von sich aus")
+  moloch_reflect()           — Selbstreflexion triggern
+  moloch_say(text)           — Echtes Gespraech (Text -> Claude/DeepSeek -> TTS)
+  moloch_conversation(n)     — Letzte N Nachrichten lesen (was hat Moloch gesagt?)
+  moloch_ipc(action, params) — Generischer IPC-Befehl
 
 Start: python3 ~/moloch/mcp/moloch_mcp_server.py
 Config: .mcp.json im Moloch-Verzeichnis
@@ -24,12 +32,18 @@ import subprocess
 import struct
 import mmap
 import tempfile
+import glob as glob_mod
+import time
+from datetime import date
 from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 MOLOCH_DIR = Path("/home/molochzuhause/moloch")
 STATUS_SHM = "/dev/shm/moloch_status.json"
 FRAME_SHM = "/dev/shm/moloch_frame"
+CONVERSATION_DIR = Path("/mnt/moloch-data/memory/conversations")
+CMD_DIR = "/tmp"
+CMD_PREFIX = "moloch_cmd_"
 
 # Erlaubte Pfade fuer moloch_read (Sicherheit)
 ALLOWED_READ_PREFIXES = [
@@ -388,6 +402,184 @@ def moloch_low_light() -> str:
         )
     except Exception as e:
         return f"FEHLER: {e}"
+
+
+# =========================================================================
+# IPC-Hilfsfunktion: Command-Datei schreiben
+# =========================================================================
+
+def _send_ipc(action: str, params: dict = None) -> bool:
+    """IPC-Command als /tmp/moloch_cmd_NNNN.json schreiben."""
+    # Naechste freie Nummer
+    pattern = os.path.join(CMD_DIR, f"{CMD_PREFIX}*.json")
+    existing = glob_mod.glob(pattern)
+    max_num = 0
+    for path in existing:
+        try:
+            num_str = os.path.basename(path).replace(CMD_PREFIX, "").replace(".json", "")
+            max_num = max(max_num, int(num_str))
+        except ValueError:
+            continue
+    num = max_num + 1
+    cmd = {"action": action}
+    if params:
+        cmd.update(params)
+    path = os.path.join(CMD_DIR, f"{CMD_PREFIX}{num:04d}.json")
+    # Atomic write
+    fd, tmp = tempfile.mkstemp(dir=CMD_DIR, suffix=".json")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(cmd, f)
+        os.replace(tmp, path)
+        return True
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        return False
+
+
+# =========================================================================
+# Kommunikations-Kanaele: Claude <-> MOLOCH
+# =========================================================================
+
+@mcp.tool()
+def moloch_nudge(key: str, value: float) -> str:
+    """Emotionalen Input in MOLOCHs CoreIntegrator injizieren (subtil, Moloch merkt nichts).
+
+    Beeinflusst Tension/Dominance/Zone indirekt ueber das Input-System.
+    Source ist immer "claude" — erscheint im CoreIntegrator als claude.key = value.
+
+    Args:
+        key: Emotions-Key (z.B. "curiosity", "respect_score", "voice_activity",
+             "face_detected", "threat_level", "novelty")
+        value: Staerke 0.0 bis 1.0
+    """
+    try:
+        val = max(0.0, min(1.0, float(value)))
+    except (ValueError, TypeError):
+        return f"FEHLER: value muss eine Zahl sein, bekommen: {value}"
+    if not key:
+        return "FEHLER: key darf nicht leer sein"
+    ok = _send_ipc("core_nudge", {"key": key, "value": val})
+    if ok:
+        return f"Nudge gesendet: claude.{key} = {val:.2f}"
+    return "FEHLER: IPC-Command konnte nicht geschrieben werden"
+
+
+@mcp.tool()
+def moloch_provoke(reason: str) -> str:
+    """Spontanen Kommentar von MOLOCH ausloesen — Moloch redet 'von sich aus'.
+
+    Moloch formuliert basierend auf seiner aktuellen Stimmung (Tension/Zone).
+    Der reason ist nur der Anlass, nicht der Text den Moloch sagt.
+    Cooldown: max 1x pro 60 Sekunden.
+
+    Args:
+        reason: Anlass fuer den Kommentar (z.B. "Markus guckt gelangweilt",
+                "Es ist still im Raum", "Neue Person betreten")
+    """
+    if not reason:
+        return "FEHLER: reason darf nicht leer sein"
+    ok = _send_ipc("trigger_spontaneous", {"reason": reason})
+    if ok:
+        return f"Spontan-Trigger gesendet: '{reason}' — Moloch wird kommentieren (wenn Cooldown abgelaufen)"
+    return "FEHLER: IPC-Command konnte nicht geschrieben werden"
+
+
+@mcp.tool()
+def moloch_reflect() -> str:
+    """Selbstreflexion ausloesen — Moloch schaut in sich hinein.
+
+    Nutzt das Introspection-Modul. Moloch analysiert seinen eigenen Zustand,
+    nudged ggf. seine Tension/Dominance, und spricht optional einen Kommentar.
+    """
+    ok = _send_ipc("trigger_reflect")
+    if ok:
+        return "Reflect-Trigger gesendet — Moloch reflektiert (laeuft async im Hintergrund)"
+    return "FEHLER: IPC-Command konnte nicht geschrieben werden"
+
+
+@mcp.tool()
+def moloch_say(text: str) -> str:
+    """Echtes Gespraech mit MOLOCH — Text wird wie eine User-Nachricht verarbeitet.
+
+    Moloch denkt via Claude/DeepSeek API nach und antwortet per TTS.
+    Die Antwort erscheint im Konversations-Log und kann mit moloch_conversation() gelesen werden.
+
+    Args:
+        text: Nachricht an Moloch (z.B. "Wie geht es dir?", "Was siehst du gerade?")
+    """
+    if not text or not text.strip():
+        return "FEHLER: text darf nicht leer sein"
+    ok = _send_ipc("chat_message", {"text": text.strip(), "sender": "Claude"})
+    if ok:
+        return f"Nachricht gesendet: '{text.strip()[:80]}' — Moloch verarbeitet (async). Antwort mit moloch_conversation() lesen."
+    return "FEHLER: IPC-Command konnte nicht geschrieben werden"
+
+
+@mcp.tool()
+def moloch_conversation(n: int = 10) -> str:
+    """Letzte N Nachrichten aus MOLOCHs Konversations-Log lesen.
+
+    Zeigt wer (user/moloch) was gesagt hat. Damit kann Claude MOLOCHs Antworten lesen.
+
+    Args:
+        n: Anzahl Nachrichten (default 10, max 50)
+    """
+    n = min(max(1, n), 50)
+    today = date.today().isoformat()
+    conv_file = CONVERSATION_DIR / f"{today}.json"
+    if not conv_file.exists():
+        return f"Keine Konversation fuer heute ({today}) gefunden."
+    try:
+        with open(conv_file, "r") as f:
+            messages = json.load(f)
+        if not messages:
+            return "Konversation ist leer."
+        # Letzte N Nachrichten
+        recent = messages[-n:]
+        lines = [f"=== Letzte {len(recent)} Nachrichten (von {len(messages)} heute) ==="]
+        for msg in recent:
+            sender = msg.get("sender", "?").upper()
+            text = msg.get("text", "")
+            source = msg.get("source", "")
+            ts = msg.get("timestamp", "")
+            # Timestamp kuerzen auf HH:MM:SS
+            if ts and len(ts) > 19:
+                ts = ts[11:19]
+            elif ts and "T" in ts:
+                ts = ts.split("T")[1][:8]
+            prefix = f"[{ts}]" if ts else ""
+            src_tag = f" ({source})" if source else ""
+            lines.append(f"{prefix} {sender}{src_tag}: {text}")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"FEHLER beim Lesen: {e}"
+
+
+@mcp.tool()
+def moloch_ipc(action: str, params: str = "{}") -> str:
+    """Generischer IPC-Befehl an MOLOCH senden.
+
+    Fuer alle IPC-Aktionen die kein eigenes Tool haben.
+    Siehe moloch_service.py fuer verfuegbare Actions.
+
+    Args:
+        action: IPC-Action (z.B. 'reload_face_db', 'set_threshold', 'spotify_play')
+        params: JSON-String mit Parametern (z.B. '{"model": "scrfd", "value": 0.8}')
+    """
+    if not action:
+        return "FEHLER: action darf nicht leer sein"
+    try:
+        p = json.loads(params) if params and params != "{}" else {}
+    except json.JSONDecodeError as e:
+        return f"FEHLER: params ist kein gueltiges JSON: {e}"
+    ok = _send_ipc(action, p)
+    if ok:
+        return f"IPC gesendet: action='{action}' params={p}"
+    return "FEHLER: IPC-Command konnte nicht geschrieben werden"
 
 
 if __name__ == "__main__":
