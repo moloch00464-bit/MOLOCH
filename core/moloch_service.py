@@ -2032,6 +2032,7 @@ class MolochService:
                 "frame_age": self._read_shm_frame_age() if USE_TAPPAS else (round(time.time() - self._cam._last_frame_write, 1) if self._cam._last_frame_write else -1),
                 "frozen_restarts": self._cam._frozen_restart_count,
                 "watchdog": self._system_watchdog.get_status() if hasattr(self, '_system_watchdog') and self._system_watchdog else {},
+                "worker_health": _inf.get_worker_health() if USE_TAPPAS and hasattr(_inf, 'get_worker_health') else {},
                 "fps": {k: round(v, 1) for k, v in fps_snapshot.items()},
                 "thresholds": {
                     "scrfd_conf": getattr(_inf, 'scrfd_conf_val', 0.6),
