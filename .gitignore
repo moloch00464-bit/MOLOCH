@@ -3,7 +3,9 @@
 # ===========================
 
 # --- Claude Code Internals ---
-.claude/
+# .claude/ wird NICHT ignoriert — settings.json + hooks muessen im Repo sein
+.claude/todos/
+.claude/projects/
 
 # --- Credentials & Secrets ---
 API KEYS/

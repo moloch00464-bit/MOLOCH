@@ -1,15 +1,17 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python3:*)",
-      "Read(//usr/local/**)",
-      "Bash(dpkg -L hailo-tappas)",
-      "Bash(dpkg -L hailo-tappas-apps)",
-      "Bash(nm -D /usr/lib/aarch64-linux-gnu/hailo/tappas/post_processes/libface_attributes_post.so)",
-      "Bash(xargs -I{} sh -c 'python3 -c \"\"from hailo_platform import HEF; h=HEF\\(\\\\\"\"$1\\\\\"\"\\); outs=[o.name for o in h.get_output_vstream_infos\\(\\)]; [print\\(\\\\\"\"$1\\\\\"\",o\\) for o in outs if \\\\\"\"fc3\\\\\"\" in o]\"\" _ {}')",
-      "Bash(vcgencmd measure_clock arm)",
-      "Bash(vcgencmd get_throttled)",
-      "Read(//sys/devices/virtual/thermal/cooling_device0/**)"
+      "Bash(*)",
+      "Read(*)",
+      "Write(*)",
+      "Edit(*)",
+      "Glob(*)",
+      "Grep(*)",
+      "WebFetch(*)",
+      "WebSearch(*)",
+      "Agent(*)",
+      "NotebookEdit(*)",
+      "mcp__moloch__*"
     ]
   }
 }
