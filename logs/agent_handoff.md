@@ -1,102 +1,128 @@
-# Agent Handoff — 2026-04-01
-# Session: ecstatic-banach (Claude Sonnet 4.6)
-# Status: VOLLSTAENDIG ABGESCHLOSSEN
+# Agent Handoff — 2026-04-02
+# Session: Cloud-Session (Claude Opus 4.6)
+# Branch: claude/investigate-windows-compatibility-7kbRm
+# Status: ALLE AENDERUNGEN GEPUSHT — OPUS REVIEW EMPFOHLEN
 
 ---
 
 ## WAS DIESE SESSION ERLEDIGT HAT
 
-### 1. Two-Stage Hybrid Pipeline (aus vorheriger Session fortgesetzt)
+### 1. Hooks & Automatisierung (Codewort: HOOKWIRE)
+- 5 Hook-Scripts in .claude/hooks/ (Session-Start, Pre-Edit, Post-Edit, Pre-Bash, Stop)
+- NEVER-Regeln automatisch erzwungen (Pan-Vorzeichen blockiert, Syntax-Check nach Edit)
+- Permissions erweitert auf allow-all (AUTONOMIE-REGEL in CLAUDE.md)
+- GitHub Action fuer Config-Audit bei jedem Push
+- Datei: HOOKWIRE.md
 
-Architektur: GStreamer nur noch YOLO, alle anderen Modelle als HailoRT-Direct Worker
-- core/perception/vision_workers.py — BaseWorker + ResultCollector
-- core/perception/roi_dispatcher.py — Frame-Verteilung
-- core/perception/face_pipeline.py — SCRFD + ArcFace + FaceAttr (Similarity 1.00)
-- core/perception/pose_worker.py — Pose, ReID, Hand
-- core/perception/tappas_pipeline.py — GStreamer 330 Zeilen → 50 Zeilen
-- scripts/enroll_face_worker.py — Enrollment identisch wie Live-Inference
-Commits: b1a5e7f, 31ff6cc, 6d8a5d1
+### 2. System-Audit (Codewort: AUDIT-APRIL)
+- 259 Dateien, 100.663 Zeilen gescannt
+- 60+ subprocess ohne timeout (NEVER 5)
+- 55+ json.dump ohne atomic write (NEVER 6)
+- 1x shell=True in Produktionscode (audio_manager.py:552)
+- Datei: AUDIT_2026-04-02.md (mit Checkboxen zum Abhaken)
 
-### 2. Real-ESRGAN x2 Super Resolution
+### 3. Self-Tune System (Codewort: SELF-TUNE)
+- 69 Parameter in config/self_tune_registry.json (59 GREEN, 10 YELLOW)
+- Generischer IPC-Befehl 'self_tune' in moloch_service.py
+- Datei: SELF-TUNE.md, config/self_tune_registry.json
 
-HEF: /mnt/moloch-data/hailo/models/real_esrgan_x2.hef (27MB)
-Datei: core/perception/super_res_worker.py (Singleton, SHARED VDevice)
-Integration: MCP moloch_snapshot() + daily_learner.py Face-Crops
-Format: uint8 Input 512x512x3 → float32 Output 1024x1024x3
-Commits: 694602c, 793f37a
+### 4. HANDSHAKE Protokoll (Codewort: HANDSHAKE)
+- Kommunikations-Protokoll MOLOCH <-> Claude Code via Git
+- 3 Simulationen (SIM01 unrealistisch, SIM02+03 realistisch mit DeepSeek R1 Limitierungen)
+- SIM03 hat ECHTES Problem gefunden: TTS length_scale an 4 Stellen hardcoded
+- Dateien: HANDSHAKE.md, ipc/handshake*.json, logs/handshake*.log
 
-### 3. Low Light Enhancement (zero_dce)
+### 5. TTS Speed Fix (aus SIM03 entstanden — ECHTER CODE-FIX)
+- config/settings.json: Neue "tts" Sektion mit user_speed_offset
+- core/personality/personality_engine.py: Liest user_speed_offset, addiert auf Zone-Speed
+- core/voice_pipeline.py:697: Init-Default 1.1 → 0.95
+- core/moloch_service.py: Generischer 'self_tune' IPC Action
 
-HEF: /mnt/moloch-data/hailo/models/zero_dce.hef (856KB, 200 FPS)
-Datei: core/perception/low_light_processor.py (Singleton, SHARED VDevice)
-Integration: tappas_pipeline._on_appsink_sample() vor SHM-Write
-Logik: CPU-Brightness-Check < 80/255 → NPU Enhancement aktiv
-Commits: 08cf594, 5c0246b
+### 6. SELF-MAP Konzept (Codewort: SELF-MAP)
+- MOLOCHs maschinenlesbare Selbstbeschreibung
+- generate_self_map.py noch zu implementieren
+- Datei: SELF-MAP.md
 
-### 4. MCP-Server — 3 neue Tools
+### 7. Unconscious Engine (NEU — 398 LOC)
+- core/unconscious_engine.py
+- Tick-Loop alle 10s, daemon=True, Singleton
+- Schicht 1: Mood (Shadow/Guardian Impulse)
+- Schicht 2: Pipeline (Temp/FPS/RAM/Tracking/Face Self-Tune)
+- 9 Regeln, Cooldown 30s, max 3 Tune/Stunde, Registry-Limits
+- NOCH NICHT in moloch_service.py integriert!
 
-Datei: mcp/moloch_mcp_server.py
-- moloch_npu_workers() — Health aller NPU-Worker
-- moloch_npu_models() — Roadmap integriert vs. ausstehend
-- moloch_low_light() — Helligkeit + Enhancement-Status
-Commit: bc9019f
+### 8. Fan-Kurve
+- scripts/fan_control.py: Noctua dreht ab 42°C hoch (statt 50°C)
+- 3°C Hysterese, 5 Stufen, Ziel: CPU-Kuehler soll nicht anspringen
 
-### 5. NPU-Modell-Roadmap + Skills verbessert
-
-Roadmap: logs/npu_model_roadmap.md (alle 26 H10H-Kategorien dokumentiert)
-Skills:
-- .claude/skills/moloch-npu.md (NEU) — Worker-Architektur + Anleitung
-- .claude/skills/moloch-dev.md — 4 neue NEVER-Regeln + HailoRT-Template + RGB/BGR
-- .claude/skills/moloch-snapshot.md — SuperRes + LowLight erwaehnt
-Commit: 08cf594
-
----
-
-## SERVICE-STATUS
-
-moloch.service: active (running)
-USE_TAPPAS: 1 (in /etc/systemd/system/moloch.service)
-GStreamer: YOLO-only, ~20 FPS
-Worker: FaceWorker, PoseWorker, ReIDWorker, HandWorker (alle aktiv)
-On-Demand: SuperResProcessor (lazy), LowLightProcessor (lazy, ab Dunkelheit)
-
----
-
-## ALLE COMMITS DIESER SESSION
-
-bc9019f feat: MCP NPU-Tools + LowLight stop()-Cleanup
-5c0246b feat: LowLight in tappas_pipeline._on_appsink_sample()
-08cf594 feat: LowLightProcessor + NPU Roadmap + Skills
-793f37a fix: SuperRes Input uint8 statt float32
-694602c feat: Real-ESRGAN x2 Super Resolution via Hailo-10H NPU
-6d8a5d1 feat: Phase 4+5 — Alle Worker + Blaustich-Fix + FaceAttr
-31ff6cc fix: ResultCollector.get_latest() direkt vom Worker
-b1a5e7f feat: Phase 2+3 — GStreamer YOLO-Only + FaceWorker live
+### 9. NPU Popup Slider
+- 5 neue Slider in popup_npu_thresh.py
+- Person Min-Hoehe/Flaeche, Pose NMS/Keypoint-Score, Hand Presence
+- Service muss neue Keys noch verdrahten
 
 ---
 
-## NAECHSTE PRIORITAETEN
+## WAS OPUS REVIEWEN SOLLTE
 
-1. person_attr_resnet_v1_18.hef — Kleidung/Alter/Rucksack (Aufwand: gering)
-   Download-URL in logs/npu_model_roadmap.md
-2. r3d_18.hef — Aktivitaetserkennung (sitzt/geht/laeuft)
-3. yolo_world_v2s.hef — Zero-Shot Objektsuche per Sprache
+### KRITISCH (vor Merge in main):
+1. **personality_engine.py** (GELB) — user_speed_offset korrekt?
+   Keine Regression bei Zone-Wechsel? _get_user_speed_offset() liest
+   settings.json bei JEDEM voice_config Aufruf — Performance OK?
+2. **moloch_service.py** (ROT) — self_tune Handler: Kann jemand ueber
+   section/key beliebige Keys schreiben? Validierung gegen Registry noetig?
+3. **unconscious_engine.py** (NEU) — Logik plausibel? Integration in Service.
+4. **settings.json** — tts-Sektion kompatibel mit bestehendem Code?
+5. **self_tune_registry.json** — alle 69 Parameter Grenzen plausibel?
+
+### EMPFOHLEN:
+6. Fan-Kurve auf Pi testen (42°C Ramp-Start)
+7. Hooks auf Pi testen (Pfade, Permissions)
+8. NPU Popup neue Slider verdrahten (set_tracker_param etc.)
 
 ---
 
-## BEKANNTE BUGS (unveraendert)
+## OFFENE PUNKTE
 
-- Kamera Hot-Plug: nur Reboot hilft (kein RTSP-Reconnect)
-- hailo-ollama: kein systemd-Service, laeuft nicht beim Boot
-- MCP moloch_snapshot() gibt erst 1024x1024 nach MCP-Server-Neustart
+- [ ] unconscious_engine.py in moloch_service.py integrieren (start/stop)
+- [ ] generate_self_map.py Script schreiben
+- [ ] diagnose_rules.json erstellen (aus SELF-TUNE.md Konzept)
+- [ ] Popup-Mockups fertigstellen (popups_mockup.html)
+- [ ] GitHub Pages aktivieren (braucht Login)
+- [ ] NEVER 5/6 Funde abarbeiten (60+ subprocess, 55+ json.dump)
+- [ ] NPU Popup neue Slider im Service verdrahten
 
 ---
 
-## GELERNTE LEKTIONEN (in moloch-dev.md ergaenzt)
+## GEAENDERTE DATEIEN (alle auf Branch, nicht auf main)
 
-1. HailoRT Input dtype: Vision-Modelle = uint8, NICHT float32
-2. np.ndarray Type-Hints nicht in moloch_service.py Signaturen (np nicht importiert)
-3. __pycache__ immer loeschen nach Code-Aenderungen
-4. Service laeuft von ~/moloch/, NIE vom Worktree
-5. GStreamer = RGB, cv2.imwrite() = BGR → COLOR_RGB2BGR vor imwrite()
-6. Stable Diffusion: KEIN H10H-HEF verfuegbar (definitiv verifiziert)
+### Neue Dateien:
+- core/unconscious_engine.py (398 LOC)
+- config/self_tune_registry.json (69 Parameter)
+- .claude/hooks/*.sh (5 Scripts)
+- .github/workflows/moloch-audit.yml
+- HOOKWIRE.md, SELF-TUNE.md, HANDSHAKE.md, SELF-MAP.md
+- AUDIT_2026-04-02.md
+- ipc/handshake*.json, logs/handshake*.log
+- docs/main_panel_mockup.html, docs/npu_popup_mockup.html
+
+### Geaenderte Dateien:
+- config/settings.json (tts Sektion hinzugefuegt)
+- core/personality/personality_engine.py (user_speed_offset)
+- core/voice_pipeline.py (Init-Default 1.1 → 0.95)
+- core/moloch_service.py (self_tune IPC Action)
+- core/gui/popups/popup_npu_thresh.py (5 neue Slider)
+- scripts/fan_control.py (Kurve aggressiver)
+- .claude/settings.json (Permissions + Hooks)
+- .gitignore (.claude/ nicht mehr komplett ignoriert)
+- CLAUDE.md (AUTONOMIE-REGEL hinzugefuegt)
+
+---
+
+## FUER OPUS — EMPFOHLENE REIHENFOLGE
+
+1. Lies diesen Handoff + CLAUDE.md (AUTONOMIE-REGEL beachten)
+2. git diff main...HEAD — alle Aenderungen ueberblicken
+3. Review: personality_engine.py + moloch_service.py
+4. unconscious_engine.py in moloch_service.py integrieren
+5. Auf Pi testen: Service-Restart, TTS-Test, Fan-Test
+6. Bei Erfolg: Branch in main mergen
