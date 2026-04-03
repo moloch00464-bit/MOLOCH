@@ -1,5 +1,5 @@
 # M.O.L.O.C.H. — Master Context für Claude Code
-# Version: Gate 1.0 | Stand: 06.03.2026
+# Version: Gate 1.1 | Stand: 2026-04-03
 # LIES DIESE DATEI ZUERST. IMMER. BEI JEDEM AUFTRAG.
 
 > "Die dunkle Seite macht mehr Spass!" — Respekt ist bidirektional.
@@ -151,19 +151,124 @@ REGELN: 1 Datei = 1 Aufgabe. Nur ServiceProxy/IPC. Panel_styles.py NIE ändern (
 
 ---
 
+## DATEI-AMPEL — RISIKO-KLASSIFIKATION
+
+### ROT — System-Crash Risk (Bestätigung PFLICHT, dann eigenständig)
+```
+core/moloch_service.py           core/perception/tappas_pipeline.py
+core/hardware/camera.py          core/hardware/hailo_manager.py
+core/core_integrator.py          core/voice_pipeline.py
+core/mpo/autonomous_tracker.py   core/gui/moloch_unified_panel.py
+core/speech/audio_pipeline.py    core/ipc_router.py
+core/memory/person_reid.py       config/settings.json
+```
+**Regel**: Einmal fragen "ROT-Datei, soll ich?", dann eigenständig durcharbeiten.
+
+### GELB — Bug Risk (Ankündigung, kein Warten)
+`core/personality/*.py`, `core/gui/panel_*.py`, `core/gui/popups/*.py`,
+`core/audio/*.py`, `core/ptz_arbiter.py`, `core/action_bridge.py`,
+`core/console/moloch_console.py`, `core/memory/episodic_memory.py`
+
+### GRÜN — Sicher
+`scripts/*`, `docs/*`, `core/eye_viewer.py`, `core/gui/panel_styles.py` (NIE ändern!),
+`core/vision/emotion_detector.py`, `core/tts/config/voices.py`
+
+---
+
+## NEVER-REGELN — ABSOLUT (automatisch durch Hooks gecheckt)
+
+| # | Regel | Warum |
+|---|-------|-------|
+| 1 | GStreamer-Pipeline-String NICHT blind ändern | Gst.parse_launch() crasht bei Typo mit SEGV |
+| 2 | Pan-Vorzeichen NICHT ändern (`pan_delta = -error_x`) | Sonoff invertiert — wurde 6x "gefixt" und 6x zurückgedreht |
+| 3 | ArcFace-Threshold NICHT erhöhen als Quick-Fix | Root Cause ist Embedding-Inkompatibilität, Threshold ist Symptombehandlung |
+| 4 | NICHT mehrere ROT-Dateien in einem Commit | Rollback unmöglich wenn 3 Subsysteme gleichzeitig crashen |
+| 5 | subprocess.Popen IMMER mit timeout=30 | Zombie-Prozesse auf 4GB Pi |
+| 6 | JSON IMMER atomic schreiben (tempfile + os.replace) | Partial-Write bei Crash korrumpiert Config |
+| 7 | Runtime-State NICHT committen (last_face_position.json etc.) | Verschmutzt Git-Historie |
+| 8 | KEIN shell=True in subprocess | Command Injection Risiko |
+| 9 | HailoRT: uint8 vs float32 VOR Inferenz prüfen | Buffer-Size-Mismatch 4x → HailoRT Error |
+| 10 | KEIN np.ndarray Type-Hint in moloch_service.py Signaturen | numpy nur lokal importiert → NameError beim Parsen |
+| 11 | __pycache__ nach Code-Änderung löschen | Service läuft alten Bytecode sonst weiter |
+| 12 | NICHT im Worktree coden und Service testen | Service läuft von ~/moloch/, nicht vom Worktree |
+
+**ArcFace Enrollment**: NUR über Live-Pipeline (IPC `enrollment_start`). NIEMALS Offline-Scripts.
+
+---
+
+## IPC-KOMMANDO-MUSTER
+
+Befehle an den Service werden als JSON in `/dev/shm/` geschrieben:
+```python
+import json, time, os, tempfile
+
+def send_ipc(action, **kwargs):
+    cmd = {"action": action, "ts": time.time(), **kwargs}
+    fd, tmp = tempfile.mkstemp(dir="/dev/shm", prefix="moloch_cmd_", suffix=".json")
+    with os.fdopen(fd, "w") as f:
+        json.dump(cmd, f)
+    os.rename(tmp, f"/dev/shm/moloch_cmd_{action}.json")
+    # Oder via ServiceProxy: proxy.send_command(cmd)
+```
+
+Aktionen: `enrollment_start`, `set_threshold`, `set_tracker_param`, `self_tune`,
+`mood_impulse`, `tts_say`, `snapshot`, `ptz_move`, `alarm_toggle`
+
+---
+
+## DEPLOY-WORKFLOW (nach jeder Änderung)
+
+```bash
+# 1. BACKUP Commit
+git add [spezifische Datei] && git commit -m "BACKUP vor [was]"
+
+# 2. Push + Deploy
+git push origin main
+ssh molochzuhause@192.168.178.30 "cd ~/moloch && git pull origin main"
+
+# 3. Cache löschen + Restart
+ssh molochzuhause@192.168.178.30 "find ~/moloch/core -name __pycache__ -exec rm -rf {} + 2>/dev/null; sudo systemctl restart moloch"
+
+# 4. Verify
+sleep 5 && ssh molochzuhause@192.168.178.30 "systemctl is-active moloch"
+ssh molochzuhause@192.168.178.30 "journalctl -u moloch -n 20 --no-pager"
+```
+
+---
+
+## AUTONOME ARBEITSWEISE (Plan genehmigt = durcharbeiten)
+
+- GRÜN-Dateien: Kein Dialog, sofort
+- GELB-Dateien: Kurze Ankündigung, NICHT warten
+- ROT-Dateien: Einmal fragen, dann eigenständig
+- Git Commits + Push: Eigenständig
+- STOPP NUR BEI: Audit FAIL, Destructive Git-Ops (force-push/reset --hard), >5 ROT-Dateien
+
+---
+
+## SKILLS (tippe /moloch-...)
+
+| Skill | Funktion |
+|-------|----------|
+| `/moloch-agent` | Welchen AGENT_*.md für welche Aufgabe? |
+| `/moloch-status` | Live FPS/Temp/Face/Tracking |
+| `/moloch-dev` | Vollständige NEVER-Regeln + Templates + Debugging |
+| `/moloch-audit` | Regressionstest PASS/FAIL |
+| `/moloch-npu` | NPU-Diagnose |
+| `/moloch-snapshot` | Pipeline-Snapshot |
+
+---
+
 ## CODING-REGELN
 
-1. Git Backup VOR jeder Änderung: `git add core/ scripts/ agents/ config/settings.json && git commit -m "BACKUP vor [was]"`
+1. Git Backup VOR jeder Änderung: `git add [datei] && git commit -m "BACKUP vor [was]"` (NIE git add -A bei ROT-Dateien)
 2. 1 Auftrag = 1 Datei. Nie mehrere gleichzeitig.
-3. Max 3 Sätze pro Auftrag. Problem, Lösung, Datei.
-4. Python, Kommentare Deutsch.
-5. Kompliziert != besser.
-6. Pi5 hat 4GB RAM — sparsam.
-7. IMMER Reboot nach Änderung (sudo reboot, nicht nur restart).
-8. Deploy & Verify: Nach Reboot prüfen ob Service läuft.
-9. Regressionstest: python3 ~/moloch/moloch_audit.py --auto
-10. KEIN Weitermachen bei FAIL.
-11. ArcFace Enrollment NUR über Live-Pipeline (IPC `enrollment_start`), NIEMALS über Offline-Scripts. HailoRT-direkt und GStreamer-hailonet produzieren inkompatible Embeddings.
+3. Python, Kommentare Deutsch.
+4. Pi5 hat 4GB RAM — sparsam.
+5. IMMER Reboot nach Änderung (sudo systemctl restart moloch).
+6. Deploy & Verify: Nach Restart prüfen ob Service aktiv.
+7. Regressionstest: `python3 ~/moloch/moloch_audit.py --auto`
+8. KEIN Weitermachen bei FAIL.
 
 ---
 
