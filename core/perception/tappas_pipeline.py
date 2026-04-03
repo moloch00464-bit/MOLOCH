@@ -1422,7 +1422,17 @@ class TappasPipeline:
             hand_result = self._result_collector.get_latest("HandWorker")
             if hand_result and hand_result.data.get("hand_detected"):
                 pf.hand_detected = True
-                if hand_result.data.get("hand"):
+                # Alle erkannten Haende (links + rechts) als Detections
+                for h in hand_result.data.get("hands", []):
+                    detections.append({
+                        "class": "hand",
+                        "bbox": h.get("bbox", []),
+                        "confidence": h.get("presence", 1.0),
+                        "keypoints": h.get("landmarks", []),
+                        "handedness": h.get("handedness", "?"),
+                    })
+                # Fallback: einzelne Hand (Kompatibilitaet)
+                if not hand_result.data.get("hands") and hand_result.data.get("hand"):
                     h = hand_result.data["hand"]
                     detections.append({
                         "class": "hand",
@@ -1588,11 +1598,13 @@ class TappasPipeline:
 
         # Phase 2: Frame an ROIDispatcher weiterleiten (fuer FaceWorker etc.)
         # Frame ist RGB (von GStreamer videoconvert format=RGB)
+        # Alle Detections durchreichen (person + pose) — HandWorker braucht Wrist-Keypoints
         if getattr(self, '_roi_dispatcher', None):
             try:
                 with self._lock:
-                    yolo_dets = [d for d in self._detections if d.get("class") == "person"]
-                self._roi_dispatcher.dispatch(frame, yolo_dets, getattr(self, '_frame_id', 0))
+                    all_dets = [d for d in self._detections
+                                if d.get("class") in ("person", "pose")]
+                self._roi_dispatcher.dispatch(frame, all_dets, getattr(self, '_frame_id', 0))
             except Exception as e:
                 logger.debug("[DISPATCH] Fehler: %s", e)
 
