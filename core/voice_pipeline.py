@@ -1815,10 +1815,16 @@ class VoicePipeline:
     # Chat Message (Text statt PTT)
     # =========================================================================
 
-    def process_text_message(self, text: str):
-        """Text-Nachricht verarbeiten (ohne Recording)."""
+    def process_text_message(self, text: str, sender: str = "Du"):
+        """Text-Nachricht verarbeiten (ohne Recording).
+
+        Args:
+            text: Nachricht-Text
+            sender: Anzeigename im Chat (z.B. "Du", "Claude")
+        """
         if not text or not text.strip():
             return
+        self._current_sender = sender
 
         thread = threading.Thread(
             target=self._process_text, args=(text,), daemon=True
@@ -1838,12 +1844,14 @@ class VoicePipeline:
     def _process_text_inner(self, text: str):
         """Eigentliche Text-Verarbeitung."""
         text = _sanitize_text(text)
+        sender = getattr(self, '_current_sender', 'Du')
         self._whisper_status = "Denke..."
-        self._emit_message("Du", text)
+        self._emit_message(sender, text)
 
-        # Langzeitgedaechtnis: User-Text SOFORT speichern
+        # Langzeitgedaechtnis: Text SOFORT speichern
+        mem_sender = "claude" if sender == "Claude" else "user"
         try:
-            get_memory().save_message("user", text, source="text")
+            get_memory().save_message(mem_sender, text, source="text")
         except Exception as e:
             logger.error(f"[VOICE] Memory save_message(user/text) fehlgeschlagen: {e}")
 
