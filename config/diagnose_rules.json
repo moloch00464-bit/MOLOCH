@@ -1,0 +1,97 @@
+{
+  "_comment": "SELF-TUNE Diagnose-Regeln — von MOLOCH zur Laufzeit ausgewertet",
+  "_version": "1.0",
+  "_generated": "2026-04-03",
+  "_usage": "core/self_tuner.py laedt diese Datei. Trigger: 'user_feedback' oder 'self_diagnosis'.",
+
+  "rules": [
+
+    {
+      "id": "tts_too_slow",
+      "trigger": "user_feedback",
+      "keywords": ["zu langsam", "red schneller", "schneller reden", "tempo hoch", "sprich schneller"],
+      "action": {"section": "tts", "key": "user_speed_offset", "direction": "decrease", "step": 0.05},
+      "min": -0.30,
+      "cooldown_s": 30,
+      "response": "Ich rede jetzt etwas schneller. Besser so?"
+    },
+
+    {
+      "id": "tts_too_fast",
+      "trigger": "user_feedback",
+      "keywords": ["zu schnell", "red langsamer", "langsamer reden", "nicht so schnell", "sprich langsamer"],
+      "action": {"section": "tts", "key": "user_speed_offset", "direction": "increase", "step": 0.05},
+      "max": 0.30,
+      "cooldown_s": 30,
+      "response": "Ich rede jetzt langsamer. Besser?"
+    },
+
+    {
+      "id": "tracking_slow",
+      "trigger": "user_feedback",
+      "keywords": ["tracking langsam", "kamera zu langsam", "schneller schwenken", "folg mir schneller"],
+      "action": {"section": "tracker", "key": "tracking_speed", "direction": "increase", "step": 0.1},
+      "max": 2.0,
+      "cooldown_s": 30,
+      "response": "Ich schwenke jetzt schneller."
+    },
+
+    {
+      "id": "face_not_recognized",
+      "trigger": "user_feedback",
+      "keywords": ["erkennst mich nicht", "wer bin ich", "kennst mich nicht mehr", "erkenn mich nicht"],
+      "action": {"section": "thresholds", "key": "arcface_thresh", "direction": "decrease", "step": 0.05},
+      "min": 0.30,
+      "cooldown_s": 60,
+      "response": "Ich habe die Erkennungsschwelle gelockert. Schau nochmal in die Kamera."
+    },
+
+    {
+      "id": "tracking_jitter",
+      "trigger": "self_diagnosis",
+      "condition": {"field": "tracking_moves_per_minute", "op": ">", "value": 60},
+      "action": {"section": "tracker", "key": "smooth_alpha", "direction": "increase", "step": 0.05},
+      "max": 0.75,
+      "cooldown_s": 120,
+      "log": "Tracking zu hektisch — EMA-Glaettung erhoeht"
+    },
+
+    {
+      "id": "false_detections_high",
+      "trigger": "self_diagnosis",
+      "condition": {"field": "fps", "op": "<", "value": 12},
+      "action": {"section": "thresholds", "key": "yolo_conf", "direction": "increase", "step": 0.05},
+      "max": 0.80,
+      "cooldown_s": 120,
+      "log": "FPS niedrig — YOLO Confidence erhoeht (weniger Detections = mehr Durchsatz)"
+    },
+
+    {
+      "id": "thermal_warning",
+      "trigger": "self_diagnosis",
+      "condition": {"field": "system_temp", "op": ">", "value": 65},
+      "action": {"section": "fan", "key": "noctua_base_pct", "direction": "increase", "step": 0.05},
+      "max": 0.50,
+      "cooldown_s": 180,
+      "log": "CPU zu warm — Noctua Grunddrehzahl erhoeht"
+    },
+
+    {
+      "id": "face_sim_too_low",
+      "trigger": "self_diagnosis",
+      "condition": {"field": "face_similarity", "op": "<", "value": 0.45, "when": "face_detected"},
+      "action": {"section": "thresholds", "key": "arcface_thresh", "direction": "decrease", "step": 0.03},
+      "min": 0.40,
+      "cooldown_s": 300,
+      "log": "Gesichts-Aehnlichkeit konsistent niedrig — Threshold vorsichtig gesenkt"
+    }
+
+  ],
+
+  "_summary": {
+    "total_rules": 8,
+    "user_feedback_rules": 4,
+    "self_diagnosis_rules": 4,
+    "note": "Regeln sind fail-safe: bei unbekanntem Feld oder Fehler wird nichts geaendert."
+  }
+}
