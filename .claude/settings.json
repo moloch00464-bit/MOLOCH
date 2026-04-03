@@ -11,6 +11,10 @@
       "WebSearch(*)",
       "Agent(*)",
       "NotebookEdit(*)",
+      "TodoWrite(*)",
+      "ToolSearch(*)",
+      "Skill(*)",
+      "mcp__github__*",
       "mcp__moloch__*"
     ]
   }
