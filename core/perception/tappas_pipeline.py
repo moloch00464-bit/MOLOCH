@@ -1442,7 +1442,8 @@ class TappasPipeline:
                     })
 
             if pose_result and pose_result.data.get("poses"):
-                for pose in pose_result.data["poses"]:
+                # Max 2 Poses — mehr erzeugt visuelles Chaos im Preview
+                for pose in pose_result.data["poses"][:2]:
                     kpts = pose.get("keypoints")
                     if kpts is not None:
                         import numpy as np

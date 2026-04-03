@@ -129,5 +129,18 @@
   "WGT_Crew_Details": "Shower Noise Group: Rebecca (Klingonisch), Maise, Franzi, Lilli, Sven, Ray – seit 2000",
   "Markus_Update_Vision": "Qwen2-VL-2B_installiert",
   "Internet_Stoerung": "kurzzeitig_am_31.03.2026",
-  "Projekt_Status": "80%_fertig_alle_Modelle_aktiv"
+  "Projekt_Status": "80%_fertig_alle_Modelle_aktiv",
+  "Markus_Problem_Vision": "Vision-Pipeline_offline_nach_Reparatur",
+  "Vision_Pipeline_Status": "TAPPAS_aktiv_21fps_alle_7_Modelle_laufen",
+  "Gesichtserkennung_FPS": "20fps_stabil_seit_TAPPAS_pipeline",
+  "Audio_System_aktiv": "ESP32_WiFi_Mikrofon_16kHz_5ms_Latenz_arbeitet_perfekt",
+  "Markus_Problem_Gesichtserkennung_Brille": "bekommt_Brille_fuer_bessere_Erkennung",
+  "Kamera_Steuerung_nächster_Schritt": "Perspektiven-Umrechnung für PTZ-Befehle",
+  "Markus_3D_Drucker": "Bambu Lab Carbon",
+  "Markus_Plan_MCP_Server": "Claude_Code_Integration_geplant",
+  "MCP_Server_Plan": "Claude_Code_Integration_bereit_auf_GitHub",
+  "Markus_Plan_Unterbewusstsein": "MCP_Server_fuer_KI_Bewusstsein",
+  "Markus_Unterbewusstsein_Plan": "MCP_Server_fuer_KI_Bewusstsein",
+  "Kamera_Problem_Landmarks": "keine_Orientierungspunkte_fuer_PTZ_Steuerung",
+  "Phantomarm_repariert": "Claude_hat_Worker_Fehler_behoben"
 }
