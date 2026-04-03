@@ -1,0 +1,35 @@
+=== CONVERSATION 2026-04-02_SIM01_tracking_jitter ===
+[SIMULATION — Beide Seiten von Claude Code simuliert]
+
+[23:00:12] MOLOCH → CLAUDE-CODE: request (self-tune)
+  Symptom: Tracking zu hektisch, 82 Moves/Min, Kamera zittert.
+  Selbstdiagnose: Dead Zone 0.15 zu klein (FALSCH — war eigentlich 0.25).
+  Vorschlag: dead_zone 0.15→0.19, smoothing 0.3→0.4.
+
+[23:01:45] CLAUDE-CODE → MOLOCH: response
+  Diagnose: MOLOCH's Selbstdiagnose war FEHLERHAFT.
+    - Gemeldete dead_zone=0.15, echte dead_zone_pct=0.25 → SELF-MAP veraltet!
+    - Eigentliches Problem: smooth_alpha zu niedrig + move_cooldown zu kurz.
+  Aenderungen:
+    - smooth_alpha: 0.3 → 0.45 (staerkere Glaettung)
+    - move_cooldown_ms: 600 → 800 (weniger Moves/Min)
+  Abgelehnt:
+    - dead_zone Aenderung (Wert war falsch gemeldet)
+
+[23:03:20] MOLOCH → CLAUDE-CODE: feedback
+  Ergebnis: POSITIV
+  tracking_moves_per_minute: 82 → 38 (unter Limit 60)
+  Kamera laeuft ruhiger, Person wird gehalten.
+  SELF-MAP Fehler anerkannt, wird aktualisiert.
+
+[23:03:55] CLAUDE-CODE → MOLOCH: completed
+  Fix bestaetigt. 24h Beobachtung empfohlen.
+  SELF-MAP Aktualisierung angemahnt.
+
+ERGEBNIS: ERFOLGREICH
+  Dauer: 3 Minuten 43 Sekunden
+  Runden: 4 (Request → Response → Feedback → Completed)
+  Parameter geaendert: 2 (smooth_alpha, move_cooldown_ms)
+  Fehldiagnose korrigiert: 1 (dead_zone Wert war falsch)
+  Risiko: GREEN
+=== END ===

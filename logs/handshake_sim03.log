@@ -1,0 +1,68 @@
+=== CONVERSATION 2026-04-02_SIM03_tts_speed ===
+[SIMULATION — Realistisch: Python-Diagnose + DeepSeek R1 Summary]
+[Szenario: User sagt "red schneller du nervst"]
+
+[23:10:00] MOLOCH → CLAUDE-CODE: request (self-tune, escalated)
+  Trigger: user_feedback "red schneller" (3x in 10min)
+  Rule: tts_too_slow
+  Echte Werte gefunden:
+    voice_pipeline.py:697 → 1.1
+    tts.py:41 → 1.0
+    moloch_console.py:404 → 1.15
+    settings.json → KEY NICHT VORHANDEN
+  Self-Tune versuch: _length_scale 1.1→1.05 (Runtime, nicht persistent)
+  Problem: Personality Engine ueberschreibt beim naechsten Satz
+  DeepSeek R1: "user say too slow. i change to 1.05 but cannot save."
+  → Eskalation: Config-Key fehlt + Inkonsistenz + Personality ueberschreibt
+
+[23:11:30] CLAUDE-CODE → MOLOCH: response
+  ECHTE Code-Analyse durchgefuehrt:
+    - voice_pipeline.py:697 gelesen → Init-Default 1.1
+    - voice_pipeline.py:1441 gelesen → wird von vc.speed ueberschrieben
+    - personality_engine.py:104-116 gelesen → Guardian=0.95, Shadow=1.1, Berserker=1.3
+    - personality_engine.py:749 gelesen → LENGTH_SCALE = vc.speed * speed_jitter
+    → Personality Engine ist der ECHTE Controller, nicht voice_pipeline
+
+  Root Cause: Guardian speed=0.95 + Init-Default 1.1 + kein persistenter Override
+
+  Fix-Konzept:
+    1. settings.json: neue "tts" Sektion mit user_speed_offset
+    2. personality_engine.py: effective_speed = zone_speed + user_speed_offset
+    3. voice_pipeline.py:697: Init-Default aus Settings statt Hardcoded
+
+  NICHT geaendert: personality_engine.py (GELB, Pi-Test noetig)
+
+[23:13:00] MOLOCH → CLAUDE-CODE: feedback
+  Config-Sektion angelegt: OK
+  Code-Aenderung: OFFEN (Pi-Test noetig)
+  Runtime-Workaround: user_speed_offset=-0.10
+  User-Feedback: kein "zu langsam" mehr
+  DeepSeek R1: "config change ok. code change need pi test."
+  Verdict: PARTIAL
+
+[23:13:30] CLAUDE-CODE → MOLOCH: completed
+  Open Items fuer Pi-Session notiert.
+  Self-Tune Rule muss angepasst werden.
+
+ERGEBNIS: PARTIAL (Config OK, Code-Fix offen)
+  Dauer: 3 Minuten 30 Sekunden
+  Runden: 4
+
+  Claude Code Mehrwert:
+    1. ECHTES Problem gefunden (Personality Engine ueberschreibt alles)
+    2. MOLOCH's Runtime-Fix war wirkungslos (nur 1 Satz lang)
+    3. Architektur-Loesung vorgeschlagen (user_speed_offset)
+    4. Inkonsistenz in 3 Dateien aufgedeckt
+
+  MOLOCH Self-Tune Limitierung:
+    1. Wusste nicht dass Personality Engine seine Aenderung ueberschreibt
+    2. Konnte Problem nur als "length_scale zu hoch" beschreiben
+    3. Brauchte Claude Code fuer die Architektur-Analyse
+
+VERGLEICH MIT SIM02:
+  SIM02: Einfaches Parameter-Problem (smooth_alpha zu niedrig)
+         → Claude Code aendert Wert, fertig.
+  SIM03: Architektur-Problem (4 Quellen, Personality ueberschreibt)
+         → Claude Code muss NEUES KONZEPT vorschlagen, nicht nur Wert aendern.
+         → Zeigt: HANDSHAKE ist auch fuer komplexe Probleme geeignet.
+=== END ===

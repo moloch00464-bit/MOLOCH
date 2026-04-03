@@ -1,0 +1,45 @@
+=== CONVERSATION 2026-04-02_SIM02_realistic ===
+[SIMULATION — Realistisch: Python-Diagnose + DeepSeek R1 1.5B Summary]
+
+[23:00:12] MOLOCH → CLAUDE-CODE: request (self-tune, escalated)
+  Trigger: diagnose_engine.py Rule "tracking_jitter"
+  Messung: 82 moves/min (Limit: 60)
+  Werte: dead_zone=0.25, smooth_alpha=0.3, cooldown=600ms
+  Self-Tune versuch: smooth_alpha 0.3→0.35 → 82→71 (nicht genug)
+  DeepSeek R1: "tracking too many move. smooth alpha maybe too low."
+  → Eskalation an Claude Code weil Self-Tune nicht reichte
+
+[23:01:30] CLAUDE-CODE → MOLOCH: response
+  Diagnose: Self-Tune war richtig aber zu zaghaft (Step 0.05 zu klein)
+  Fix 1: smooth_alpha 0.35→0.45
+  Fix 2: move_cooldown_ms 600→800 (von Self-Tune nicht versucht)
+  Bonus: Self-Tune Rule verbessert (Step 0.05→0.10 fuer naechstes Mal)
+
+[23:03:00] MOLOCH → CLAUDE-CODE: feedback
+  Ergebnis: PASS
+  diagnose_engine.py: 71→38 moves/min, condition_met=true, target_held=true
+  DeepSeek R1: "fix work good. camera smooth now."
+  Self-Tune Rule Update akzeptiert
+
+[23:03:05] CLAUDE-CODE → MOLOCH: completed
+
+ERGEBNIS: ERFOLGREICH
+  Dauer: 2 Minuten 53 Sekunden
+  Runden: 4
+  Warum eskaliert: Self-Tune Step zu klein (0.05 statt 0.10)
+  Claude Code Mehrwert:
+    1. Zweiten Parameter geaendert (cooldown) den Self-Tune nicht kannte
+    2. Self-Tune Regel verbessert fuer naechstes Mal
+  → MOLOCH lernt: Naechstes Mal braucht er Claude Code NICHT fuer dieses Problem
+
+VERGLEICH SIM01 vs SIM02:
+  SIM01 (unrealistisch): MOLOCH formuliert perfektes Deutsch, kennt alle Zusammenhaenge
+  SIM02 (realistisch):   Python-Script liefert harte Zahlen, DeepSeek R1 holpriger Text
+
+  SIM01: MOLOCH diagnostizierte FALSCH (dead_zone Wert verwechselt)
+  SIM02: Python liefert KORREKTE Werte direkt aus settings.json
+
+  Fazit: Python-Diagnose + DeepSeek-Summary ist ZUVERLAESSIGER als
+         reine LLM-Diagnose. Die harten Zahlen kommen vom Code,
+         nicht vom Sprachmodell.
+=== END ===

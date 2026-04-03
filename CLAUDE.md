@@ -167,6 +167,29 @@ REGELN: 1 Datei = 1 Aufgabe. Nur ServiceProxy/IPC. Panel_styles.py NIE ändern (
 
 ---
 
+## AUTONOMIE-REGEL — PLAN GENEHMIGT = EIGENSTAENDIG ARBEITEN
+
+Wenn Markus einen Plan genehmigt hat (muendlich, per Text, oder per Codewort),
+darf Claude Code diesen Plan EIGENSTAENDIG durchfuehren:
+
+- KEINE Rueckfragen bei GRUEN-Dateien
+- KEINE Rueckfragen bei Settings-Aenderungen innerhalb der self_tune_registry.json Grenzen
+- GELB-Dateien: Kurze Ankuendigung ("Aendere personality_engine.py"), aber NICHT warten
+- ROT-Dateien: EINMAL fragen, dann durcharbeiten
+- Git Commits: Eigenstaendig, ohne Rueckfrage
+- Git Push: Eigenstaendig auf den aktuellen Branch
+
+WANN TROTZDEM FRAGEN:
+- Destructive Git-Ops (force-push, reset --hard, branch loeschen)
+- Mehr als 5 ROT-Dateien in einer Session
+- Wenn der Audit FAIL zeigt
+- Wenn etwas unklar ist das nicht im Plan steht
+
+SINN: Markus geht aus dem Zimmer, kommt zurueck, Arbeit ist erledigt.
+Nicht: Markus kommt zurueck, 15 Permission-Dialoge warten auf ihn.
+
+---
+
 ## REGEL 10 — CHRISTIAN-PRINZIP
 
 Benannt nach Christian (FRANCOR CEO, RoboCup Rescue):
