@@ -1,0 +1,98 @@
+{
+  "_comment": "SELF-TUNE Registry: Alle Parameter die MOLOCH eigenstaendig aendern darf",
+  "_generated": "2026-04-02",
+  "_usage": "self_tune IPC: {action: 'self_tune', section: X, key: Y, value: Z}",
+
+  "parameters": [
+
+    {"section": "thresholds", "key": "scrfd_conf",      "min": 0.10, "max": 0.90, "step": 0.05, "default": 0.50, "type": "float", "risk": "GREEN", "description": "Gesichtserkennung Confidence (hoeher = weniger Fehlalarme)"},
+    {"section": "thresholds", "key": "scrfd_nms",        "min": 0.10, "max": 0.90, "step": 0.05, "default": 0.45, "type": "float", "risk": "GREEN", "description": "Gesichtserkennung NMS Ueberlappungsfilter"},
+    {"section": "thresholds", "key": "arcface_thresh",   "min": 0.30, "max": 0.90, "step": 0.05, "default": 0.65, "type": "float", "risk": "YELLOW", "description": "Gesichts-Aehnlichkeit fuer Wiedererkennung (NEVER 3 beachten!)"},
+    {"section": "thresholds", "key": "yolo_conf",        "min": 0.10, "max": 0.90, "step": 0.05, "default": 0.50, "type": "float", "risk": "GREEN", "description": "Person Detection Confidence"},
+    {"section": "thresholds", "key": "pose_conf",        "min": 0.10, "max": 0.90, "step": 0.05, "default": 0.60, "type": "float", "risk": "GREEN", "description": "Pose/Keypoint Detection Confidence"},
+    {"section": "thresholds", "key": "hand_conf",        "min": 0.10, "max": 0.90, "step": 0.05, "default": 0.65, "type": "float", "risk": "GREEN", "description": "Hand/Gesten Detection Confidence"},
+
+    {"section": "hand_occlusion", "key": "enabled",  "min": null, "max": null, "step": null, "default": false, "type": "bool", "risk": "GREEN", "description": "Hand-Verdeckung Erkennung an/aus"},
+    {"section": "hand_occlusion", "key": "timeout",  "min": 1.0,  "max": 15.0, "step": 0.5,  "default": 6.0,   "type": "float", "risk": "GREEN", "description": "Sekunden bis Hand-Modus deaktiviert"},
+    {"section": "hand_occlusion", "key": "streak",   "min": 1,    "max": 15,   "step": 1,    "default": 5,     "type": "int",   "risk": "GREEN", "description": "Frames in Folge mit Hand bevor Modus wechselt"},
+    {"section": "hand_occlusion", "key": "recency",  "min": 0.5,  "max": 10.0, "step": 0.5,  "default": 4.0,   "type": "float", "risk": "GREEN", "description": "Zeitfenster fuer letzte Hand-Erkennung"},
+
+    {"section": "audio", "key": "mic_gain",       "min": 0.1,   "max": 5.0,  "step": 0.1,  "default": 1.0,   "type": "float", "risk": "GREEN", "description": "Mikrofon-Verstaerkung"},
+    {"section": "audio", "key": "agc_enabled",     "min": null,  "max": null, "step": null, "default": true,  "type": "bool",  "risk": "GREEN", "description": "Automatische Gain-Kontrolle an/aus"},
+    {"section": "audio", "key": "noise_gate_db",   "min": -60.0, "max": 0.0,  "step": 1.0,  "default": -40.0, "type": "float", "risk": "GREEN", "description": "Noise Gate Schwelle in dB (hoeher = mehr Filterung)"},
+
+    {"section": "camera", "key": "ptz_speed",     "min": 1.0,  "max": 50.0,  "step": 1.0,  "default": 15.0,  "type": "float", "risk": "GREEN",  "description": "PTZ Schwenkgeschwindigkeit"},
+    {"section": "camera", "key": "led_enabled",    "min": null, "max": null,  "step": null, "default": false, "type": "bool",  "risk": "GREEN",  "description": "Status-LED an/aus"},
+    {"section": "camera", "key": "ir_mode",        "min": null, "max": null,  "step": null, "default": "Aus", "type": "string","risk": "GREEN",  "description": "Infrarot-Modus (Aus/Auto/An)"},
+
+    {"section": "learner", "key": "flash_enabled", "min": null, "max": null, "step": null, "default": true, "type": "bool", "risk": "GREEN", "description": "LED-Flash bei Face Learning an/aus"},
+
+    {"section": "mpo", "key": "tension_tau",          "min": 50,   "max": 900,  "step": 10,   "default": 350.0, "type": "float", "risk": "GREEN",  "description": "Tension Abbau-Geschwindigkeit in Sekunden (hoeher = langsamer)"},
+    {"section": "mpo", "key": "dominance_drift",      "min": 0.001,"max": 0.10, "step": 0.001,"default": 0.021, "type": "float", "risk": "GREEN",  "description": "Drift Richtung Guardian pro Minute"},
+    {"section": "mpo", "key": "zone_hysteresis",      "min": 0.05, "max": 0.50, "step": 0.01, "default": 0.27,  "type": "float", "risk": "GREEN",  "description": "Min. Dominance-Delta fuer Persoenlichkeits-Wechsel"},
+    {"section": "mpo", "key": "berserker_threshold",  "min": 0.70, "max": 1.00, "step": 0.01, "default": 0.88,  "type": "float", "risk": "YELLOW", "description": "Tension-Level fuer Berserker-Aktivierung"},
+    {"section": "mpo", "key": "thermal_damping_start", "min": 50,  "max": 85,   "step": 1,    "default": 73.0,  "type": "float", "risk": "GREEN",  "description": "CPU-Temperatur ab der Tension gedaempft wird"},
+
+    {"section": "gestures", "key": "wave_enabled",      "min": null, "max": null, "step": null, "default": true, "type": "bool",  "risk": "GREEN", "description": "Winken-Geste erkennen"},
+    {"section": "gestures", "key": "thumbs_up_enabled",  "min": null, "max": null, "step": null, "default": true, "type": "bool",  "risk": "GREEN", "description": "Daumen-Hoch Geste erkennen"},
+    {"section": "gestures", "key": "stop_enabled",       "min": null, "max": null, "step": null, "default": true, "type": "bool",  "risk": "GREEN", "description": "Stop/Halt Geste erkennen"},
+    {"section": "gestures", "key": "point_enabled",      "min": null, "max": null, "step": null, "default": true, "type": "bool",  "risk": "GREEN", "description": "Zeige-Geste erkennen"},
+    {"section": "gestures", "key": "sensitivity",        "min": 0.1,  "max": 1.0,  "step": 0.05, "default": 0.55, "type": "float", "risk": "GREEN", "description": "Gesten-Empfindlichkeit (hoeher = empfindlicher)"},
+
+    {"section": "tracker", "key": "dead_zone_pct",         "min": 0.05, "max": 0.50, "step": 0.01, "default": 0.25, "type": "float", "risk": "GREEN",  "description": "Dead Zone — BBox muss X% vom Zentrum abweichen fuer Move"},
+    {"section": "tracker", "key": "track_start_pct",       "min": 0.05, "max": 0.50, "step": 0.01, "default": 0.26, "type": "float", "risk": "GREEN",  "description": "Ab welcher Abweichung Tracking startet"},
+    {"section": "tracker", "key": "coast_stable_time",     "min": 1.0,  "max": 30.0, "step": 0.5,  "default": 5.5,  "type": "float", "risk": "GREEN",  "description": "Sekunden bis Coast-Modus nach Target-Verlust"},
+    {"section": "tracker", "key": "coast_resume_pct",      "min": 0.05, "max": 0.40, "step": 0.01, "default": 0.12, "type": "float", "risk": "GREEN",  "description": "Aufwach-Schwelle im Coast-Modus"},
+    {"section": "tracker", "key": "tracking_speed",        "min": 0.1,  "max": 3.0,  "step": 0.1,  "default": 0.7,  "type": "float", "risk": "GREEN",  "description": "Tracking Grundgeschwindigkeit"},
+    {"section": "tracker", "key": "min_move_speed",        "min": 0.01, "max": 1.0,  "step": 0.01, "default": 0.1,  "type": "float", "risk": "GREEN",  "description": "Minimale Bewegungsgeschwindigkeit"},
+    {"section": "tracker", "key": "smooth_alpha",          "min": 0.05, "max": 0.90, "step": 0.05, "default": 0.3,  "type": "float", "risk": "GREEN",  "description": "EMA Glaettung (hoeher = staerker geglaettet)"},
+    {"section": "tracker", "key": "pan_gain",              "min": 0.05, "max": 3.0,  "step": 0.05, "default": 0.4,  "type": "float", "risk": "GREEN",  "description": "Pan-Verstaerkung (hoeher = aggressiver)"},
+    {"section": "tracker", "key": "tilt_gain",             "min": 0.05, "max": 3.0,  "step": 0.05, "default": 0.15, "type": "float", "risk": "GREEN",  "description": "Tilt-Verstaerkung (hoeher = aggressiver)"},
+    {"section": "tracker", "key": "max_step_pan",          "min": 1.0,  "max": 20.0, "step": 0.5,  "default": 6.0,  "type": "float", "risk": "GREEN",  "description": "Maximaler Pan-Schritt pro Move in Grad"},
+    {"section": "tracker", "key": "max_step_tilt",         "min": 1.0,  "max": 20.0, "step": 0.5,  "default": 3.0,  "type": "float", "risk": "GREEN",  "description": "Maximaler Tilt-Schritt pro Move in Grad"},
+    {"section": "tracker", "key": "move_cooldown_ms",      "min": 100,  "max": 2000, "step": 50,   "default": 600,  "type": "float", "risk": "GREEN",  "description": "Pause zwischen Moves in Millisekunden"},
+    {"section": "tracker", "key": "center_ring_buffer_size","min": 3,   "max": 30,   "step": 1,    "default": 12,   "type": "float", "risk": "GREEN",  "description": "Ringbuffer-Groesse fuer Zentrier-Berechnung"},
+    {"section": "tracker", "key": "pan_limit_min",         "min": -180, "max": 0,    "step": 1,    "default": -100, "type": "float", "risk": "YELLOW", "description": "Pan Links-Limit in Grad"},
+    {"section": "tracker", "key": "pan_limit_max",         "min": 0,    "max": 180,  "step": 1,    "default": 88,   "type": "float", "risk": "YELLOW", "description": "Pan Rechts-Limit in Grad"},
+    {"section": "tracker", "key": "tilt_limit_min",        "min": -90,  "max": 0,    "step": 1,    "default": -15,  "type": "float", "risk": "YELLOW", "description": "Tilt Unten-Limit in Grad"},
+    {"section": "tracker", "key": "tilt_limit_max",        "min": 0,    "max": 90,   "step": 1,    "default": 30,   "type": "float", "risk": "YELLOW", "description": "Tilt Oben-Limit in Grad"},
+    {"section": "tracker", "key": "search_speed",          "min": 0.05, "max": 2.0,  "step": 0.05, "default": 0.8,  "type": "float", "risk": "GREEN",  "description": "Such-Geschwindigkeit nach Target-Verlust"},
+    {"section": "tracker", "key": "search_home_timeout",   "min": 5,    "max": 120,  "step": 5,    "default": 20,   "type": "float", "risk": "GREEN",  "description": "Sekunden bis Suche abgebrochen und Home angefahren"},
+    {"section": "tracker", "key": "target_lost_timeout",   "min": 1,    "max": 30,   "step": 0.5,  "default": 8.5,  "type": "float", "risk": "GREEN",  "description": "Sekunden bis Target als verloren gilt"},
+    {"section": "tracker", "key": "home_pan",              "min": -170, "max": 170,  "step": 1,    "default": 103,  "type": "float", "risk": "GREEN",  "description": "Home-Position Pan in Grad"},
+    {"section": "tracker", "key": "home_tilt",             "min": -78,  "max": 78,   "step": 1,    "default": 9.9,  "type": "float", "risk": "GREEN",  "description": "Home-Position Tilt in Grad"},
+
+    {"section": "ptz", "key": "home_pan",       "min": -170, "max": 170,  "step": 1,    "default": 0,      "type": "float", "risk": "GREEN",  "description": "PTZ Home Pan (alternativ zu tracker.home_pan)"},
+    {"section": "ptz", "key": "home_tilt",      "min": -78,  "max": 78,   "step": 1,    "default": 0,      "type": "float", "risk": "GREEN",  "description": "PTZ Home Tilt"},
+    {"section": "ptz", "key": "tracking_speed", "min": 0.1,  "max": 3.0,  "step": 0.1,  "default": 0.7,    "type": "float", "risk": "GREEN",  "description": "PTZ Tracking Speed"},
+    {"section": "ptz", "key": "search_speed",   "min": 0.05, "max": 2.0,  "step": 0.05, "default": 0.15,   "type": "float", "risk": "GREEN",  "description": "PTZ Search Speed"},
+    {"section": "ptz", "key": "pan_limit_min",  "min": -180, "max": 0,    "step": 1,    "default": -168.4, "type": "float", "risk": "YELLOW", "description": "Hardware Pan-Limit Links"},
+    {"section": "ptz", "key": "pan_limit_max",  "min": 0,    "max": 180,  "step": 1,    "default": 170.0,  "type": "float", "risk": "YELLOW", "description": "Hardware Pan-Limit Rechts"},
+    {"section": "ptz", "key": "tilt_limit_min", "min": -90,  "max": 0,    "step": 1,    "default": -78.0,  "type": "float", "risk": "YELLOW", "description": "Hardware Tilt-Limit Unten"},
+    {"section": "ptz", "key": "tilt_limit_max", "min": 0,    "max": 90,   "step": 1,    "default": 78.8,   "type": "float", "risk": "YELLOW", "description": "Hardware Tilt-Limit Oben"},
+
+    {"section": "tts", "key": "user_speed_offset",  "min": -0.30, "max": 0.30, "step": 0.05, "default": 0.0,  "type": "float", "risk": "GREEN", "description": "User Speed Offset (negativ=schneller, positiv=langsamer)"},
+    {"section": "tts", "key": "guardian_speed",      "min": 0.70,  "max": 1.30, "step": 0.05, "default": 0.95, "type": "float", "risk": "GREEN", "description": "Guardian Sprechgeschwindigkeit"},
+    {"section": "tts", "key": "shadow_speed",        "min": 0.70,  "max": 1.50, "step": 0.05, "default": 1.1,  "type": "float", "risk": "GREEN", "description": "Shadow Sprechgeschwindigkeit"},
+    {"section": "tts", "key": "berserker_speed",     "min": 0.80,  "max": 1.80, "step": 0.05, "default": 1.3,  "type": "float", "risk": "GREEN", "description": "Berserker Sprechgeschwindigkeit"},
+
+    {"section": "profiler", "key": "enabled",          "min": null, "max": null, "step": null, "default": true, "type": "bool",  "risk": "GREEN", "description": "Profiler an/aus"},
+    {"section": "profiler", "key": "log_interval_sec",  "min": 5,    "max": 300,  "step": 5,    "default": 30,   "type": "int",   "risk": "GREEN", "description": "Profiler Log-Intervall in Sekunden"},
+
+    {"section": "teach", "key": "mode_enabled", "min": null, "max": null, "step": null, "default": false, "type": "bool",  "risk": "GREEN", "description": "Teach-Modus aktiv"},
+    {"section": "teach", "key": "cooldown",     "min": 5,    "max": 120,  "step": 5,    "default": 30,    "type": "float", "risk": "GREEN", "description": "Teach Cooldown zwischen Aufnahmen in Sekunden"},
+
+    {"section": "internet", "key": "autonomous_search_interval",     "min": 60,   "max": 3600, "step": 60,  "default": 300,  "type": "int",    "risk": "GREEN", "description": "Autonome Internet-Suche Intervall in Sekunden"},
+    {"section": "internet", "key": "autonomous_search_ttl",          "min": 300,  "max": 86400,"step": 300, "default": 3600, "type": "int",    "risk": "GREEN", "description": "Wie lange Suchergebnisse gueltig sind"},
+    {"section": "internet", "key": "autonomous_search_city",         "min": null, "max": null, "step": null,"default": "Nuernberg", "type": "string", "risk": "GREEN", "description": "Stadt fuer Wetter/Nachrichten"},
+    {"section": "internet", "key": "autonomous_search_max_per_session","min": 1,  "max": 100,  "step": 1,   "default": 20,   "type": "int",    "risk": "GREEN", "description": "Max Suchen pro Session"}
+  ],
+
+  "_summary": {
+    "total": 73,
+    "green": 61,
+    "yellow": 12,
+    "red": 0,
+    "note": "Alle RED-Parameter (Pipeline, HEF-Pfade, Service-Config) sind NICHT in dieser Registry — sie duerfen NUR von einem Menschen geaendert werden."
+  }
+}

@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>M.O.L.O.C.H. 4.0 — Hauptfenster Mockup</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0d1117; color: #c9d1d9; font-family: 'Courier New', monospace; padding: 10px; font-size: 12px; }
+  .window { background: #1a1a2e; border: 2px solid #16213e; border-radius: 6px; max-width: 1400px; margin: 0 auto; }
+  .titlebar { background: #16213e; padding: 6px 12px; font-size: 14px; color: #e6e6e6; border-radius: 4px 4px 0 0; display: flex; justify-content: space-between; }
+  .main-grid { display: grid; grid-template-columns: 400px 1fr 260px; gap: 8px; padding: 8px; }
+  .col { display: flex; flex-direction: column; gap: 6px; }
+  .section { border: 1px solid #2a2a4a; border-radius: 4px; padding: 8px; }
+  .section-title { color: #aaa; font-size: 11px; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid #2a2a4a; padding-bottom: 4px; }
+  .preview { background: #0f0f23; width: 100%; height: 220px; display: flex; align-items: center; justify-content: center; border-radius: 4px; position: relative; }
+  .preview .fps { position: absolute; top: 6px; right: 8px; color: #ffcc00; font-size: 11px; }
+  .preview .nosignal { color: #666; font-size: 14px; }
+  .eye-container { width: 100%; height: 300px; background: #0f0f23; border-radius: 4px; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; }
+  .eye { width: 200px; height: 200px; border-radius: 50%; border: 3px solid #00d4ff; position: relative; display: flex; align-items: center; justify-content: center; }
+  .eye-outer { border: 2px solid rgba(0,212,255,0.3); border-radius: 50%; width: 240px; height: 240px; position: absolute; }
+  .eye-inner { width: 80px; height: 80px; border-radius: 50%; background: radial-gradient(circle, #020205 30%, #0044aa 60%, #44aaff 100%); position: relative; }
+  .eye-highlight { width: 12px; height: 12px; background: rgba(255,255,255,0.8); border-radius: 50%; position: absolute; top: 15px; right: 18px; }
+  .eye-grid { position: absolute; inset: 0; background-image: linear-gradient(rgba(17,17,32,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(17,17,32,0.5) 1px, transparent 1px); background-size: 20px 20px; }
+  .eye-scan { position: absolute; left: 0; right: 0; height: 2px; background: rgba(0,212,255,0.3); top: 40%; }
+  .zone-label { text-align: center; color: #00d4ff; font-size: 16px; font-weight: bold; margin-top: 4px; }
+  .zone-state { text-align: center; color: #666; font-size: 11px; }
+  .btn { background: #1a1a3e; color: #fff; border: 1px solid #2a2a4a; padding: 4px 8px; font-family: 'Courier New'; font-size: 11px; cursor: pointer; border-radius: 3px; text-align: center; }
+  .btn:hover { border-color: #00d4ff; }
+  .btn-on { background: #006622; }
+  .btn-off { background: #1a1a3e; color: #666; }
+  .btn-red { background: #aa0000; }
+  .btn-alarm { background: #ff4444; }
+  .btn-cyan { background: #00d4ff; color: #000; }
+  .btn-orange { background: #884400; }
+  .dpad { display: grid; grid-template-columns: 40px 40px 40px; grid-template-rows: 40px 40px 40px; gap: 3px; justify-content: center; }
+  .dpad .btn { display: flex; align-items: center; justify-content: center; font-size: 16px; }
+  .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .label { color: #aaa; font-size: 11px; }
+  .value { color: #ffcc00; font-size: 11px; }
+  .value-green { color: #00ff66; }
+  .value-cyan { color: #00d4ff; }
+  .value-red { color: #ff4444; }
+  .value-dim { color: #666; }
+  .led { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
+  .led-green { background: #00ff66; }
+  .led-red { background: #ff4444; }
+  .led-yellow { background: #ffcc00; }
+  .led-dim { background: #333; }
+  .checkbox { accent-color: #00aa44; }
+  .action-btns { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+  .action-labels { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; font-size: 9px; text-align: center; }
+  .model-row { display: flex; gap: 8px; align-items: center; font-size: 11px; }
+  .popup-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; }
+  .chat-area { background: #0f0f23; border-radius: 4px; padding: 6px; height: 180px; overflow-y: auto; font-size: 11px; }
+  .chat-line { margin-bottom: 3px; }
+  .chat-ts { color: #666; }
+  .chat-user { color: #00d4ff; }
+  .chat-moloch { color: #00FF88; }
+  .chat-input { display: flex; gap: 4px; margin-top: 4px; }
+  .chat-input input { flex: 1; background: #0f0f23; border: 1px solid #2a2a4a; color: #c0c0c0; padding: 4px; font-family: 'Courier New'; font-size: 11px; }
+  .ptt-btn { width: 60px; height: 30px; background: #1a1a3e; border: 2px solid #aa0000; color: #fff; font-weight: bold; }
+  .tension-bar { width: 100px; height: 12px; background: #0f0f23; border: 1px solid #2a2a4a; position: relative; display: inline-block; }
+  .tension-fill { position: absolute; top: 1px; height: 10px; background: #00ff66; }
+  .tension-center { position: absolute; left: 50px; top: 0; width: 1px; height: 12px; background: #666; }
+  .status-bar { background: #16213e; padding: 6px 12px; font-size: 11px; border-radius: 0 0 4px 4px; display: flex; gap: 12px; }
+  .spotify-section { display: flex; flex-direction: column; gap: 4px; }
+  .track-name { color: #c0c0c0; font-size: 11px; background: #0f0f23; padding: 3px 6px; border-radius: 3px; }
+  .track-artist { color: #666; font-size: 10px; padding: 0 6px; }
+  .transport { display: flex; gap: 3px; align-items: center; }
+  .vol-row { display: flex; gap: 4px; align-items: center; font-size: 10px; }
+  .vol-slider { width: 80px; accent-color: #00d4ff; }
+  .res-select { background: #0f0f23; color: #c0c0c0; border: 1px solid #2a2a4a; font-size: 10px; padding: 2px; }
+</style>
+</head>
+<body>
+
+<div class="window">
+  <div class="titlebar">
+    <span>M.O.L.O.C.H. 4.0</span>
+    <span style="color:#666">— _ X</span>
+  </div>
+
+  <div class="main-grid">
+    <!-- SPALTE 1: Kamera -->
+    <div class="col">
+      <div class="section">
+        <div class="section-title">Kamera</div>
+        <div class="row" style="margin-bottom:4px">
+          <span class="label">Aufloesung:</span>
+          <select class="res-select"><option>SD 640x360</option><option>HD 800x450</option><option selected>HD+ 960x540</option><option>Full 1280x720</option></select>
+        </div>
+        <div class="preview">
+          <div class="fps">20.1 FPS</div>
+          <div class="nosignal">[ Live Preview — 960x540 ]</div>
+        </div>
+      </div>
+
+      <!-- Eye/Avatar -->
+      <div class="eye-container">
+        <div class="eye-grid"></div>
+        <div class="eye-scan"></div>
+        <div class="eye-outer"></div>
+        <div class="eye">
+          <div class="eye-inner">
+            <div class="eye-highlight"></div>
+          </div>
+        </div>
+      </div>
+      <div class="zone-label">GUARDIAN</div>
+      <div class="zone-state">T:+0.12 | D:+0.05 | Idle</div>
+      <div class="zone-state" style="color:#1DB954">♫ Artist — Track Name</div>
+    </div>
+
+    <!-- SPALTE 2: Steuerung -->
+    <div class="col">
+      <!-- PTZ -->
+      <div class="section">
+        <div class="section-title">PTZ</div>
+        <div style="display:flex;gap:20px;align-items:start">
+          <div class="dpad">
+            <div></div><div class="btn">▲</div><div></div>
+            <div class="btn">◄</div><div class="btn">⌂</div><div class="btn">►</div>
+            <div></div><div class="btn">▼</div><div></div>
+          </div>
+          <div style="flex:1">
+            <div class="row"><span class="label">Pan: 0.0°</span> <span class="label" style="margin-left:12px">Tilt: 0.0°</span></div>
+            <div class="row" style="margin-top:4px"><span class="value-dim">Moves: 142  Trk: 87  Srch: 12</span></div>
+            <div class="row" style="margin-top:6px"><span class="label">PTZ:</span> <span class="value-green">Ruhig</span> <span style="margin-left:12px" class="value-green">Trackt</span></div>
+            <div class="row" style="margin-top:2px"><span class="label">NPU:</span> <span class="value-green">FACE</span> <span class="value-dim" style="margin-left:8px">scrfd arcface yolov8m pose</span></div>
+          </div>
+        </div>
+        <div class="row" style="margin-top:6px;gap:3px">
+          <span class="label">Positionen:</span>
+          <button class="btn" style="width:80px">Werkstatt</button>
+          <button class="btn btn-cyan" style="width:80px">Wohnzimmer</button>
+        </div>
+        <div class="row" style="margin-top:6px;gap:3px">
+          <span class="label">Modi:</span>
+          <button class="btn btn-on" style="width:120px">MOLOCH steuert</button>
+          <button class="btn btn-off" style="width:50px">TEACH</button>
+        </div>
+      </div>
+
+      <!-- Aktionen -->
+      <div class="section">
+        <div class="section-title">Aktionen</div>
+        <div class="action-btns">
+          <button class="btn btn-off">ALARM</button>
+          <button class="btn btn-cyan">SNAP</button>
+          <button class="btn btn-off">TEACH</button>
+          <button class="btn btn-off">FLUTLICHT</button>
+          <button class="btn btn-cyan">ERKANNT</button>
+          <button class="btn">EINPRAEGEN</button>
+          <button class="btn">GALERIE</button>
+        </div>
+        <div class="action-labels">
+          <span class="value-dim">AUS</span>
+          <span class="value-cyan">bereit</span>
+          <span class="value-dim"></span>
+          <span class="value-dim">AUS</span>
+          <span class="value-cyan">MARKUS</span>
+          <span class="value-dim"></span>
+          <span class="value-dim"></span>
+        </div>
+      </div>
+
+      <!-- NPU Status + Modelle -->
+      <div class="section">
+        <div class="section-title">NPU Status</div>
+        <div class="row"><span class="label">Pipeline:</span> <span class="value-green">TAPPAS</span></div>
+        <div class="row"><span class="label">Aktiv:</span> <span class="value-green">NAH</span></div>
+        <div class="row"><span class="label">Source:</span> <span class="value-cyan">🔵 Moloch Tracking aktiv</span></div>
+        <div style="margin-top:6px">
+          <div class="model-row">
+            <span class="label">TAPPAS:</span>
+            <label style="color:#00aa44"><input type="checkbox" checked disabled class="checkbox"> SCRFD</label>
+            <label style="color:#00aa44"><input type="checkbox" checked disabled class="checkbox"> ArcFace</label>
+            <label style="color:#00aa44"><input type="checkbox" checked disabled class="checkbox"> YOLOv8m</label>
+            <label style="color:#00aa44"><input type="checkbox" checked disabled class="checkbox"> FaceAttr</label>
+          </div>
+          <div class="model-row" style="margin-top:3px">
+            <span class="label">Extra:</span>
+            <label style="color:#fff"><input type="checkbox" checked class="checkbox"> Pose</label>
+            <label style="color:#fff"><input type="checkbox" class="checkbox"> Hand LM</label>
+            <label style="color:#fff"><input type="checkbox" class="checkbox"> ReID</label>
+          </div>
+        </div>
+        <div class="row" style="margin-top:6px"><span class="label">FPS:</span> <span class="value">20.1</span> <span class="value-dim">(scrfd:20 yolov8m:20 arcface:18 pose:7)</span></div>
+        <div style="margin-top:6px"><button class="btn" style="width:120px">SAVE SETTINGS</button></div>
+      </div>
+
+      <!-- Bridge / Erkennung -->
+      <div class="section">
+        <div class="section-title">Bridge / Erkennung</div>
+        <div class="row"><span class="label">Bridge:</span> <span class="value-green">TRACKING</span> <span class="value-dim">(12s)</span> <span class="value-dim" style="margin-left:8px">Dec: 47</span></div>
+        <div class="row"><span class="label">Face:</span> <span class="value-cyan">MARKUS (87%)</span> <span class="value-cyan" style="margin-left:8px">Owner: Markus</span></div>
+      </div>
+
+      <!-- Innenleben -->
+      <div class="section">
+        <div class="section-title">Innenleben</div>
+        <div class="row">
+          <span class="label">Tension:</span>
+          <div class="tension-bar"><div class="tension-center"></div><div class="tension-fill" style="left:50px;width:12px;background:#00ff66"></div></div>
+          <span class="value">+0.12</span>
+          <span class="value-dim" style="margin-left:8px">Dom: +0.05</span>
+        </div>
+        <div class="row"><span class="label">Zone:</span> <span class="value-cyan">GUARDIAN</span> <span class="value-dim" style="margin-left:8px">Pers: Guardian</span> <span class="value-dim" style="margin-left:8px">Tag</span></div>
+        <div class="row"><span class="label">Praesenz:</span> <span class="value-green">da seit 4m</span> <span class="value-dim" style="margin-left:8px">Dist: Nah</span> <span class="value-green" style="margin-left:8px">→ Kommt</span></div>
+      </div>
+
+      <!-- Popups -->
+      <div class="section">
+        <div class="section-title">Popups</div>
+        <div class="popup-grid">
+          <button class="btn">AUDIO</button>
+          <button class="btn">HARDWARE</button>
+          <button class="btn">NPU/MPO</button>
+          <button class="btn">TRACKER</button>
+          <button class="btn">WHISPER</button>
+          <button class="btn">DASHBOARD</button>
+          <button class="btn">SUPERVISOR</button>
+          <button class="btn">PIPOWER5</button>
+          <button class="btn">SETTINGS</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- SPALTE 3: Kommunikation -->
+    <div class="col">
+      <!-- Chat -->
+      <div class="section" style="flex:1;display:flex;flex-direction:column">
+        <div class="section-title">Chat</div>
+        <div class="chat-area" style="flex:1">
+          <div class="chat-line"><span class="chat-ts">[18:22:01]</span> <span class="chat-user">Markus:</span> Wie geht's dir?</div>
+          <div class="chat-line"><span class="chat-ts">[18:22:03]</span> <span class="chat-moloch">MOLOCH:</span> Alles im gruenen Bereich. Temperatur 48 Grad, alle Systeme laufen.</div>
+          <div class="chat-line"><span class="chat-ts">[18:23:15]</span> <span class="chat-user">Markus:</span> Spiel was Ruhiges.</div>
+          <div class="chat-line"><span class="chat-ts">[18:23:17]</span> <span class="chat-moloch">MOLOCH:</span> Lege Ambient auf. Guardian-Stimmung passt dazu.</div>
+        </div>
+        <div class="chat-input">
+          <input type="text" placeholder="Nachricht...">
+          <button class="btn" style="width:50px">Send</button>
+        </div>
+      </div>
+
+      <!-- Push-to-Talk -->
+      <div class="section">
+        <div class="section-title">Push-to-Talk</div>
+        <div class="row">
+          <button class="ptt-btn">PTT</button>
+          <span class="value-green">WiFi-Mic</span>
+          <span class="value-dim">Idle</span>
+        </div>
+        <div class="row" style="margin-top:4px">
+          <label style="color:#fff"><input type="checkbox" checked class="checkbox"> Sprache AN</label>
+          <span class="led led-dim"></span><span class="value-dim">API</span>
+          <span class="led led-green"></span><span class="value-green">NPU</span>
+        </div>
+      </div>
+
+      <!-- Stimme -->
+      <div class="section">
+        <div class="section-title">Stimme</div>
+        <div class="row">
+          <select class="res-select" style="width:130px">
+            <option selected>Thorsten (High)</option>
+            <option>Thorsten (Medium)</option>
+            <option>Karlsson (Kobold)</option>
+            <option>Kerstin</option>
+            <option>Eva K.</option>
+          </select>
+          <button class="btn" style="width:40px">Test</button>
+        </div>
+      </div>
+
+      <!-- Spotify -->
+      <div class="section">
+        <div class="section-title">SPOTIFY</div>
+        <div class="spotify-section">
+          <div class="track-name">Weightless — Marconi Union</div>
+          <div class="track-artist">Marconi Union</div>
+          <div class="transport">
+            <button class="btn" style="width:35px">◄◄</button>
+            <button class="btn btn-on" style="width:55px">PAUSE</button>
+            <button class="btn" style="width:35px">►►</button>
+            <button class="btn btn-off" style="width:55px;font-size:9px">AUTO-DJ</button>
+          </div>
+          <div class="vol-row">
+            <span class="value-dim">VOL</span>
+            <input type="range" min="0" max="100" value="45" class="vol-slider">
+            <span class="value-dim">45%</span>
+          </div>
+          <div class="row" style="gap:3px">
+            <button class="btn" style="font-size:9px;padding:2px 5px">Aehnlich</button>
+            <button class="btn" style="font-size:9px;padding:2px 5px">Top</button>
+            <button class="btn" style="font-size:9px;padding:2px 5px">Neu</button>
+            <span class="value-green" style="margin-left:auto;font-size:10px">Guardian</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Status Bar -->
+  <div class="status-bar">
+    <span><span class="led led-green"></span><span class="value-green">Service: aktiv</span></span>
+    <span><span class="label">FPS:</span> <span class="value">20.1</span></span>
+    <span><span class="value-green">TRACKING</span></span>
+    <span><span class="label">Bridge:</span> <span class="value-green">TRACKING</span></span>
+    <span><span class="label">Face:</span> <span class="value-cyan">MARKUS (87%)</span></span>
+    <span><span class="label">Zone:</span> <span class="value-cyan">GUARDIAN</span></span>
+    <span><span class="label">T:</span> <span class="value">+0.12</span></span>
+  </div>
+</div>
+
+<p style="text-align:center;margin-top:15px;color:#666;font-size:11px">
+  M.O.L.O.C.H. 4.0 Hauptfenster — 3-Spalten Layout (Kamera | Steuerung | Kommunikation)
+</p>
+
+</body>
+</html>

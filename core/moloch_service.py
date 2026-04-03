@@ -509,12 +509,8 @@ class MolochService:
                 else:
                     db = {}
                 db[emb_key] = emb_normalized.tolist()
-                import tempfile as _tf_mod
-                with _tf_mod.NamedTemporaryFile("w", dir=os.path.dirname(emb_path),
-                                                delete=False, suffix=".tmp") as tf:
-                    json.dump(db, tf, indent=2)
-                    _tmp = tf.name
-                os.replace(_tmp, emb_path)
+                with open(emb_path, 'w') as f:
+                    json.dump(db, f, indent=2)
                 logger.info(f"[TEACH] Embedding gespeichert: {emb_key} (sim={sim_score:.3f})")
 
                 # Face-DB im RAM neu laden
@@ -1669,6 +1665,16 @@ class MolochService:
             self._watchdog = None
             logger.warning(f"[START] Watchdog fehlgeschlagen: {e}")
 
+        # Unterbewusstsein — Mood + Pipeline Self-Tune (alle 10s)
+        try:
+            from core.unconscious_engine import get_unconscious_engine
+            self._unconscious = get_unconscious_engine()
+            self._unconscious.start()
+            logger.info("[START] UnconsciousEngine (Unterbewusstsein) gestartet")
+        except Exception as e:
+            self._unconscious = None
+            logger.warning(f"[START] UnconsciousEngine fehlgeschlagen: {e}")
+
         # G1-T03: Auto-Resume Callback — TTS Spruch bei Manuell→Autonom
         try:
             from core.ptz_arbiter import get_ptz_arbiter
@@ -1778,6 +1784,10 @@ class MolochService:
         """Sauberes Herunterfahren."""
         logger.info("M.O.L.O.C.H. Service wird gestoppt...")
         self.running = False
+
+        # Unterbewusstsein stoppen
+        if hasattr(self, '_unconscious') and self._unconscious:
+            self._unconscious.stop()
 
         # System-Watchdog zuerst stoppen (verhindert Neustart-Versuche waehrend Shutdown)
         if hasattr(self, '_system_watchdog') and self._system_watchdog:
@@ -2052,9 +2062,6 @@ class MolochService:
                     status["face_id"] = getattr(pframe, 'face_id', None)
                     status["face_confidence"] = round(getattr(pframe, 'face_confidence', 0.0), 3)
                     status["face_similarity"] = round(getattr(pframe, 'face_similarity', 0.0), 3)
-                    status["emotion"]   = getattr(pframe, 'emotion', None)
-                    status["gender"]    = getattr(pframe, 'gender', None)
-                    status["age_range"] = getattr(pframe, 'age_range', None)
                     status["mode"] = "tappas"
                 # Detektionen fuer Panel-BBox-Overlay (normalisierte Koordinaten [0-1])
                 if hasattr(_inf, 'get_detections'):
@@ -2492,6 +2499,13 @@ class MolochService:
             value = cmd.get('value')
             if param is not None and value is not None:
                 value = float(value)
+                # Person-Filter-Keys gehen an TappasPipeline
+                if param in ('person_min_height', 'person_min_area'):
+                    attr = f"{param}_val"
+                    if hasattr(self._inference, attr):
+                        setattr(self._inference, attr, value)
+                        logger.info(f"[TRACKER] inference.{attr} = {value}")
+                    return
                 tracker = self._cam._tracker
                 if tracker and hasattr(tracker, 'config'):
                     cfg = tracker.config
@@ -2647,6 +2661,61 @@ class MolochService:
             if voice_id and self._voice_pipeline:
                 self._voice_pipeline.set_voice(voice_id)
                 logger.info(f"[IPC] Voice: {voice_id}")
+
+        elif action == 'self_tune':
+            # SELF-TUNE: Parameter in settings.json aendern — NUR Registry-Parameter erlaubt!
+            # Format: {"action": "self_tune", "section": "tts", "key": "user_speed_offset", "value": -0.10}
+            section = cmd.get('section', '')
+            key = cmd.get('key', '')
+            value = cmd.get('value')
+            if not section or not key or value is None:
+                logger.warning("[SELF-TUNE] Fehlende Parameter: section, key, value")
+            else:
+                try:
+                    import tempfile
+                    # Registry-Validierung: Parameter muss in self_tune_registry.json stehen
+                    registry_path = os.path.expanduser("~/moloch/config/self_tune_registry.json")
+                    param_def = None
+                    try:
+                        with open(registry_path, "r") as rf:
+                            registry = json.load(rf)
+                        for p in registry.get("parameters", []):
+                            if p.get("section") == section and p.get("key") == key:
+                                param_def = p
+                                break
+                    except Exception as re:
+                        logger.error(f"[SELF-TUNE] Registry nicht lesbar: {re}")
+                        return
+                    if param_def is None:
+                        logger.warning(f"[SELF-TUNE] ABGELEHNT: {section}.{key} nicht in Registry")
+                        return
+
+                    # Wertebereich aus Registry erzwingen (nicht aus IPC-Command)
+                    if isinstance(value, (int, float)):
+                        val_min = param_def.get("min")
+                        val_max = param_def.get("max")
+                        if val_min is not None:
+                            value = max(float(val_min), value)
+                        if val_max is not None:
+                            value = min(float(val_max), value)
+                        value = round(value, 3)
+
+                    settings_path = os.path.expanduser("~/moloch/config/settings.json")
+                    with open(settings_path, "r") as f:
+                        data = json.load(f)
+                    old_value = data.get(section, {}).get(key, "N/A")
+                    if section not in data:
+                        data[section] = {}
+                    data[section][key] = value
+                    # Atomar schreiben
+                    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(settings_path), suffix=".tmp")
+                    with os.fdopen(fd, 'w') as f:
+                        json.dump(data, f, indent=2)
+                        f.write("\n")
+                    os.replace(tmp, settings_path)
+                    logger.info(f"[SELF-TUNE] {section}.{key}: {old_value} -> {value}")
+                except Exception as e:
+                    logger.error(f"[SELF-TUNE] Fehler: {e}")
 
         elif action == 'voice_test':
             if self._voice_pipeline:

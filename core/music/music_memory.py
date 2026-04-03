@@ -22,7 +22,6 @@ from typing import Optional, Dict, Any, List
 logger = logging.getLogger("MolochMusicMemory")
 
 MEMORY_PATH = "/mnt/moloch-data/memory/music_memory.json"
-MAX_ENTRIES = 1000  # Maximale Eintraege — aelteste werden verworfen
 
 
 class MusicMemory:
@@ -47,17 +46,11 @@ class MusicMemory:
             logger.info("[MUSIC-MEM] Keine bestehenden Assoziationen, starte leer")
 
     def _save(self):
-        """Assoziationen auf Disk schreiben (atomisch, max MAX_ENTRIES)."""
-        import tempfile
+        """Assoziationen auf Disk schreiben (muss unter Lock aufgerufen werden)."""
         try:
             os.makedirs(os.path.dirname(MEMORY_PATH), exist_ok=True)
-            # Nur die letzten MAX_ENTRIES behalten (aelteste verwerfen)
-            data = self._associations[-MAX_ENTRIES:]
-            with tempfile.NamedTemporaryFile("w", dir=os.path.dirname(MEMORY_PATH),
-                                            delete=False, suffix=".tmp") as tf:
-                json.dump(data, tf, indent=2, ensure_ascii=False)
-                tmp = tf.name
-            os.replace(tmp, MEMORY_PATH)
+            with open(MEMORY_PATH, "w") as f:
+                json.dump(self._associations, f, indent=2, ensure_ascii=False)
         except Exception as e:
             logger.error(f"[MUSIC-MEM] Speichern fehlgeschlagen: {e}")
 

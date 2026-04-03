@@ -308,8 +308,8 @@ class FaceWorker(BaseWorker):
         if self._faceattr_configured is not None:
             try:
                 gender, age_range, emotion = self._infer_face_attr(aligned)
-            except Exception as _fa_err:
-                logger.warning(f"[FACEATTR] Fehler: {_fa_err}")
+            except Exception:
+                pass  # Nicht-kritisch
 
         return {
             "bbox": [float(box[0]), float(box[1]), float(box[2]), float(box[3])],
@@ -325,29 +325,14 @@ class FaceWorker(BaseWorker):
             "face_size": [bw, bh],
         }
 
-    # CelebA-40 Attribut-Indizes (Standard-Reihenfolge, verifiziert mit Hailo face_attr_resnet_v1_18)
-    # Format: 80 float32 = 40 Paare [logit_neg, logit_pos], Attribut i = Indices [2i, 2i+1]
-    # Attribut ist aktiv wenn out[2i+1] > out[2i] (d.h. Konfidenz = out[2i+1]-out[2i] > 0)
-    _FA_ARCHED_BROWS   = 1   # Hochgezogene Augenbrauen → ueberrascht
-    _FA_BAGS_EYES      = 3   # Tränensäcke → muede
-    _FA_EYEGLASSES     = 15  # Brille
-    _FA_HIGH_CHEEKS    = 19  # Hohe Wangenknochen → freudig
-    _FA_MALE           = 20  # Maennlich (VERIFIZIERT: Markus wird korrekt erkannt)
-    _FA_MOUTH_OPEN     = 21  # Mund leicht offen → ueberrascht
-    _FA_NARROW_EYES    = 23  # Zusammengekniffene Augen → aergerlich
-    _FA_NO_BEARD       = 24  # Kein Bart (invertiert = Bart vorhanden)
-    _FA_ROSY_CHEEKS    = 29  # Rote Wangen → aufgeregt
-    _FA_SMILING        = 31  # Laecheln → freudig
-    _FA_WEARING_HAT    = 35  # Hut
-    _FA_YOUNG          = 39  # Jung (Altersindikator)
-
     def _infer_face_attr(self, aligned_112: np.ndarray) -> Tuple[str, str, str]:
-        """Face Attributes: Gender, Age, Emotion via CelebA-40 Dekoder.
+        """Face Attributes: Gender, Age, Emotion.
 
         Input: 112x112 RGB (bereits aligned).
-        Output: (gender, age_range, emotion)
-        Modell: face_attr_resnet_v1_18, Input 218x178x3, Output 80 float32
+        face_attr_resnet_v1_18 erwartet 178x218x3 = 116412 bytes.
         """
+        # face_attr_resnet_v1_18: Input shape [218, 178, 3] = HxWxC
+        # cv2.resize erwartet (width, height) = (178, 218)
         attr_input = cv2.resize(aligned_112, (178, 218))
 
         bindings = self._faceattr_configured.create_bindings()
@@ -360,45 +345,21 @@ class FaceWorker(BaseWorker):
 
         self._faceattr_configured.run([bindings], INFERENCE_TIMEOUT_MS)
 
-        v = bufs[self._faceattr_out_names[0]].flatten()
-        if len(v) < 80:
-            return None, None, "neutral"
+        # Decode (haengt vom konkreten Modell ab — minimal-Version)
+        # Output ist typisch: [age, gender_logit, smile_logit] oder aehnlich
+        # Hier: robustes Parsing, Detailformat spaeter anpassen
+        out_data = bufs[self._faceattr_out_names[0]].flatten()
 
-        def conf(idx):
-            """Konfidenz fuer Attribut idx: positiv = vorhanden, negativ = abwesend."""
-            return float(v[2 * idx + 1]) - float(v[2 * idx])
-
-        # --- Gender ---
-        gender = "M" if conf(self._FA_MALE) > 0 else "F"
-
-        # --- Alter (Young-Attribut als Proxy) ---
-        young_conf = conf(self._FA_YOUNG)
-        if young_conf > 1.5:
-            age_range = "18-35"
-        elif young_conf > 0.0:
-            age_range = "35-50"
-        else:
-            age_range = "50+"
-
-        # --- Emotion (aus Kombination von Attributen) ---
-        smiling    = conf(self._FA_SMILING)        # positiv = laechelt
-        mouth_open = conf(self._FA_MOUTH_OPEN)     # positiv = Mund offen
-        narrow_eye = conf(self._FA_NARROW_EYES)    # positiv = zusammengekniffen
-        arched     = conf(self._FA_ARCHED_BROWS)   # positiv = hochgezogen
-        high_cheek = conf(self._FA_HIGH_CHEEKS)    # positiv = hohe Wangenknochen
-        rosy       = conf(self._FA_ROSY_CHEEKS)    # positiv = rote Wangen
-
-        # Entscheidungsbaum: Schwellwert 1.0 = deutliches Signal
-        if smiling > 1.0 or (smiling > 0.3 and high_cheek > 0.5):
-            emotion = "freudig"
-        elif (mouth_open > 1.0 or arched > 1.5) and smiling < 0.5:
-            emotion = "ueberrascht"
-        elif narrow_eye > 0.8 and smiling < 0:
-            emotion = "aergerlich"
-        elif rosy > 1.0 and smiling > 0:
-            emotion = "aufgeregt"
-        else:
-            emotion = "neutral"
+        gender = "M" if (len(out_data) > 1 and out_data[1] > 0) else "F"
+        emotion = "neutral"
+        if len(out_data) > 2:
+            emotion = "happy" if out_data[2] > 0 else "neutral"
+        age_range = None
+        if len(out_data) > 0:
+            age_val = float(out_data[0])
+            if 0 < age_val < 100:
+                age_low = int(age_val / 5) * 5
+                age_range = f"{age_low}-{age_low + 5}"
 
         return gender, age_range, emotion
 

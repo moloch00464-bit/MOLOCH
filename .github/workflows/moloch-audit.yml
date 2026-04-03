@@ -1,0 +1,224 @@
+name: MOLOCH Audit
+
+on:
+  push:
+    branches: ['*']
+  pull_request:
+    branches: [main]
+
+jobs:
+  config-audit:
+    name: Konfigurationen pruefen
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: JSON Validierung
+        run: |
+          echo "=== JSON-Dateien pruefen ==="
+          ERRORS=0
+
+          # settings.json
+          if [ -f ".claude/settings.json" ]; then
+            python3 -c "import json; json.load(open('.claude/settings.json'))" \
+              && echo "PASS: .claude/settings.json" \
+              || { echo "FAIL: .claude/settings.json ist kein valides JSON"; ERRORS=$((ERRORS+1)); }
+          fi
+
+          # .mcp.json
+          if [ -f ".mcp.json" ]; then
+            python3 -c "import json; json.load(open('.mcp.json'))" \
+              && echo "PASS: .mcp.json" \
+              || { echo "FAIL: .mcp.json ist kein valides JSON"; ERRORS=$((ERRORS+1)); }
+          fi
+
+          # config/settings.json
+          if [ -f "config/settings.json" ]; then
+            python3 -c "import json; json.load(open('config/settings.json'))" \
+              && echo "PASS: config/settings.json" \
+              || { echo "FAIL: config/settings.json ist kein valides JSON"; ERRORS=$((ERRORS+1)); }
+          fi
+
+          [ $ERRORS -eq 0 ] || exit 1
+
+      - name: Hook-Scripts Syntax
+        run: |
+          echo "=== Shell-Script Syntax ==="
+          ERRORS=0
+          for f in .claude/hooks/*.sh; do
+            [ -f "$f" ] || continue
+            bash -n "$f" \
+              && echo "PASS: $f" \
+              || { echo "FAIL: $f hat Syntax-Fehler"; ERRORS=$((ERRORS+1)); }
+          done
+          [ $ERRORS -eq 0 ] || exit 1
+
+      - name: Hook-Scripts ausfuehrbar
+        run: |
+          echo "=== Executable-Check ==="
+          ERRORS=0
+          for f in .claude/hooks/*.sh; do
+            [ -f "$f" ] || continue
+            if [ -x "$f" ]; then
+              echo "PASS: $f ist ausfuehrbar"
+            else
+              echo "FAIL: $f ist NICHT ausfuehrbar (chmod +x fehlt)"
+              ERRORS=$((ERRORS+1))
+            fi
+          done
+          [ $ERRORS -eq 0 ] || exit 1
+
+      - name: Settings-Hooks Referenzen pruefen
+        run: |
+          echo "=== Hook-Referenzen in settings.json ==="
+          ERRORS=0
+          # Jedes Script das in settings.json referenziert wird muss existieren
+          python3 <<'PYEOF'
+import json, re, sys, os
+
+with open(".claude/settings.json") as f:
+    data = json.load(f)
+
+hooks = data.get("hooks", {})
+errors = 0
+
+for event, entries in hooks.items():
+    for entry in entries:
+        for hook in entry.get("hooks", []):
+            cmd = hook.get("command", "")
+            cmd_resolved = cmd.replace('"$CLAUDE_PROJECT_DIR"', '.').replace('$CLAUDE_PROJECT_DIR', '.')
+            match = re.search(r'(\./\.claude/hooks/\S+)', cmd_resolved)
+            if match:
+                path = match.group(1)
+                if os.path.exists(path):
+                    print(f"PASS: {event} -> {path}")
+                else:
+                    print(f"FAIL: {event} -> {path} EXISTIERT NICHT")
+                    errors += 1
+
+sys.exit(1 if errors > 0 else 0)
+PYEOF
+
+      - name: NEVER-Regeln in Hooks pruefen
+        run: |
+          echo "=== NEVER-Regeln Abdeckung ==="
+          HOOK_FILE=".claude/hooks/pre-edit-check.sh"
+          if [ ! -f "$HOOK_FILE" ]; then
+            echo "FAIL: pre-edit-check.sh fehlt!"
+            exit 1
+          fi
+
+          WARNINGS=0
+
+          # NEVER 2: Pan-Vorzeichen
+          grep -q "pan_delta" "$HOOK_FILE" \
+            && echo "PASS: NEVER 2 (Pan-Vorzeichen) abgedeckt" \
+            || { echo "WARN: NEVER 2 (Pan-Vorzeichen) NICHT in Hooks"; WARNINGS=$((WARNINGS+1)); }
+
+          # NEVER 5: subprocess timeout
+          grep -q "subprocess" "$HOOK_FILE" \
+            && echo "PASS: NEVER 5 (subprocess timeout) abgedeckt" \
+            || { echo "WARN: NEVER 5 (subprocess timeout) NICHT in Hooks"; WARNINGS=$((WARNINGS+1)); }
+
+          # NEVER 6: JSON atomic write
+          grep -q "json" "$HOOK_FILE" \
+            && echo "PASS: NEVER 6 (JSON atomic) abgedeckt" \
+            || { echo "WARN: NEVER 6 (JSON atomic) NICHT in Hooks"; WARNINGS=$((WARNINGS+1)); }
+
+          # NEVER 7: Runtime-State
+          grep -q "last_face_position\|learned_patrol" "$HOOK_FILE" \
+            && echo "PASS: NEVER 7 (Runtime-State) abgedeckt" \
+            || { echo "WARN: NEVER 7 (Runtime-State) NICHT in Hooks"; WARNINGS=$((WARNINGS+1)); }
+
+          # NEVER 8: shell=True
+          grep -q "shell=True" "$HOOK_FILE" \
+            && echo "PASS: NEVER 8 (shell=True) abgedeckt" \
+            || { echo "WARN: NEVER 8 (shell=True) NICHT in Hooks"; WARNINGS=$((WARNINGS+1)); }
+
+          # NEVER 10: np.ndarray
+          grep -q "np\.ndarray\|numpy" "$HOOK_FILE" \
+            && echo "PASS: NEVER 10 (np.ndarray) abgedeckt" \
+            || { echo "WARN: NEVER 10 (np.ndarray) NICHT in Hooks"; WARNINGS=$((WARNINGS+1)); }
+
+          echo ""
+          echo "=== $WARNINGS Warnungen ==="
+          # Warnungen sind kein harter Fehler, aber sichtbar
+
+      - name: Skills vorhanden
+        run: |
+          echo "=== Skills pruefen ==="
+          EXPECTED_SKILLS=("moloch-audit" "moloch-dev" "moloch-status" "moloch-snapshot" "moloch-npu")
+          ERRORS=0
+
+          for SKILL in "${EXPECTED_SKILLS[@]}"; do
+            if [ -f ".claude/skills/${SKILL}.md" ]; then
+              echo "PASS: Skill ${SKILL}"
+            else
+              echo "FAIL: Skill ${SKILL} fehlt!"
+              ERRORS=$((ERRORS+1))
+            fi
+          done
+          [ $ERRORS -eq 0 ] || exit 1
+
+      - name: CLAUDE.md vorhanden und nicht leer
+        run: |
+          if [ -s "CLAUDE.md" ]; then
+            LINES=$(wc -l < CLAUDE.md)
+            echo "PASS: CLAUDE.md vorhanden ($LINES Zeilen)"
+          else
+            echo "FAIL: CLAUDE.md fehlt oder ist leer!"
+            exit 1
+          fi
+
+      - name: HOOKWIRE.md vorhanden
+        run: |
+          if [ -s "HOOKWIRE.md" ]; then
+            echo "PASS: HOOKWIRE.md vorhanden"
+          else
+            echo "FAIL: HOOKWIRE.md fehlt!"
+            exit 1
+          fi
+
+      - name: Keine Secrets im Repo
+        run: |
+          echo "=== Secret-Scan ==="
+          ERRORS=0
+
+          # API Keys
+          if grep -rn "api_key\s*=\s*['\"]sk-" --include="*.py" --include="*.json" .; then
+            echo "FAIL: API Key gefunden!"
+            ERRORS=$((ERRORS+1))
+          fi
+
+          # Passwoerter
+          if grep -rn "password\s*=\s*['\"][^'\"]\{8,\}" --include="*.py" --include="*.json" . 2>/dev/null | grep -v "example\|placeholder\|dummy"; then
+            echo "WARN: Moegliches Passwort gefunden"
+          fi
+
+          # .env Dateien
+          if [ -f ".env" ]; then
+            echo "FAIL: .env Datei im Repo!"
+            ERRORS=$((ERRORS+1))
+          fi
+
+          if [ $ERRORS -eq 0 ]; then
+            echo "PASS: Keine Secrets gefunden"
+          else
+            exit 1
+          fi
+
+      - name: Zusammenfassung
+        if: always()
+        run: |
+          echo ""
+          echo "========================================"
+          echo "  MOLOCH CONFIG AUDIT ABGESCHLOSSEN"
+          echo "========================================"
+          echo ""
+          echo "Geprueft:"
+          echo "  - JSON Validierung (settings, mcp, config)"
+          echo "  - Hook-Scripts (Syntax, Executable, Referenzen)"
+          echo "  - NEVER-Regeln Abdeckung in Hooks"
+          echo "  - Skills Vollstaendigkeit"
+          echo "  - CLAUDE.md + HOOKWIRE.md"
+          echo "  - Secret-Scan"

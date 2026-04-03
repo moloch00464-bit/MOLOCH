@@ -2333,12 +2333,8 @@ class MolochUnifiedPanel:
 
                 # Ensure data dir exists
                 os.makedirs(os.path.dirname(db_path), exist_ok=True)
-                import tempfile as _tf
-                with _tf.NamedTemporaryFile("w", dir=os.path.dirname(db_path),
-                                            delete=False, suffix=".tmp") as tf:
-                    json.dump(existing_db, tf)
-                    _tmp = tf.name
-                os.replace(_tmp, db_path)
+                with open(db_path, "w") as f:
+                    json.dump(existing_db, f)
 
                 # Reload service face DB
                 if hasattr(self.service, '_reload_face_db'):

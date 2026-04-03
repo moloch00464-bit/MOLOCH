@@ -63,18 +63,16 @@ class IdentityManager:
             self.identities = {}
 
     def _save_registry(self):
-        """Speichere Identitäten in JSON (atomisch: tmp → replace)."""
-        import tempfile, os as _os
+        """Speichere Identitäten in JSON."""
         try:
             # Ensure directory exists
             self.registry_path.parent.mkdir(parents=True, exist_ok=True)
 
-            data = {"version": "1.0", "identities": self.identities}
-            with tempfile.NamedTemporaryFile("w", dir=str(self.registry_path.parent),
-                                            delete=False, suffix=".tmp") as tf:
-                json.dump(data, tf, indent=2)
-                tmp = tf.name
-            _os.replace(tmp, self.registry_path)
+            with open(self.registry_path, "w") as f:
+                json.dump({
+                    "version": "1.0",
+                    "identities": self.identities
+                }, f, indent=2)
 
             logger.info(f"[IDENTITY] Registry saved ({len(self.identities)} identities)")
 

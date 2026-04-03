@@ -51,14 +51,10 @@ _LEARNED_POSITIONS_FILE = _os.path.expanduser("~/moloch/config/learned_patrol_po
 
 def _save_last_face_pos(pan: float, tilt: float):
     """Letzte Face-Position auf Disk speichern (max alle 10s)."""
-    import tempfile
     try:
-        data = {"pan": round(pan, 1), "tilt": round(tilt, 1), "ts": time.time()}
-        dir_ = _os.path.dirname(_LAST_FACE_POS_FILE)
-        with tempfile.NamedTemporaryFile("w", dir=dir_, delete=False, suffix=".tmp") as tf:
-            json.dump(data, tf)
-            tmp = tf.name
-        _os.replace(tmp, _LAST_FACE_POS_FILE)
+        with open(_LAST_FACE_POS_FILE, "w") as f:
+            json.dump({"pan": round(pan, 1), "tilt": round(tilt, 1),
+                       "ts": time.time()}, f)
     except Exception:
         pass
 
@@ -76,14 +72,9 @@ def _load_last_face_pos() -> tuple:
 
 def _save_learned_positions(positions: list):
     """Gelernte Patrol-Positionen persistent speichern."""
-    import tempfile
     try:
-        data = {"positions": positions, "ts": time.time()}
-        dir_ = _os.path.dirname(_LEARNED_POSITIONS_FILE)
-        with tempfile.NamedTemporaryFile("w", dir=dir_, delete=False, suffix=".tmp") as tf:
-            json.dump(data, tf)
-            tmp = tf.name
-        _os.replace(tmp, _LEARNED_POSITIONS_FILE)
+        with open(_LEARNED_POSITIONS_FILE, "w") as f:
+            json.dump({"positions": positions, "ts": time.time()}, f)
     except Exception:
         pass
 
@@ -464,10 +455,6 @@ class AutonomousTracker:
         self._visited_positions: set = set()  # Bereits abgefahrene Patrol-Positionen
         self._camera_smart_tracking_on = False  # Kamera-eigenes Smart-Tracking aktiv?
         self._last_face_save_time = 0.0  # Throttle: max alle 10s speichern
-        self._ptz_pos_history = []       # [(time, pan, tilt), ...] fuer Jitter-Erkennung
-        self._moloch_activate_time = 0.0  # Wann hat Moloch zuletzt uebernommen?
-        self._no_face_count: int = 0     # Hysterese: aufeinanderfolgende Frames ohne Face
-        self._st_settle_count: int = 0   # Hysterese: Frames in denen Kamera still steht
 
         # ST-Bewegungslernen: Kamera-Positionen aufzeichnen
         self._st_learner = STMovementLearner()
@@ -1090,10 +1077,6 @@ class AutonomousTracker:
 
             # Kamera-Dynamik immer aufzeichnen — lernt Geschwindigkeit unabhaengig von ST
             self._st_learner.record(pos.pan, pos.tilt)
-            # PTZ-History fuer Jitter-Erkennung aktualisieren
-            self._ptz_pos_history.append((time.time(), pos.pan, pos.tilt))
-            if len(self._ptz_pos_history) > self._ST_JITTER_WINDOW:
-                self._ptz_pos_history.pop(0)
 
             # Drift erkennen und Target-Cache invalidieren wenn zu gross
             drift = abs(old_pan - pos.pan) + abs(old_tilt - pos.tilt)
@@ -1998,10 +1981,6 @@ class AutonomousTracker:
     _ST_SETTLE_THRESHOLD = 2.0   # Grad — weniger Bewegung = Kamera hat sich beruhigt
     _ST_SETTLE_FRAMES = 3        # N aufeinanderfolgende stabile Reads = "settled"
     _ST_MIN_TIME = 1.5           # Absolute Mindestzeit (Sicherheit)
-    _ST_JITTER_WINDOW = 5        # Letzten 5 PTZ-Positionen fuer Jitter-Erkennung
-    _ST_JITTER_VEL_THRESHOLD = 12.0  # Grad/s — darueber = Kamera unruhig → kein ST
-    _ST_MOLOCH_MIN_HOLD_S = 4.0  # Moloch haelt min. 4s bevor ST wieder eingeschaltet
-    _ST_MIN_HOLD_S = 3.0         # ST haelt min. 3s bevor Moloch uebernehmen darf
 
     # Auto-ST-Aktivierung: Wenn MOLOCH-Tracking BBox nicht zentriert bekommt
     _ST_AUTO_ERROR_THRESHOLD = 0.35   # 35% off-center = wirklich weit weg (war 0.25 → zu schnell)
@@ -2023,7 +2002,7 @@ class AutonomousTracker:
         # === NEUE LOGIK: Kein Face → ST soll laufen (mit Hysterese) ===
         if not detection.has_face:
             # Hysterese: erst nach N aufeinanderfolgenden face-losen Frames ST einschalten
-            self._no_face_count += 1
+            self._no_face_count = getattr(self, '_no_face_count', 0) + 1
             if self._no_face_count >= self._ST_NO_FACE_THRESHOLD:
                 if not self._camera_smart_tracking_on:
                     logger.info(
@@ -2058,9 +2037,9 @@ class AutonomousTracker:
         self._st_prev_tilt = self.last_known_tilt
 
         if movement < self._ST_SETTLE_THRESHOLD:
-            self._st_settle_count += 1
+            self._st_settle_count = getattr(self, '_st_settle_count', 0) + 1
         else:
-            self._st_settle_count = 0  # Bewegung erkannt — Reset
+            self._st_settle_count = 0
             return False
 
         camera_settled = self._st_settle_count >= self._ST_SETTLE_FRAMES
@@ -2068,73 +2047,29 @@ class AutonomousTracker:
             return False
 
         # Kamera settled + Face erkannt → Moloch uebernimmt
-        # Nur loggen wenn ST auch wirklich ausgeht (Mindesthaltezeit erreicht)
-        st_held = now - getattr(self, '_st_activate_time', 0.0)
-        if st_held >= self._ST_MIN_HOLD_S:
-            logger.info(f"[HANDOVER] Face erkannt + Kamera settled ({st_duration:.1f}s) → Moloch uebernimmt")
+        logger.info(f"[HANDOVER] Face erkannt + Kamera settled ({st_duration:.1f}s) → Moloch uebernimmt")
         self._enable_camera_smart_tracking(False)
         return True
 
     def _enable_camera_smart_tracking(self, on: bool):
-        """Sonoff-eigenes Smart-Tracking — mit Jitter-Guard gegen Toggle-Schleife.
+        """Sonoff-eigenes Smart-Tracking — DEAKTIVIERT.
 
-        EIN: nur wenn Moloch min. 4s gehalten hat UND Kamera aktuell ruhig ist.
-        AUS: nur wenn ST min. 3s gehalten hat.
-        Verhindert das fruehre Toggle-Problem (2026-03-30).
+        Smart Tracking kaempft mit Moloch-Tracking und verursacht:
+        - Nervöses Kamera-Hin-und-Her (Toggle-Schleife)
+        - Mögliche RTSP-Stream-Störungen bei jedem Umschalten
+        - Szenario-Wechsel die Valve-Transitions triggern
+        Bleibt AUS bis Moloch-Tracking stabil genug ist (2026-03-30).
         """
-        now = time.time()
-        if on:
-            # Mindesthaltezeit Moloch: verhindert sofortiges ST-Einschalten
-            moloch_held = now - self._moloch_activate_time
-            if moloch_held < self._ST_MOLOCH_MIN_HOLD_S:
-                return
-            # Jitter-Guard: wenn Kamera aktuell unruhig → kein ST
-            if self._is_camera_jittering():
-                logger.info("[SMART-TRACK] Jitter erkannt → ST bleibt aus")
-                return
-            if self._camera_smart_tracking_on:
-                return
-            try:
-                if self.camera and hasattr(self.camera, 'cloud_bridge') and self.camera.cloud_bridge:
-                    self.camera.cloud_bridge.set_smart_tracking(True)
-                    self._camera_smart_tracking_on = True
-                    self._st_activate_time = now
-                    logger.info("[SMART-TRACK] Kamera Smart-Tracking EIN")
-            except Exception as e:
-                logger.warning(f"[SMART-TRACK] Fehler beim Einschalten: {e}")
-        else:
-            if not self._camera_smart_tracking_on:
-                return
-            # Mindesthaltezeit ST: verhindert sofortiges Ausschalten
-            st_held = now - getattr(self, '_st_activate_time', 0.0)
-            if st_held < self._ST_MIN_HOLD_S:
-                return
-            # Flag IMMER zuruecksetzen — auch wenn API-Call fehlschlaegt
-            self._camera_smart_tracking_on = False
-            self._st_deactivate_time = now
-            self._moloch_activate_time = now
+        # ST komplett deaktiviert — Moloch trackt allein
+        if self._camera_smart_tracking_on:
             try:
                 if self.camera and hasattr(self.camera, 'cloud_bridge') and self.camera.cloud_bridge:
                     self.camera.cloud_bridge.set_smart_tracking(False)
-                    logger.info("[SMART-TRACK] Kamera Smart-Tracking AUS")
-            except Exception as e:
-                logger.warning(f"[SMART-TRACK] Fehler beim Ausschalten: {e}")
-
-    def _is_camera_jittering(self) -> bool:
-        """Prueft ob Kamera aktuell unruhig ist (zu hohe PTZ-Geschwindigkeit)."""
-        hist = self._ptz_pos_history
-        if len(hist) < 3:
-            return False
-        velocities = []
-        for i in range(1, len(hist)):
-            dt = hist[i][0] - hist[i-1][0]
-            if dt <= 0:
-                continue
-            vel = (abs(hist[i][1] - hist[i-1][1]) + abs(hist[i][2] - hist[i-1][2])) / dt
-            velocities.append(vel)
-        if not velocities:
-            return False
-        return (sum(velocities) / len(velocities)) > self._ST_JITTER_VEL_THRESHOLD
+                    logger.info("[SMART-TRACK] Kamera Smart-Tracking AUS (permanent deaktiviert)")
+            except Exception:
+                pass
+            self._camera_smart_tracking_on = False
+        return
 
     def _do_coast(self):
         """Coast - stop movement when target briefly lost."""

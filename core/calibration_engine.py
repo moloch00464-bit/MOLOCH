@@ -847,13 +847,8 @@ class CalibrationEngine:
             existing["phases"][self._phase] = result
             existing["last_run"] = result["timestamp"]
 
-            import tempfile as _tf
-            with _tf.NamedTemporaryFile("w", dir=os.path.dirname(RESULTS_PATH),
-                                        delete=False, suffix=".tmp",
-                                        encoding="utf-8") as tf:
-                json.dump(existing, tf, indent=2, ensure_ascii=False)
-                _tmp = tf.name
-            os.replace(_tmp, RESULTS_PATH)
+            with open(RESULTS_PATH, "w", encoding="utf-8") as f:
+                json.dump(existing, f, indent=2, ensure_ascii=False)
             logger.info(f"[CAL] Ergebnisse gespeichert: {RESULTS_PATH}")
         except Exception as e:
             logger.error(f"[CAL] Speichern fehlgeschlagen: {e}")
@@ -914,13 +909,8 @@ class CalibrationEngine:
             if adjusted:
                 data["weights"] = weights
                 data["calibration_adjusted"] = time.strftime("%Y-%m-%dT%H:%M:%S")
-                import tempfile as _tf2
-                with _tf2.NamedTemporaryFile("w", dir=os.path.dirname(weights_path),
-                                             delete=False, suffix=".tmp",
-                                             encoding="utf-8") as tf:
-                    json.dump(data, tf, indent=2)
-                    _tmp2 = tf.name
-                os.replace(_tmp2, weights_path)
+                with open(weights_path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2)
                 logger.info(f"[CAL] Weights angepasst: {weights}")
         except Exception as e:
             logger.warning(f"[CAL] Threshold-Anpassung fehlgeschlagen: {e}")

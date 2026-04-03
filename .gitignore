@@ -3,7 +3,9 @@
 # ===========================
 
 # --- Claude Code Internals ---
-.claude/
+.claude/worktrees/
+.claude/todos/
+# Skills, Hooks und Settings WERDEN commited (nicht ignoriert)
 
 # --- Credentials & Secrets ---
 API KEYS/

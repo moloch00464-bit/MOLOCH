@@ -81,24 +81,13 @@ moloch_service.py wird durch lazy import in Methoden-Body geloest.
 | Pan-Vorzeichen | camera.py | 732 | GELOEST | NICHT ANFASSEN. 6x falsch "gefixt" laut Git. |
 | ArcFace Embedding-Inkompatibilitaet | tappas_pipeline.py | systemisch | OFFEN | GStreamer != HailoRT Embeddings. Threshold aendern ist nutzlos. |
 | Runtime-State in Git | autonomous_tracker.py | 42-43 | OFFEN | last_face_position.json + learned_patrol_positions.json gehoeren nach /dev/shm |
-| subprocess ohne timeout | audio_pipeline.py | 158 | GELOEST | Verifiziert: hat timeout=duration+1. War stale. |
-| subprocess ohne timeout | music_visualizer.py | 228 | GELOEST | Popen fuer Daueraufnahme — intentional, kein timeout noetig. |
-| subprocess ohne timeout | tts.py | 159,218,331,382,395,401 | GELOEST 2026-04-02 | 6 Aufrufe: timeout 30s/120s gesetzt. |
-| subprocess ohne timeout | audio_manager, moloch_console | diverse | GELOEST 2026-04-02 | which-Aufrufe: timeout=5s. |
-| shell=True Injection | moloch_console.py | 514, 518 | GELOEST | shell=False gesetzt. cmd via /bin/bash -c. |
-| shell=True Injection | audio_manager.py | 552 | OFFEN | audio_manager wird nicht vom Service verwendet. Niedrig-Risiko. |
-| Non-atomic JSON writes | calibration_engine.py | 851, 913 | GELOEST 2026-04-02 | tmpfile+replace. (97 war bereits atomic) |
-| Non-atomic JSON writes | identity_manager.py | 72 | GELOEST 2026-04-02 | tmpfile+replace. |
-| Non-atomic JSON writes | moloch_service.py | 512 | GELOEST 2026-04-02 | face_embeddings.json tmpfile+replace. |
-| Non-atomic JSON writes | person_reid.py | 88 | GELOEST 2026-04-02 | reid_db.json tmpfile+replace. |
-| Non-atomic JSON writes | autonomous_tracker.py | 56,77 | GELOEST 2026-04-02 | last_face_pos + patrol_positions tmpfile+replace. |
-| Non-atomic JSON writes | ptz_calibration.py | 163 | GELOEST 2026-04-02 | ptz_limits.json tmpfile+replace. |
-| Non-atomic JSON writes | music_memory.py | 52 | GELOEST 2026-04-02 | Cap MAX_ENTRIES=1000 + tmpfile+replace. |
-| Non-atomic JSON writes | popup_settings.py | 290 | GELOEST 2026-04-02 | settings.json reset atomic. |
-| Non-atomic JSON writes | popup_whisper.py | 428 | GELOEST 2026-04-02 | settings.json write atomic. |
-| Non-atomic JSON writes | daily_learner.py | 328 | GELOEST 2026-04-02 | snapshot meta tmpfile+replace. |
-| Non-atomic JSON writes | moloch_unified_panel.py | 2337 | GELOEST 2026-04-02 | face_embeddings.json atomic. |
-| Suchrichtung asymmetrisch | ptz_orchestrator.py | TBD | OFFEN | ptz_orchestrator ist jetzt Shim → Logik in camera.py |
+| subprocess ohne timeout | audio_pipeline.py | 158 | OFFEN | Zombie-Prozesse moeglich |
+| subprocess ohne timeout | music_visualizer.py | 228 | OFFEN | Buffer-Overrun bei FFT-Lag |
+| shell=True Injection | moloch_console.py | 514, 518 | OFFEN | OWASP-Risiko |
+| shell=True Injection | audio_manager.py | 552 | OFFEN | OWASP-Risiko |
+| Non-atomic JSON writes | calibration_engine.py | 97, 851, 913 | OFFEN | Partial Write bei Crash |
+| Non-atomic JSON writes | identity_manager.py | 72 | OFFEN | Partial Write bei Crash |
+| Suchrichtung asymmetrisch | ptz_orchestrator.py | TBD | OFFEN | Links verschwinden → sucht nicht links |
 | ArcFace Threshold zu niedrig | settings.json | TBD | OFFEN | Erkennt alles als Markus (0.45) |
 | Kamera Hot-Plug | camera_manager.py | TBD | OFFEN | Stecker raus/rein → nur Reboot hilft |
 | Tracking Gains zu hoch | settings.json | TBD | OFFEN | TRACKING_GAIN_PAN=0.7 → Ueberschwinger |

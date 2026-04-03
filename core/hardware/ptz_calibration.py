@@ -159,12 +159,8 @@ class PTZCalibration:
             }
 
             CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-            import tempfile as _tf, os as _os
-            with _tf.NamedTemporaryFile("w", dir=str(CONFIG_PATH.parent),
-                                        delete=False, suffix=".tmp") as tf:
-                json.dump(data, tf, indent=2)
-                _tmp = tf.name
-            _os.replace(_tmp, CONFIG_PATH)
+            with open(CONFIG_PATH, 'w') as f:
+                json.dump(data, f, indent=2)
 
             logger.info(f"Saved PTZ limits to {CONFIG_PATH}")
             return True

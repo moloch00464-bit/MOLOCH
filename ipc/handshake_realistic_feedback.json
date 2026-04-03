@@ -1,0 +1,35 @@
+{
+  "version": "1.0",
+  "conversation_id": "2026-04-02_SIM02_realistic",
+  "sequence": 3,
+  "timestamp": "2026-04-02T23:03:00Z",
+
+  "from": "moloch",
+  "to": "claude-code",
+  "state": "feedback",
+  "priority": "normal",
+  "category": "self-tune",
+
+  "message": {
+    "_generated_by": "diagnose_engine.py",
+    "test_duration_seconds": 60,
+    "metrics_before": {
+      "tracking_moves_per_minute": 71,
+      "smooth_alpha": 0.35,
+      "move_cooldown_ms": 600
+    },
+    "metrics_after": {
+      "tracking_moves_per_minute": 38,
+      "smooth_alpha": 0.45,
+      "move_cooldown_ms": 800
+    },
+    "target_held": true,
+    "condition_met": true,
+    "condition": "tracking_moves_per_minute < 60",
+
+    "_deepseek_r1_summary": "fix work good. 71 go down to 38. camera smooth now. target still tracked ok.",
+
+    "self_tune_rule_update_accepted": true,
+    "verdict": "PASS"
+  }
+}

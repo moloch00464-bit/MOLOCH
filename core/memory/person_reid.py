@@ -75,8 +75,7 @@ class PersonReID:
             logger.error(f"[REID] DB laden fehlgeschlagen: {e}")
 
     def _save_db(self):
-        """Embedding-DB auf Disk speichern (atomisch: tmp → replace)."""
-        import tempfile
+        """Embedding-DB atomar auf Disk speichern (NEVER 6: tmp + replace)."""
         try:
             os.makedirs(os.path.dirname(REID_DB_PATH), exist_ok=True)
             data = {}
@@ -85,10 +84,10 @@ class PersonReID:
                     "embedding": emb.tolist(),
                     "count": self._db_counts.get(name, 1),
                 }
-            dir_ = os.path.dirname(REID_DB_PATH)
-            with tempfile.NamedTemporaryFile("w", dir=dir_, delete=False, suffix=".tmp") as tf:
-                json.dump(data, tf)
-                tmp = tf.name
+            import tempfile
+            fd, tmp = tempfile.mkstemp(dir=os.path.dirname(REID_DB_PATH), suffix=".tmp")
+            with os.fdopen(fd, "w") as f:
+                json.dump(data, f)
             os.replace(tmp, REID_DB_PATH)
             logger.info(f"[REID] DB gespeichert: {len(data)} Identitaeten")
         except Exception as e:

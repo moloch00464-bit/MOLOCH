@@ -207,6 +207,8 @@ class TappasPipeline:
         self.yolo_conf_val = 0.30
         self.pose_conf_val = 0.30
         self.hand_conf_val = 0.30
+        self.person_min_height_val = 0.10  # Min. BBox-Hoehe relativ zum Bild
+        self.person_min_area_val = 0.08    # Min. BBox-Flaeche relativ zum Bild
 
         # --- Feature-Flags (Panel/Settings lesen/schreiben diese) ---
         self._learner_flash = False
@@ -1292,6 +1294,14 @@ class TappasPipeline:
             x2 = max(0.0, min(1.0, bbox.xmax()))
             y2 = max(0.0, min(1.0, bbox.ymax()))
 
+            # Groessen-Filter: zu kleine Personen ignorieren
+            h = y2 - y1
+            area = (x2 - x1) * h
+            if h < self.person_min_height_val:
+                continue
+            if area < self.person_min_area_val:
+                continue
+
             entry = {
                 "class": label,
                 "bbox": [x1, y1, x2, y2],
@@ -1327,9 +1337,7 @@ class TappasPipeline:
                         "face_similarity": face.get("similarity", 0),
                         "embedding": face.get("embedding"),
                         "gender": face.get("gender"),
-                        "age_range": face.get("age_range"),
-                        "emotion": face.get("emotion"),
-                        "smiling": face.get("emotion") in ("happy", "freudig") if face.get("emotion") else None,
+                        "smiling": face.get("emotion") == "happy" if face.get("emotion") else None,
                         "track_id": None,
                         "landmarks": face.get("landmarks"),  # 5 SCRFD-Punkte [[x,y],...] normalisiert [0,1]
                     }
@@ -1876,12 +1884,8 @@ class TappasPipeline:
             best_attr_face = max(faces, key=lambda f: f.get("confidence", 0))
             if best_attr_face.get("gender"):
                 pf.gender = best_attr_face["gender"]
-            if best_attr_face.get("age_range"):
-                pf.age_range = best_attr_face["age_range"]
-            if best_attr_face.get("emotion"):
-                pf.emotion = best_attr_face["emotion"]
-            elif best_attr_face.get("smiling") is not None:
-                pf.emotion = "freudig" if best_attr_face["smiling"] else "neutral"
+            if best_attr_face.get("smiling") is not None:
+                pf.emotion = "happy" if best_attr_face["smiling"] else "neutral"
 
         # Perception Router: Szenario + aktive Modelle
         pf.scenario = self._scheduler.get_scenario()

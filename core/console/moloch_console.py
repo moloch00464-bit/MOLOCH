@@ -411,7 +411,7 @@ class MolochTTS:
         # Check if Piper is available
         if not self.piper_path.exists():
             # Try system path
-            result = subprocess.run(["which", "piper"], capture_output=True, text=True, timeout=5)
+            result = subprocess.run(["which", "piper"], capture_output=True, text=True)
             if result.returncode == 0:
                 self.piper_path = Path(result.stdout.strip())
             else:
@@ -425,8 +425,8 @@ class MolochTTS:
             self.enabled = False
 
         # Check pitch tools: prefer rubberband (better quality), fallback to sox
-        self.rubberband_available = subprocess.run(["which", "rubberband"], capture_output=True, timeout=5).returncode == 0
-        self.sox_available = subprocess.run(["which", "sox"], capture_output=True, timeout=5).returncode == 0
+        self.rubberband_available = subprocess.run(["which", "rubberband"], capture_output=True).returncode == 0
+        self.sox_available = subprocess.run(["which", "sox"], capture_output=True).returncode == 0
 
         if self.rubberband_available:
             self.pitch_tool = "rubberband"

@@ -286,12 +286,9 @@ class SettingsPopup(tk.Toplevel):
             return
 
         try:
-            import tempfile as _tf, os as _os
-            tmp = SETTINGS_PATH + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
+            with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
                 json.dump(DEFAULTS, f, indent=2, ensure_ascii=False)
                 f.write("\n")
-            _os.replace(tmp, SETTINGS_PATH)
             self._load_and_display()
             self._show_feedback("Defaults wiederhergestellt.", color=ACCENT_GREEN)
             logger.info("Settings auf Defaults zurueckgesetzt")

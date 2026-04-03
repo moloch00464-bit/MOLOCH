@@ -694,7 +694,8 @@ class VoicePipeline:
 
         # TTS
         self._current_voice = "de_DE-thorsten-low"  # 16kHz nativ (passt zu ReSpeaker)
-        self._length_scale = 1.1  # Leicht langsamer fuer Verstaendlichkeit
+        # Init-Default aus Personality Engine (respektiert user_speed_offset aus settings.json)
+        self._length_scale = 0.95  # Guardian Default, wird von voice_config ueberschrieben
         self._piper_available = PIPER_PATH.exists()
 
         # Message-Queue fuer IPC zum Panel (bleibt erhalten, Panel tracked per ID)
