@@ -480,6 +480,22 @@ class TappasPipeline:
                 # Modelle laufen parallel in Pipeline — gleiche Frame-Rate
             }
 
+    def get_worker_health(self) -> dict:
+        """Health-Status aller HailoRT-Direct Worker + ROI-Dispatcher Stats."""
+        health = {}
+        collector = getattr(self, '_result_collector', None)
+        if collector:
+            with collector._lock:
+                for name, worker in collector._workers.items():
+                    try:
+                        health[name] = worker.get_health()
+                    except Exception:
+                        health[name] = {"error": "get_health() fehlgeschlagen"}
+        dispatcher = getattr(self, '_roi_dispatcher', None)
+        if dispatcher:
+            health["_dispatcher"] = dispatcher.get_stats()
+        return health
+
     def get_npu_sched_mode(self) -> str:
         """Aktueller NPU Scheduler-Modus (jetzt Szenario-Name)."""
         return self._scheduler.get_scenario()

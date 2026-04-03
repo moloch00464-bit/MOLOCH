@@ -67,16 +67,19 @@ def moloch_status() -> str:
 
     fps = data.get("fps", {})
     ptz = data.get("ptz", {})
+    wd = data.get("watchdog", {})
+    # CPU/RAM aus Watchdog (korrekte Werte), Fallback auf Top-Level
+    cpu_temp = wd.get("cpu_temp", data.get("cpu_temp", 0))
+    ram_pct = wd.get("ram_percent", 0)
     lines = [
         "=== MOLOCH LIVE STATUS ===",
         f"FPS total:    {fps.get('total', 0):.1f}",
         f"FPS yolov8m:  {fps.get('yolov8m', 0):.1f}",
         f"FPS scrfd:    {fps.get('scrfd', 0):.1f}",
         f"FPS arcface:  {fps.get('arcface', 0):.1f}",
-        f"FPS pose:     {fps.get('pose', 0):.1f}",
         "",
-        f"CPU Temp:     {data.get('cpu_temp', 0):.1f}°C",
-        f"RAM:          {data.get('ram_used_mb', 0):.0f} MB",
+        f"CPU Temp:     {cpu_temp:.1f}°C",
+        f"RAM:          {ram_pct:.1f}%",
         f"Frame Age:    {data.get('frame_age', 0):.2f}s",
         "",
         f"Person:       {data.get('person_detected', False)}",
@@ -326,20 +329,36 @@ def moloch_npu_workers() -> str:
         except Exception as e:
             lines.append(f"  {label:12s}: FEHLER — {e}")
 
-    # FaceWorker/PoseWorker: aus Status-JSON
+    # Pipeline-Worker: aus Status-JSON (worker_health)
     try:
-        import json
         with open("/dev/shm/moloch_status.json") as f:
             st = json.load(f)
         wh = st.get("worker_health", {})
-        for name, info in wh.items():
-            inf = info.get("total_inferences", "?")
-            err = info.get("total_errors", "?")
-            ms  = info.get("last_inference_ms", "?")
-            run = info.get("running", "?")
-            lines.append(f"  {name:12s}: running={run}  inferences={inf}  errors={err}  last_ms={ms}")
+        disp = wh.pop("_dispatcher", None)
+        if wh:
+            lines.append("\n  --- Pipeline Worker (HailoRT-Direct) ---")
+            for name, info in sorted(wh.items()):
+                if name.startswith("_") or not isinstance(info, dict):
+                    continue
+                if "running" in info:
+                    run = info.get("running", "?")
+                    loaded = info.get("models_loaded", "?")
+                    inf_count = info.get("total_inferences", 0)
+                    err = info.get("total_errors", 0)
+                    ms = info.get("last_inference_ms", 0)
+                    q = info.get("queue_size", 0)
+                    lines.append(
+                        f"  {name:18s}: running={run}  loaded={loaded}  "
+                        f"inferences={inf_count}  errors={err}  "
+                        f"last={ms:.1f}ms  queue={q}")
+        if disp:
+            total = disp.get("total_frames", 0)
+            sent = disp.get("dispatched", 0)
+            drop = disp.get("dropped", 0)
+            lines.append(f"\n  --- ROI Dispatcher ---")
+            lines.append(f"  Frames={total}  Dispatched={sent}  Dropped={drop}")
     except Exception:
-        lines.append("  [Pipeline-Worker nicht aus Status-JSON lesbar — Service läuft?]")
+        lines.append("  [Pipeline-Worker nicht aus Status-JSON lesbar — Service laeuft?]")
 
     return "NPU Worker Status:\n" + "\n".join(lines)
 
