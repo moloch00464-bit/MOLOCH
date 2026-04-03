@@ -5,7 +5,7 @@
 # --- Claude Code Internals ---
 .claude/worktrees/
 .claude/todos/
-# Skills, Hooks und Settings WERDEN commited (nicht ignoriert)
+.claude/projects/
 
 # --- Credentials & Secrets ---
 API KEYS/
