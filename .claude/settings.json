@@ -1,22 +1,17 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python3:*)",
-      "Bash(git:*)",
-      "Bash(journalctl:*)",
-      "Bash(systemctl:*)",
-      "Bash(cat /dev/shm/*)",
-      "Bash(ls:*)",
-      "Bash(mkdir:*)",
-      "Bash(chmod:*)",
-      "Bash(find:*)",
-      "Bash(dpkg -L hailo-tappas)",
-      "Bash(dpkg -L hailo-tappas-apps)",
-      "Bash(nm -D /usr/lib/aarch64-linux-gnu/hailo/tappas/post_processes/libface_attributes_post.so)",
-      "Bash(vcgencmd measure_clock arm)",
-      "Bash(vcgencmd get_throttled)",
-      "Read(//usr/local/**)",
-      "Read(//sys/devices/virtual/thermal/cooling_device0/**)"
+      "Bash(*)",
+      "Read(*)",
+      "Write(*)",
+      "Edit(*)",
+      "Glob(*)",
+      "Grep(*)",
+      "WebFetch(*)",
+      "WebSearch(*)",
+      "Agent(*)",
+      "NotebookEdit(*)",
+      "mcp__moloch__*"
     ]
   },
   "hooks": {
