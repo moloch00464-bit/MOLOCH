@@ -59,6 +59,11 @@ mcp = FastMCP("moloch")
 @mcp.tool()
 def moloch_status() -> str:
     """Live MOLOCH System-Status: FPS, CPU-Temp, RAM, Face-ID, NPU-Szenario, Tracking."""
+    # Pflicht-Startprotokoll: Lock aufheben — Session hat Status geprueft
+    try:
+        os.remove("/tmp/moloch_session_lock")
+    except FileNotFoundError:
+        pass
     try:
         with open(STATUS_SHM, "r") as f:
             data = json.load(f)

@@ -13,6 +13,26 @@ NEW_STRING=$(echo "$INPUT" | jq -r '.tool_input.new_string // ""' 2>/dev/null)
 BASENAME=$(basename "$FILE")
 
 # ============================================================
+# PFLICHT-STARTPROTOKOLL LOCK
+# Session-Start erzeugt Lock. Erst wenn moloch_status lief, wird er geloescht.
+# Solange Lock aktiv: KEIN Edit/Write moeglich.
+# ============================================================
+LOCK_FILE="/tmp/moloch_session_lock"
+if [ -f "$LOCK_FILE" ]; then
+    # Erlaubt: .claude/ Dateien editieren (Konfig), und /tmp/ Dateien
+    case "$FILE" in
+        */.claude/*|*/tmp/*|*.md)
+            ;; # Konfig/Docs duerfen immer
+        *)
+            echo "BLOCKIERT: PFLICHT-STARTPROTOKOLL nicht ausgefuehrt!" >&2
+            echo "Du MUSST zuerst moloch_status() und moloch_npu_workers() ausfuehren." >&2
+            echo "Erst DANN darfst Du Code aendern. Lies CLAUDE.md Abschnitt 1." >&2
+            exit 2
+            ;;
+    esac
+fi
+
+# ============================================================
 # ROT-Dateien Warnung (blockiert NICHT, aber warnt deutlich)
 # ============================================================
 ROT_FILES=(

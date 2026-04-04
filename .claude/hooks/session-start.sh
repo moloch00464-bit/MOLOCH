@@ -5,6 +5,9 @@
 INPUT=$(cat)
 SOURCE=$(echo "$INPUT" | jq -r '.source // "startup"' 2>/dev/null)
 
+# Lock erzeugen — Code-Edits blockiert bis moloch_status() gelaufen ist
+touch /tmp/moloch_session_lock
+
 echo "=== MOLOCH SESSION START ($SOURCE) ==="
 
 # Git Status
