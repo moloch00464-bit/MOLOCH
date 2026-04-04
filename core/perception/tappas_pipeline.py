@@ -483,17 +483,20 @@ class TappasPipeline:
     def get_worker_health(self) -> dict:
         """Health-Status aller HailoRT-Direct Worker + ROI-Dispatcher Stats."""
         health = {}
-        collector = getattr(self, '_result_collector', None)
-        if collector:
-            with collector._lock:
-                for name, worker in collector._workers.items():
+        try:
+            collector = getattr(self, '_result_collector', None)
+            if collector and hasattr(collector, '_workers'):
+                # Snapshot ohne Lock — get_health() ist thread-safe
+                for name, worker in list(collector._workers.items()):
                     try:
                         health[name] = worker.get_health()
                     except Exception:
                         health[name] = {"error": "get_health() fehlgeschlagen"}
-        dispatcher = getattr(self, '_roi_dispatcher', None)
-        if dispatcher:
-            health["_dispatcher"] = dispatcher.get_stats()
+            dispatcher = getattr(self, '_roi_dispatcher', None)
+            if dispatcher:
+                health["_dispatcher"] = dispatcher.get_stats()
+        except Exception:
+            pass  # Status-JSON darf nie wegen worker_health crashen
         return health
 
     def get_npu_sched_mode(self) -> str:

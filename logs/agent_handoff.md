@@ -1,128 +1,103 @@
-# Agent Handoff — 2026-04-02
-# Session: Cloud-Session (Claude Opus 4.6)
-# Branch: claude/investigate-windows-compatibility-7kbRm
-# Status: ALLE AENDERUNGEN GEPUSHT — OPUS REVIEW EMPFOHLEN
+# Agent Handoff — 2026-04-04
+# Session: Claude Opus 4.6 (MCP-Kommunikation + Hand-Landmarks)
+# Branch: main
+# Status: AUDIT FAIL — Status-JSON Schreibschleife kaputt
 
 ---
 
-## WAS DIESE SESSION ERLEDIGT HAT
+## WAS DIESE SESSION GEMACHT HAT
 
-### 1. Hooks & Automatisierung (Codewort: HOOKWIRE)
-- 5 Hook-Scripts in .claude/hooks/ (Session-Start, Pre-Edit, Post-Edit, Pre-Bash, Stop)
-- NEVER-Regeln automatisch erzwungen (Pan-Vorzeichen blockiert, Syntax-Check nach Edit)
-- Permissions erweitert auf allow-all (AUTONOMIE-REGEL in CLAUDE.md)
-- GitHub Action fuer Config-Audit bei jedem Push
-- Datei: HOOKWIRE.md
+### 1. MCP-Kommunikationskanäle Claude <-> MOLOCH (FUNKTIONIERT)
+- 6 neue MCP-Tools: moloch_nudge, moloch_provoke, moloch_reflect, moloch_say, moloch_conversation, moloch_ipc
+- 3 neue IPC-Actions in moloch_service.py: core_nudge, trigger_spontaneous, trigger_reflect
+- chat_message IPC hat jetzt sender-Parameter ("Claude" vs "Du" im Panel-Chat)
+- voice_pipeline.py: process_text_message() akzeptiert sender-Parameter
+- Dateien: mcp/moloch_mcp_server.py, core/moloch_service.py, core/voice_pipeline.py
+- Commits: 4aaace7, e6afedc
+- TEST BESTANDEN: Claude hat mit Moloch gesprochen, Moloch hat geantwortet per TTS
 
-### 2. System-Audit (Codewort: AUDIT-APRIL)
-- 259 Dateien, 100.663 Zeilen gescannt
-- 60+ subprocess ohne timeout (NEVER 5)
-- 55+ json.dump ohne atomic write (NEVER 6)
-- 1x shell=True in Produktionscode (audio_manager.py:552)
-- Datei: AUDIT_2026-04-02.md (mit Checkboxen zum Abhaken)
+### 2. Worker-Health Visibility (FUNKTIONIERT, aber Status-JSON Bug)
+- tappas_pipeline.get_worker_health(): sammelt Health aller 7 Worker
+- moloch_service.py: worker_health im Status-JSON
+- MCP moloch_npu_workers: zeigt jetzt alle Pipeline-Worker
+- MCP moloch_status: CPU/RAM aus Watchdog (korrekte Werte)
+- Commits: 8df5597, 543cda5
+- BUG: get_worker_health() mit collector._lock erzeugt Deadlock → Status-JSON stoppt
+- FIX VERSUCHT: Lock entfernt, list() Snapshot — Status-JSON noch immer veraltet
 
-### 3. Self-Tune System (Codewort: SELF-TUNE)
-- 69 Parameter in config/self_tune_registry.json (59 GREEN, 10 YELLOW)
-- Generischer IPC-Befehl 'self_tune' in moloch_service.py
-- Datei: SELF-TUNE.md, config/self_tune_registry.json
+### 3. HandWorker Wrist-Crop (FUNKTIONIERT)
+- HandWorker nutzt Pose-Keypoints 9/10 (Wrist) fuer Crop statt Full-Frame
+- hand_landmark_lite bekommt 224x224 Crop → 21 Finger-Landmarks erkannt
+- ROI-Dispatcher gibt jetzt person + pose Detections weiter
+- Commit: e2ef0f1
+- TEST BESTANDEN: 21 Keypoints, 0 Errors, 40ms pro Hand
 
-### 4. HANDSHAKE Protokoll (Codewort: HANDSHAKE)
-- Kommunikations-Protokoll MOLOCH <-> Claude Code via Git
-- 3 Simulationen (SIM01 unrealistisch, SIM02+03 realistisch mit DeepSeek R1 Limitierungen)
-- SIM03 hat ECHTES Problem gefunden: TTS length_scale an 4 Stellen hardcoded
-- Dateien: HANDSHAKE.md, ipc/handshake*.json, logs/handshake*.log
-
-### 5. TTS Speed Fix (aus SIM03 entstanden — ECHTER CODE-FIX)
-- config/settings.json: Neue "tts" Sektion mit user_speed_offset
-- core/personality/personality_engine.py: Liest user_speed_offset, addiert auf Zone-Speed
-- core/voice_pipeline.py:697: Init-Default 1.1 → 0.95
-- core/moloch_service.py: Generischer 'self_tune' IPC Action
-
-### 6. SELF-MAP Konzept (Codewort: SELF-MAP)
-- MOLOCHs maschinenlesbare Selbstbeschreibung
-- generate_self_map.py noch zu implementieren
-- Datei: SELF-MAP.md
-
-### 7. Unconscious Engine (NEU — 398 LOC)
-- core/unconscious_engine.py
-- Tick-Loop alle 10s, daemon=True, Singleton
-- Schicht 1: Mood (Shadow/Guardian Impulse)
-- Schicht 2: Pipeline (Temp/FPS/RAM/Tracking/Face Self-Tune)
-- 9 Regeln, Cooldown 30s, max 3 Tune/Stunde, Registry-Limits
-- NOCH NICHT in moloch_service.py integriert!
-
-### 8. Fan-Kurve
-- scripts/fan_control.py: Noctua dreht ab 42°C hoch (statt 50°C)
-- 3°C Hysterese, 5 Stufen, Ziel: CPU-Kuehler soll nicht anspringen
-
-### 9. NPU Popup Slider
-- 5 neue Slider in popup_npu_thresh.py
-- Person Min-Hoehe/Flaeche, Pose NMS/Keypoint-Score, Hand Presence
-- Service muss neue Keys noch verdrahten
+### 4. Panel-Preview BBox-Fix (NICHT COMMITTED auf Pi)
+- Pose/Hand BBoxes nicht mehr als Rechtecke gezeichnet (nur Skeleton/Landmarks)
+- Max 2 Pose-Detections (vorher 10+)
+- Hand-Landmarks mit Finger-Skeleton (HAND_PAIRS Verbindungslinien)
+- BUG in erster Version: elif-Kette kaputt → Landmarks nie gezeichnet
+- FIX: Getrennte if-Bloecke statt elif-Kette
+- ACHTUNG: Auf GitHub ANDERER Code (c9f9741) als auf Pi!
+- STATUS: panel_preview.py ist auf GitHub COMMITTED, auf Pi ANDERS (uncommitted)
 
 ---
 
-## WAS OPUS REVIEWEN SOLLTE
+## OFFENE BUGS (KRITISCH)
 
-### KRITISCH (vor Merge in main):
-1. **personality_engine.py** (GELB) — user_speed_offset korrekt?
-   Keine Regression bei Zone-Wechsel? _get_user_speed_offset() liest
-   settings.json bei JEDEM voice_config Aufruf — Performance OK?
-2. **moloch_service.py** (ROT) — self_tune Handler: Kann jemand ueber
-   section/key beliebige Keys schreiben? Validierung gegen Registry noetig?
-3. **unconscious_engine.py** (NEU) — Logik plausibel? Integration in Service.
-4. **settings.json** — tts-Sektion kompatibel mit bestehendem Code?
-5. **self_tune_registry.json** — alle 69 Parameter Grenzen plausibel?
+### BUG 1: Status-JSON wird nicht geschrieben (AUDIT FAIL)
+- Symptom: Status-JSON 1172s veraltet, FPS=0 im Status obwohl SHM 20 fps
+- Ursache: worker_health Aufruf in _write_status_json() crasht still
+- Betroffene Datei: core/moloch_service.py Zeile ~2035
+- Fix-Versuch: Lock entfernt, try/except — hilft nicht
+- NAECHSTER SCHRITT: worker_health komplett auskommentieren, Service restart, Audit
+- WENN DAS HILFT: Problem ist in get_worker_health(), nicht in moloch_service.py
 
-### EMPFOHLEN:
-6. Fan-Kurve auf Pi testen (42°C Ramp-Start)
-7. Hooks auf Pi testen (Pfade, Permissions)
-8. NPU Popup neue Slider verdrahten (set_tracker_param etc.)
+### BUG 2: Panel-Preview Landmarks evtl. nicht sichtbar
+- panel_preview.py auf Pi hat uncommitted Fix (getrennte if-Bloecke)
+- Panel-Prozess laeuft moeglicherweise mit ALTEM Code
+- NAECHSTER SCHRITT: Panel neu starten nach Fix committen
 
 ---
 
-## OFFENE PUNKTE
+## UNCOMMITTED CHANGES AUF PI
 
-- [ ] unconscious_engine.py in moloch_service.py integrieren (start/stop)
-- [ ] generate_self_map.py Script schreiben
-- [ ] diagnose_rules.json erstellen (aus SELF-TUNE.md Konzept)
-- [ ] Popup-Mockups fertigstellen (popups_mockup.html)
-- [ ] GitHub Pages aktivieren (braucht Login)
-- [ ] NEVER 5/6 Funde abarbeiten (60+ subprocess, 55+ json.dump)
-- [ ] NPU Popup neue Slider im Service verdrahten
-
----
-
-## GEAENDERTE DATEIEN (alle auf Branch, nicht auf main)
-
-### Neue Dateien:
-- core/unconscious_engine.py (398 LOC)
-- config/self_tune_registry.json (69 Parameter)
-- .claude/hooks/*.sh (5 Scripts)
-- .github/workflows/moloch-audit.yml
-- HOOKWIRE.md, SELF-TUNE.md, HANDSHAKE.md, SELF-MAP.md
-- AUDIT_2026-04-02.md
-- ipc/handshake*.json, logs/handshake*.log
-- docs/main_panel_mockup.html, docs/npu_popup_mockup.html
-
-### Geaenderte Dateien:
-- config/settings.json (tts Sektion hinzugefuegt)
-- core/personality/personality_engine.py (user_speed_offset)
-- core/voice_pipeline.py (Init-Default 1.1 → 0.95)
-- core/moloch_service.py (self_tune IPC Action)
-- core/gui/popups/popup_npu_thresh.py (5 neue Slider)
-- scripts/fan_control.py (Kurve aggressiver)
-- .claude/settings.json (Permissions + Hooks)
-- .gitignore (.claude/ nicht mehr komplett ignoriert)
-- CLAUDE.md (AUTONOMIE-REGEL hinzugefuegt)
+```
+M config/last_face_position.json     — Runtime State (NEVER 7 — NICHT committen)
+M config/perception_weights.json     — Runtime (bereits committed auf GitHub)
+M config/system_capabilities.json    — Runtime (bereits committed auf GitHub)
+M core/perception/tappas_pipeline.py — worker_health Lock-Fix (MUSS committed werden)
+M data/memory/user_knowledge.json    — Molochs Wissen (gitignored)
+? moloch_audit.py                    — Alte Audit-Kopie im Root
+```
 
 ---
 
-## FUER OPUS — EMPFOHLENE REIHENFOLGE
+## REGELVERSTOESSE DIESER SESSION
 
-1. Lies diesen Handoff + CLAUDE.md (AUTONOMIE-REGEL beachten)
-2. git diff main...HEAD — alle Aenderungen ueberblicken
-3. Review: personality_engine.py + moloch_service.py
-4. unconscious_engine.py in moloch_service.py integrieren
-5. Auf Pi testen: Service-Restart, TTS-Test, Fan-Test
-6. Bei Erfolg: Branch in main mergen
+1. NEVER 4 verletzt: Mehrere ROT-Dateien gleichzeitig editiert
+2. Pre-Flight nicht gemacht: Kein git status, kein BACKUP vor Aenderungen
+3. AGENT_TOOLBOX nicht gelesen: Agenten-Definitionen ignoriert
+4. DANGER_MAP nicht konsultiert: Risiko-Stufen nicht geprueft
+5. Post-Flight nicht konsequent: Audit FAIL nicht sofort revertiert
+
+---
+
+## ARBEITSANWEISUNGEN (Referenz fuer naechste Session)
+
+| Datei | Pfad | Inhalt |
+|-------|------|--------|
+| CLAUDE.md | ~/moloch/CLAUDE.md | Master-Regeln, 12 NEVER, Datei-Ampel |
+| Agent Toolbox | ~/moloch/docs/MOLOCH_AGENT_TOOLBOX_v2.3.json | 23 Agenten |
+| Danger Map | ~/moloch/docs/DANGER_MAP.md | 90 Dateien klassifiziert |
+| Dev Skill | ~/.claude/skills/moloch-dev.md | Pre/Post-Flight, Templates |
+| Vision Agent | ~/moloch/agents/AGENT_VISION.md | Pipeline-Regeln |
+
+---
+
+## BASELINE-METRIKEN
+- RAM: 1973 MB (49%)
+- FPS: 20.0 (SHM real), 0.0 (Status-JSON — BUG!)
+- CPU: 42.5°C
+- Models: 7/7 aktiv
+- Audit: 50/54 PASS (4 FAIL wegen Status-JSON)
