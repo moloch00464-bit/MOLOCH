@@ -1,8 +1,28 @@
 # M.O.L.O.C.H. — Master Context fuer Claude Code
-# Version: 2.0 | Stand: 2026-04-04
+# Version: 2.1 | Stand: 2026-04-04
 # LIES DIESE DATEI ZUERST. IMMER. BEI JEDEM AUFTRAG.
 
 > "Die dunkle Seite macht mehr Spass!" — Respekt ist bidirektional.
+
+---
+
+## PFLICHT-STARTPROTOKOLL (VOR jeder Arbeit!)
+
+**BEVOR Du auch nur eine Zeile Code schreibst, fuehre diese 3 Schritte aus:**
+
+1. `moloch_status()` — MCP-Tool aufrufen, System-Status pruefen
+2. `moloch_npu_workers()` — MCP-Tool aufrufen, Worker-Health pruefen
+3. Dem User kurz zeigen: "Service laeuft, X FPS, Y Worker aktiv"
+
+**Wenn Du einen Fehler debuggen sollst, ZUSAETZLICH:**
+4. `moloch_logs(n=30, filter_str="ERROR")` — Letzte Fehler lesen
+5. `moloch_dmesg()` — Kernel-Meldungen (NPU/SEGV)
+
+**KEIN manuelles SSH, KEIN `cat /dev/shm/...`, KEIN `journalctl` per Bash.**
+Alle 18 MCP-Tools sind verfuegbar. BENUTZE SIE. Siehe `/moloch-mcp` Skill.
+
+**Wenn Du Code aendern willst:** Lies `/moloch-dev` Skill (NEVER-Regeln, Templates).
+**Wenn Du nicht weisst welcher Agent:** Lies `/moloch-agent` Skill.
 
 ---
 
@@ -97,7 +117,10 @@ Markus geht aus dem Zimmer, kommt zurueck, Arbeit ist erledigt.
 
 ---
 
-## MCP-TOOLS (bevorzugt statt manueller SSH/IPC!)
+## MCP-TOOLS (PFLICHT — kein SSH, kein manuelles JSON!)
+
+**Du MUSST MCP-Tools benutzen. KEIN `ssh`, KEIN `cat /dev/shm/`, KEIN `journalctl` per Bash.**
+**Bei Verstoss: Markus wird sauer. Das ist keine Empfehlung, das ist eine Regel.**
 
 | Tool | Funktion |
 |------|----------|
@@ -119,11 +142,12 @@ Markus geht aus dem Zimmer, kommt zurueck, Arbeit ist erledigt.
 | `moloch_read` | Config/Log-Datei lesen (sichere Pfade) |
 | `moloch_git_log` | Letzte N Commits |
 
-**Regel:** Benutze MCP-Tools statt manueller SSH-Befehle oder JSON-in-/dev/shm.
+**PFLICHT:** MCP-Tools sind dein EINZIGER Weg zum System. Kein SSH, kein Bash-Workaround.
+Wenn ein MCP-Tool existiert, MUSST du es benutzen. `/moloch-mcp` zeigt alle 18 Tools.
 
 ---
 
-## SKILLS (tippe /moloch-...)
+## SKILLS (PFLICHT bei Code-Aenderungen — tippe /moloch-...)
 
 | Skill | Funktion |
 |-------|----------|
