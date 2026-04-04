@@ -2184,6 +2184,10 @@ class MolochService:
                     status["face_confidence"] = round(getattr(pframe, 'face_confidence', 0.0), 3)
                     status["face_similarity"] = round(getattr(pframe, 'face_similarity', 0.0), 3)
                     status["mode"] = "tappas"
+                    # PersonAttr: Kleidung, Alter, Zubehoer aus PFrame
+                    _pattrs = getattr(pframe, 'person_attributes', [])
+                    if _pattrs:
+                        status["person_attributes"] = list(_pattrs)
                 # Detektionen fuer Panel-BBox-Overlay (normalisierte Koordinaten [0-1])
                 if hasattr(_inf, 'get_detections'):
                     raw_dets = _inf.get_detections()
