@@ -3,9 +3,10 @@
 # ===========================
 
 # --- Claude Code Internals ---
+# .claude/ wird NICHT ignoriert — settings.json + hooks muessen im Repo sein
 .claude/worktrees/
 .claude/todos/
-# Skills, Hooks und Settings WERDEN commited (nicht ignoriert)
+.claude/projects/
 
 # --- Credentials & Secrets ---
 API KEYS/
