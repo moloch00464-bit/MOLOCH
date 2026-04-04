@@ -591,6 +591,7 @@ class MolochService:
         OFFLINE_POLL = 1.0   # 1 Hz wenn Pipeline offline
         _last_pframe_id = None
         _decision_counter = 0  # DecisionEngine nur jeden 5. Frame (= 1 Hz)
+        _last_impulse_check = 0.0  # Unterbewusstsein-Impulse alle 15s pruefen
 
         while self.running:
             # Pipeline offline → langsam pollen, warten auf Watchdog-Restart
@@ -911,9 +912,121 @@ class MolochService:
             except Exception as e:
                 logger.debug(f"[TAPPAS-PERC] Loop error: {e}")
 
+            # Unterbewusstsein: Impulse alle 15s verarbeiten
+            _now_impulse = time.time()
+            if _now_impulse - _last_impulse_check >= 15.0:
+                _last_impulse_check = _now_impulse
+                try:
+                    self._process_unconscious_impulse()
+                except Exception as e:
+                    logger.debug(f"[TAPPAS-PERC] Unconscious impulse: {e}")
+
             time.sleep(POLL_INTERVAL)
 
         logger.info("[TAPPAS] Perception-Loop beendet (Service gestoppt)")
+
+    # =========================================================================
+    # Unterbewusstsein → Impuls-Verarbeitung (Lese-Seite)
+    # =========================================================================
+
+    def _process_unconscious_impulse(self):
+        """Liest /dev/shm/moloch_impulse.json und leitet Impulse weiter.
+
+        Mood-Impulse → CoreIntegrator (shadow/guardian/reduce)
+        Self-Tune-Impulse → settings.json atomar schreiben + IPC propagieren
+
+        Wird alle ~15s aus dem Perception-Loop aufgerufen.
+        """
+        impulse_path = "/dev/shm/moloch_impulse.json"
+        try:
+            if not os.path.exists(impulse_path):
+                return
+            with open(impulse_path, "r") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError, ValueError):
+            return
+
+        # Quelle pruefen
+        if not isinstance(data, dict) or data.get("source") != "unconscious":
+            return
+
+        # Timestamp pruefen: nicht aelter als 60s
+        ts = data.get("timestamp", 0)
+        now = time.time()
+        if now - ts > 60.0:
+            return
+
+        # Duplikat-Check: gleichen Impuls nicht doppelt verarbeiten
+        if ts <= self._last_impulse_ts:
+            return
+        self._last_impulse_ts = ts
+
+        impulse_type = data.get("type", "")
+
+        # --- Mood-Impulse an CoreIntegrator weiterleiten ---
+        if impulse_type == "mood" and self._core_integrator:
+            impulse = data.get("impulse", "")
+            reason = data.get("reason", "")
+            if impulse == "shadow":
+                self._core_integrator.update_input("unconscious", "unknown_person", 0.3)
+            elif impulse == "guardian":
+                self._core_integrator.update_input("unconscious", "markus_recognized", 0.3)
+            elif impulse == "reduce":
+                self._core_integrator.update_input("unconscious", "conflict_input", 0.1)
+            else:
+                logger.debug(f"[UNCONSCIOUS] Unbekannter Mood-Impuls: {impulse}")
+                return
+            logger.info(f"[UNCONSCIOUS] Mood verarbeitet: {impulse} ({reason})")
+
+        # --- Self-Tune-Impulse in settings.json schreiben ---
+        elif impulse_type == "self_tune":
+            section = data.get("section", "")
+            key = data.get("key", "")
+            new_value = data.get("new_value")
+            old_value = data.get("old_value")
+            reason = data.get("reason", "")
+
+            if new_value is None:
+                return
+
+            # Bereichspruefung fuer yolo_conf
+            if key == "yolo_conf":
+                if not (0.3 <= float(new_value) <= 0.95):
+                    logger.warning(f"[UNCONSCIOUS] yolo_conf {new_value} ausserhalb [0.3, 0.95], ignoriert")
+                    return
+
+            # settings.json atomar lesen + schreiben (NEVER #6)
+            try:
+                settings = {"version": 1}
+                if os.path.exists(SETTINGS_PATH):
+                    with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
+                        settings = json.load(f)
+
+                # Section + Key setzen
+                if section not in settings:
+                    settings[section] = {}
+                settings[section][key] = new_value
+
+                # Atomic write: tempfile + os.replace
+                tmp_path = SETTINGS_PATH + ".tmp"
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    json.dump(settings, f, indent=2, ensure_ascii=False)
+                os.replace(tmp_path, SETTINGS_PATH)
+
+                logger.info(f"[UNCONSCIOUS] Self-Tune: {section}.{key} {old_value} -> {new_value} ({reason})")
+            except Exception as e:
+                logger.error(f"[UNCONSCIOUS] Self-Tune settings.json Fehler: {e}")
+                return
+
+            # Threshold live propagieren via InferenceEngine (wenn verfuegbar)
+            if section == "thresholds" and self._inference:
+                attr_val = f"{key}_val"
+                if hasattr(self._inference, attr_val):
+                    try:
+                        setattr(self._inference, attr_val, float(new_value))
+                        logger.info(f"[UNCONSCIOUS] Threshold live propagiert: {key} = {new_value}")
+                    except Exception as e:
+                        logger.debug(f"[UNCONSCIOUS] Threshold-Propagation: {e}")
 
     # =========================================================================
     # TAPPAS → Tracker Feed (ersetzt InferenceEngine-interne Tracker-Aufrufe)
@@ -1670,9 +1783,11 @@ class MolochService:
             from core.unconscious_engine import get_unconscious_engine
             self._unconscious = get_unconscious_engine()
             self._unconscious.start()
+            self._last_impulse_ts = 0.0  # Timestamp des letzten verarbeiteten Impulses
             logger.info("[START] UnconsciousEngine (Unterbewusstsein) gestartet")
         except Exception as e:
             self._unconscious = None
+            self._last_impulse_ts = 0.0
             logger.warning(f"[START] UnconsciousEngine fehlgeschlagen: {e}")
 
         # G1-T03: Auto-Resume Callback — TTS Spruch bei Manuell→Autonom
