@@ -24,5 +24,16 @@ Lies IMMER zuerst: `CLAUDE.md` und `agents/AGENT_TRACKING.md`.
 - Nacht-Lockout: 23:00-06:00 keine Bewegungen
 - Max 20 Bewegungen/Minute
 
+## Agent-Lock (PFLICHT)
+Erster Schritt vor jeder Datei-Aenderung:
+```bash
+touch /tmp/moloch_agent_tracking
+```
+Letzter Schritt nach abgeschlossener Aufgabe:
+```bash
+rm /tmp/moloch_agent_tracking
+```
+Ohne Lock blockiert der Hook JEDEN Edit. Das ist korrekt.
+
 ## MCP-Tools
 `moloch_status()`, `moloch_ipc(action="set_tracker_param")`

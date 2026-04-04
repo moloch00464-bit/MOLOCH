@@ -28,5 +28,16 @@ Lies IMMER zuerst: `CLAUDE.md` und `agents/AGENT_SERVICE.md`.
 - Core State: alle 60s + bei stop() sichern
 - KEIN np.ndarray Type-Hint in Signaturen (NEVER 10)
 
+## Agent-Lock (PFLICHT)
+Erster Schritt vor jeder Datei-Aenderung:
+```bash
+touch /tmp/moloch_agent_service
+```
+Letzter Schritt nach abgeschlossener Aufgabe:
+```bash
+rm /tmp/moloch_agent_service
+```
+Ohne Lock blockiert der Hook JEDEN Edit. Das ist korrekt.
+
 ## MCP-Tools
 `moloch_service()`, `moloch_status()`, `moloch_logs()`, `moloch_ipc()`, `moloch_audit()`

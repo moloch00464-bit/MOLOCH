@@ -12,6 +12,15 @@ fi
 
 cd "$CLAUDE_PROJECT_DIR" 2>/dev/null || cd /home/user/MOLOCH
 
+# Agent-Locks aufraumen (Session-Ende)
+for LOCK in /tmp/moloch_agent_*; do
+    if [ -f "$LOCK" ]; then
+        AGENT=$(basename "$LOCK" | sed 's/moloch_agent_//')
+        echo "HINWEIS: Agent-Lock '$AGENT' noch aktiv — wird entfernt."
+        rm "$LOCK"
+    fi
+done
+
 # Uncommitted Changes pruefen
 DIRTY=$(git status --porcelain 2>/dev/null | grep -v "^??" | head -5)
 if [ -n "$DIRTY" ]; then

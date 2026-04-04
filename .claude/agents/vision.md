@@ -26,5 +26,16 @@ Lies IMMER zuerst: `CLAUDE.md` und `agents/AGENT_VISION.md` (detailliertes Wisse
 - Git Backup vor jeder Aenderung
 - Nur eigene Dateien editieren
 
+## Agent-Lock (PFLICHT)
+Erster Schritt vor jeder Datei-Aenderung:
+```bash
+touch /tmp/moloch_agent_vision
+```
+Letzter Schritt nach abgeschlossener Aufgabe:
+```bash
+rm /tmp/moloch_agent_vision
+```
+Ohne Lock blockiert der Hook JEDEN Edit. Das ist korrekt.
+
 ## MCP-Tools
 `moloch_npu_models()`, `moloch_npu_workers()`, `moloch_snapshot()`, `moloch_low_light()`

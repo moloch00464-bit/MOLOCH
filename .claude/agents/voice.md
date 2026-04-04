@@ -27,5 +27,16 @@ Lies IMMER zuerst: `CLAUDE.md` und `agents/AGENT_VOICE.md`.
 - LLM Fallback: Lokal → DeepSeek → Claude → Stille
 - Alles ueber personality_engine.speak() — keine Bypass-Pfade
 
+## Agent-Lock (PFLICHT)
+Erster Schritt vor jeder Datei-Aenderung:
+```bash
+touch /tmp/moloch_agent_voice
+```
+Letzter Schritt nach abgeschlossener Aufgabe:
+```bash
+rm /tmp/moloch_agent_voice
+```
+Ohne Lock blockiert der Hook JEDEN Edit. Das ist korrekt.
+
 ## MCP-Tools
 `moloch_say()`, `moloch_conversation()`, `moloch_nudge()`, `moloch_provoke()`

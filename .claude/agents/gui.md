@@ -24,5 +24,16 @@ Lies IMMER zuerst: `CLAUDE.md` und `agents/AGENT_GUI.md`.
 - 4 GB RAM — sparsam mit Widgets/Timern
 - `panel_styles.py` ist TABU (ausser Markus sagt explizit)
 
+## Agent-Lock (PFLICHT)
+Erster Schritt vor jeder Datei-Aenderung:
+```bash
+touch /tmp/moloch_agent_gui
+```
+Letzter Schritt nach abgeschlossener Aufgabe:
+```bash
+rm /tmp/moloch_agent_gui
+```
+Ohne Lock blockiert der Hook JEDEN Edit. Das ist korrekt.
+
 ## MCP-Tools
 `moloch_status()`, `moloch_snapshot()`
