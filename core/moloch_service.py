@@ -2120,8 +2120,13 @@ class MolochService:
         """Status-JSON zusammenbauen und via IPCRouter schreiben."""
         try:
             fps_snapshot = self._inference.get_fps()
-            with self._ctx_lock:
-                active_models = list(self._active_ctx.keys())
+            # TAPPAS-Mode: active_models kommt aus PFrame (s.u.) — _ctx_lock
+            # ist hier unnoetig und kann mit ModelOrchestrator deadlocken
+            if USE_TAPPAS:
+                active_models = []
+            else:
+                with self._ctx_lock:
+                    active_models = list(self._active_ctx.keys())
 
             _inf = self._inference
             # TAPPAS: Modelle laufen immer alle parallel — getattr fuer Kompatibilitaet
