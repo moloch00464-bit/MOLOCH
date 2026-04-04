@@ -171,6 +171,7 @@ Wenn ein MCP-Tool existiert, MUSST du es benutzen. `/moloch-mcp` zeigt alle 18 T
 | tracking | PTZ-Tracker, Such-FSM, Arbiter | Tracking/Bewegung |
 | voice | Whisper, TTS, Personality, Spotify | Audio/Sprache |
 | service | moloch_service, IPC, Memory | Service/Integration |
+| unconscious | TaoEngine, Unterbewusstsein, Self-Tune | Innerer Zustand/Selbstregulation |
 | stresstest | Chaos Engineering | Stabilitaetstests |
 
 Regeln: 1 Agent = 1 Domain. Bei 85% Token → Uebergabe schreiben.
