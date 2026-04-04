@@ -39,6 +39,13 @@ if [ -f "$BUGS" ]; then
 fi
 
 echo ""
-echo "Session geladen. CLAUDE.md und Agent-MDs gelten."
+echo "=== PFLICHT-STARTPROTOKOLL ==="
+echo "BEVOR Du Code schreibst, MUSST Du:"
+echo "  1. moloch_status()       — System-Status pruefen"
+echo "  2. moloch_npu_workers()  — Worker-Health pruefen"
+echo "  3. /moloch-dev laden     — NEVER-Regeln + Templates"
+echo "KEIN SSH. KEIN cat /dev/shm/. NUR MCP-Tools."
+echo "Skills: /moloch-mcp /moloch-agent /moloch-dev /moloch-npu /moloch-audit"
+echo "================================"
 
 exit 0
