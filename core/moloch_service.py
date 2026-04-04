@@ -2188,6 +2188,10 @@ class MolochService:
                     _pattrs = getattr(pframe, 'person_attributes', [])
                     if _pattrs:
                         status["person_attributes"] = list(_pattrs)
+                    # ActivityWorker: Erkannte Aktivitaet aus PFrame
+                    _act = getattr(pframe, 'person_action', None)
+                    if _act:
+                        status["activity_label"] = _act
                 # Detektionen fuer Panel-BBox-Overlay (normalisierte Koordinaten [0-1])
                 if hasattr(_inf, 'get_detections'):
                     raw_dets = _inf.get_detections()
