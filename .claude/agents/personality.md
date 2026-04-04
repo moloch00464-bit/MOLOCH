@@ -17,7 +17,6 @@ Lies IMMER zuerst: `CLAUDE.md` und `docs/DANGER_MAP.md`.
 - `core/personality/mood_engine.py` — Emergenter Mood-State (calm, focused, alert, agitated, euphoric, dark)
 - `core/personality/behavior_rules.py` — Mood → konkrete Trigger (LED, Sirene, Aktionen)
 - `core/personality/tension_integrator.py` — Gate-3 Awareness → CoreIntegrator Bridge
-- `core/core_integrator.py` — Tension-System, Zone-Management, 1Hz Tick-Loop
 - `core/moloch_event_bus.py` — Event-System (publish/subscribe fuer alle Module)
 - `core/moloch_sprache.py` — Deutsch NLP, Sprach-Stil pro Zone
 - `core/timeline.py` — Event-Timeline, Chronik der Ereignisse

@@ -20,7 +20,6 @@ Lies IMMER zuerst: `CLAUDE.md` und `docs/DANGER_MAP.md`.
 - `core/autonomy/night_cycle.py` — Tages-Zusammenfassung, Musik-Memory-Decay
 - `core/autonomy/atmosphere_controller.py` — Musik + LED + PTZ als unified State
 - `core/autonomy/preference_learner.py` — Reinforcement Learning aus Verhalten
-- `core/unconscious_engine.py` — Background-Tick-Loop (10s), Stimmungs-Impulse
 - `core/deepseek_client.py` — OpenAI-kompatibler DeepSeek Chat-Client
 - `core/music/spotify_bridge.py`, `core/music/music_memory.py` — Musik-Events
 - `core/net/internet_bridge.py`, `core/net/autonomous_search.py` — Web-Suche

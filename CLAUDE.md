@@ -166,12 +166,20 @@ Wenn ein MCP-Tool existiert, MUSST du es benutzen. `/moloch-mcp` zeigt alle 18 T
 | Agent | Domain | Wann laden |
 |-------|--------|------------|
 | vision | TAPPAS, GStreamer, NPU, Perception | Pipeline/Modell-Arbeit |
-| hardware | ONVIF, RTSP, PTZ, eWeLink | Kamera/Hardware-Probleme |
+| hardware | ONVIF, RTSP, PTZ, eWeLink, Thermal, LED | Kamera/Hardware-Probleme |
 | gui | Tkinter Panel, Popups | GUI-Aenderungen |
 | tracking | PTZ-Tracker, Such-FSM, Arbiter | Tracking/Bewegung |
-| voice | Whisper, TTS, Personality, Spotify | Audio/Sprache |
-| service | moloch_service, IPC, Memory | Service/Integration |
+| voice | Whisper, TTS, Piper, Audio-Pipeline | Sprach-I/O |
+| service | moloch_service, IPC, core_integrator | Service/Integration |
 | unconscious | TaoEngine, Unterbewusstsein, Self-Tune | Innerer Zustand/Selbstregulation |
+| autonomy | Decision Engine, Homeostasis, LLM-Bridge, Night Cycle | Autonome Entscheidungen |
+| awareness | Activity, Context, Motion, RoomMap, WorldState | Situationsbewusstsein |
+| personality | PersonalityEngine, Mood, TensionIntegrator, EventBus | Persoenlichkeit/Emotion |
+| memory | Episodic, Persistent, Vector, ReID, Longterm | Gedaechtnis/Identitaet |
+| watchdog | SystemWatchdog, Diagnostics, CapabilityMonitor | System-Health |
+| music | Spotify, Track-Index, MusicMemory | Musik/Spotify |
+| deepseek | hailo-ollama, DeepSeek API, LLM-Response | LLM-Integration |
+| tentacle | ESP32 WiFi-Mic, Firmware, eWeLink, UDP | Peripherie/Firmware |
 | stresstest | Chaos Engineering | Stabilitaetstests |
 
 Regeln: 1 Agent = 1 Domain. Bei 85% Token → Uebergabe schreiben.

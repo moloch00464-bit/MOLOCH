@@ -40,3 +40,14 @@ Lies IMMER zuerst: `CLAUDE.md`, `docs/plans/tao_engine_plan.md` und `agents/AGEN
 - `core/moloch_service.py` — TaoEngine Lifecycle (INT-01)
 - `core/personality/mood_engine.py` — Mood Events lesen
 - `core/moloch_event_bus.py` — Event Bus API
+
+## Agent-Lock (PFLICHT)
+Erster Schritt vor jeder Datei-Aenderung:
+```bash
+touch /tmp/moloch_agent_unconscious
+```
+Letzter Schritt nach abgeschlossener Aufgabe:
+```bash
+rm /tmp/moloch_agent_unconscious
+```
+Ohne Lock blockiert der Hook JEDEN Edit. Das ist korrekt.
