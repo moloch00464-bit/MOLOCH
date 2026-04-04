@@ -278,6 +278,8 @@ class ResultCollector:
                     logger.warning("[ResultCollector] Worker %s haengt!", name)
 
     def get_health(self) -> Dict[str, Dict]:
-        """Health-Status aller Worker."""
+        """Health-Status aller Worker (Snapshot-Pattern: Lock nur fuer Kopie)."""
         with self._lock:
-            return {name: worker.get_health() for name, worker in self._workers.items()}
+            snapshot = list(self._workers.items())  # Nur Snapshot unter Lock
+        # Iteration lock-frei — kein Deadlock mit Worker-Threads
+        return {name: worker.get_health() for name, worker in snapshot}
