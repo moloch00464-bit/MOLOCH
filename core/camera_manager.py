@@ -17,6 +17,7 @@ import time
 import json
 import threading
 import logging
+import concurrent.futures
 
 import cv2
 import numpy as np
@@ -696,7 +697,17 @@ class CameraManager:
                         logger.info("[AUTONOM] Kamera online aber autonomous_mode=False - retry")
                         self.enable_autonomous()
 
-                pos = cam.get_position()
+                # ONVIF GetStatus kann haengen wenn Tracker gleichzeitig
+                # move_absolute() aufruft (zeep nicht thread-safe, kein Timeout).
+                # Deshalb: get_position() mit 5s Timeout absichern,
+                # bei Timeout cached Position verwenden.
+                try:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _ptz_pool:
+                        _pos_future = _ptz_pool.submit(cam.get_position)
+                        pos = _pos_future.result(timeout=5.0)
+                except (concurrent.futures.TimeoutError, Exception) as _e:
+                    logger.warning(f"[CAM_STATUS] get_position() Timeout/Fehler: {_e}")
+                    pos = cam.current_position  # cached Position verwenden
                 if pos:
                     pan, tilt = pos.pan, pos.tilt
                     ptz_text = f"Pan: {pan:.1f}  Tilt: {tilt:.1f}"
