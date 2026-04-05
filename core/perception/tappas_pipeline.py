@@ -1283,6 +1283,25 @@ class TappasPipeline:
         Phase 2: GStreamer liefert nur YOLO Person-Detections.
         Face/Pose/ReID kommen von HailoRT-Direct Workern.
         """
+        # DEBUG: Pruefen ob Callback ueberhaupt aufgerufen wird
+        if not hasattr(self, '_on_buffer_call_count'):
+            self._on_buffer_call_count = 0
+        self._on_buffer_call_count += 1
+        if self._on_buffer_call_count <= 3:
+            logger.warning(f"[ON_BUFFER] Aufruf #{self._on_buffer_call_count}")
+
+        try:
+            return self._on_buffer_inner(pad, info, user_data)
+        except Exception as e:
+            if not hasattr(self, '_on_buffer_err_count'):
+                self._on_buffer_err_count = 0
+            self._on_buffer_err_count += 1
+            if self._on_buffer_err_count <= 10:
+                logger.error(f"[ON_BUFFER] Exception #{self._on_buffer_err_count}: {e}", exc_info=True)
+            return Gst.PadProbeReturn.OK
+
+    def _on_buffer_inner(self, pad, info, user_data):
+        """Innere Logik von _on_buffer — in eigener Methode fuer try/except Wrapper."""
         buffer = info.get_buffer()
         if buffer is None:
             return Gst.PadProbeReturn.OK
