@@ -1,11 +1,14 @@
 {
   "mcpServers": {
     "moloch": {
-      "command": "python3",
-      "args": ["/home/molochzuhause/moloch/mcp/moloch_mcp_server.py"],
-      "env": {
-        "PYTHONPATH": "/home/molochzuhause/moloch"
-      }
+      "command": "ssh",
+      "args": [
+        "-T",
+        "-o", "BatchMode=yes",
+        "-o", "ConnectTimeout=10",
+        "molochzuhause@192.168.178.30",
+        "PYTHONPATH=/home/molochzuhause/moloch exec python3 /home/molochzuhause/moloch/mcp/moloch_mcp_server.py"
+      ]
     }
   }
 }

@@ -63,6 +63,16 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "matcher": "mcp__moloch__moloch_status",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rm -f /tmp/moloch_session_lock && echo '[LOKOMOTIVE] Session-Lock aufgehoben.'",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "Stop": [
