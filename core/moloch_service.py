@@ -582,15 +582,17 @@ class MolochService:
 
         Ersetzt die Integrations-Logik die bei InferenceEngine INTERN laeuft.
         Hier extern, weil TappasPipeline nur Daten liefert (Separation of Concerns).
-        Laeuft mit ~5 Hz (200ms) — schnell genug fuer LED/Perception, langsam genug fuer CPU.
+        Laeuft mit ~20 Hz (50ms) — fluessige BBox-Updates fuer Panel.
 
         WICHTIG: Loop ueberlebt Pipeline-Restart! Prueft is_running() intern
         und wartet bis Watchdog die Pipeline neu startet.
         """
-        POLL_INTERVAL = 0.2  # 5 Hz
+        POLL_INTERVAL = 0.05  # 20 Hz — fluessige BBox-Updates fuer Panel
         OFFLINE_POLL = 1.0   # 1 Hz wenn Pipeline offline
+        STATUS_WRITE_MOD = 1  # Status-JSON bei jedem Tick schreiben (20 Hz, /dev/shm = RAM)
         _last_pframe_id = None
-        _decision_counter = 0  # DecisionEngine nur jeden 5. Frame (= 1 Hz)
+        _decision_counter = 0  # DecisionEngine nur jeden 20. Frame (= 1 Hz bei 20 Hz Loop)
+        _status_write_counter = 0
         _last_impulse_check = 0.0  # Unterbewusstsein-Impulse alle 15s pruefen
 
         while self.running:
@@ -883,7 +885,7 @@ class MolochService:
                             music_playing=getattr(self, '_last_awareness_music_energy', 0.0) > 0.01,
                         )
                         _decision_counter += 1
-                        if _decision_counter >= 5:  # 1 Hz bei 5 Hz Loop
+                        if _decision_counter >= 20:  # 1 Hz bei 20 Hz Loop
                             self._decision_engine.decide()
                             _decision_counter = 0
                     except Exception as e:
@@ -911,6 +913,15 @@ class MolochService:
 
             except Exception as e:
                 logger.debug(f"[TAPPAS-PERC] Loop error: {e}")
+
+            # Status-JSON schreiben (panel_detections Update fuer Panel)
+            _status_write_counter += 1
+            if _status_write_counter >= STATUS_WRITE_MOD:
+                _status_write_counter = 0
+                try:
+                    self._write_status_json()
+                except Exception:
+                    pass
 
             # Unterbewusstsein: Impulse alle 15s verarbeiten
             _now_impulse = time.time()
