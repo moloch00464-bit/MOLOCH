@@ -150,6 +150,31 @@ Code: ~/moloch/core/ | Configs: ~/moloch/config/ | Modelle: /mnt/moloch-data/hai
 
 ---
 
+## ABSCHLUSS-PROTOKOLL (nach JEDER abgeschlossenen Aufgabe)
+
+**Wenn die Aufgabe FERTIG ist — BEVOR Du "fertig" sagst:**
+
+1. **Audit:** `moloch_audit()` — Regressionstest MUSS PASS sein
+2. **Service-Test:** `moloch_service("restart")` + `moloch_status()` — laeuft der Service noch?
+3. **Commit:** Jede geaenderte Datei einzeln committen (1 Datei = 1 Commit)
+4. **Push:** `git push` auf den aktuellen Branch
+5. **Handoff:** `logs/agent_handoff.md` aktualisieren:
+   - Was wurde gemacht (Dateien + Commits)
+   - Was funktioniert / was nicht
+   - Bekannte Bugs
+   - Naechste Schritte
+6. **Status-Meldung an Markus:**
+   > **LOKOMOTIVE abgeschlossen.** X Dateien geaendert, Audit PASS, Service laeuft.
+
+**Bei FAIL:**
+- NICHT pushen
+- Problem analysieren + Ursache nennen
+- Markus entscheidet ob Fix oder Rollback
+
+**Sinn:** Markus kommt zurueck, sieht "LOKOMOTIVE abgeschlossen", weiss: alles sauber.
+
+---
+
 ## AUTONOMIE — PLAN GENEHMIGT = EIGENSTAENDIG ARBEITEN
 
 - GRUEN: Sofort, keine Rueckfrage
