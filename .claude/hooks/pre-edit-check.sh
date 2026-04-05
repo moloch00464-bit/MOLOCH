@@ -201,11 +201,9 @@ fi
 # ROT-Dateien Warnung
 # ============================================================
 ROT_FILES="moloch_service.py tappas_pipeline.py camera.py hailo_manager.py
-core_integrator.py voice_pipeline.py autonomous_tracker.py moloch_unified_panel.py
-audio_pipeline.py inference_engine.py camera_manager.py model_orchestrator.py
-perception_engine.py ipc_router.py thermal_manager.py ptz_tracker.py
-model_scheduler.py episodic_memory.py person_reid.py settings.json
-super_res_worker.py low_light_processor.py"
+core_integrator.py voice_pipeline.py autonomous_tracker.py
+audio_pipeline.py ipc_router.py person_reid.py vision_workers.py
+face_pipeline.py roi_dispatcher.py settings.json"
 
 for ROT in $ROT_FILES; do
     if [ "$BASENAME" = "$ROT" ]; then
@@ -249,6 +247,35 @@ if [ "$BASENAME" = "moloch_service.py" ]; then
         exit 2
     fi
 fi
+
+# ============================================================
+# NEVER 3: ArcFace-Threshold nicht erhoehen
+# ============================================================
+if echo "$NEW_STRING" | grep -qE "arcface.*threshold|ARCFACE.*THRESH|similarity_threshold"; then
+    if echo "$NEW_STRING" | grep -qE "0\.[7-9]|[1-9]\.[0-9]"; then
+        echo "BLOCKIERT: NEVER 3 — ArcFace-Threshold NICHT erhoehen! Enrollment muss via gleichen Code-Pfad wie Live-Inference." >&2
+        exit 2
+    fi
+fi
+
+# ============================================================
+# NEVER 4: Nicht mehrere ROT-Dateien in einer Session
+# ============================================================
+ROT_TRACK="/tmp/moloch_rot_edited"
+for ROT in $ROT_FILES; do
+    if [ "$BASENAME" = "$ROT" ]; then
+        if [ -f "$ROT_TRACK" ]; then
+            PREV_ROT=$(cat "$ROT_TRACK")
+            if [ "$PREV_ROT" != "$BASENAME" ]; then
+                echo "WARNUNG: NEVER 4 — Bereits ROT-Datei '$PREV_ROT' editiert! Jetzt auch '$BASENAME'." >&2
+                echo "1 Commit = 1 ROT-Datei. Erst committen, dann naechste Datei." >&2
+            fi
+        else
+            echo "$BASENAME" > "$ROT_TRACK"
+        fi
+        break
+    fi
+done
 
 # ============================================================
 # NEVER 8: shell=True

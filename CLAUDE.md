@@ -41,14 +41,24 @@ Wenn es fehlt: Claude hat das Protokoll uebersprungen — stoppen und neu starte
 3. Wenn Aufgabe andere Domains beruehrt → passenden Agenten spawnen
 
 **Erkennungsregeln:**
-- Aufgabe betrifft GUI? → gui-Agent
-- Aufgabe betrifft Pipeline/Modelle? → vision-Agent
-- Aufgabe betrifft PTZ/Tracking? → tracking-Agent
-- Aufgabe betrifft Sprache/Audio? → voice-Agent
-- Aufgabe betrifft Service/IPC? → service-Agent
-- Aufgabe betrifft Persoenlichkeit? → personality-Agent
-- Aufgabe betrifft mehrere Domains? → Hauptdomain als Agent, Neben-Domains als Sub-Agenten
-- Unsicher welcher Agent? → `/moloch-agent` Skill laden
+- GUI/Panel/Popups? → gui-Agent
+- Pipeline/Modelle/NPU? → vision-Agent
+- PTZ/Tracking/Arbiter? → tracking-Agent
+- Sprache/Audio/TTS/Whisper? → voice-Agent
+- Service/IPC/CoreIntegrator? → service-Agent
+- Persoenlichkeit/Mood/Tension? → personality-Agent
+- Kamera/ONVIF/Hardware/LED? → hardware-Agent
+- Awareness/Raum/Aktivitaet/Kontext? → awareness-Agent
+- Gedaechtnis/ReID/Face-DB? → memory-Agent
+- Autonomie/Entscheidung/Homeostasis? → autonomy-Agent
+- System-Health/Watchdog/Diagnostik? → watchdog-Agent
+- Spotify/Musik? → music-Agent
+- LLM/DeepSeek/hailo-ollama? → deepseek-Agent
+- ESP32/WiFi-Mic/Firmware? → tentacle-Agent
+- Unterbewusstsein/TaoEngine? → unconscious-Agent
+- Stresstest/Chaos? → stresstest-Agent
+- Mehrere Domains? → Hauptdomain als Agent, Neben-Domains als Sub-Agenten
+- Unsicher? → `/moloch-agent` Skill laden
 
 **Beispiel:** "BBox wird in der GUI falsch angezeigt"
 → Hauptdomain: gui (Panel zeichnet BBox) + Neben: vision (BBox-Daten aus Pipeline)
@@ -88,7 +98,7 @@ Code: ~/moloch/core/ | Configs: ~/moloch/config/ | Modelle: /mnt/moloch-data/hai
 
 ---
 
-## NEVER-REGELN (durch Hooks erzwungen)
+## NEVER-REGELN (Hooks + Konvention)
 
 | # | Regel |
 |---|-------|

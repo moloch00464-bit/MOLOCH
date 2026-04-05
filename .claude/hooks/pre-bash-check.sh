@@ -44,6 +44,13 @@ except:
 fi
 
 # ============================================================
+# NEVER 4: ROT-Tracker nach Commit zuruecksetzen
+# ============================================================
+if echo "$COMMAND" | grep -q "git commit"; then
+    rm -f /tmp/moloch_rot_edited
+fi
+
+# ============================================================
 # Git Amend Warnung
 # ============================================================
 if echo "$COMMAND" | grep -q "git commit.*--amend"; then
