@@ -409,9 +409,10 @@ class PreviewModule:
                 except Exception as e:
                     self._logger.error(f"BBox render error: {e}", exc_info=True)
 
-                # Anzeigen — PhotoImage recyclen statt neu erzeugen (spart GC-Druck)
+                # Anzeigen — PhotoImage aktualisieren + Canvas-Redraw erzwingen
                 try:
                     self._photo.paste(img)
+                    self._canvas.itemconfig(self._image_id, image=self._photo)
                 except Exception:
                     # Fallback bei Groessenaenderung: neues PhotoImage
                     self._photo = ImageTk.PhotoImage(img)
