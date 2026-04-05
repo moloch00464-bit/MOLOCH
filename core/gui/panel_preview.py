@@ -358,10 +358,11 @@ class PreviewModule:
 
                             # --- Landmarks (getrennte if-Bloecke, kein elif) ---
 
-                            # Face-Landmarks: 5 SCRFD-Punkte (gruen)
+                            # Face-Landmarks: 5 SCRFD-Punkte (gruen) — flaches Array [x0,y0,x1,y1,...]
                             if cls == "face" and d.get("landmarks"):
-                                for (lx, ly) in d["landmarks"]:
-                                    lpx, lpy = int(lx * cw), int(ly * ch)
+                                lms = d["landmarks"]
+                                for i in range(0, len(lms) - 1, 2):
+                                    lpx, lpy = int(lms[i] * cw), int(lms[i+1] * ch)
                                     draw.ellipse([lpx-3, lpy-3, lpx+3, lpy+3], fill=(0, 255, 100))
 
                             # Pose-Skeleton: 17 COCO-Keypoints + Verbindungslinien (orange)
