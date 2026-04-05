@@ -150,30 +150,39 @@ Code: ~/moloch/core/ | Configs: ~/moloch/config/ | Modelle: /mnt/moloch-data/hai
 
 ---
 
-## NEUSTART-PROTOKOLL (wenn der Pi rebootet wird/wurde)
+## NEUSTART-PROTOKOLL (Pi-Reboot waehrend Coding-Session)
 
-**BEVOR Du nach einem Reboot weiterarbeitest:**
+**Wenn Du beim Kodieren merkst: "Der Pi muss neu gestartet werden":**
 
-1. **Warten:** 30 Sekunden nach Boot — Services muessen hochfahren
+### VOR dem Reboot (Sicherung):
+1. **Alles committen:** Jede geaenderte Datei committen — NICHTS darf uncommitted bleiben
+2. **Push:** `git push` — Code ist auf GitHub gesichert
+3. **__pycache__ loeschen:** `find ~/moloch -type d -name __pycache__ -exec rm -rf {} +`
+4. **Service stoppen:** `moloch_service("stop")` — sauberer Shutdown
+5. **Reboot ausfuehren:** `sudo reboot`
+
+### NACH dem Reboot (Verifikation):
+1. **Warten:** 30 Sekunden — Services muessen hochfahren
 2. **Service pruefen:** `moloch_service("status")` — laeuft er?
    - Wenn NICHT: `moloch_service("start")` und 10s warten
 3. **Status pruefen:** `moloch_status()` — FPS, Temp, Worker
 4. **NPU pruefen:** `moloch_npu_workers()` — alle Worker running?
-5. **Kamera pruefen:** Gibt es FPS > 0? Wenn 0: RTSP-Verbindung verloren
+5. **Kamera pruefen:** FPS > 0? Wenn 0: RTSP-Verbindung verloren
    - Bekannter Bug: Kamera Hot-Plug → nur Reboot hilft
-6. **Git pruefen:** `git status` — keine uncommitted Aenderungen verloren?
+6. **Git pruefen:** `git status` — alles sauber? Branch korrekt?
 7. **Audit:** `moloch_audit()` — Regressionstest PASS?
 
-**Wenn alles PASS:** Weiterarbeiten.
+**Wenn alles PASS:** Weiterarbeiten wo Du aufgehoert hast.
 **Wenn Service nicht startet:** `moloch_logs(n=50, filter_str="ERROR")` + `moloch_dmesg()`
 
-**WANN Reboot noetig:**
+### WANN Reboot noetig:
 - NPU haengt (SEGV in dmesg, kein Recovery)
 - Kamera-Stecker war raus/rein
 - Kernel-Panic oder OOM-Kill
 - Nach `apt upgrade` mit Kernel-Update
+- hailo-ollama oder andere Systemd-Services geaendert
 
-**WANN Reboot NICHT noetig (Service-Restart reicht):**
+### WANN Reboot NICHT noetig (Service-Restart reicht):
 - Python-Code geaendert
 - Config geaendert
 - Worker-Fehler (Queue voll, Timeout)
