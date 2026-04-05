@@ -293,8 +293,8 @@ class TrackingConfig:
     face_settle_time: float = 0.35  # Sekunden einfrieren wenn Gesicht frisch erkannt
     min_step_deg: float = 0.2       # Feinste Restkorrektur
     tracking_speed: float = 0.70    # Reduziert (war 1.0) — praeziseres Bremsen moeglich
-    move_cooldown_ms: float = 300.0  # 300ms (war 50ms) — Kamera bekommt Zeit zum Ankommen
-    smooth_alpha: float = 0.40      # Mehr EMA-Daempfung (war 0.70) — weniger Jitter waehrend Kamerabewegung
+    move_cooldown_ms: float = 200.0  # 200ms (war 300ms) — hoehere Update-Rate fuer Feinzentrierung
+    smooth_alpha: float = 0.55      # Schnellere Reaktion (war 0.40 → zu traege fuer Zentrierung)
 
     # Kamera Hardware-Limits (SonoffCameraController clampt intern,
     # aber Tracker muss gecachte Position AUCH clampen!)
@@ -374,9 +374,9 @@ class TrackingConfig:
     # coast_resume_px:     COAST verlassen wenn error wieder groesser
     # tilt_boost_threshold_px: Tilt-Verstaerkung ab diesem Pixel-Error
     # tilt_boost_factor:   Multiplikator fuer Tilt-Delta bei grossem Error
-    frozen_threshold_px: float = 30.0      # < 30px -> FROZEN (war 20 → zu klein, Micro-Ruckeln)
-    coast_threshold_px: float = 25.0       # COAST bei < 25px (war 40)
-    coast_resume_px: float = 50.0          # COAST aufwachen bei > 50px (war 35 → Ping-Pong mit frozen)
+    frozen_threshold_px: float = 15.0      # < 15px -> FROZEN (war 30 → Person sichtbar off-center)
+    coast_threshold_px: float = 12.0       # COAST bei < 12px (war 25) — nur bei fast perfekter Zentrierung
+    coast_resume_px: float = 30.0          # COAST aufwachen bei > 30px (war 50 → zu traege)
     tilt_boost_threshold_px: float = 80.0  # Tilt-Boost ab 80px tilt-Error
     tilt_boost_factor: float = 2.0         # Tilt-Delta verdoppeln bei grossem Error
 
@@ -484,7 +484,7 @@ class AutonomousTracker:
         # Anti-Overshoot: letztes Ziel tracken
         self._target_pan = None
         self._target_tilt = None
-        self._target_arrival_thresh = 10.0  # Grad — groesserer Puffer (war 5.0), Kamera muss wirklich stehen
+        self._target_arrival_thresh = 5.0  # Grad — praeziseres Warten (war 10.0 → naechster Move kam zu spaet)
         # EMA Glaettung fuer smooth tracking
         self._smooth_x = None
         self._smooth_y = None
