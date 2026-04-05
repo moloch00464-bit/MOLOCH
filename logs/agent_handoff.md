@@ -1,103 +1,146 @@
-# Agent Handoff — 2026-04-04
-# Session: Claude Opus 4.6 (MCP-Kommunikation + Hand-Landmarks)
+# Agent Handoff — 2026-04-05
+# Session: Claude Sonnet 4.6 (Agenten-Overhaul + Workflow-Audit + MCP-Plan)
 # Branch: main
-# Status: AUDIT FAIL — Status-JSON Schreibschleife kaputt
+# GitHub: moloch00464-bit/MOLOCH
+# Status: AUDIT PASS 54/54 ✅ | Git sauber | 16 Agenten aktiv
+
+---
+
+## SYSTEM-BASELINE (aktuell)
+
+- FPS: 20.1 | CPU: 46.3°C | RAM: 43.7%
+- Worker: 7/7 running, 0 Errors
+- Audit: 54/54 PASS
+- Zone: IDLE | Tracker: tracking
+- Git: main, sauber, synchron mit GitHub
 
 ---
 
 ## WAS DIESE SESSION GEMACHT HAT
 
-### 1. MCP-Kommunikationskanäle Claude <-> MOLOCH (FUNKTIONIERT)
-- 6 neue MCP-Tools: moloch_nudge, moloch_provoke, moloch_reflect, moloch_say, moloch_conversation, moloch_ipc
-- 3 neue IPC-Actions in moloch_service.py: core_nudge, trigger_spontaneous, trigger_reflect
-- chat_message IPC hat jetzt sender-Parameter ("Claude" vs "Du" im Panel-Chat)
-- voice_pipeline.py: process_text_message() akzeptiert sender-Parameter
-- Dateien: mcp/moloch_mcp_server.py, core/moloch_service.py, core/voice_pipeline.py
-- Commits: 4aaace7, e6afedc
-- TEST BESTANDEN: Claude hat mit Moloch gesprochen, Moloch hat geantwortet per TTS
+### 1. Hook Domain-Mapping: alle 16 Agenten (Commit ba679b1)
+- pre-edit-check.sh: 9 neue Domains eingetragen (autonomy, awareness, personality,
+  memory, watchdog, music, deepseek, tentacle, unconscious)
+- Verzeichnis-Pattern personality/* → personality (war fälschlich voice)
+- Datei-Zuordnungen bereinigt: spotify→music, wifi_mic→tentacle, longterm_memory→memory
+- Fehlermeldung listet jetzt alle 16 Agenten
 
-### 2. Worker-Health Visibility (FUNKTIONIERT, aber Status-JSON Bug)
-- tappas_pipeline.get_worker_health(): sammelt Health aller 7 Worker
-- moloch_service.py: worker_health im Status-JSON
-- MCP moloch_npu_workers: zeigt jetzt alle Pipeline-Worker
-- MCP moloch_status: CPU/RAM aus Watchdog (korrekte Werte)
-- Commits: 8df5597, 543cda5
-- BUG: get_worker_health() mit collector._lock erzeugt Deadlock → Status-JSON stoppt
-- FIX VERSUCHT: Lock entfernt, list() Snapshot — Status-JSON noch immer veraltet
+### 2. GUI-Agent: BBox + Landmark Rendering (Commit ba679b1)
+- gui.md + AGENT_GUI.md: BBox/Landmark-Darstellung als GUI-Territorium
+- Letterbox-Warnung: keine Doppelkorrektur
+- Audit-Checkliste für BBoxen/Landmarks
 
-### 3. HandWorker Wrist-Crop (FUNKTIONIERT)
-- HandWorker nutzt Pose-Keypoints 9/10 (Wrist) fuer Crop statt Full-Frame
-- hand_landmark_lite bekommt 224x224 Crop → 21 Finger-Landmarks erkannt
-- ROI-Dispatcher gibt jetzt person + pose Detections weiter
-- Commit: e2ef0f1
-- TEST BESTANDEN: 21 Keypoints, 0 Errors, 40ms pro Hand
+### 3. moloch-agent Skill: alle 16 Agenten (Commit b6d22e9)
+- Agent-Mapping auf 16 Agenten erweitert
+- Territorium-Tabelle korrigiert: personality/memory aus voice/service raus
+- BBox-Anzeige + Landmarks im GUI-Eintrag
 
-### 4. Panel-Preview BBox-Fix (NICHT COMMITTED auf Pi)
-- Pose/Hand BBoxes nicht mehr als Rechtecke gezeichnet (nur Skeleton/Landmarks)
-- Max 2 Pose-Detections (vorher 10+)
-- Hand-Landmarks mit Finger-Skeleton (HAND_PAIRS Verbindungslinien)
-- BUG in erster Version: elif-Kette kaputt → Landmarks nie gezeichnet
-- FIX: Getrennte if-Bloecke statt elif-Kette
-- ACHTUNG: Auf GitHub ANDERER Code (c9f9741) als auf Pi!
-- STATUS: panel_preview.py ist auf GitHub COMMITTED, auf Pi ANDERS (uncommitted)
+### 4. Alle 16 Agenten-Prompts überarbeitet (Commit 2151d50)
+- Territorium-Konflikte gelöst (voice/service/hardware/autonomy)
+- unconscious: MCP-Tools hinzugefügt (fehlten komplett)
+- stresstest: Erfolgskriterien + moloch_audit() in Tools
+- Descriptions präziser mit Abgrenzungshinweisen
 
----
+### 5. Stresstest E2E Display-Chain + MCP Konnektivität (Commit bc627e6)
+- stresstest.md: Backend-Event → IPC → Status-JSON → Panel-Anzeige
+- 7 Trigger-Tests mit Akzeptanzkriterien
+- MCP-Konnektivitätstest: alle 17 Tools mit Erwartungswerten
 
-## OFFENE BUGS (KRITISCH)
+### 6. Workflow-Audit durchgeführt
+- Alle Komponenten geprüft: Session-Start, Hooks, Skills, Agenten, MCP
+- Befund: 95% OK — 3 kleine Fixes nötig (→ diese Session erledigt)
+- pre-bash-check.sh: jq → python3 (jq nicht auf Pi!)
 
-### BUG 1: Status-JSON wird nicht geschrieben (AUDIT FAIL)
-- Symptom: Status-JSON 1172s veraltet, FPS=0 im Status obwohl SHM 20 fps
-- Ursache: worker_health Aufruf in _write_status_json() crasht still
-- Betroffene Datei: core/moloch_service.py Zeile ~2035
-- Fix-Versuch: Lock entfernt, try/except — hilft nicht
-- NAECHSTER SCHRITT: worker_health komplett auskommentieren, Service restart, Audit
-- WENN DAS HILFT: Problem ist in get_worker_health(), nicht in moloch_service.py
-
-### BUG 2: Panel-Preview Landmarks evtl. nicht sichtbar
-- panel_preview.py auf Pi hat uncommitted Fix (getrennte if-Bloecke)
-- Panel-Prozess laeuft moeglicherweise mit ALTEM Code
-- NAECHSTER SCHRITT: Panel neu starten nach Fix committen
+### 7. MCP-Bidirektional-Plan geschrieben
+- Plan: .claude/plans/delightful-hugging-mitten.md
+- Moloch's NPU-LLM direkt via MCP befragbar (moloch_llm_query)
+- Moloch kann Claude fragen via MCP Sampling (moloch_ask_claude)
+- hailo-ollama systemd-Service ebenfalls geplant
 
 ---
 
-## UNCOMMITTED CHANGES AUF PI
+## PFLICHT-STARTPROTOKOLL (Phase 1 — JEDE Session)
+
+1. `logs/agent_handoff.md` lesen
+2. `git status` — uncommitted changes?
+3. `moloch_status()` — löst /tmp/moloch_session_lock
+4. `moloch_npu_workers()` — Worker-Health
+5. `moloch_audit()` — Baseline PASS/FAIL
+6. Markus zeigen: "Service läuft, X FPS, Audit X/54"
+
+---
+
+## WORKFLOW (Kurzfassung)
 
 ```
-M config/last_face_position.json     — Runtime State (NEVER 7 — NICHT committen)
-M config/perception_weights.json     — Runtime (bereits committed auf GitHub)
-M config/system_capabilities.json    — Runtime (bereits committed auf GitHub)
-M core/perception/tappas_pipeline.py — worker_health Lock-Fix (MUSS committed werden)
-M data/memory/user_knowledge.json    — Molochs Wissen (gitignored)
-? moloch_audit.py                    — Alte Audit-Kopie im Root
+Auftrag → /moloch-agent Skill → richtigen Agenten spawnen
+         → touch /tmp/moloch_agent_[name]
+         → Code editieren (Hook prüft Domain!)
+         → sudo systemctl restart moloch
+         → moloch_audit() → bei FAIL: STOPP
+         → rm /tmp/moloch_agent_[name]
+         → git commit (1 Datei = 1 Commit)
+         → git push
 ```
 
 ---
 
-## REGELVERSTOESSE DIESER SESSION
+## 16 AGENTEN (vollständige Liste)
 
-1. NEVER 4 verletzt: Mehrere ROT-Dateien gleichzeitig editiert
-2. Pre-Flight nicht gemacht: Kein git status, kein BACKUP vor Aenderungen
-3. AGENT_TOOLBOX nicht gelesen: Agenten-Definitionen ignoriert
-4. DANGER_MAP nicht konsultiert: Risiko-Stufen nicht geprueft
-5. Post-Flight nicht konsequent: Audit FAIL nicht sofort revertiert
+| Agent | Territorium |
+|-------|-------------|
+| vision | core/perception/, tappas_pipeline, NPU, BBox-Inferenz |
+| hardware | core/hardware/, camera.py, LED, Thermal |
+| gui | core/gui/, panel_*.py, popups/, BBox-Zeichnen, Landmarks |
+| tracking | core/mpo/, ptz_arbiter, ptz_tracker |
+| voice | core/speech/, core/tts/, core/audio/, voice_pipeline |
+| service | moloch_service, core_integrator, ipc_router |
+| unconscious | unconscious_engine.py, TaoEngine, anima_mappings |
+| autonomy | core/autonomy/ (decision, homeostasis, introspection, llm_bridge, night_cycle, atmosphere, preference_learner) |
+| awareness | core/awareness/ (activity, context, motion, room_map), world_state |
+| personality | core/personality/ (engine, mood, behavior, tension), event_bus, sprache, timeline |
+| memory | core/memory/ (episodic, persistent, vector, reid), longterm_memory, daily_learner |
+| watchdog | system_watchdog, diagnostics, capability_monitor, status |
+| music | core/music/, spotify_controller |
+| deepseek | local_llm_bridge, deepseek_client, llm_response, introspection |
+| tentacle | wifi_mic, camera_cloud_bridge, firmware/respeaker_wifi_mic/ |
+| stresstest | scripts/, Tests, Chaos Engineering, E2E Display-Chain |
 
 ---
 
-## ARBEITSANWEISUNGEN (Referenz fuer naechste Session)
+## OFFENE AUFGABEN (priorisiert)
 
-| Datei | Pfad | Inhalt |
-|-------|------|--------|
-| CLAUDE.md | ~/moloch/CLAUDE.md | Master-Regeln, 12 NEVER, Datei-Ampel |
-| Agent Toolbox | ~/moloch/docs/MOLOCH_AGENT_TOOLBOX_v2.3.json | 23 Agenten |
-| Danger Map | ~/moloch/docs/DANGER_MAP.md | 90 Dateien klassifiziert |
-| Dev Skill | ~/.claude/skills/moloch-dev.md | Pre/Post-Flight, Templates |
-| Vision Agent | ~/moloch/agents/AGENT_VISION.md | Pipeline-Regeln |
+PRIO 1 — MCP Bidirektional (NÄCHSTE SESSION):
+  - Plan: .claude/plans/delightful-hugging-mitten.md
+  - 5 Commits: moloch_llm_query + moloch_llm_status → moloch_ask_claude (async Sampling)
+    → IPC-Handler in moloch_service.py → hailo-ollama systemd → stresstest E2E
+  - Agent: service
+  - hailo-ollama API: /api/chat (NICHT /v1/chat/completions — gibt 404!)
+
+PRIO 2 — TaoEngine implementieren: ✅ PRIO VERSCHOBEN (nach MCP-Plan)
+  - Plan: docs/plans/tao_engine_plan.md (von Opus 4.6 erstellt)
+  - Agent: unconscious
+
+PRIO 3 — Tracker STUCK-AT-LIMIT:
+  - core/mpo/autonomous_tracker.py → _track_tracking_target()
+  - Nach 8s am mechanischen Anschlag → SEARCH starten
+  - Agent: tracking
+
+PRIO 4 — ArcFace Similarity 0.50-0.61 (Threshold 0.65):
+  - Neu-Enrollment: scripts/enroll_face_worker.py
+  - Agent: vision
 
 ---
 
-## BASELINE-METRIKEN
-- RAM: 1973 MB (49%)
-- FPS: 20.0 (SHM real), 0.0 (Status-JSON — BUG!)
-- CPU: 42.5°C
-- Models: 7/7 aktiv
-- Audit: 50/54 PASS (4 FAIL wegen Status-JSON)
+## REFERENZ-DATEIEN
+
+| Datei | Inhalt |
+|-------|--------|
+| CLAUDE.md | Master-Regeln, 12 NEVER, Datei-Ampel, 16 Agenten |
+| .claude/plans/delightful-hugging-mitten.md | MCP-Bidirektional Implementierungsplan |
+| docs/DANGER_MAP.md | ROT/GELB/GRUEN für alle Dateien mit NEVER-DOs |
+| logs/system_contract_pipeline.md | 10 Pipeline-Sync-Regeln (bei Pipeline-Arbeit) |
+| docs/plans/tao_engine_plan.md | TaoEngine Implementierungsplan (Opus 4.6) |
+| .claude/hooks/pre-edit-check.sh | Agent-Lock + Domain-Check Hook (16 Agenten) |
+| .claude/hooks/pre-bash-check.sh | Bash-Check Hook (python3, kein jq!) |
+| .claude/agents/*.md | 16 Agenten-Definitionen |

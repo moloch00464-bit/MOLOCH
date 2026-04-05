@@ -60,6 +60,42 @@ Prueft: Backend-Event → IPC → Status-JSON → Panel-Anzeige (vollstaendige K
 
 **Akzeptanzkriterium:** Status-JSON-Update < 200ms, Panel-Update < 1s nach Event
 
+### MCP Server Konnektivitaet (Claude Code ↔ Moloch)
+Prueft: Sind alle MCP-Tools erreichbar und liefern valide Daten?
+
+**Schnelltest — alle Tools einmal aufrufen:**
+| Tool | Erwartetes Ergebnis | Timeout |
+|------|---------------------|---------|
+| `moloch_status()` | FPS > 0, JSON valide | 2s |
+| `moloch_npu_workers()` | mind. 1 Worker running | 2s |
+| `moloch_npu_models()` | mind. 1 HEF geladen | 2s |
+| `moloch_logs(n=5)` | Zeilen zurueck, kein Fehler | 3s |
+| `moloch_dmesg()` | Ausgabe zurueck | 3s |
+| `moloch_audit()` | PASS/FAIL Ergebnis | 30s |
+| `moloch_snapshot()` | Base64-String nicht leer | 5s |
+| `moloch_low_light()` | Status-Dict zurueck | 2s |
+| `moloch_git_log(n=3)` | Commit-Liste zurueck | 2s |
+| `moloch_read(path="config/settings.json")` | JSON-Inhalt zurueck | 2s |
+| `moloch_service(action="status")` | active/inactive | 2s |
+| `moloch_ipc(action="get_status")` | Dict zurueck | 2s |
+| `moloch_conversation(n=3)` | Liste zurueck | 2s |
+| `moloch_nudge(key="test", value=0.0)` | kein Fehler | 2s |
+| `moloch_provoke(reason="mcp_test")` | kein Fehler | 3s |
+| `moloch_reflect()` | kein Fehler | 5s |
+| `moloch_say(text="MCP Test")` | kein Fehler, TTS hoerbar | 5s |
+
+**Reconnect-Test:**
+1. `moloch_service(action="restart")` ausfuehren
+2. Sofort `moloch_status()` aufrufen — MCP-Server antwortet waehrend Restart?
+3. Nach 10s erneut `moloch_status()` — FPS wieder > 0?
+4. Akzeptanz: MCP-Server ueberlebt Service-Restart ohne Neustart Claude Code
+
+**Stresstest MCP:**
+- 20x `moloch_status()` in schneller Folge → Antwortzeit stabil < 2s?
+- Parallel: `moloch_snapshot()` + `moloch_npu_workers()` gleichzeitig → kein Deadlock?
+
+**Akzeptanzkriterium:** Alle 17 Tools antworten, kein Timeout, kein Exception
+
 ## Erfolgskriterien
 - Audit: 54/54 PASS nach jedem Szenario
 - RAM: kein stetiger Anstieg (kein Leak)

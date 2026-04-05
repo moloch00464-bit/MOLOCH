@@ -3,7 +3,14 @@
 # Exit 2 = blockiert, Exit 0 = erlaubt
 
 INPUT=$(cat)
-COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // ""' 2>/dev/null)
+COMMAND=$(echo "$INPUT" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(d.get('tool_input', {}).get('command', ''))
+except:
+    print('')
+" 2>/dev/null)
 
 # Kein Command = kein Check
 [ -z "$COMMAND" ] && exit 0
@@ -23,7 +30,14 @@ fi
 # NEVER 12: Worktree-Warnung
 # ============================================================
 if echo "$COMMAND" | grep -q "systemctl.*moloch"; then
-    CWD=$(echo "$INPUT" | jq -r '.cwd // ""' 2>/dev/null)
+    CWD=$(echo "$INPUT" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(d.get('cwd', ''))
+except:
+    print('')
+" 2>/dev/null)
     if echo "$CWD" | grep -q "worktrees\|worktree"; then
         echo "WARNUNG: NEVER 12 — Du bist in einem Worktree! Service laeuft von ~/moloch/, nicht vom Worktree."
     fi
