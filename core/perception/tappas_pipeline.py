@@ -1442,7 +1442,9 @@ class TappasPipeline:
                 pf.pose_count = pose_result.data["pose_count"]
 
             hand_result = self._result_collector.get_latest("HandWorker")
-            if hand_result and hand_result.data.get("hand_detected"):
+            hand_age = frame_id - getattr(hand_result, 'frame_id', 0) if hand_result else 999
+            # Hand-Daten nur wenn YOLO aktiv eine Person sieht UND Ergebnis frisch (<= 6 Frames)
+            if persons and hand_result and hand_result.data.get("hand_detected") and hand_age <= 6:
                 pf.hand_detected = True
                 # Alle erkannten Haende (links + rechts) als Detections
                 for h in hand_result.data.get("hands", []):
@@ -1463,7 +1465,9 @@ class TappasPipeline:
                         "keypoints": h.get("landmarks", []),
                     })
 
-            if pose_result and pose_result.data.get("poses"):
+            pose_age = frame_id - getattr(pose_result, 'frame_id', 0) if pose_result else 999
+            # Pose-Daten nur wenn YOLO aktiv eine Person sieht UND Ergebnis frisch (<= 6 Frames)
+            if persons and pose_result and pose_result.data.get("poses") and pose_age <= 6:
                 # Max 2 Poses — mehr erzeugt visuelles Chaos im Preview
                 for pose in pose_result.data["poses"][:2]:
                     kpts = pose.get("keypoints")
