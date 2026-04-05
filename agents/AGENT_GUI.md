@@ -64,6 +64,36 @@ Pruefe ALLE Panels und Popups auf Konsistenz:
 [ ] Alle Status-Polls lesen die richtigen IPC-Keys
 [ ] subprocess-Aufrufe haben Timeouts und Error-Handling
 [ ] Threading: daemon=True, Safe Shutdown bei Window-Close
+[ ] BBoxen sitzen visuell korrekt (kein Offset, kein Letterbox-Doppelfehler)
+[ ] Landmarks (Face/Pose/Hand) liegen auf richtigen Koerperteilen
+[ ] BBox-Farben korrekt (Cyan=erkannt, Gelb=unbekannt, Gruen=Person)
+[ ] Keine Artefakt-BBoxen bei 0 Detektionen
+```
+
+## BBox + Landmark Rendering (panel_preview.py)
+
+Zustaendig fuer die VISUELLE DARSTELLUNG im Kamera-Vorschaufenster:
+
+- **BBoxen**: PIL ImageDraw zeichnet Rechtecke auf den Preview-Frame
+  - Cyan = Person erkannt | Gelb = unbekannt | Gruen = Person ohne Face-ID
+  - Koordinaten kommen aus `panel_detections` in moloch_status.json (normalisiert 0-1)
+  - Umrechnung: `x_px = norm_x * preview_width` usw.
+- **Landmarks**: Face-Landmarks (5 Punkte), Pose-Keypoints, Hand-Keypoints
+  - Werden als Punkte/Linien auf den Frame gezeichnet
+  - Koordinaten ebenfalls normalisiert aus Status-JSON
+- **Letterbox-Regel**: TAPPAS liefert BEREITS korrigierte Koordinaten — NIEMALS nochmal
+  manuell rescalen (fuehrt zu Doppelkorrektur/Verzerrung!)
+- **Abgrenzung**: BBox-Inferenz (korrekte Pixel aus Hailo) = Vision-Agent.
+  BBox-Zeichnen (korrekte Darstellung auf Screen) = GUI-Agent.
+
+### Audit-Checkliste BBox/Landmarks:
+```
+[ ] BBoxen sitzen visuell korrekt ueber Person/Gesicht (kein Offset)
+[ ] Landmark-Punkte liegen auf den richtigen Koerperteilen
+[ ] Keine Doppelkorrektur (BBox nicht verschoben nach Letterbox-Resize)
+[ ] BBox-Farben korrekt (Cyan/Gelb/Gruen)
+[ ] Bei 0 Personen: keine Artefakt-BBoxen sichtbar
+[ ] Landmarks verschwinden wenn kein Detection-Result vorhanden
 ```
 
 ## Bekannte Bugs in deinem Bereich

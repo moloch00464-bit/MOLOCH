@@ -76,22 +76,26 @@ is_exempt() {
 get_file_domain() {
     # Nach Verzeichnis
     case "$DIRPATH" in
-        */perception*|*/hailo*)   echo "vision";   return ;;
-        */mpo*)                   echo "tracking"; return ;;
-        */mcp*)                   echo "service";  return ;;
-        */personality*)           echo "voice";    return ;;
-        */speech*)                echo "voice";    return ;;
+        */perception*|*/hailo*)   echo "vision";      return ;;
+        */mpo*)                   echo "tracking";    return ;;
+        */mcp*)                   echo "service";     return ;;
+        */personality*)           echo "personality"; return ;;
+        */autonomy*)              echo "autonomy";    return ;;
+        */awareness*)             echo "awareness";   return ;;
+        */memory*)                echo "memory";      return ;;
+        */music*)                 echo "music";       return ;;
+        */speech*|*/tts*)         echo "voice";       return ;;
         */hardware*)
             case "$BASENAME" in
                 audio_pipeline.py) echo "voice"; return ;;
             esac
             echo "hardware"; return ;;
-        */gui*|*/panel*)          echo "gui";      return ;;
+        */gui*|*/panel*)          echo "gui";         return ;;
     esac
     # Nach Dateiname
     case "$BASENAME" in
         moloch_service.py|core_integrator.py|ipc_router.py|camera_manager.py|\
-        longterm_memory.py|status.py|daily_learner.py|environment_watcher.py|\
+        status.py|environment_watcher.py|\
         moloch_mcp_server.py|settings.json)
             echo "service" ;;
         tappas_pipeline.py|vision_workers.py|roi_dispatcher.py|face_pipeline.py|\
@@ -103,13 +107,33 @@ get_file_domain() {
             echo "tracking" ;;
         moloch_unified_panel.py|moloch_console.py|panel_*.py|popup_*.py)
             echo "gui" ;;
-        voice_pipeline.py|hailo_whisper.py|tts.py|spotify_controller.py|\
+        voice_pipeline.py|hailo_whisper.py|tts.py|\
         moloch_sprache.py|keyword_handler.py)
             echo "voice" ;;
-        camera.py|camera_cloud_bridge.py|ptz_calibration.py|thermal_manager.py|\
+        camera.py|ptz_calibration.py|thermal_manager.py|\
         led_controller.py|rgb_led_controller.py|cloud_controller.py|\
-        wifi_mic.py|ewelink_controller.py)
+        ewelink_controller.py)
             echo "hardware" ;;
+        unconscious_engine.py|tao_engine.py|anima_mappings.py)
+            echo "unconscious" ;;
+        system_watchdog.py|diagnostics.py|capability_monitor.py)
+            echo "watchdog" ;;
+        local_llm_bridge.py|deepseek_client.py|llm_response.py)
+            echo "deepseek" ;;
+        spotify_controller.py)
+            echo "music" ;;
+        wifi_mic.py|camera_cloud_bridge.py)
+            echo "tentacle" ;;
+        longterm_memory.py|daily_learner.py|episodic_memory.py)
+            echo "memory" ;;
+        personality_engine.py|mood.py|tension_integrator.py|event_bus.py)
+            echo "personality" ;;
+        decision_engine.py|homeostasis.py|introspection.py|llm_bridge.py|\
+        night_cycle.py|atmosphere.py|preference_learner.py)
+            echo "autonomy" ;;
+        activity_worker.py|context_evaluator.py|motion_analyzer.py|\
+        room_map.py|world_state.py)
+            echo "awareness" ;;
         *)
             echo "unknown" ;;
     esac
@@ -137,12 +161,22 @@ if ! is_exempt; then
         echo "Spawne den zustaendigen Domain-Agenten:" >&2
         echo "  Zustaendige Domain: ${FILE_DOMAIN:-unbekannt}" >&2
         echo "" >&2
-        echo "  service   -> moloch_service.py, IPC, Memory, core_integrator" >&2
-        echo "  vision    -> TAPPAS, GStreamer, NPU, perception" >&2
-        echo "  tracking  -> PTZ, Tracker, Arbiter, autonomous_tracker" >&2
-        echo "  gui       -> Tkinter, panel_*.py, popups" >&2
-        echo "  voice     -> Whisper, TTS, Personality, Spotify" >&2
-        echo "  hardware  -> ONVIF, Kamera, Thermal, LED" >&2
+        echo "  service     -> moloch_service.py, IPC, core_integrator" >&2
+        echo "  vision      -> TAPPAS, GStreamer, NPU, perception" >&2
+        echo "  tracking    -> PTZ, Tracker, Arbiter, autonomous_tracker" >&2
+        echo "  gui         -> Tkinter, panel_*.py, popups" >&2
+        echo "  voice       -> Whisper, TTS, Piper, audio_pipeline" >&2
+        echo "  hardware    -> ONVIF, Kamera, Thermal, LED, eWeLink" >&2
+        echo "  personality -> PersonalityEngine, Mood, Tension, EventBus" >&2
+        echo "  autonomy    -> DecisionEngine, Homeostasis, LLM-Bridge" >&2
+        echo "  awareness   -> Activity, Context, Motion, RoomMap" >&2
+        echo "  memory      -> Episodic, Persistent, Vector, ReID, Longterm" >&2
+        echo "  watchdog    -> SystemWatchdog, Diagnostics, CapabilityMonitor" >&2
+        echo "  music       -> Spotify, Track-Index, MusicMemory" >&2
+        echo "  deepseek    -> hailo-ollama, LLM-Bridge, DeepSeek API" >&2
+        echo "  tentacle    -> ESP32 WiFi-Mic, wifi_mic.py, camera_cloud_bridge" >&2
+        echo "  unconscious -> TaoEngine, Unterbewusstsein, anima_mappings" >&2
+        echo "  stresstest  -> Scripts, Tests, Chaos Engineering" >&2
         echo "" >&2
         echo "Agent setzt Lock: touch /tmp/moloch_agent_[name]" >&2
         exit 2

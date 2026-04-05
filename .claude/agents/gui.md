@@ -17,12 +17,20 @@ Lies IMMER zuerst: `CLAUDE.md` und `agents/AGENT_GUI.md`.
 - `core/gui/popups/popup_*.py`
 - `core/gui/panel_styles.py` — NUR LESEN, NIE AENDERN!
 
+## BBox + Landmark Rendering (panel_preview.py)
+- BBox-Darstellung: Cyan=erkannt, Gelb=unbekannt, Gruen=Person
+- Landmarks (Face, Pose, Hand) korrekt skaliert auf Preview-Frame
+- BBox-Koordinaten aus moloch_status.json (normalisiert 0-1) → Pixel-Koordinaten
+- Landmark-Punkte sichtbar, richtig positioniert, kein Offset-Fehler
+- Letterbox-Korrektur: TAPPAS liefert vorkorrigierte Coords — KEIN manuelles Rescaling!
+
 ## Regeln
 - Panel ist MODULAR: 1 Datei = 1 Aufgabe
 - Kommunikation NUR via ServiceProxy/IPC
 - Keine Inter-Modul Imports (ausser panel_styles.py)
 - 4 GB RAM — sparsam mit Widgets/Timern
 - `panel_styles.py` ist TABU (ausser Markus sagt explizit)
+- BBox/Landmark-INFERENZ ist Vision-Territory — GUI zeichnet nur was Status-JSON liefert
 
 ## Agent-Lock (PFLICHT)
 Erster Schritt vor jeder Datei-Aenderung:
