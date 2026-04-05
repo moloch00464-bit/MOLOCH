@@ -150,6 +150,36 @@ Code: ~/moloch/core/ | Configs: ~/moloch/config/ | Modelle: /mnt/moloch-data/hai
 
 ---
 
+## NEUSTART-PROTOKOLL (wenn der Pi rebootet wird/wurde)
+
+**BEVOR Du nach einem Reboot weiterarbeitest:**
+
+1. **Warten:** 30 Sekunden nach Boot — Services muessen hochfahren
+2. **Service pruefen:** `moloch_service("status")` — laeuft er?
+   - Wenn NICHT: `moloch_service("start")` und 10s warten
+3. **Status pruefen:** `moloch_status()` — FPS, Temp, Worker
+4. **NPU pruefen:** `moloch_npu_workers()` — alle Worker running?
+5. **Kamera pruefen:** Gibt es FPS > 0? Wenn 0: RTSP-Verbindung verloren
+   - Bekannter Bug: Kamera Hot-Plug → nur Reboot hilft
+6. **Git pruefen:** `git status` — keine uncommitted Aenderungen verloren?
+7. **Audit:** `moloch_audit()` — Regressionstest PASS?
+
+**Wenn alles PASS:** Weiterarbeiten.
+**Wenn Service nicht startet:** `moloch_logs(n=50, filter_str="ERROR")` + `moloch_dmesg()`
+
+**WANN Reboot noetig:**
+- NPU haengt (SEGV in dmesg, kein Recovery)
+- Kamera-Stecker war raus/rein
+- Kernel-Panic oder OOM-Kill
+- Nach `apt upgrade` mit Kernel-Update
+
+**WANN Reboot NICHT noetig (Service-Restart reicht):**
+- Python-Code geaendert
+- Config geaendert
+- Worker-Fehler (Queue voll, Timeout)
+
+---
+
 ## ABSCHLUSS-PROTOKOLL (nach JEDER abgeschlossenen Aufgabe)
 
 **Wenn die Aufgabe FERTIG ist — BEVOR Du "fertig" sagst:**
