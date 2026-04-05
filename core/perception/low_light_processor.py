@@ -22,7 +22,10 @@ HEF_PATH = "/mnt/moloch-data/hailo/models/zero_dce.hef"
 VDEVICE_GROUP_ID = "SHARED"
 MODEL_W = 600           # zero_dce Input: Breite
 MODEL_H = 400           # zero_dce Input: Hoehe
-DARK_THRESHOLD = 80     # Mittlere Helligkeit [0-255] unter der Enhancement aktiv wird
+DARK_THRESHOLD = 50     # Mittlere Helligkeit [0-255] unter der Enhancement aktiv wird
+                        # 50 = echte Dunkelheit (~20%) — verhindert AE-Blip-Trigger
+DARK_FRAMES_MIN = 5     # Hysterese: erst nach N aufeinanderfolgenden dunklen Frames aktiv
+BRIGHT_FRAMES_MIN = 3   # Hysterese: erst nach N hellen Frames wieder deaktivieren
 INFERENCE_TIMEOUT_MS = 3000
 
 
@@ -42,6 +45,9 @@ class LowLightProcessor:
         self._loaded = False
         self._load_error: Optional[str] = None
         self._last_brightness: int = -1
+        self._dark_streak: int = 0    # aufeinanderfolgende dunkle Frames
+        self._bright_streak: int = 0  # aufeinanderfolgende helle Frames
+        self._enhancement_active: bool = False
 
     def _ensure_loaded(self) -> bool:
         """Modell lazy laden beim ersten dunklen Frame."""
@@ -91,8 +97,20 @@ class LowLightProcessor:
             brightness = 128
         self._last_brightness = brightness
 
-        if brightness >= DARK_THRESHOLD:
-            return img_rgb  # Hell genug → nichts tun
+        # Hysterese: Streaks zaehlen, Enhancement nur bei stabiler Dunkelheit
+        if brightness < DARK_THRESHOLD:
+            self._dark_streak += 1
+            self._bright_streak = 0
+            if self._dark_streak >= DARK_FRAMES_MIN:
+                self._enhancement_active = True
+        else:
+            self._bright_streak += 1
+            self._dark_streak = 0
+            if self._bright_streak >= BRIGHT_FRAMES_MIN:
+                self._enhancement_active = False
+
+        if not self._enhancement_active:
+            return img_rgb  # Hell genug oder noch nicht stabil dunkel genug
 
         # 2. Dunkel: Modell laden + Enhancement
         with self._lock:
@@ -141,8 +159,8 @@ class LowLightProcessor:
         return self._last_brightness
 
     def is_active(self) -> bool:
-        """True wenn letzter Frame dunkel genug war fuer Enhancement."""
-        return 0 <= self._last_brightness < DARK_THRESHOLD
+        """True wenn Enhancement gerade aktiv (Hysterese beachtet)."""
+        return self._enhancement_active
 
     def is_available(self) -> bool:
         """True wenn Modell geladen und bereit."""
