@@ -3,17 +3,33 @@
 # Wird bei startup, resume, clear und compact ausgefuehrt
 
 INPUT=$(cat)
-SOURCE=$(echo "$INPUT" | jq -r '.source // "startup"' 2>/dev/null)
+SOURCE=$(echo "$INPUT" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(d.get('source', 'startup'))
+except:
+    print('startup')
+" 2>/dev/null)
 
 # Lock erzeugen — Code-Edits blockiert bis moloch_status() gelaufen ist
 touch /tmp/moloch_session_lock
 
 echo "=== MOLOCH SESSION START ($SOURCE) ==="
+echo ""
+echo "  ██╗      ██████╗ ██╗  ██╗ ██████╗ ███╗   ███╗ ██████╗ ████████╗██╗██╗   ██╗███████╗"
+echo "  ██║     ██╔═══██╗██║ ██╔╝██╔═══██╗████╗ ████║██╔═══██╗╚══██╔══╝██║██║   ██║██╔════╝"
+echo "  ██║     ██║   ██║█████╔╝ ██║   ██║██╔████╔██║██║   ██║   ██║   ██║██║   ██║█████╗  "
+echo "  ██║     ██║   ██║██╔═██╗ ██║   ██║██║╚██╔╝██║██║   ██║   ██║   ██║╚██╗ ██╔╝██╔══╝  "
+echo "  ███████╗╚██████╔╝██║  ██╗╚██████╔╝██║ ╚═╝ ██║╚██████╔╝   ██║   ██║ ╚████╔╝ ███████╗"
+echo "  ╚══════╝ ╚═════╝ ╚═╝  ╚═╝ ╚═════╝ ╚═╝     ╚═╝ ╚═════╝    ╚═╝   ╚═╝  ╚═══╝  ╚══════╝"
+echo ""
+echo "  Codename: LOKOMOTIVE | Workflow aktiv | Alle Regeln gelten"
+echo ""
 
 # Git Status
-echo ""
 echo "--- GIT STATUS ---"
-cd "$CLAUDE_PROJECT_DIR" 2>/dev/null || cd /home/user/MOLOCH
+cd "$CLAUDE_PROJECT_DIR" 2>/dev/null || cd /home/molochzuhause/moloch
 DIRTY=$(git status --porcelain 2>/dev/null | head -5)
 if [ -n "$DIRTY" ]; then
     echo "WARNUNG: Uncommitted Changes!"

@@ -4,6 +4,16 @@
 
 > "Die dunkle Seite macht mehr Spass!" — Respekt ist bidirektional.
 
+## CODENAME: LOKOMOTIVE
+
+**LOKOMOTIVE** = der offizielle Name fuer diesen Workflow.
+Wenn Claude mit einer Coding-Aufgabe beginnt, schreibt er als erstes:
+
+> **LOKOMOTIVE aktiv.** — gefolgt vom Pflicht-Startprotokoll.
+
+Wenn Markus **LOKOMOTIVE** sieht: Workflow wird korrekt eingehalten.
+Wenn es fehlt: Claude hat das Protokoll uebersprungen — stoppen und neu starten.
+
 ---
 
 ## PFLICHT-STARTPROTOKOLL (VOR jeder Arbeit!)
