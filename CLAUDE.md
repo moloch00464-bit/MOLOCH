@@ -56,6 +56,7 @@ Wenn es fehlt: Claude hat das Protokoll uebersprungen — stoppen und neu starte
 - LLM/DeepSeek/hailo-ollama? → deepseek-Agent
 - ESP32/WiFi-Mic/Firmware? → tentacle-Agent
 - Unterbewusstsein/TaoEngine? → unconscious-Agent
+- BBox falsch/Landmark verschoben/Keypoints fliegen raus? → coordinates-Agent
 - Stresstest/Chaos? → stresstest-Agent
 - Mehrere Domains? → Hauptdomain als Agent, Neben-Domains als Sub-Agenten
 - Unsicher? → `/moloch-agent` Skill laden
@@ -217,6 +218,7 @@ Markus geht aus dem Zimmer, kommt zurueck, Arbeit ist erledigt.
 | voice | Whisper, TTS, Piper, Audio-Pipeline | Sprach-I/O |
 | service | moloch_service, IPC, core_integrator | Service/Integration |
 | unconscious | TaoEngine, Unterbewusstsein, Self-Tune | Innerer Zustand/Selbstregulation |
+| coordinates | BBox/Landmark-Skalierung, Letterbox-Korrektur | Anzeige-Bugs mit BBoxen/Keypoints |
 | autonomy | Decision Engine, Homeostasis, LLM-Bridge, Night Cycle | Autonome Entscheidungen |
 | awareness | Activity, Context, Motion, RoomMap, WorldState | Situationsbewusstsein |
 | personality | PersonalityEngine, Mood, TensionIntegrator, EventBus | Persoenlichkeit/Emotion |
