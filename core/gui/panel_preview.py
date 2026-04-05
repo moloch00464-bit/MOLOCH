@@ -406,8 +406,8 @@ class PreviewModule:
                                     kpx, kpy = int(kp[0]*cw), int(kp[1]*ch)
                                     draw.ellipse([kpx-4, kpy-4, kpx+4, kpy+4], fill=(255, 0, 200))
                         del draw
-                except Exception:
-                    pass  # BBox-Fehler darf Preview nie blockieren
+                except Exception as e:
+                    self._logger.error(f"BBox render error: {e}", exc_info=True)
 
                 # Anzeigen — PhotoImage recyclen statt neu erzeugen (spart GC-Druck)
                 try:
