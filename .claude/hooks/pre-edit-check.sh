@@ -134,6 +134,8 @@ get_file_domain() {
         activity_worker.py|context_evaluator.py|motion_analyzer.py|\
         room_map.py|world_state.py)
             echo "awareness" ;;
+        moloch_audit.py|stress_test*.py|chaos_*.py)
+            echo "stresstest" ;;
         *)
             echo "unknown" ;;
     esac
