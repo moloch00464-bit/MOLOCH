@@ -1,23 +1,26 @@
 ---
 name: moloch-audit
-description: Voller MOLOCH Audit (39 Tests). Nutze nach Code-Aenderungen oder vor/nach Reboot.
+description: Voller MOLOCH Audit (54 Tests). Nutze nach Code-Aenderungen oder vor/nach Reboot. FAIL = sofort stoppen.
 disable-model-invocation: true
 ---
 
-Fuehre den vollstaendigen MOLOCH Audit aus:
+# MOLOCH Audit — 54 Tests
 
-```bash
-python3 ~/moloch/moloch_audit.py --auto
-```
-
-Oder nutze das MCP-Tool:
+Nutze das MCP-Tool:
 ```
 moloch_audit()
 ```
 
-Zeige das Ergebnis und bei FAIL:
-- Welche Tests sind fehlgeschlagen?
-- Was ist die wahrscheinliche Ursache?
-- Vorschlag fuer Fix
+**Erwartetes Ergebnis: 54/54 PASS**
 
-Bei PASS: Kurze Bestaetigung mit Anzahl Tests.
+Bei FAIL:
+- Welche Tests fehlgeschlagen?
+- Wahrscheinliche Ursache (letzte Code-Aenderung?)
+- Fix vorschlagen
+- `git checkout -- [datei]` wenn noetig
+
+Bei PASS:
+- Kurze Bestaetigung: "Audit 54/54 PASS"
+- Weiter mit naechstem Schritt
+
+**Regel: Bei FAIL nicht weitermachen — erst fixen!**
