@@ -30,12 +30,35 @@ Lies IMMER zuerst: `CLAUDE.md` und `agents/AGENT_STRESSTEST.md`.
 - Audit-FAIL ignorieren oder weiter testen
 
 ## Test-Szenarien
+
+### Chaos / Last
 - PTZ-Stress: 50 Befehle in 10 Sekunden → Mechanical Endstop testen
 - RAM-Leaktest: Service 1h laufen, RAM-Kurve beobachten
 - RTSP-Reconnect: Stream 10x trennen/verbinden
 - Service Stop/Start Zyklen: 20x restart
 - Worker-Stress: Alle 7 Worker gleichzeitig unter Last
 - Thermal-Stress: CPU-Last + Fan-Monitoring
+
+### E2E Display-Chain Verifikation
+Prueft: Backend-Event → IPC → Status-JSON → Panel-Anzeige (vollstaendige Kette)
+
+| Trigger | Erwartete Anzeige im Panel |
+|---------|---------------------------|
+| `moloch_ipc(action="set_zone", params={"zone":"berserker"})` | Zone-Label wechselt auf BERSERKER, LED-Farbe rot |
+| `moloch_ipc(action="set_zone", params={"zone":"shadow"})` | Zone-Label wechselt auf SHADOW, LED-Farbe blau |
+| `moloch_nudge(emotion="alert", intensity=0.8)` | Tension-Balken steigt im Panel |
+| `moloch_ipc(action="ptz_move", params={"pan":10,"tilt":0})` | PTZ-Koordinaten im Panel updaten |
+| Person betritt Frame (via moloch_provoke) | Person-Detection in Preview, BBox sichtbar |
+| `moloch_say("Test")` | TTS-Aktivitaets-Indikator im Panel |
+| Worker-Error simulieren | Watchdog-Status im Hardware-Popup rot |
+
+**Pruef-Ablauf:**
+1. IPC-Befehl senden (moloch_ipc oder moloch_nudge)
+2. moloch_status() lesen — steht der neue Wert im Status-JSON?
+3. Panel-Screenshot via moloch_snapshot() — zeigt GUI den Wert?
+4. Bei Abweichung: Bug-Report in logs/bug_report.txt
+
+**Akzeptanzkriterium:** Status-JSON-Update < 200ms, Panel-Update < 1s nach Event
 
 ## Erfolgskriterien
 - Audit: 54/54 PASS nach jedem Szenario
