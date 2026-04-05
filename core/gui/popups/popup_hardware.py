@@ -641,6 +641,14 @@ class HardwarePopup:
             if not isinstance(fps_dict, dict):
                 fps_dict = {}
 
+            # Worker-Health fuer Standby-Erkennung
+            worker_health = status.get("worker_health", {})
+            _MODEL_TO_WORKER = {
+                "hand": "HandWorker", "pose": "PoseWorker",
+                "reid": "ReIDWorker", "scrfd": "FaceWorker",
+                "arcface": "FaceWorker", "faceattr": "FaceWorker",
+            }
+
             # Modelle + FPS + RAM tabellarisch
             model_lines = []
             npu_ram = 0.0
@@ -654,8 +662,11 @@ class HardwarePopup:
                         model_lines.append(
                             f"{m_str:<12} {ram:5.1f} MB  {fps_val:4.0f} FPS")
                     else:
+                        wname = _MODEL_TO_WORKER.get(m_str)
+                        n_inf = worker_health.get(wname, {}).get("inferences", 0) if wname else 0
+                        status_str = f"standby ({n_inf})" if n_inf > 0 else "geladen"
                         model_lines.append(
-                            f"{m_str:<12} {ram:5.1f} MB  geladen")
+                            f"{m_str:<12} {ram:5.1f} MB  {status_str}")
 
             # TAPPAS-Modelle die nicht in active_models stehen
             # (face_attr laeuft mit, wird aber oft nicht gelistet)
