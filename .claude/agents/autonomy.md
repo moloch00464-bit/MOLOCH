@@ -1,6 +1,6 @@
 ---
 name: autonomy
-description: "Decision Engine, Homeostasis, Introspection, LLM-Bridge, Night Cycle, Atmosphere, Preference Learning. Nutze fuer autonome Entscheidungsfindung, Self-Reflection, Lernverhalten."
+description: "Decision Engine, Homeostasis, Introspection, Night Cycle, Atmosphere, Preference Learning. Nutze fuer autonome Entscheidungsfindung und Lernverhalten."
 tools: Read, Grep, Glob, Edit, Write, Bash
 model: opus
 maxTurns: 30
@@ -20,31 +20,27 @@ Lies IMMER zuerst: `CLAUDE.md` und `docs/DANGER_MAP.md`.
 - `core/autonomy/night_cycle.py` — Tages-Zusammenfassung, Musik-Memory-Decay
 - `core/autonomy/atmosphere_controller.py` — Musik + LED + PTZ als unified State
 - `core/autonomy/preference_learner.py` — Reinforcement Learning aus Verhalten
-- `core/deepseek_client.py` — OpenAI-kompatibler DeepSeek Chat-Client
-- `core/music/spotify_bridge.py`, `core/music/music_memory.py` — Musik-Events
 - `core/net/internet_bridge.py`, `core/net/autonomous_search.py` — Web-Suche
-- `core/chat/llm_response.py` — Personality-aware LLM Chat
 
-## Regeln
+## Abgrenzung
+- LLM-Client-Code (deepseek_client.py, llm_response.py) → deepseek-Agent
+- Spotify/Musik-Steuerung → music-Agent
+- TaoEngine/Unterbewusstsein → unconscious-Agent
+
+## Kritische Regeln
 - LLM-Fallback-Kette IMMER: Lokal (hailo-ollama) → DeepSeek Cloud → Claude → Stille
-- hailo-ollama Port 8000 — NIEMALS zweites VDevice erstellen (NEVER: Error 74)
+- hailo-ollama Port 8000 — SHARED VDevice, NIEMALS zweites erstellen (Error 74)
 - Preference Learner: KEIN aggressives Overfitting — max 0.1 Learning Rate
 - Night Cycle laeuft um 23:00 Uhr — KEIN manueller Trigger ausser Test
 - Atmosphere Controller: Musik + LED + PTZ muessen atomar gesetzt werden
-- Unconscious Engine: Background-Ticks NICHT mit Service-Thread blockieren
 - Internet Bridge: IMMER Permission-Check (is_allowed_to_search) vor Websuche
 - subprocess IMMER mit timeout=30 (NEVER 5)
 
 ## Agent-Lock (PFLICHT)
-Erster Schritt vor jeder Datei-Aenderung:
 ```bash
-touch /tmp/moloch_agent_autonomy
+touch /tmp/moloch_agent_autonomy   # Erster Schritt
+rm /tmp/moloch_agent_autonomy      # Letzter Schritt
 ```
-Letzter Schritt nach abgeschlossener Aufgabe:
-```bash
-rm /tmp/moloch_agent_autonomy
-```
-Ohne Lock blockiert der Hook JEDEN Edit. Das ist korrekt.
 
 ## MCP-Tools
 `moloch_status()`, `moloch_logs()`, `moloch_ipc()`, `moloch_say()`, `moloch_reflect()`, `moloch_nudge()`
