@@ -1,5 +1,5 @@
 # M.O.L.O.C.H. — Master Context fuer Claude Code
-# Version: 2.1 | Stand: 2026-04-04
+# Version: 2.2 | Stand: 2026-04-05
 # LIES DIESE DATEI ZUERST. IMMER. BEI JEDEM AUFTRAG.
 
 > "Die dunkle Seite macht mehr Spass!" — Respekt ist bidirektional.
@@ -16,23 +16,43 @@ Wenn es fehlt: Claude hat das Protokoll uebersprungen — stoppen und neu starte
 
 ---
 
-## PFLICHT-STARTPROTOKOLL (VOR jeder Arbeit!)
+## PFLICHT-STARTPROTOKOLL
 
-**BEVOR Du auch nur eine Zeile Code schreibst, fuehre diese 3 Schritte aus:**
+**Bei JEDER Coding-Aufgabe — BEVOR Du Code schreibst:**
 
-1. `moloch_status()` — MCP-Tool aufrufen, System-Status pruefen
-2. `moloch_npu_workers()` — MCP-Tool aufrufen, Worker-Health pruefen
+1. `moloch_status()` — System-Status pruefen
+2. `moloch_npu_workers()` — Worker-Health pruefen
 3. Dem User kurz zeigen: "Service laeuft, X FPS, Y Worker aktiv"
 
-**Wenn Du einen Fehler debuggen sollst, ZUSAETZLICH:**
+**Wenn Fehler debuggen, ZUSAETZLICH:**
 4. `moloch_logs(n=30, filter_str="ERROR")` — Letzte Fehler lesen
 5. `moloch_dmesg()` — Kernel-Meldungen (NPU/SEGV)
 
-**KEIN manuelles SSH, KEIN `cat /dev/shm/...`, KEIN `journalctl` per Bash.**
-Alle 18 MCP-Tools sind verfuegbar. BENUTZE SIE. Siehe `/moloch-mcp` Skill.
+**Bei reinen Fragen, Reviews, Docs:** Startprotokoll ueberspringen, direkt antworten.
 
-**Wenn Du Code aendern willst:** Lies `/moloch-dev` Skill (NEVER-Regeln, Templates).
-**Wenn Du nicht weisst welcher Agent:** Lies `/moloch-agent` Skill.
+---
+
+## DOMAIN-ERKENNUNG (bei jeder Aufgabe)
+
+**NACH dem Startprotokoll, VOR dem Coden:**
+
+1. Aufgabe analysieren: Welche Domains/Dateien sind betroffen?
+2. `/moloch-dev` laden (ALWAYS bei Code-Aenderungen — NEVER-Regeln, Templates)
+3. Wenn Aufgabe andere Domains beruehrt → passenden Agenten spawnen
+
+**Erkennungsregeln:**
+- Aufgabe betrifft GUI? → gui-Agent
+- Aufgabe betrifft Pipeline/Modelle? → vision-Agent
+- Aufgabe betrifft PTZ/Tracking? → tracking-Agent
+- Aufgabe betrifft Sprache/Audio? → voice-Agent
+- Aufgabe betrifft Service/IPC? → service-Agent
+- Aufgabe betrifft Persoenlichkeit? → personality-Agent
+- Aufgabe betrifft mehrere Domains? → Hauptdomain als Agent, Neben-Domains als Sub-Agenten
+- Unsicher welcher Agent? → `/moloch-agent` Skill laden
+
+**Beispiel:** "BBox wird in der GUI falsch angezeigt"
+→ Hauptdomain: gui (Panel zeichnet BBox) + Neben: vision (BBox-Daten aus Pipeline)
+→ gui-Agent spawnen, vision-Agent fuer Daten-Check
 
 ---
 
@@ -57,10 +77,12 @@ PI IP:   192.168.178.30 | SSH User: molochzuhause
 
 ---
 
-## PIPELINE
+## PIPELINE (Two-Stage Hybrid, seit 2026-03-31)
 
 ```
-MOLOCH_USE_TAPPAS=1 → GStreamer: rtspsrc → YOLO + SCRFD + ArcFace (20 FPS, ~200MB)
+Stage 1: GStreamer TAPPAS → rtspsrc → YOLO Detection (20 FPS, ~200MB)
+Stage 2: HailoRT-Direct Worker-Threads → SCRFD, ArcFace, Pose, ReID, Hand, FaceAttr
+Feature-Flag: MOLOCH_USE_TAPPAS=1 (in ~/.profile)
 Code: ~/moloch/core/ | Configs: ~/moloch/config/ | Modelle: /mnt/moloch-data/hailo/models/
 ```
 
@@ -72,7 +94,7 @@ Code: ~/moloch/core/ | Configs: ~/moloch/config/ | Modelle: /mnt/moloch-data/hai
 |---|-------|
 | 1 | GStreamer-Pipeline-String NICHT blind aendern (SEGV bei Typo) |
 | 2 | Pan-Vorzeichen NICHT aendern (`pan_delta = -error_x` ist KORREKT) |
-| 3 | ArcFace-Threshold NICHT erhoehen (Root Cause = Embedding-Inkompatibilitaet) |
+| 3 | ArcFace-Threshold NICHT erhoehen (Enrollment muss via gleichen Code-Pfad wie Live-Inference) |
 | 4 | NICHT mehrere ROT-Dateien in einem Commit |
 | 5 | subprocess IMMER mit timeout=30 |
 | 6 | JSON IMMER atomic schreiben (tempfile + os.replace) |
@@ -90,11 +112,14 @@ Code: ~/moloch/core/ | Configs: ~/moloch/config/ | Modelle: /mnt/moloch-data/hai
 **ROT** (Einmal fragen, dann eigenstaendig):
 `moloch_service.py`, `tappas_pipeline.py`, `camera.py`, `hailo_manager.py`,
 `core_integrator.py`, `voice_pipeline.py`, `autonomous_tracker.py`,
-`audio_pipeline.py`, `ipc_router.py`, `person_reid.py`, `settings.json`
+`audio_pipeline.py`, `ipc_router.py`, `person_reid.py`, `vision_workers.py`,
+`face_pipeline.py`, `roi_dispatcher.py`, `settings.json`
 
 **GELB** (Ankuendigung, kein Warten):
 `personality/*.py`, `gui/panel_*.py`, `gui/popups/*.py`, `audio/*.py`,
-`ptz_arbiter.py`, `action_bridge.py`, `moloch_console.py`
+`ptz_arbiter.py`, `action_bridge.py`, `moloch_console.py`,
+`pose_worker.py`, `action_inference.py`, `gesture_classifier.py`,
+`longterm_memory.py`, `system_watchdog.py`
 
 **GRUEN** (Sofort, kein Dialog):
 `scripts/*`, `docs/*`, `config/*.json` (ausser settings.json)
@@ -110,7 +135,7 @@ Code: ~/moloch/core/ | Configs: ~/moloch/config/ | Modelle: /mnt/moloch-data/hai
 5. Nach Aenderung: `sudo systemctl restart moloch`
 6. Regressionstest: `python3 ~/moloch/moloch_audit.py --auto`
 7. KEIN Weitermachen bei FAIL
-8. Christian-Prinzip: Separation of Concerns, Fail Isolation, atomic Changes
+8. Separation of Concerns, Fail Isolation, atomic Changes
 
 ---
 
@@ -122,6 +147,7 @@ Code: ~/moloch/core/ | Configs: ~/moloch/config/ | Modelle: /mnt/moloch-data/hai
 - Git Commits + Push: Eigenstaendig
 
 **STOPP bei:** Audit FAIL | Destructive Git-Ops | >5 ROT-Dateien | Unklarheit
+**Nach STOPP:** Problem analysieren, Ursache + Loesungsvorschlag dem User zeigen, auf Freigabe warten.
 
 Markus geht aus dem Zimmer, kommt zurueck, Arbeit ist erledigt.
 
@@ -129,8 +155,8 @@ Markus geht aus dem Zimmer, kommt zurueck, Arbeit ist erledigt.
 
 ## MCP-TOOLS (PFLICHT — kein SSH, kein manuelles JSON!)
 
-**Du MUSST MCP-Tools benutzen. KEIN `ssh`, KEIN `cat /dev/shm/`, KEIN `journalctl` per Bash.**
-**Bei Verstoss: Markus wird sauer. Das ist keine Empfehlung, das ist eine Regel.**
+**KEIN `ssh`, KEIN `cat /dev/shm/`, KEIN `journalctl` per Bash. NUR MCP-Tools.**
+**Fallback bei MCP-Ausfall:** User informieren, Bash-Diagnose nur nach Freigabe.
 
 | Tool | Funktion |
 |------|----------|
@@ -138,7 +164,7 @@ Markus geht aus dem Zimmer, kommt zurueck, Arbeit ist erledigt.
 | `moloch_service` | start/stop/restart/status |
 | `moloch_logs` | journalctl mit optionalem Filter |
 | `moloch_dmesg` | NPU/SEGV/GPU Kernel-Meldungen |
-| `moloch_audit` | 39-Test Regressionstest |
+| `moloch_audit` | Regressionstest (PASS/FAIL) |
 | `moloch_snapshot` | Kamera-Frame als Base64-PNG |
 | `moloch_low_light` | Zero-DCE Enhancement Status |
 | `moloch_npu_models` | HEF-Inventar: integriert vs. ausstehend |
@@ -152,8 +178,7 @@ Markus geht aus dem Zimmer, kommt zurueck, Arbeit ist erledigt.
 | `moloch_read` | Config/Log-Datei lesen (sichere Pfade) |
 | `moloch_git_log` | Letzte N Commits |
 
-**PFLICHT:** MCP-Tools sind dein EINZIGER Weg zum System. Kein SSH, kein Bash-Workaround.
-Wenn ein MCP-Tool existiert, MUSST du es benutzen. `/moloch-mcp` zeigt alle 18 Tools.
+**Hinweis:** Skills (`/moloch-status` etc.) laden Dokumentation. MCP-Tools (`moloch_status()` etc.) liefern Live-Daten. Beides nutzen, nicht verwechseln.
 
 ---
 
@@ -195,6 +220,11 @@ Wenn ein MCP-Tool existiert, MUSST du es benutzen. `/moloch-mcp` zeigt alle 18 T
 Regeln: 1 Agent = 1 Domain. Bei 85% Token → Uebergabe schreiben.
 Markus ist Boss — bei Konflikten entscheidet ER.
 
+**Uebergabe-Protokoll (bei ~85-90% Kontext):**
+Datei `~/moloch/logs/agent_handoff.md` schreiben mit: Gate/Phase, was erledigt,
+was offen, Blocker, geaenderte Dateien, Service-Status. Neue Instanz liest:
+CLAUDE.md → Gate-Kontext → Handoff → Memory.
+
 ---
 
 ## GELOESTE BUGS — FINGER WEG
@@ -202,11 +232,18 @@ Markus ist Boss — bei Konflikten entscheidet ER.
 1. Pan-Vorzeichen: `pan_delta = -error_x` (MINUS IST KORREKT)
 2. RTSP-Doppelzugriff: USE_TAPPAS ueberspringt CameraManager
 3. Letterbox: TAPPAS macht das automatisch — KEIN cv2.resize
+4. ArcFace-Similarity: Enrollment + Live nutzen identischen Python-Code (seit 2026-03-31)
+5. Status-JSON Deadlock: ResultCollector.get_health() Snapshot-Pattern (seit 2026-04-04)
+6. hailooverlay entfernt: BBox-Rendering via PIL in panel_preview.py (seit 2026-03-30)
 
-## OFFENE BUGS
+## OFFENE BUGS (Details: Handoff + Memory)
 
 1. Kamera Hot-Plug: Stecker raus/rein → nur Reboot hilft
-2. ReID + Hand: SEGV bei Valve — `reid_needed=False` als Workaround
+2. ReID + Hand: SEGV bei Pose-Detection Race — `reid_needed=False` als Workaround
+3. person_attr_resnet_v1_18.hef: Kleidung/Alter/Rucksack noch nicht integriert
+4. r3d_18.hef: Aktivitaetserkennung noch nicht integriert
+5. hailo-ollama: systemd-Service fehlt, laeuft nicht beim Boot
+6. MCP moloch_snapshot(): erst nach MCP-Neustart volle Aufloesung
 
 ---
 
