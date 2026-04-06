@@ -78,6 +78,54 @@ moloch_audit()                     # 54 Tests — alle PASS?
 
 ---
 
+## REBOOT-ENTSCHEIDUNG — Service-Restart vs. Pi-Reboot
+
+**Faustregel:** Service-Restart reicht fuer Python-Code. Pi-Reboot bei System-Level-Aenderungen.
+
+### Nur Service-Restart noetig (`moloch_service(action="restart")`)
+- Python-Code geaendert (core/*.py, gui/*.py, etc.)
+- Config-Dateien geaendert (config/*.json)
+- Agent/Skill-Dateien geaendert (.claude/*)
+- Normalfall bei allen GRUEN/GELB/ROT-Dateien
+
+### Pi-Reboot PFLICHT (`sudo reboot` via SSH)
+
+| Was geaendert wurde | Warum Reboot |
+|---------------------|-------------|
+| `moloch.service` (systemd Unit) | systemd laedt Units nur beim Boot neu |
+| `~/.profile` (Umgebungsvariablen wie `MOLOCH_USE_TAPPAS`) | Profile wird nur bei Login geladen |
+| Hailo-Firmware / HailoRT-Update | NPU-Treiber nur per Reboot neu ladbar |
+| GStreamer-Plugins installiert/aktualisiert | SO-Caches muessen geleert werden |
+| Kernel-Module veraendert (`modprobe`) | Gilt sofort oder nach Reboot je nach Modul |
+| Kamera-Hotplug-Problem (Stecker raus/rein → kein Feed) | Bekannter Bug: nur Reboot hilft |
+| MCP-Server haengt / kein Snapshot moeglich | Reboot loest MCP-Init-Bug |
+| hailo-ollama neu installiert | systemd-Service fehlt noch, Reboot registriert ihn |
+| NPU Error 74 bleibt nach Service-Restart | Shared VDevice kaputt — Reboot pflicht |
+
+### REBOOT-PROTOKOLL (VOR dem Reboot)
+
+```
+1. git add [alle geaenderten Dateien]
+2. git commit -m "BACKUP vor Reboot: [was geaendert]"
+3. git push
+4. moloch_service(action="stop")   # Sauber beenden
+5. SSH: sudo reboot
+```
+
+### VERIFIKATION (NACH dem Reboot, ~60 Sek warten)
+
+```
+1. moloch_status()           # Service wieder aktiv? FPS > 0?
+2. moloch_npu_workers()      # Alle Worker geladen?
+3. moloch_audit()            # Alle Tests PASS?
+4. moloch_snapshot()         # Kamera-Feed OK?
+5. git log --oneline -3      # Commits noch da?
+```
+
+**Bei Audit-FAIL nach Reboot:** `moloch_logs(n=50, filter_str="ERROR")` → Ursache finden, NICHT weitermachen.
+
+---
+
 ## DATEI-AMPEL
 
 **ROT** (einmal fragen, dann eigenstaendig — Git Backup vorher!):
