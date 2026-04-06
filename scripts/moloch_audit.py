@@ -294,7 +294,7 @@ def test_npu_models():
 def test_npu_no_error_loop():
     try:
         out = subprocess.check_output(
-            "dmesg 2>/dev/null | grep -ci 'hailo.*error\\|hailo.*fail' || echo 0",
+            "dmesg --since -30min 2>/dev/null | grep -ci 'hailo.*error\\|hailo.*fail' || echo 0",
             shell=True, timeout=5
         ).decode().strip()
         count = int(out) if out.isdigit() else 0
@@ -997,11 +997,11 @@ def test_capabilities():
     # Langzeitgedaechtnis
     check("Langzeitgedaechtnis", os.path.isdir("/mnt/moloch-data/memory/"))
 
-    # Deaktivierte Features
+    # Features
     hand = data.get("hand_active", False) if data else False
     check("Hand-Erkennung", hand)
-    # ReID ist immer False aktuell
-    check("Person-ReID", False)
+    active_models = data.get("active_models", []) if data else []
+    check("Person-ReID", "reid" in active_models)
 
     n_ok = len(caps)
     n_total = n_ok + len(fails)
