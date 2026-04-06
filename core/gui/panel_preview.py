@@ -352,9 +352,16 @@ class PreviewModule:
                                 draw.rectangle([px1, py1, px2, py2], outline=color, width=2)
                                 draw.text((px1 + 2, max(0, py1 - 12)), label, fill=color)
                             elif cls == "person":
-                                draw.rectangle([px1, py1, px2, py2], outline=(0, 220, 80), width=2)
-                                draw.text((px1 + 2, max(0, py1 - 12)),
-                                          f"person {d.get('confidence', 0):.2f}", fill=(0, 220, 80))
+                                reid_name = d.get("reid_name")
+                                reid_score = d.get("reid_score", 0.0)
+                                if reid_name:
+                                    person_color = (0, 200, 255)  # Cyan: ReID-Treffer
+                                    person_label = f"{reid_name} {reid_score:.2f}"
+                                else:
+                                    person_color = (0, 220, 80)   # Gruen: unbekannt
+                                    person_label = f"person {d.get('confidence', 0):.2f}"
+                                draw.rectangle([px1, py1, px2, py2], outline=person_color, width=2)
+                                draw.text((px1 + 2, max(0, py1 - 12)), person_label, fill=person_color)
 
                             # --- Landmarks (getrennte if-Bloecke, kein elif) ---
 
