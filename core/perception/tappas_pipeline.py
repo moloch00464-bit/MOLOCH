@@ -1443,9 +1443,9 @@ class TappasPipeline:
 
             hand_result = self._result_collector.get_latest("HandWorker")
             hand_age = frame_id - getattr(hand_result, 'frame_id', 0) if hand_result else 999
-            # Hand-Daten nur wenn YOLO aktiv eine Person sieht UND Ergebnis frisch (<= 15 Frames)
-            # 15 Frames @ 20fps = 750ms — HandWorker laeuft alle 4 Frames + ~107ms Inferenz
-            if persons and hand_result and hand_result.data.get("hand_detected") and hand_age <= 15:
+            # Hand-Daten wenn Ergebnis frisch (<= 15 Frames) — KEIN persons-Check
+            # (YOLO kann bei Nahaufnahme ausfallen, aber HandWorker laeuft trotzdem)
+            if hand_result and hand_result.data.get("hand_detected") and hand_age <= 15:
                 pf.hand_detected = True
                 # Alle erkannten Haende (links + rechts) als Detections
                 for h in hand_result.data.get("hands", []):
@@ -1499,9 +1499,9 @@ class TappasPipeline:
                     pass  # ReID darf Panel nie crashen
 
             pose_age = frame_id - getattr(pose_result, 'frame_id', 0) if pose_result else 999
-            # Pose-Daten nur wenn YOLO aktiv eine Person sieht UND Ergebnis frisch (<= 12 Frames)
-            # 12 Frames @ 20fps = 600ms — PoseWorker laeuft alle 3 Frames + ~115ms Inferenz
-            if persons and pose_result and pose_result.data.get("poses") and pose_age <= 12:
+            # Pose-Daten wenn Ergebnis frisch (<= 12 Frames) — KEIN persons-Check
+            # (PoseWorker laeuft auch ohne YOLO-Person-Detection)
+            if pose_result and pose_result.data.get("poses") and pose_age <= 12:
                 # Max 2 Poses — mehr erzeugt visuelles Chaos im Preview
                 for pose in pose_result.data["poses"][:2]:
                     kpts = pose.get("keypoints")
