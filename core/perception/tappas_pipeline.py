@@ -1365,7 +1365,8 @@ class TappasPipeline:
 
         if getattr(self, '_result_collector', None):
             face_result = self._result_collector.get_latest("FaceWorker")
-            if face_result and face_result.data.get("faces"):
+            face_age = frame_id - getattr(face_result, 'frame_id', 0) if face_result else 999
+            if face_result and face_result.data.get("faces") and face_age <= 10:
                 for face in face_result.data["faces"]:
                     face_entry = {
                         "class": "face",
