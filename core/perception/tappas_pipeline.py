@@ -1176,7 +1176,7 @@ class TappasPipeline:
         tracker = (
             f'hailotracker name=hailo_face_tracker class-id=-1 '
             f'kalman-dist-thr=0.7 iou-thr=0.8 init-iou-thr=0.9 '
-            f'keep-new-frames=2 keep-tracked-frames=6 keep-lost-frames=8 '
+            f'keep-new-frames=2 keep-tracked-frames=3 keep-lost-frames=3 '
             f'keep-past-metadata=true qos=false ! '
             f'queue name=tracker_q leaky=downstream max-size-buffers=2 max-size-bytes=0 max-size-time=0 '
         )
@@ -1366,7 +1366,7 @@ class TappasPipeline:
         if getattr(self, '_result_collector', None):
             face_result = self._result_collector.get_latest("FaceWorker")
             face_age = frame_id - getattr(face_result, 'frame_id', 0) if face_result else 999
-            if face_result and face_result.data.get("faces") and face_age <= 10:
+            if face_result and face_result.data.get("faces") and face_age <= 5:
                 for face in face_result.data["faces"]:
                     face_entry = {
                         "class": "face",
@@ -1446,7 +1446,7 @@ class TappasPipeline:
             hand_age = frame_id - getattr(hand_result, 'frame_id', 0) if hand_result else 999
             # Hand-Daten wenn Ergebnis frisch (<= 15 Frames) — KEIN persons-Check
             # (YOLO kann bei Nahaufnahme ausfallen, aber HandWorker laeuft trotzdem)
-            if hand_result and hand_result.data.get("hand_detected") and hand_age <= 15:
+            if hand_result and hand_result.data.get("hand_detected") and hand_age <= 5:
                 pf.hand_detected = True
                 # Alle erkannten Haende (links + rechts) als Detections
                 for h in hand_result.data.get("hands", []):
@@ -1470,7 +1470,7 @@ class TappasPipeline:
             # ReID Identity Labels fuer Panel-Overlay
             reid_result = self._result_collector.get_latest("ReIDWorker")
             reid_age = frame_id - getattr(reid_result, 'frame_id', 0) if reid_result else 999
-            if persons and reid_result and reid_result.data.get("embeddings") and reid_age <= 20:
+            if persons and reid_result and reid_result.data.get("embeddings") and reid_age <= 10:
                 try:
                     from core.memory.person_reid import get_reid as _get_reid
                     _reid_db = _get_reid()
@@ -1502,7 +1502,7 @@ class TappasPipeline:
             pose_age = frame_id - getattr(pose_result, 'frame_id', 0) if pose_result else 999
             # Pose-Daten wenn Ergebnis frisch (<= 12 Frames) — KEIN persons-Check
             # (PoseWorker laeuft auch ohne YOLO-Person-Detection)
-            if pose_result and pose_result.data.get("poses") and pose_age <= 12:
+            if pose_result and pose_result.data.get("poses") and pose_age <= 5:
                 # Max 2 Poses — mehr erzeugt visuelles Chaos im Preview
                 for pose in pose_result.data["poses"][:2]:
                     kpts = pose.get("keypoints")
@@ -1517,16 +1517,19 @@ class TappasPipeline:
                         })
 
             attr_result = self._result_collector.get_latest("PersonAttrWorker")
-            if attr_result and attr_result.data.get("persons"):
+            attr_age = frame_id - getattr(attr_result, 'frame_id', 0) if attr_result else 999
+            if attr_result and attr_result.data.get("persons") and attr_age <= 30:
                 # Attribute der ersten erkannten Person nehmen
                 pf.person_attributes = attr_result.data["persons"][0].get("attribute", [])
 
             activity_result = self._result_collector.get_latest("ActivityWorker")
-            if activity_result and activity_result.success and activity_result.data.get("activity"):
+            activity_age = frame_id - getattr(activity_result, 'frame_id', 0) if activity_result else 999
+            if activity_result and activity_result.success and activity_result.data.get("activity") and activity_age <= 30:
                 pf.person_action = activity_result.data["activity"]
 
             world_result = self._result_collector.get_latest("YOLOWorldWorker")
-            if world_result and world_result.success and world_result.data.get("detections"):
+            world_age = frame_id - getattr(world_result, 'frame_id', 0) if world_result else 999
+            if world_result and world_result.success and world_result.data.get("detections") and world_age <= 60:
                 pf.objects = [
                     {"class": d["label"], "confidence": round(d["score"], 3), "bbox": d["bbox"]}
                     for d in world_result.data["detections"]
