@@ -12,4 +12,4 @@ read:
 
 # Sauberes Output
 no-pretty: true
-yes: true
+yes-always: true
