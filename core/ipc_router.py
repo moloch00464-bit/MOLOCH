@@ -25,6 +25,16 @@ logger = logging.getLogger("IPCRouter")
 
 FACE_STATE_PATH = "/tmp/moloch_face_state.json"
 
+
+class _NumpyEncoder(json.JSONEncoder):
+    """JSON-Encoder der numpy-Skalare und Arrays korrekt serialisiert."""
+    def default(self, obj):
+        if hasattr(obj, 'item'):    # numpy scalar → Python native
+            return obj.item()
+        if hasattr(obj, 'tolist'):  # numpy array → list
+            return obj.tolist()
+        return super().default(obj)
+
 # Preview-Groesse fuer Panel IPC (1080p waere 6MB/Frame)
 PREVIEW_W = 640
 PREVIEW_H = 360
@@ -76,7 +86,7 @@ class IPCRouter:
         try:
             with self._status_write_lock:
                 with open('/dev/shm/moloch_status.tmp', 'w') as f:
-                    json.dump(status, f)
+                    json.dump(status, f, cls=_NumpyEncoder)
                 os.rename('/dev/shm/moloch_status.tmp', '/dev/shm/moloch_status.json')
         except Exception:
             pass
