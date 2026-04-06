@@ -6,6 +6,13 @@
       "env": {
         "PYTHONPATH": "/home/molochzuhause/moloch"
       }
+    },
+    "moloch-unconscious": {
+      "command": "python3",
+      "args": ["/home/molochzuhause/moloch/mcp/moloch_unconscious_mcp.py"],
+      "env": {
+        "PYTHONPATH": "/home/molochzuhause/moloch"
+      }
     }
   }
 }
