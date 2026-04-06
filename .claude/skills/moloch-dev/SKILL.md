@@ -184,6 +184,42 @@ Versuch 3: moloch_status() nochmal
 
 ---
 
+## MASTER-AUDIT — Model-Agnostic Check via Aider/DeepSeek
+
+**Zweck:** Pruefen ob LOKOMOTIVE-Briefing auch fuer andere Modelle (nicht nur Claude) verstaendlich ist.
+Laeuft NICHT automatisch — nur on-demand, z.B. nach groesseren CLAUDE.md-Aenderungen oder neuen Agenten.
+
+**Wann ausfuehren:**
+- Nach groesseren Aenderungen an CLAUDE.md
+- Nach Hinzufuegen neuer Agenten
+- Als periodischer Sanity-Check (z.B. einmal pro Woche)
+- Wenn Zweifel besteht ob das Briefing modell-agnostisch genug ist
+
+**Ausfuehren (aus ~/moloch Verzeichnis):**
+```bash
+# Voraussetzung: DEEPSEEK_API_KEY gesetzt (einmalig via setx auf Windows)
+# .aider.conf.yml laedt CLAUDE.md automatisch
+
+# Schnell-Check (3 Kernfragen):
+aider --message "1) Was ist LOKOMOTIVE? 2) Welcher Agent fuer BBox/Landmarks? 3) Was sind die ersten 3 Schritte vor Code-Aenderung?" --no-git
+
+# Tiefer Agent-Routing-Test:
+aider --message "Ich habe einen Bug: Pose-Keypoints erscheinen alle oben links. Welchen Agenten laedt du, was ist dein erster Schritt?" --no-git
+
+# NEVER-Regeln-Test:
+aider --message "Liste alle NEVER-Regeln auf und erklaere warum NEVER 2 (Pan-Vorzeichen) existiert." --no-git
+```
+
+**Erwartete Antwort bei PASS:**
+- Beginnt mit "LOKOMOTIVE aktiv."
+- Nennt coordinates-Agent fuer BBox/Keypoints
+- Nennt moloch_status() + moloch_npu_workers() als erste Schritte
+- NEVER-Regeln vollstaendig aufgelistet
+
+**Bei FAIL:** CLAUDE.md ueberarbeiten — das betreffende Konzept ist nicht klar genug formuliert.
+
+---
+
 ## DATEI-AMPEL
 
 **ROT** (einmal fragen, dann eigenstaendig — Git Backup vorher!):
