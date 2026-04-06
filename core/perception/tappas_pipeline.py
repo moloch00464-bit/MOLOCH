@@ -1131,10 +1131,10 @@ class TappasPipeline:
 
         # --- Source: RTSP → H264 depay → decode → scale → RGB ---
         source = (
-            f'rtspsrc location="{self._rtsp_url}" name=source latency=300 protocols=tcp '
+            f'rtspsrc location="{self._rtsp_url}" name=source latency=100 protocols=tcp '
             f'retry=5 timeout=5000000 tcp-timeout=5000000 ! '
             f'rtph264depay name=source_depay ! '
-            f'queue name=source_queue_decode leaky=downstream max-size-buffers=5 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=source_queue_decode leaky=downstream max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
             f'avdec_h264 name=source_decode ! '
             f'queue name=source_scale_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
             f'videoscale name=source_videoscale n-threads=2 ! '
