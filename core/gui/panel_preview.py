@@ -318,7 +318,7 @@ class PreviewModule:
 
                 # Auf Canvas-Groesse resizen (gekappt auf MAX_CANVAS)
                 if img.size != (self._canvas_w, self._canvas_h):
-                    img = img.resize((self._canvas_w, self._canvas_h), Image.NEAREST)
+                    img = img.resize((self._canvas_w, self._canvas_h), Image.BILINEAR)
 
                 # BBox-Overlay aus Status-JSON (normalisierte Koordinaten → Canvas-Pixel)
                 try:
