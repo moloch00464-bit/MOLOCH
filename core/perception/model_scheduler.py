@@ -108,6 +108,11 @@ class ModelScheduler:
         if time_of_day < 0:
             time_of_day = datetime.now().hour
 
+        # Fallback: Gesicht erkannt = Person vorhanden (fuer NAH-Modus ohne YOLO)
+        # Verhindert NAH→IDLE Oszillation wenn YOLO aus ist aber SCRFD noch feuert
+        if person_count == 0 and face_detected:
+            person_count = 1
+
         # Timer aktualisieren
         if person_count > 0:
             self._last_person_seen = now
