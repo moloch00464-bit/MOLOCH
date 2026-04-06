@@ -1136,40 +1136,40 @@ class TappasPipeline:
             f'rtph264depay name=source_depay ! '
             f'queue name=source_queue_decode leaky=downstream max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
             f'avdec_h264 name=source_decode ! '
-            f'queue name=source_scale_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=source_scale_q leaky=downstream max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! '
             f'videoscale name=source_videoscale n-threads=2 ! '
-            f'queue name=source_convert_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=source_convert_q leaky=downstream max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! '
             f'videoconvert n-threads=3 name=source_convert qos=false ! '
             f'video/x-raw, pixel-aspect-ratio=1/1, format=RGB, width={self._width}, height={self._height} '
         )
 
         # --- Stage 1: YOLO Person Detection ---
         yolo_inner = (
-            f'queue name=yolo_scale_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=yolo_scale_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
             f'videoscale name=yolo_videoscale n-threads=2 qos=false ! '
-            f'queue name=yolo_convert_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=yolo_convert_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
             f'video/x-raw, pixel-aspect-ratio=1/1 ! '
             f'videoconvert name=yolo_videoconvert n-threads=2 ! '
-            f'queue name=yolo_hailonet_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=yolo_hailonet_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
             f'hailonet name=yolo_hailonet hef-path={YOLO_HEF} batch-size=1 '
             f'vdevice-group-id={VDEVICE_GROUP_ID} '
             f'nms-score-threshold=0.3 nms-iou-threshold=0.45 '
             f'output-format-type=HAILO_FORMAT_TYPE_FLOAT32 '
             f'force-writable=true ! '
-            f'queue name=yolo_hailofilter_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=yolo_hailofilter_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 ! '
             f'hailofilter name=yolo_hailofilter so-path={YOLO_POSTPROCESS_SO} '
             f'function-name={YOLO_POSTPROCESS_FUNC} qos=false ! '
-            f'queue name=yolo_output_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
+            f'queue name=yolo_output_q leaky=no max-size-buffers=3 max-size-bytes=0 max-size-time=0 '
         )
 
         yolo_wrapper = (
-            f'queue name=yolo_wrapper_input_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! '
+            f'queue name=yolo_wrapper_input_q leaky=downstream max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! '
             f'hailocropper name=yolo_wrapper_crop so-path={WHOLE_BUFFER_SO} function-name=create_crops '
             f'use-letterbox=true resize-method=inter-area internal-offset=false '
             f'hailoaggregator name=yolo_wrapper_agg '
-            f'yolo_wrapper_crop. ! queue name=yolo_wrapper_bypass_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! yolo_wrapper_agg.sink_0 '
+            f'yolo_wrapper_crop. ! queue name=yolo_wrapper_bypass_q leaky=downstream max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! yolo_wrapper_agg.sink_0 '
             f'yolo_wrapper_crop. ! {yolo_inner} ! yolo_wrapper_agg.sink_1 '
-            f'yolo_wrapper_agg. ! queue name=yolo_wrapper_output_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
+            f'yolo_wrapper_agg. ! queue name=yolo_wrapper_output_q leaky=downstream max-size-buffers=2 max-size-bytes=0 max-size-time=0 '
         )
 
         # --- Tracker (haelt Person-IDs ueber Frames stabil) ---
@@ -1178,7 +1178,7 @@ class TappasPipeline:
             f'kalman-dist-thr=0.7 iou-thr=0.8 init-iou-thr=0.9 '
             f'keep-new-frames=2 keep-tracked-frames=6 keep-lost-frames=8 '
             f'keep-past-metadata=true qos=false ! '
-            f'queue name=tracker_q leaky=no max-size-buffers=8 max-size-bytes=0 max-size-time=0 '
+            f'queue name=tracker_q leaky=downstream max-size-buffers=2 max-size-bytes=0 max-size-time=0 '
         )
 
         # --- Callback + appsink (kein hailooverlay — Panel zeichnet BBoxen selbst) ---
