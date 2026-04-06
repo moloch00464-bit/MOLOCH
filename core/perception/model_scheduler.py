@@ -6,9 +6,9 @@ Situationsbasiertes Modell-Scheduling fuer Hailo-10H NPU.
 
 7 Szenarien bestimmen welche Modelle aktiv sind:
 - IDLE:     Keine Person >30s → nur YOLO
-- FERN:     Person bbox_height < 30% → YOLO + ReID + Pose
-- MITTEL:   Person bbox_height 30-60% → YOLO + SCRFD + ArcFace + FaceAttr + Pose
-- NAH:      Person bbox_height > 60% → SCRFD + ArcFace + FaceAttr + Hand
+- FERN:     Person bbox_height < 20% → YOLO + ReID + Pose
+- MITTEL:   Person bbox_height 20-45% → YOLO + SCRFD + ArcFace + FaceAttr + Pose
+- NAH:      Person bbox_height > 45% → SCRFD + ArcFace + FaceAttr + Hand
 - RUECKEN:  Person aber kein Face >3s → YOLO + ReID + Pose (SCRFD-Probe)
 - MULTI:    >1 Person → YOLO + SCRFD + ArcFace + ReID + Pose
 - NACHT:    IDLE >30min UND 23:00-07:00 → alles aus
@@ -65,8 +65,8 @@ NACHT_START_H = 23           # Nachtmodus ab 23:00
 NACHT_END_H = 7              # Nachtmodus bis 07:00
 RUECKEN_NO_FACE_S = 3.0      # Kein Gesicht → RUECKEN nach 3s
 HYSTERESE_DOWN_S = 3.0       # Downgrade-Verzoegerung
-BBOX_HEIGHT_FERN = 0.30      # < 30% = FERN
-BBOX_HEIGHT_NAH = 0.60       # > 60% = NAH
+BBOX_HEIGHT_FERN = 0.20      # < 20% = FERN
+BBOX_HEIGHT_NAH = 0.45       # > 45% = NAH
 SCRFD_PROBE_CYCLE_S = 2.0    # RUECKEN: SCRFD-Probe alle 2s
 SCRFD_PROBE_DURATION_S = 0.5 # RUECKEN: SCRFD-Probe fuer 0.5s
 
