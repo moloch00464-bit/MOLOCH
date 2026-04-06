@@ -1659,12 +1659,27 @@ class TappasPipeline:
 
         # Phase 2: Frame an ROIDispatcher weiterleiten (fuer FaceWorker etc.)
         # Frame ist RGB (von GStreamer videoconvert format=RGB)
-        # Alle Detections durchreichen (person + pose) — HandWorker braucht Wrist-Keypoints
+        # HandWorker braucht Wrist-Keypoints: pose-Daten direkt aus ResultCollector holen
+        # (nicht aus self._detections — Queue-Delay kann Sync-Probleme verursachen)
         if getattr(self, '_roi_dispatcher', None):
             try:
                 with self._lock:
-                    all_dets = [d for d in self._detections
-                                if d.get("class") in ("person", "pose")]
+                    all_dets = [d for d in self._detections if d.get("class") == "person"]
+                # Pose-Ergebnis direkt aus ResultCollector — umgeht Frame-Sync-Problem
+                rc = getattr(self, '_result_collector', None)
+                if rc:
+                    pose_res = rc.get_latest("PoseWorker")
+                    if pose_res and pose_res.data.get("poses"):
+                        for pose in pose_res.data["poses"][:2]:
+                            kpts = pose.get("keypoints")
+                            if kpts is not None:
+                                kpts_list = kpts.tolist() if hasattr(kpts, "tolist") else kpts
+                                all_dets.append({
+                                    "class": "pose",
+                                    "bbox": pose.get("bbox_norm", []),
+                                    "confidence": 1.0,
+                                    "keypoints": kpts_list,
+                                })
                 self._roi_dispatcher.dispatch(frame, all_dets, getattr(self, '_frame_id', 0))
             except Exception as e:
                 logger.debug("[DISPATCH] Fehler: %s", e)
