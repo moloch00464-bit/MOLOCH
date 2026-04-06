@@ -65,6 +65,7 @@ NACHT_START_H = 23           # Nachtmodus ab 23:00
 NACHT_END_H = 7              # Nachtmodus bis 07:00
 RUECKEN_NO_FACE_S = 3.0      # Kein Gesicht → RUECKEN nach 3s
 HYSTERESE_DOWN_S = 3.0       # Downgrade-Verzoegerung
+HYSTERESE_UP_S = 1.5         # Upgrade-Verzoegerung (Anti-Oszillation)
 BBOX_HEIGHT_FERN = 0.20      # < 20% = FERN
 BBOX_HEIGHT_NAH = 0.45       # > 45% = NAH
 SCRFD_PROBE_CYCLE_S = 2.0    # RUECKEN: SCRFD-Probe alle 2s
