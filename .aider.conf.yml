@@ -1,0 +1,15 @@
+##########################################################
+# MOLOCH Aider Konfiguration — LOKOMOTIVE aktiv
+# Wird automatisch geladen wenn Aider im Projektverzeichnis gestartet wird
+##########################################################
+
+# Modell
+model: deepseek/deepseek-chat
+
+# LOKOMOTIVE-Briefing immer laden
+read:
+  - CLAUDE.md
+
+# Sauberes Output
+no-pretty: true
+yes: true
