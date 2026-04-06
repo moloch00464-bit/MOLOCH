@@ -349,7 +349,7 @@ class PreviewModule:
                                     label = f"{label} {sim:.2f}"
                                 else:
                                     label = f"face {conf:.2f}"
-                                draw.rectangle([px1, py1, px2, py2], outline=color, width=2)
+                                draw.rectangle([px1, py1, px2, py2], outline=color, width=1)
                                 draw.text((px1 + 2, max(0, py1 - 12)), label, fill=color)
                             elif cls == "person":
                                 reid_name = d.get("reid_name")
@@ -376,7 +376,7 @@ class PreviewModule:
                                 lms = d["landmarks"]
                                 for i in range(0, len(lms) - 1, 2):
                                     lpx, lpy = int(lms[i] * cw), int(lms[i+1] * ch)
-                                    draw.ellipse([lpx-2, lpy-2, lpx+2, lpy+2], fill=(0, 255, 100))
+                                    draw.ellipse([lpx-1, lpy-1, lpx+1, lpy+1], fill=(0, 255, 100))
 
                             # Pose-Skeleton: 17 COCO-Keypoints + Verbindungslinien (orange)
                             if cls == "pose" and d.get("keypoints"):
@@ -392,11 +392,11 @@ class PreviewModule:
                                         if len(ka) > 2 and len(kb) > 2 and ka[2] > 0.2 and kb[2] > 0.2:
                                             ax, ay = int(ka[0]*cw), int(ka[1]*ch)
                                             bx, by = int(kb[0]*cw), int(kb[1]*ch)
-                                            draw.line([ax, ay, bx, by], fill=(255, 165, 0), width=2)
+                                            draw.line([ax, ay, bx, by], fill=(255, 165, 0), width=1)
                                 for kp in kpts:
                                     if len(kp) > 2 and kp[2] > 0.2:
                                         kpx, kpy = int(kp[0]*cw), int(kp[1]*ch)
-                                        draw.ellipse([kpx-4, kpy-4, kpx+4, kpy+4], fill=(255, 165, 0))
+                                        draw.ellipse([kpx-2, kpy-2, kpx+2, kpy+2], fill=(255, 165, 0))
 
                             # Hand-Landmarks: 21 Punkte + Finger-Skeleton (magenta)
                             if cls == "hand" and d.get("keypoints"):
