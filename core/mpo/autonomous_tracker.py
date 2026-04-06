@@ -288,13 +288,13 @@ class TrackingConfig:
     fov_vertical: float = 65.0
     pan_gain: float = 0.28          # Sanft (war 0.45→0.65) — Consumer-PTZ braucht kleine Schritte
     tilt_gain: float = 0.28         # Gleich wie Pan (war 0.40)
-    max_step_pan: float = 12.0      # Max-Sprung begrenzt (war 15.0)
-    max_step_tilt: float = 10.0     # Tilt ebenfalls (war 12.0)
+    max_step_pan: float = 16.0      # Groessere Schritte fuer schnellere BBox-Folge (war 12.0)
+    max_step_tilt: float = 14.0     # Tilt ebenso (war 10.0)
     face_settle_time: float = 0.35  # Sekunden einfrieren wenn Gesicht frisch erkannt
     min_step_deg: float = 0.2       # Feinste Restkorrektur
-    tracking_speed: float = 0.70    # Reduziert (war 1.0) — praeziseres Bremsen moeglich
-    move_cooldown_ms: float = 200.0  # 200ms (war 300ms) — hoehere Update-Rate fuer Feinzentrierung
-    smooth_alpha: float = 0.55      # Schnellere Reaktion (war 0.40 → zu traege fuer Zentrierung)
+    tracking_speed: float = 0.90    # Hoehere ONVIF-Basisgeschwindigkeit (war 0.70)
+    move_cooldown_ms: float = 150.0  # Haeufigere Updates fuer floessiges Tracking (war 200ms)
+    smooth_alpha: float = 0.72      # Weniger EMA-Lag = schnellere BBox-Reaktion (war 0.55)
 
     # Kamera Hardware-Limits (SonoffCameraController clampt intern,
     # aber Tracker muss gecachte Position AUCH clampen!)
