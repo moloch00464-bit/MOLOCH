@@ -284,7 +284,7 @@ class HandWorker(BaseWorker):
         hands = []
         for crop_224, crop_x, crop_y, crop_w, crop_h, side in crops:
             outputs = self._run_inference(crop_224)
-            result = decode_hand_landmark(outputs, presence_thresh=0.5)
+            result = decode_hand_landmark(outputs, presence_thresh=0.3)
             if result is None:
                 continue
             # Landmarks von Crop-Space [0,1] auf Frame-Space [0,1] mappen
