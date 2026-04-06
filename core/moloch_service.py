@@ -2214,6 +2214,8 @@ class MolochService:
                          "face_similarity": round(d.get("face_similarity", 0.0), 2),
                          "landmarks": d.get("landmarks"),   # Face: 5×[x,y] normalisiert
                          "keypoints": d.get("keypoints"),   # Pose: 17×[x,y,vis] / Hand: 21×[x,y]
+                         "reid_name": d.get("reid_name"),   # ReID: erkannte Person
+                         "reid_score": d.get("reid_score"), # ReID: Aehnlichkeits-Score
                          }
                         for d in raw_dets if d.get("bbox")
                     ]
