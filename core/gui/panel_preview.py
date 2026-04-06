@@ -362,6 +362,12 @@ class PreviewModule:
                                     person_label = f"person {d.get('confidence', 0):.2f}"
                                 draw.rectangle([px1, py1, px2, py2], outline=person_color, width=2)
                                 draw.text((px1 + 2, max(0, py1 - 12)), person_label, fill=person_color)
+                            elif cls == "pose":
+                                # Koerper-BBox: Orange Rahmen (gleiche Farbe wie Skeleton)
+                                draw.rectangle([px1, py1, px2, py2], outline=(255, 165, 0), width=2)
+                            elif cls == "hand":
+                                # Hand-BBox: Magenta Rahmen (gleiche Farbe wie Hand-Skeleton)
+                                draw.rectangle([px1, py1, px2, py2], outline=(255, 0, 200), width=2)
 
                             # --- Landmarks (getrennte if-Bloecke, kein elif) ---
 
