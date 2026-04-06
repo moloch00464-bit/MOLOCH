@@ -376,7 +376,7 @@ class PreviewModule:
                                 lms = d["landmarks"]
                                 for i in range(0, len(lms) - 1, 2):
                                     lpx, lpy = int(lms[i] * cw), int(lms[i+1] * ch)
-                                    draw.ellipse([lpx-3, lpy-3, lpx+3, lpy+3], fill=(0, 255, 100))
+                                    draw.ellipse([lpx-2, lpy-2, lpx+2, lpy+2], fill=(0, 255, 100))
 
                             # Pose-Skeleton: 17 COCO-Keypoints + Verbindungslinien (orange)
                             if cls == "pose" and d.get("keypoints"):
@@ -415,10 +415,10 @@ class PreviewModule:
                                         ay = int(hkpts[a][1]*ch)
                                         bx = int(hkpts[b][0]*cw)
                                         by = int(hkpts[b][1]*ch)
-                                        draw.line([ax, ay, bx, by], fill=(255, 0, 200), width=2)
+                                        draw.line([ax, ay, bx, by], fill=(255, 0, 200), width=1)
                                 for kp in hkpts:
                                     kpx, kpy = int(kp[0]*cw), int(kp[1]*ch)
-                                    draw.ellipse([kpx-4, kpy-4, kpx+4, kpy+4], fill=(255, 0, 200))
+                                    draw.ellipse([kpx-2, kpy-2, kpx+2, kpy+2], fill=(255, 0, 200))
                         del draw
                 except Exception as e:
                     self._logger.error(f"BBox render error: {e}", exc_info=True)
