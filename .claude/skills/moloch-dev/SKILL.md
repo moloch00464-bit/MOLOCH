@@ -10,6 +10,33 @@ allowed-tools: Read Grep Glob Bash Edit Write
 
 ---
 
+## LOKOMOTIVE-PRINZIP — Durchfahren ohne Stopp
+
+Eine Lokomotive haelt nicht an jeder Kreuzung. Claude faehrt durch.
+
+**Keine Rueckfrage bei:**
+- GRUEN-Dateien → sofort umsetzen
+- GELB-Dateien → ankuendigen, dann sofort umsetzen
+- Kleinen Korrekturen, Bugfixes, Docs, Config-Anpassungen
+- Wenn der Plan genehmigt wurde → eigenstaendig bis zum Ende durcharbeiten
+- Agent/Sub-Agent-Auswahl → Claude entscheidet selbst (dafuer gibt es die Agenten)
+
+**Einmal fragen, dann durchfahren:**
+- ROT-Dateien → EINMAL kurz ankuendigen, auf Nicken warten, dann eigenstaendig
+- Unbekannte Abhaengigkeit → einmal klaeren, dann weiter
+
+**Vollstaendiger STOPP nur bei:**
+- Audit FAIL (moloch_audit zeigt FAIL)
+- Destructive Git-Op (reset --hard, force-push main)
+- Mehr als 5 ROT-Dateien gleichzeitig
+- Echter Widerspruch in den Anforderungen
+
+**Merksatz:** Markus geht aus dem Zimmer, kommt zurueck — Arbeit ist erledigt.
+Kein "Darf ich?", kein "Soll ich?", kein "Bestaetigen Sie bitte."
+Die Agenten und Sub-Agenten managen die Domain-Grenzen — Claude muss nicht staendig nachfragen.
+
+---
+
 ## SESSION-START PROTOKOLL
 
 1. `moloch_status()` — loest Session-Lock, zeigt System-Status
@@ -112,14 +139,45 @@ moloch_audit()                     # 54 Tests — alle PASS?
 5. SSH: sudo reboot
 ```
 
-### VERIFIKATION (NACH dem Reboot, ~60 Sek warten)
+### WARTEN AUF PI-BEREITSCHAFT (nach Reboot)
+
+Der Pi braucht ~35 Sekunden bis SSH erreichbar ist.
+TAPPAS-Pipeline + NPU-Worker brauchen weitere ~20-30 Sekunden.
+**Gesamtwartezeit: 60 Sekunden** — dann aktiv pruefen, NICHT blind warten.
+
+**Pruef-Logik (alle 15 Sek wiederholen bis OK oder Timeout 90 Sek):**
+```
+Versuch 1 (nach 30 Sek): moloch_status()
+  → MCP-Timeout oder FPS = 0?  → 15 Sek warten, nochmal
+  → FPS > 0 UND Service aktiv? → Naechster Schritt
+
+Versuch 2: moloch_npu_workers()
+  → Worker = 0 oder Errors?    → 15 Sek warten, nochmal
+  → Alle Worker geladen?        → Naechster Schritt
+
+Versuch 3: moloch_status() nochmal
+  → FPS stabil (> 10)?         → Pi ist BEREIT
+  → FPS = 0 nach 90 Sek total? → moloch_logs(filter_str="ERROR") → Fehler melden
+```
+
+**Indikatoren fuer NICHT-BEREIT (noch warten):**
+- `moloch_status()` gibt MCP-Timeout zurueck
+- FPS = 0.0 (Service laeuft, Pipeline noch nicht initialisiert)
+- NPU-Worker-Count = 0 (HEF noch nicht geladen)
+- Frame Age > 5.0s (Pipeline haengt)
+
+**Indikatoren fuer BEREIT:**
+- FPS > 10 (TAPPAS laeuft)
+- Alle Worker geladen (arcface, scrfd, yolo mindestens)
+- Frame Age < 1.0s
+- Kein ERROR im Log der letzten 30 Sek
+
+### VERIFIKATION (wenn BEREIT-Status erreicht)
 
 ```
-1. moloch_status()           # Service wieder aktiv? FPS > 0?
-2. moloch_npu_workers()      # Alle Worker geladen?
-3. moloch_audit()            # Alle Tests PASS?
-4. moloch_snapshot()         # Kamera-Feed OK?
-5. git log --oneline -3      # Commits noch da?
+1. moloch_audit()            # Alle Tests PASS?
+2. moloch_snapshot()         # Kamera-Feed visuell OK?
+3. git log --oneline -3      # Commits noch da?
 ```
 
 **Bei Audit-FAIL nach Reboot:** `moloch_logs(n=50, filter_str="ERROR")` → Ursache finden, NICHT weitermachen.
