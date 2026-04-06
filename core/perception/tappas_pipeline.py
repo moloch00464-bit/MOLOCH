@@ -1465,6 +1465,38 @@ class TappasPipeline:
                         "keypoints": h.get("landmarks", []),
                     })
 
+            # ReID Identity Labels fuer Panel-Overlay
+            reid_result = self._result_collector.get_latest("ReIDWorker")
+            reid_age = frame_id - getattr(reid_result, 'frame_id', 0) if reid_result else 999
+            if persons and reid_result and reid_result.data.get("embeddings") and reid_age <= 20:
+                try:
+                    from core.memory.person_reid import get_reid as _get_reid
+                    _reid_db = _get_reid()
+                    for emb_data in reid_result.data["embeddings"]:
+                        emb = emb_data.get("embedding")
+                        if emb is None:
+                            continue
+                        matched_name, matched_score = _reid_db.match(emb)
+                        if not matched_name:
+                            continue
+                        emb_bbox = emb_data.get("bbox", [])
+                        if len(emb_bbox) != 4:
+                            continue
+                        # Person-Detection per BBox-Naehe finden (±5% Toleranz)
+                        for det in detections:
+                            if det.get("class") != "person":
+                                continue
+                            det_bbox = det.get("bbox", [])
+                            if len(det_bbox) != 4:
+                                continue
+                            if (abs(det_bbox[0] - emb_bbox[0]) < 0.05 and
+                                    abs(det_bbox[1] - emb_bbox[1]) < 0.05):
+                                det["reid_name"] = matched_name
+                                det["reid_score"] = round(float(matched_score), 2)
+                                break
+                except Exception:
+                    pass  # ReID darf Panel nie crashen
+
             pose_age = frame_id - getattr(pose_result, 'frame_id', 0) if pose_result else 999
             # Pose-Daten nur wenn YOLO aktiv eine Person sieht UND Ergebnis frisch (<= 6 Frames)
             if persons and pose_result and pose_result.data.get("poses") and pose_age <= 6:
