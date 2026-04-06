@@ -294,12 +294,12 @@ def test_npu_models():
 def test_npu_no_error_loop():
     try:
         out = subprocess.check_output(
-            "dmesg --since -30min 2>/dev/null | grep -ci 'hailo.*error\\|hailo.*fail' || echo 0",
+            "dmesg --since -5min 2>/dev/null | grep -ci 'hailo.*error\\|hailo.*fail' || echo 0",
             shell=True, timeout=5
         ).decode().strip()
         count = int(out) if out.isdigit() else 0
-        if count <= 3:
-            return True, f"{count} Errors (tolerierbar)"
+        if count == 0:
+            return True, "0 Hailo-Errors (letzte 5 Min)"
         return False, f"{count} Hailo-Errors!"
     except:
         return True, "dmesg nicht lesbar (normal)"
