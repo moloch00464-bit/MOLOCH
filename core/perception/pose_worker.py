@@ -211,6 +211,9 @@ class HandWorker(BaseWorker):
     RIGHT_WRIST = 10
     # Crop-Groesse relativ zur Frame-Hoehe (wie weit um Handgelenk herum)
     CROP_EXPAND = 0.15  # 15% der Frame-Hoehe als Crop-Radius
+    # Wrist liegt am unteren Rand der Hand — Crop nach oben verschieben
+    # 0.5 = halber Radius nach oben, damit Hand zentriert im Crop liegt
+    WRIST_Y_SHIFT = 0.5
 
     def __init__(self):
         super().__init__(name="HandWorker", max_queue=2)
@@ -248,11 +251,14 @@ class HandWorker(BaseWorker):
                 cx, cy = kp[0], kp[1]
                 px, py = int(cx * fw), int(cy * fh)
                 radius = int(self.CROP_EXPAND * fh)
+                # Crop-Mitte nach oben verschieben (Wrist = unteres Drittel)
+                # Hand liegt OBERHALB des Handgelenks → Crop muss hoeher sitzen
+                py_center = py - int(radius * self.WRIST_Y_SHIFT)
                 # Crop-Grenzen (mit Clipping)
                 x1 = max(0, px - radius)
-                y1 = max(0, py - radius)
+                y1 = max(0, py_center - radius)
                 x2 = min(fw, px + radius)
-                y2 = min(fh, py + radius)
+                y2 = min(fh, py_center + radius)
                 if x2 - x1 < 20 or y2 - y1 < 20:
                     continue  # Crop zu klein
                 crop = frame_rgb[y1:y2, x1:x2]
