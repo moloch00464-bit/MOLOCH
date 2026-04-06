@@ -242,7 +242,7 @@ class HandWorker(BaseWorker):
             # Beide Handgelenke pruefen
             for idx, side in [(self.LEFT_WRIST, "L"), (self.RIGHT_WRIST, "R")]:
                 kp = kpts[idx]
-                if len(kp) < 3 or kp[2] < 0.3:
+                if len(kp) < 3 or kp[2] < 0.15:
                     continue  # Confidence zu niedrig
                 # Normalisierte Coords [0,1] → Pixel
                 cx, cy = kp[0], kp[1]
@@ -305,24 +305,6 @@ class HandWorker(BaseWorker):
                 "handedness": side,
                 "presence": result.get("presence", 0.0),
             })
-
-        # Fallback: kein Pose vorhanden → Full-Frame (alter Pfad, niedrige Erfolgsquote)
-        if not crops:
-            crop_224 = cv2.resize(frame_rgb, (224, 224))
-            outputs = self._run_inference(crop_224)
-            result = decode_hand_landmark(outputs, presence_thresh=0.5)
-            if result is not None:
-                landmarks = result["landmarks"]
-                mapped = [[float(landmarks[i, 0]), float(landmarks[i, 1]),
-                           float(landmarks[i, 2])] for i in range(21)]
-                xs = [p[0] for p in mapped]
-                ys = [p[1] for p in mapped]
-                hands.append({
-                    "landmarks": mapped,
-                    "bbox": [min(xs), min(ys), max(xs), max(ys)],
-                    "handedness": result.get("handedness", "R"),
-                    "presence": result.get("presence", 0.0),
-                })
 
         return WorkerResult(
             worker_name="HandWorker",
