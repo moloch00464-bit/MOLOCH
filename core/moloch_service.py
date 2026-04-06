@@ -595,9 +595,28 @@ class MolochService:
         _status_write_counter = 0
         _last_impulse_check = 0.0  # Unterbewusstsein-Impulse alle 15s pruefen
 
+        def _always_tick():
+            """Status-JSON + Unterbewusstsein — muss IMMER laufen, auch ohne neues PFrame."""
+            nonlocal _status_write_counter, _last_impulse_check
+            _status_write_counter += 1
+            if _status_write_counter >= STATUS_WRITE_MOD:
+                _status_write_counter = 0
+                try:
+                    self._write_status_json()
+                except Exception:
+                    pass
+            _now_imp = time.time()
+            if _now_imp - _last_impulse_check >= 15.0:
+                _last_impulse_check = _now_imp
+                try:
+                    self._process_unconscious_impulse()
+                except Exception:
+                    pass
+
         while self.running:
             # Pipeline offline → langsam pollen, warten auf Watchdog-Restart
             if not self._inference.is_running():
+                _always_tick()
                 time.sleep(OFFLINE_POLL)
                 _last_pframe_id = None  # Reset nach Reconnect
                 continue
@@ -605,12 +624,14 @@ class MolochService:
             try:
                 pframe = self._inference.get_current_pframe()
                 if pframe is None:
+                    _always_tick()
                     time.sleep(POLL_INTERVAL)
                     continue
 
                 # Duplikat-Check (gleiches Frame nicht doppelt verarbeiten)
                 pf_id = id(pframe)
                 if pf_id == _last_pframe_id:
+                    _always_tick()
                     time.sleep(POLL_INTERVAL)
                     continue
                 _last_pframe_id = pf_id
@@ -914,23 +935,8 @@ class MolochService:
             except Exception as e:
                 logger.debug(f"[TAPPAS-PERC] Loop error: {e}")
 
-            # Status-JSON schreiben (panel_detections Update fuer Panel)
-            _status_write_counter += 1
-            if _status_write_counter >= STATUS_WRITE_MOD:
-                _status_write_counter = 0
-                try:
-                    self._write_status_json()
-                except Exception:
-                    pass
-
-            # Unterbewusstsein: Impulse alle 15s verarbeiten
-            _now_impulse = time.time()
-            if _now_impulse - _last_impulse_check >= 15.0:
-                _last_impulse_check = _now_impulse
-                try:
-                    self._process_unconscious_impulse()
-                except Exception as e:
-                    logger.debug(f"[TAPPAS-PERC] Unconscious impulse: {e}")
+            # Status-JSON + Unterbewusstsein (auch nach pframe-Verarbeitung)
+            _always_tick()
 
             time.sleep(POLL_INTERVAL)
 
