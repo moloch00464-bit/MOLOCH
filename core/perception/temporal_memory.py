@@ -210,9 +210,12 @@ class SmoothedState:
 
     Verhindert Scheduler-Flattern (NAH→IDLE→NAH) durch temporale
     Mehrheitsentscheidung statt Einzel-Frame-Reaktion.
+
+    Window=30 (~1.5s bei 20 FPS) — genuegend Traegheit gegen Ausreisser.
+    BBox-Hoehe: Median statt Mean, Null-Werte (kein Person-Detection) ignoriert.
     """
 
-    def __init__(self, window: int = 10):
+    def __init__(self, window: int = 30):
         self._window = window
         self._person_history: deque = deque(maxlen=window)
         self._face_history: deque = deque(maxlen=window)
@@ -242,10 +245,20 @@ class SmoothedState:
 
     @property
     def bbox_height_pct(self) -> float:
-        """Geglaettete BBox-Hoehe (gleitender Durchschnitt)."""
+        """Geglaettete BBox-Hoehe (Median, Null-Werte ignoriert).
+
+        Frames ohne Person-Detection (height=0.0) werden NICHT gezaehlt,
+        weil sie den Durchschnitt verzerren und Szenario-Oszillation verursachen.
+        Median ist robuster gegenueber Ausreissern als Mean.
+        """
         if not self._height_history:
             return 0.0
-        return sum(self._height_history) / len(self._height_history)
+        # Nur Frames MIT Person-Detection (height > 0) zaehlen
+        valid = [h for h in self._height_history if h > 0.01]
+        if not valid:
+            return 0.0  # Keine Person in den letzten 30 Frames → 0
+        valid.sort()
+        return valid[len(valid) // 2]  # Median
 
 
 # =============================================================================
