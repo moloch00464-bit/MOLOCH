@@ -256,6 +256,20 @@ def moloch_read(path: str, lines: int = 200) -> str:
 
 
 @mcp.tool()
+def moloch_git_pull() -> str:
+    """Git Pull im MOLOCH Repository — holt neueste Commits von GitHub."""
+    try:
+        r = subprocess.run(
+            ["git", "pull", "origin", "main"],
+            capture_output=True, text=True, timeout=30,
+            cwd=str(MOLOCH_DIR)
+        )
+        return (r.stdout + r.stderr).strip() or "OK"
+    except Exception as e:
+        return f"FEHLER: {e}"
+
+
+@mcp.tool()
 def moloch_git_log(n: int = 10) -> str:
     """Letzte N Git-Commits im MOLOCH Repository.
 
