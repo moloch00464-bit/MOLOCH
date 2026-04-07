@@ -21,6 +21,7 @@ managed den NPU-Zugriff selbst via shared VDevice.
 Singleton: get_llm_bridge()
 """
 
+import json
 import logging
 import os
 import requests
@@ -210,7 +211,9 @@ class LocalLLMBridge:
                                   "top_p": top_p}},
                 timeout=timeout)
             resp.raise_for_status()
-            data = resp.json()
+            # Explizit UTF-8 dekodieren — resp.json() kann bei fehlendem charset-Header
+            # Latin-1 waehlen → Umlaute werden als Ã¼ statt ü dargestellt
+            data = json.loads(resp.content.decode('utf-8'))
             text = data.get("message", {}).get("content", "").strip()
 
             # DeepSeek R1 <think> Block entfernen (nur Antwort behalten)
