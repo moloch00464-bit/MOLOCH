@@ -617,4 +617,17 @@ def moloch_ipc(action: str, params: str = "{}") -> str:
 
 
 if __name__ == "__main__":
+    # Singleton: alte Instanz beenden bevor neue startet (verhindert RAM-Leak)
+    import atexit, signal as _signal
+    _PID_FILE = "/tmp/moloch_mcp_main.pid"
+    if os.path.exists(_PID_FILE):
+        try:
+            _old_pid = int(open(_PID_FILE).read().strip())
+            if _old_pid != os.getpid():
+                os.kill(_old_pid, _signal.SIGTERM)
+        except (OSError, ValueError):
+            pass
+    with open(_PID_FILE, "w") as _f:
+        _f.write(str(os.getpid()))
+    atexit.register(lambda: os.path.exists(_PID_FILE) and os.unlink(_PID_FILE))
     mcp.run(transport="stdio")
