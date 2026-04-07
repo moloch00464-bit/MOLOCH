@@ -210,7 +210,7 @@ class HandWorker(BaseWorker):
     LEFT_WRIST = 9
     RIGHT_WRIST = 10
     # Crop-Groesse relativ zur Frame-Hoehe (wie weit um Handgelenk herum)
-    CROP_EXPAND = 0.20  # 20% der Frame-Hoehe als Crop-Radius (vorher 0.15 — zu klein)
+    CROP_EXPAND = 0.25  # 25% der Frame-Hoehe als Crop-Radius (0.15 zu klein, 0.20 fast)
     # Wrist liegt am unteren Rand der Hand — Crop nach oben verschieben
     # 0.5 = halber Radius nach oben, damit Hand zentriert im Crop liegt
     WRIST_Y_SHIFT = 0.5
