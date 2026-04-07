@@ -2005,9 +2005,11 @@ class AutonomousTracker:
             self._no_face_count = getattr(self, '_no_face_count', 0) + 1
             if self._no_face_count >= self._ST_NO_FACE_THRESHOLD:
                 if not self._camera_smart_tracking_on:
-                    logger.info(
-                        f"[HANDOVER] {self._no_face_count}x kein Face → ST einschalten"
-                    )
+                    if not getattr(self, '_st_requested', False):
+                        logger.info(
+                            f"[HANDOVER] {self._no_face_count}x kein Face → ST einschalten (ST deaktiviert)"
+                        )
+                        self._st_requested = True
                     self._enable_camera_smart_tracking(True)
             # ST laeuft (oder wartet noch), Moloch beobachtet
             return False
@@ -2015,6 +2017,7 @@ class AutonomousTracker:
         # === Ab hier: Face erkannt → Moloch-Praezision gefragt ===
         # Hysterese-Counter zuruecksetzen
         self._no_face_count = 0
+        self._st_requested = False
 
         # ST war nie an → Moloch trackt direkt
         if not self._camera_smart_tracking_on:
