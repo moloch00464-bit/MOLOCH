@@ -1,146 +1,91 @@
-# Agent Handoff — 2026-04-05
-# Session: Claude Sonnet 4.6 (Agenten-Overhaul + Workflow-Audit + MCP-Plan)
-# Branch: main
-# GitHub: moloch00464-bit/MOLOCH
-# Status: AUDIT PASS 54/54 ✅ | Git sauber | 16 Agenten aktiv
+# Agent Handoff — 2026-04-07 (Session 12 — NÄCHSTE SESSION LIEST DAS)
+# Letzter Commit: f7c7e16 | Audit: 54/54 PASS | FPS: 20.8 | RAM: 43%
 
 ---
 
-## SYSTEM-BASELINE (aktuell)
+## ⚡ KEINE OFFENEN AUFGABEN
 
-- FPS: 20.1 | CPU: 46.3°C | RAM: 43.7%
-- Worker: 7/7 running, 0 Errors
-- Audit: 54/54 PASS
-- Zone: IDLE | Tracker: tracking
-- Git: main, sauber, synchron mit GitHub
-
----
-
-## WAS DIESE SESSION GEMACHT HAT
-
-### 1. Hook Domain-Mapping: alle 16 Agenten (Commit ba679b1)
-- pre-edit-check.sh: 9 neue Domains eingetragen (autonomy, awareness, personality,
-  memory, watchdog, music, deepseek, tentacle, unconscious)
-- Verzeichnis-Pattern personality/* → personality (war fälschlich voice)
-- Datei-Zuordnungen bereinigt: spotify→music, wifi_mic→tentacle, longterm_memory→memory
-- Fehlermeldung listet jetzt alle 16 Agenten
-
-### 2. GUI-Agent: BBox + Landmark Rendering (Commit ba679b1)
-- gui.md + AGENT_GUI.md: BBox/Landmark-Darstellung als GUI-Territorium
-- Letterbox-Warnung: keine Doppelkorrektur
-- Audit-Checkliste für BBoxen/Landmarks
-
-### 3. moloch-agent Skill: alle 16 Agenten (Commit b6d22e9)
-- Agent-Mapping auf 16 Agenten erweitert
-- Territorium-Tabelle korrigiert: personality/memory aus voice/service raus
-- BBox-Anzeige + Landmarks im GUI-Eintrag
-
-### 4. Alle 16 Agenten-Prompts überarbeitet (Commit 2151d50)
-- Territorium-Konflikte gelöst (voice/service/hardware/autonomy)
-- unconscious: MCP-Tools hinzugefügt (fehlten komplett)
-- stresstest: Erfolgskriterien + moloch_audit() in Tools
-- Descriptions präziser mit Abgrenzungshinweisen
-
-### 5. Stresstest E2E Display-Chain + MCP Konnektivität (Commit bc627e6)
-- stresstest.md: Backend-Event → IPC → Status-JSON → Panel-Anzeige
-- 7 Trigger-Tests mit Akzeptanzkriterien
-- MCP-Konnektivitätstest: alle 17 Tools mit Erwartungswerten
-
-### 6. Workflow-Audit durchgeführt
-- Alle Komponenten geprüft: Session-Start, Hooks, Skills, Agenten, MCP
-- Befund: 95% OK — 3 kleine Fixes nötig (→ diese Session erledigt)
-- pre-bash-check.sh: jq → python3 (jq nicht auf Pi!)
-
-### 7. MCP-Bidirektional-Plan geschrieben
-- Plan: .claude/plans/delightful-hugging-mitten.md
-- Moloch's NPU-LLM direkt via MCP befragbar (moloch_llm_query)
-- Moloch kann Claude fragen via MCP Sampling (moloch_ask_claude)
-- hailo-ollama systemd-Service ebenfalls geplant
+### Entdeckte Bugs (noch nicht gefixt):
+- **B2**: Moloch halluziniert Quellen — sagt "Laut Suchergebnissen" für Trainings-Wissen (Bitcoin-Kurs, CHF/EUR)
+- **B3**: Face-Confidence inkonsistent — 3 verschiedene Werte (Status 76%, Moloch sagt 64%, Log sim=0.57)
+- **B4**: News-Aktualität bei generischen Anfragen schwach (März-Meldungen statt April)
+- **B5**: Gedächtnis-Fehlinformation — Moloch glaubt "Markus hat Internetzugang freigeschaltet"
 
 ---
 
-## PFLICHT-STARTPROTOKOLL (Phase 1 — JEDE Session)
+## WAS BEREITS GEFIXT IST — NICHT NOCHMAL ANFASSEN
 
-1. `logs/agent_handoff.md` lesen
-2. `git status` — uncommitted changes?
-3. `moloch_status()` — löst /tmp/moloch_session_lock
-4. `moloch_npu_workers()` — Worker-Health
-5. `moloch_audit()` — Baseline PASS/FAIL
-6. Markus zeigen: "Service läuft, X FPS, Audit X/54"
+| Fix | Commit | Datei |
+|-----|--------|-------|
+| _api_in_flight Queue statt silent Drop (B1) | a30b0dd | voice_pipeline.py |
+| Google News RSS Backend (universelle Nachrichtensuche) | f7c7e16 | internet_bridge.py |
+| Internet Bridge Early-Start (Race Condition online=False) | c6e74d9 | voice_pipeline.py |
+| Echtzeit-Websuche (kein Halluzinieren mehr) | 5b76891 | voice_pipeline.py |
+| UTF-8 Encoding hailo-ollama | cdb86ce | local_llm_bridge.py |
+| MCP Singleton PID-File | da014b3 | moloch_mcp_server.py |
+| LLM Input-Length → Cloud-Fallback | 58d01e8 | local_llm_bridge.py |
+| OLLAMA_TIMEOUT_CHAT 60s→30s | 1854ecf | local_llm_bridge.py |
+| ActivityWorker Relevanz-Filter | c6704cc | activity_worker.py |
+
+**Diese Bugs existieren NICHT mehr. Nicht nochmal "fixen".**
 
 ---
 
-## WORKFLOW (Kurzfassung)
+## SESSION 11 — WAS PASSIERT IST (2026-04-07)
+
+### A4: hailo-ollama systemd-Service
+- Bereits erledigt — `/etc/systemd/system/hailo-ollama.service` existiert, enabled, läuft aktiv
+- Nach Reboot automatisch gestartet (bestätigt via `systemctl is-enabled → enabled`)
+
+### Internet Bridge Race Condition (NEU ENTDECKT + GEFIXT)
+- **Problem:** Bridge lazy erstellt → beim ersten chat_message ist Ping-Thread ~500ms nicht fertig → online=False
+- **Fix c6e74d9:** `get_internet_bridge()` in `VoicePipeline.__init__()` — Bridge startet beim Service-Start
+- **Test:** Moloch sagte vorher "ich bin offline" — jetzt zitiert er "Laut Google News..."
+
+### Google News RSS Backend (NEU)
+- **Problem:** Wikipedia + DDG liefern für Nachrichten-Anfragen veraltete Enzyklopädie-Einträge
+- **Fix f7c7e16:** `_is_news_query()` + `_search_news_rss()` in `internet_bridge.py`
+- News-Keywords → Google News RSS statt Wikipedia (kostenlos, kein API-Key, immer aktuell)
+- **Livebeweis:** `moloch_say("Was sind heute die aktuellen Nachrichten?")` → Moloch zitiert Google News
+
+---
+
+---
+
+## WAS IN voice_pipeline.py GEÄNDERT WURDE (Session 10)
+
+**Problem:** MOLOCH halluzinierte Internetzugang — erfand `[INTERNET:...]` Tags.
+**Ursache:** System-Prompt zeigte "INTERNET: ONLINE" aber Suchergebnisse wurden nie injiziert.
+
+**Fix (3 Änderungen, ~33 Zeilen):**
+1. `_search_context(user_text)` — neue Funktion, ruft `internet_bridge.search_web()` auf
+   bei Info-Fragen (Keywords: suche, google, was ist, wer ist, wetter, aktuell, ...)
+2. `_build_system_prompt()` — WEBSUCHE-Anleitung statt falscher INTERNET-Status im Prompt
+3. `_chat()` — Suchergebnisse als `--- WEBSUCHE ---` Block in System-Prompt injiziert
+
+**Wie es funktioniert:**
+- Markus fragt: "Was ist das Wetter heute?"
+- `_search_context()` erkennt "was ist" → ruft `bridge.search_web()` auf
+- Ergebnisse (3 Top-Resultate, max 200 Zeichen je) werden dem System-Prompt vorangestellt
+- LLM antwortet mit echten Daten statt Halluzinationen
+
+---
+
+## STARTPROTOKOLL
 
 ```
-Auftrag → /moloch-agent Skill → richtigen Agenten spawnen
-         → touch /tmp/moloch_agent_[name]
-         → Code editieren (Hook prüft Domain!)
-         → sudo systemctl restart moloch
-         → moloch_audit() → bei FAIL: STOPP
-         → rm /tmp/moloch_agent_[name]
-         → git commit (1 Datei = 1 Commit)
-         → git push
+1. moloch_status()        → Session-Lock lösen
+2. moloch_npu_workers()   → Worker-Health
+3. /moloch-dev Skill      → NEVER-Regeln
 ```
 
 ---
 
-## 16 AGENTEN (vollständige Liste)
+## SYSTEM-STAND
 
-| Agent | Territorium |
-|-------|-------------|
-| vision | core/perception/, tappas_pipeline, NPU, BBox-Inferenz |
-| hardware | core/hardware/, camera.py, LED, Thermal |
-| gui | core/gui/, panel_*.py, popups/, BBox-Zeichnen, Landmarks |
-| tracking | core/mpo/, ptz_arbiter, ptz_tracker |
-| voice | core/speech/, core/tts/, core/audio/, voice_pipeline |
-| service | moloch_service, core_integrator, ipc_router |
-| unconscious | unconscious_engine.py, TaoEngine, anima_mappings |
-| autonomy | core/autonomy/ (decision, homeostasis, introspection, llm_bridge, night_cycle, atmosphere, preference_learner) |
-| awareness | core/awareness/ (activity, context, motion, room_map), world_state |
-| personality | core/personality/ (engine, mood, behavior, tension), event_bus, sprache, timeline |
-| memory | core/memory/ (episodic, persistent, vector, reid), longterm_memory, daily_learner |
-| watchdog | system_watchdog, diagnostics, capability_monitor, status |
-| music | core/music/, spotify_controller |
-| deepseek | local_llm_bridge, deepseek_client, llm_response, introspection |
-| tentacle | wifi_mic, camera_cloud_bridge, firmware/respeaker_wifi_mic/ |
-| stresstest | scripts/, Tests, Chaos Engineering, E2E Display-Chain |
-
----
-
-## OFFENE AUFGABEN (priorisiert)
-
-PRIO 1 — MCP Bidirektional (NÄCHSTE SESSION):
-  - Plan: .claude/plans/delightful-hugging-mitten.md
-  - 5 Commits: moloch_llm_query + moloch_llm_status → moloch_ask_claude (async Sampling)
-    → IPC-Handler in moloch_service.py → hailo-ollama systemd → stresstest E2E
-  - Agent: service
-  - hailo-ollama API: /api/chat (NICHT /v1/chat/completions — gibt 404!)
-
-PRIO 2 — TaoEngine implementieren: ✅ PRIO VERSCHOBEN (nach MCP-Plan)
-  - Plan: docs/plans/tao_engine_plan.md (von Opus 4.6 erstellt)
-  - Agent: unconscious
-
-PRIO 3 — Tracker STUCK-AT-LIMIT:
-  - core/mpo/autonomous_tracker.py → _track_tracking_target()
-  - Nach 8s am mechanischen Anschlag → SEARCH starten
-  - Agent: tracking
-
-PRIO 4 — ArcFace Similarity 0.50-0.61 (Threshold 0.65):
-  - Neu-Enrollment: scripts/enroll_face_worker.py
-  - Agent: vision
-
----
-
-## REFERENZ-DATEIEN
-
-| Datei | Inhalt |
-|-------|--------|
-| CLAUDE.md | Master-Regeln, 12 NEVER, Datei-Ampel, 16 Agenten |
-| .claude/plans/delightful-hugging-mitten.md | MCP-Bidirektional Implementierungsplan |
-| docs/DANGER_MAP.md | ROT/GELB/GRUEN für alle Dateien mit NEVER-DOs |
-| logs/system_contract_pipeline.md | 10 Pipeline-Sync-Regeln (bei Pipeline-Arbeit) |
-| docs/plans/tao_engine_plan.md | TaoEngine Implementierungsplan (Opus 4.6) |
-| .claude/hooks/pre-edit-check.sh | Agent-Lock + Domain-Check Hook (16 Agenten) |
-| .claude/hooks/pre-bash-check.sh | Bash-Check Hook (python3, kein jq!) |
-| .claude/agents/*.md | 16 Agenten-Definitionen |
+- FPS: 20.2 stabil
+- RAM: 44% (1696/3993 MB) — kein Leak
+- 7 Worker: alle running, 0 Errors
+- hailo-ollama: läuft manuell, gibt gelegentlich 500er → DeepSeek API springt ein (funktioniert)
+- Tension: guardian-Zone
+- Websuche: aktiv, getestet (Audit 54/54 PASS)
