@@ -5,13 +5,13 @@
     "scrfd_conf": 0.75,
     "scrfd_nms": 0.55,
     "arcface_thresh": 0.7,
-    "yolo_conf": 0.6,
+    "yolo_conf": 0.9,
     "pose_conf": 0.35,
     "hand_conf": 0.65,
     "person_min_height": 0.1,
     "person_min_area": 0.065,
-    "pose_nms": 0.4,
-    "pose_kpt_thresh": 0.3,
+    "pose_nms": 0.65,
+    "pose_kpt_thresh": 0.45,
     "hand_presence": 0.5
   },
   "hand_occlusion": {
@@ -21,9 +21,12 @@
     "recency": 4.0
   },
   "audio": {
-    "mic_gain": 1.0,
+    "mic_gain": 1.58,
+    "noise_gate_db": -40.0,
     "agc_enabled": true,
-    "noise_gate_db": -40.0
+    "wifi_samplerate": 16000,
+    "audio_source": "auto",
+    "wifi_software_gain": 1.58
   },
   "camera": {
     "ptz_speed": 15.0,
@@ -36,10 +39,10 @@
   "orchestration_mode": "adaptive",
   "active_models": [],
   "mpo": {
-    "tension_tau": 350.0,
-    "dominance_drift": 0.021,
-    "zone_hysteresis": 0.27,
-    "berserker_threshold": 0.88,
+    "tension_tau": 160.0,
+    "dominance_drift": 0.007,
+    "zone_hysteresis": 0.05,
+    "berserker_threshold": 0.86,
     "thermal_damping_start": 73.0
   },
   "gestures": {
