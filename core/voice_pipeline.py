@@ -734,6 +734,7 @@ class VoicePipeline:
         # API-Thread Schutz: Verhindert Queue von API-Calls wenn API down
         self._api_in_flight = False
         self._api_lock = threading.Lock()
+        self._pending_chat: Optional[tuple] = None  # (text, source) wartet auf naechsten Slot
 
         # WiFi-Mic PTT State
         self._wifi_mic = None  # WiFiMic Singleton (lazy)
@@ -1967,9 +1968,8 @@ class VoicePipeline:
         # Schutz: Wenn bereits ein API-Call laeuft, nicht stapeln
         with self._api_lock:
             if self._api_in_flight:
-                logger.warning("[VOICE] API-Call laeuft bereits, ueberspringe")
-                self._emit_message("System",
-                    "Vorherige Anfrage laeuft noch...")
+                self._pending_chat = (text, source)
+                logger.info("[VOICE] API laeuft — Anfrage in Queue gespeichert")
                 return
             self._api_in_flight = True
 
@@ -2035,10 +2035,22 @@ class VoicePipeline:
 
             self._whisper_status = "Idle"
         finally:
+            pending = None
             with self._api_lock:
                 self._api_in_flight = False
+                if self._pending_chat:
+                    pending = self._pending_chat
+                    self._pending_chat = None
             # LED zurueck zu IDLE (Sicherheitsnetz — falls TTS nicht aufgerufen wurde)
             self._publish_event("audio.speaking_end")
+            # Wartende Anfrage jetzt verarbeiten
+            if pending:
+                logger.info("[VOICE] Verarbeite wartende Anfrage aus Queue")
+                threading.Thread(
+                    target=self._api_and_respond,
+                    args=pending,
+                    daemon=True,
+                ).start()
             # LLM-Indikator zuruecksetzen — Gespraechsturn beendet
             try:
                 from core.autonomy.local_llm_bridge import get_llm_bridge
