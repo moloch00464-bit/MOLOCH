@@ -786,6 +786,14 @@ class VoicePipeline:
         except Exception:
             pass
 
+        # Internet Bridge fruehzeitig starten (Ping-Thread braucht ~500ms bis online=True)
+        try:
+            from core.net.internet_bridge import get_internet_bridge
+            get_internet_bridge()
+            logger.info("[VOICE] Internet Bridge gestartet")
+        except Exception as e:
+            logger.warning(f"[VOICE] Internet Bridge init fehlgeschlagen: {e}")
+
         logger.info(f"[VOICE] Pipeline init: deepseek={self._claude_available}, "
                     f"piper={self._piper_available}, voice={self._current_voice}")
 
