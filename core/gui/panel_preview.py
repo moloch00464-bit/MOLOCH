@@ -418,7 +418,7 @@ class PreviewModule:
                                         draw.line([ax, ay, bx, by], fill=(255, 0, 200), width=1)
                                 for kp in hkpts:
                                     kpx, kpy = int(kp[0]*cw), int(kp[1]*ch)
-                                    draw.ellipse([kpx-2, kpy-2, kpx+2, kpy+2], fill=(255, 0, 200))
+                                    draw.ellipse([kpx-1, kpy-1, kpx+1, kpy+1], fill=(255, 0, 200))
                         del draw
                 except Exception as e:
                     self._logger.error(f"BBox render error: {e}", exc_info=True)
