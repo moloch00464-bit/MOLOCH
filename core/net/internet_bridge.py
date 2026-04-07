@@ -163,11 +163,17 @@ class InternetBridge:
             weather = self._search_weather(query)
             results.extend(weather)
 
-        # 2. Wikipedia (parallel zu DDG — beide schnell)
-        wiki = self._search_wikipedia(query)
-        for r in wiki:
-            if len(results) < 5 and not self._is_duplicate(r, results):
-                results.append(r)
+        # 2. News-Anfragen → Google News RSS (aktuell), sonst Wikipedia
+        if self._is_news_query(query):
+            news = self._search_news_rss(query)
+            for r in news:
+                if len(results) < 5 and not self._is_duplicate(r, results):
+                    results.append(r)
+        else:
+            wiki = self._search_wikipedia(query)
+            for r in wiki:
+                if len(results) < 5 and not self._is_duplicate(r, results):
+                    results.append(r)
 
         # 3. DDG Instant Answer (Fakten, Definitionen, Umrechnungen)
         ddg = self._search_ddg_api(query)
@@ -224,6 +230,44 @@ class InternetBridge:
                        "wind", "weather", "forecast", "niederschlag",
                        "sonnenschein", "bewölkt", "bewoelkt"]
         )
+
+    def _is_news_query(self, query: str) -> bool:
+        """Pruefen ob Anfrage aktuelle Nachrichten betrifft."""
+        q = query.lower()
+        return any(w in q for w in [
+            "nachrichten", "news", "meldung", "aktuell", "heute",
+            "passiert", "ereignis", "schlagzeilen", "top-news",
+        ])
+
+    def _search_news_rss(self, query: str) -> List[Dict]:
+        """Google News RSS — aktuelle Nachrichten ohne API-Key."""
+        try:
+            import xml.etree.ElementTree as ET
+            params = urllib.parse.urlencode({
+                "q": query, "hl": "de", "gl": "DE", "ceid": "DE:de"
+            })
+            url = f"https://news.google.com/rss/search?{params}"
+            req = urllib.request.Request(url, headers={"User-Agent": UA})
+            with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+                tree = ET.fromstring(resp.read())
+            results = []
+            for item in tree.findall(".//item")[:4]:
+                title = (item.findtext("title") or "").strip()
+                desc  = re.sub(r"<[^>]+>", "", item.findtext("description") or "").strip()
+                link  = (item.findtext("link") or "").strip()
+                pub   = (item.findtext("pubDate") or "").strip()
+                if title and desc:
+                    results.append({
+                        "title": title[:100],
+                        "text":  (f"[{pub[:16]}] " if pub else "") + desc[:250],
+                        "url":   link,
+                        "source": "Google News",
+                    })
+            logger.info(f"[NET] News RSS '{query[:40]}': {len(results)} Ergebnis(se)")
+            return results
+        except Exception as e:
+            logger.debug(f"[NET] News RSS fehlgeschlagen: {e}")
+            return []
 
     def _search_weather(self, query: str) -> List[Dict]:
         """Wetter via wttr.in JSON API — kein Key, kostenlos."""
