@@ -34,7 +34,7 @@ logger = logging.getLogger("MolochDecisionEngine")
 COOLDOWNS = {
     "music_change": 120.0,   # 2 Minuten zwischen Musikwechseln
     "light_change": 15.0,    # 15s zwischen LED-Aenderungen
-    "ptz_move": 30.0,        # 30s zwischen PTZ-Moves
+    "ptz_move": 300.0,       # 5 Minuten zwischen PTZ-Moves (verhindert park_at_door Loop)
     "speak": 60.0,           # 1 Minute zwischen Kommentaren
     "web_search": 300.0,     # 5 Minuten zwischen autonomen Websuchen
     "reflect": 600.0,        # 10 Minuten zwischen NPU-Reflexionen
@@ -67,6 +67,7 @@ class DecisionEngine:
         self._engagement: float = 0.0
         self._music_playing: bool = False
         self._hour: int = 0
+        self._parked_at_door: bool = False  # Verhindert park_at_door Endlosschleife
 
     def update_signals(self, mood: str = "calm", tension: float = 0.0,
                        dominance: float = 0.0, activity: str = "away",
@@ -88,6 +89,9 @@ class DecisionEngine:
             self._engagement = engagement
             self._music_playing = music_playing
             self._hour = time.localtime().tm_hour
+            # Person erkannt → parked-Flag zuruecksetzen
+            if face_id and face_id != "unknown":
+                self._parked_at_door = False
 
     def decide(self) -> Dict[str, Any]:
         """Autonome Entscheidung treffen.
@@ -128,6 +132,9 @@ class DecisionEngine:
         with self._lock:
             self._last_actions[best["action"]] = now
             self._last_decision = best
+            # park_at_door nur einmal feuern bis Person wieder da
+            if best.get("reason") == "park_at_door":
+                self._parked_at_door = True
 
         # Event publizieren
         if best["action"] != "silence":
@@ -265,8 +272,8 @@ class DecisionEngine:
             score = 0.35
             reason = "follow_to_desk"
             params = {"target_zone": "schreibtisch"}
-        # Niemand da → Park-Position (Tuer beobachten)
-        elif self._activity == "away" and self._zone != "tuer":
+        # Niemand da → Park-Position (Tuer beobachten) — nur einmal
+        elif self._activity == "away" and self._zone != "tuer" and not self._parked_at_door:
             score = 0.40
             reason = "park_at_door"
             params = {"target_zone": "tuer"}
