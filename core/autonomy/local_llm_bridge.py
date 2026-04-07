@@ -237,6 +237,14 @@ class LocalLLMBridge:
             return None
 
         except Exception as e:
+            # HTTP 500 und andere Fehler: auch im Circuit-Breaker zaehlen
+            self._ollama_fail_count += 1
+            if self._ollama_fail_count >= 3:
+                self._ollama_backoff_until = time.monotonic() + self.OLLAMA_BACKOFF_SEC
+                logger.warning(
+                    f"[LLM] Ollama {self._ollama_fail_count}x Fehler → "
+                    f"{self.OLLAMA_BACKOFF_SEC}s Cloud-Backoff aktiv"
+                )
             logger.warning(f"[LLM-BRIDGE] hailo-ollama ({model}) Fehler: {e}")
             return None
 
