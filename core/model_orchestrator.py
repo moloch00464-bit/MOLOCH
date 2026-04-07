@@ -100,8 +100,8 @@ class ModelOrchestrator:
         self._attention_level_lock = threading.Lock()
         self._target_frame_delay = 0.033  # 30 FPS Default
 
-        # Orchestration Mode: "adaptive" = NPU Idle-Modus (PerceptionEngine steuert)
-        self._orchestration_mode = "adaptive"
+        # Orchestration Mode: "always_on" = alle Modelle permanent geladen (kein Switching)
+        self._orchestration_mode = "always_on"
 
         # NPU Watchdog: Anti-Oszillation
         self._swap_log = []
