@@ -597,6 +597,29 @@ def _load_capabilities_block() -> str:
         return ""
 
 
+def _search_context(user_text: str) -> str:
+    """Wenn Nutzer Info-Frage stellt: Websuche ausfuehren und Ergebnisse formatieren."""
+    INFO_KEYWORDS = ["suche", "google", "was ist", "wer ist", "wetter",
+                     "aktuell", "news", "erklaer", "zeig mir", "finde",
+                     "wie hoch", "wie viel", "wann", "wo ist", "was kostet"]
+    if not any(kw in user_text.lower() for kw in INFO_KEYWORDS):
+        return ""
+    try:
+        from core.net.internet_bridge import get_internet_bridge
+        bridge = get_internet_bridge()
+        if not bridge.online:
+            return ""
+        results = bridge.search_web(user_text)
+        if not results:
+            return ""
+        lines = ["Websuche-Ergebnisse:"]
+        for r in results[:3]:
+            lines.append(f"- {r['title']}: {r['text'][:200]}")
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
+
 def _build_system_prompt() -> str:
     """System-Prompt fuer Claude API bauen."""
     prompt = """Du bist M.O.L.O.C.H. - Maschinelle Organisation fuer Logische Operationen und Computergestuetzte Hilfe.
@@ -635,6 +658,11 @@ Beispiel: "Klar, ich leg Suicide Commando auf! [SPOTIFY:artist=Suicide Commando]
 Beispiel: "Playlist laeuft! [SPOTIFY:playlist=Tanzen Tanzen Tanzen]"
 Benutze diese Tags wenn Markus nach Musik fragt oder Steuerung will.
 Tipp: Sei kreativ bei Musikauswahl — nicht immer die gleichen Artists.
+
+WEBSUCHE:
+Wenn Markus nach aktuellen Infos fragt (Wetter, Neuigkeiten, Fakten), bekommst du echte
+Suchergebnisse automatisch bereitgestellt (im Abschnitt --- WEBSUCHE ---).
+Nutze diese Ergebnisse direkt — erfinde KEINE Informationen.
 """
 
     # Brain Context laden wenn vorhanden
@@ -1429,6 +1457,11 @@ class VoicePipeline:
                 system = system + "\nINTERNET: OFFLINE (kein Internetzugang gerade)"
         except Exception:
             pass  # Internet-Bridge optional
+
+        # Echtzeit-Websuche bei Info-Fragen
+        search_ctx = _search_context(user_text)
+        if search_ctx:
+            system = system + "\n\n--- WEBSUCHE ---\n" + search_ctx
 
         try:
             from core.personality.personality_engine import get_personality_engine
