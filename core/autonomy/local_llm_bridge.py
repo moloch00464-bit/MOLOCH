@@ -36,7 +36,7 @@ logger = logging.getLogger("LocalLLMBridge")
 OLLAMA_HOST = "http://localhost:8000"
 OLLAMA_MODEL_CHAT = "qwen2.5-instruct:1.5b"
 OLLAMA_MODEL_REASON = "deepseek_r1_distill_qwen:1.5b"
-OLLAMA_TIMEOUT_CHAT = 60      # Qwen antwortet in ~26s
+OLLAMA_TIMEOUT_CHAT = 30      # Qwen antwortet in ~26s — nach 30s → Cloud-Fallback
 OLLAMA_TIMEOUT_REASON = 120   # DeepSeek R1 braucht ~80s (Chain-of-Thought)
 OLLAMA_MAX_INPUT_CHARS = 12000  # ~3000 Tokens Safety-Limit (Qwen2.5-1.5B: 4096 Kontext, 256 Output)
 
