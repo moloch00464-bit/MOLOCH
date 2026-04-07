@@ -211,10 +211,11 @@ class ActivityWorker(BaseWorker):
             for i in top5_idx
         ]
 
-        # Relevant-Flag: Moloch-interessante Aktivitaet?
+        # Relevant-Flag: nur Moloch-relevante Aktivitaeten weiterleiten
+        # r3d_18 gibt sonst "snowmobiling", "riding mule" etc. aus — das ist physisch falsch
         relevant = any(kw in top_label for kw in RELEVANT_KEYWORDS)
 
-        if relevant or top_score > 0.3:
+        if relevant:
             logger.info("[ActivityWorker] %s (%.2f)", top_label, top_score)
 
         return WorkerResult(
@@ -223,8 +224,8 @@ class ActivityWorker(BaseWorker):
             timestamp=item.timestamp,
             success=True,
             data={
-                "activity": top_label,
-                "score": top_score,
+                "activity": top_label if relevant else None,
+                "score": top_score if relevant else 0.0,
                 "relevant": relevant,
                 "top5": top5,
             }
