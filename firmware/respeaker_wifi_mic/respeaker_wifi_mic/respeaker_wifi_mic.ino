@@ -352,7 +352,10 @@ static void wifi_connect() {
         Serial.printf("\n[WIFI] Verbunden! IP: %s, RSSI: %d dBm\n",
                       WiFi.localIP().toString().c_str(), WiFi.RSSI());
     } else {
-        Serial.println("\n[WIFI] Verbindung fehlgeschlagen!");
+        Serial.println("\n[WIFI] Verbindung fehlgeschlagen! Neustart in 3s...");
+        neopixelWrite(LED_PIN, 255, 0, 0);  // Rot = Fehler
+        delay(3000);
+        ESP.restart();
     }
 }
 

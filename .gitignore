@@ -21,7 +21,6 @@ SYSTEM_STATE.json
 
 # --- Models & Large Files ---
 models/
-firmware/
 
 # --- Runtime Data ---
 faces/
@@ -69,3 +68,6 @@ Thumbs.db
 *.bak.*
 state/timeline.jsonl
 .env.spotify
+
+# --- PlatformIO Build Cache ---
+firmware/**/.pio/
