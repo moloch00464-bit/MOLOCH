@@ -37,6 +37,7 @@ OLLAMA_MODEL_CHAT = "qwen2.5-instruct:1.5b"
 OLLAMA_MODEL_REASON = "deepseek_r1_distill_qwen:1.5b"
 OLLAMA_TIMEOUT_CHAT = 60      # Qwen antwortet in ~26s
 OLLAMA_TIMEOUT_REASON = 120   # DeepSeek R1 braucht ~80s (Chain-of-Thought)
+OLLAMA_MAX_INPUT_CHARS = 12000  # ~3000 Tokens Safety-Limit (Qwen2.5-1.5B: 4096 Kontext, 256 Output)
 
 
 class LocalLLMBridge:
@@ -186,6 +187,12 @@ class LocalLLMBridge:
                     f"{self.OLLAMA_BACKOFF_SEC}s Cloud-Backoff"
                 )
             logger.debug("[LLM-BRIDGE] hailo-ollama nicht erreichbar")
+            return None
+
+        # Input-Length-Check: zu langer Prompt → direkt Cloud-Fallback (kein Circuit-Breaker-Zaehler)
+        input_len = len(system) + len(prompt)
+        if input_len > OLLAMA_MAX_INPUT_CHARS:
+            logger.info(f"[LLM] Input zu lang ({input_len} Zeichen > {OLLAMA_MAX_INPUT_CHARS}) → Cloud-Fallback")
             return None
 
         resp = None
