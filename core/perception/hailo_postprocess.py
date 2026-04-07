@@ -489,22 +489,22 @@ def draw_hand_landmarks(frame: np.ndarray, hand_result: Dict,
     for j0, j1 in HAND_SKELETON:
         finger = FINGER_MAP.get(j1, "palm")
         color = FINGER_COLORS.get(finger, (200, 200, 200))
-        cv2.line(frame, pts[j0], pts[j1], color, 2)
+        cv2.line(frame, pts[j0], pts[j1], color, 1)
 
     # Landmark-Punkte
     for i, (px, py) in enumerate(pts):
         finger = FINGER_MAP.get(i, "palm")
         color = FINGER_COLORS.get(finger, (200, 200, 200))
         if i in FINGERTIP_INDICES:
-            # Fingerspitzen: groesser
-            cv2.circle(frame, (px, py), 7, color, -1)
-            cv2.circle(frame, (px, py), 7, (255, 255, 255), 1)
+            # Fingerspitzen: klein
+            cv2.circle(frame, (px, py), 4, color, -1)
+            cv2.circle(frame, (px, py), 4, (255, 255, 255), 1)
         elif i == 0:
             # Wrist: mittel
-            cv2.circle(frame, (px, py), 5, (255, 255, 255), -1)
+            cv2.circle(frame, (px, py), 3, (255, 255, 255), -1)
         else:
-            # Gelenke: klein
-            cv2.circle(frame, (px, py), 4, color, -1)
+            # Gelenke: minimal
+            cv2.circle(frame, (px, py), 2, color, -1)
 
     # Handedness Label am Wrist
     h_frame, w_frame = frame.shape[:2]
