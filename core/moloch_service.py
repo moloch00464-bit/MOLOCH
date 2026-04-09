@@ -2736,6 +2736,31 @@ class MolochService:
             self._cam.ptz_goto(cmd.get('position', ''))
         elif action == 'ptz_calibrate':
             self._cam.ptz_calibrate()
+        elif action == 'set_fan':
+            # Lüfter-Stufe manuell setzen (0=aus, 1-4=Stufen, -1=auto)
+            level = int(cmd.get('level', -1))
+            try:
+                from core.hardware.thermal_manager import get_thermal_manager
+                tm = get_thermal_manager()
+                if level < 0:
+                    tm._can_write_fan = False
+                    logger.info("[IPC] Lüfter: AUTO")
+                else:
+                    tm._can_write_fan = True
+                    tm._write_fan_state(level)
+                    logger.info(f"[IPC] Lüfter: Stufe {level}")
+            except Exception as e:
+                logger.error(f"[IPC] set_fan fehlgeschlagen: {e}")
+        elif action == 'led_set':
+            # RGB-LED direkt steuern: {"farbe": "rot", "modus": "blinkend"}
+            farbe = cmd.get('farbe', 'weiss')
+            modus = cmd.get('modus', 'statisch')
+            try:
+                from core.hardware.rgb_led_controller import get_rgb_led
+                get_rgb_led().set_color(farbe, modus)
+                logger.info(f"[IPC] LED: {farbe} {modus}")
+            except Exception as e:
+                logger.error(f"[IPC] led_set fehlgeschlagen: {e}")
         elif action == 'cloud_led':
             self._cam.cloud_set_night_mode(cmd.get('level', 0))
         elif action == 'cloud_alarm':
