@@ -274,6 +274,13 @@ class KeywordHandler:
                 self._set_arbiter_manuell()
                 return self._ptz_antwort(antwort, zone)
 
+        # Schrittweite: "weit" oder "ganz weit" = groesser
+        step = 30.0
+        if "weit" in lower or "ganz" in lower or "viel" in lower:
+            step = 60.0
+        elif "bisschen" in lower or "etwas" in lower or "leicht" in lower:
+            step = 15.0
+
         # Richtungen pruefen
         richtungen = {
             "links": ("ptz_move", {"direction": "left"}, "Ich schaue nach links."),
@@ -286,7 +293,7 @@ class KeywordHandler:
         }
         for key, (cmd, params, antwort) in richtungen.items():
             if key in lower:
-                self._send_ipc_command(cmd, **params)
+                self._send_ipc_command(cmd, step=step, **params)
                 self._set_arbiter_manuell()
                 return self._ptz_antwort(antwort, zone)
 
