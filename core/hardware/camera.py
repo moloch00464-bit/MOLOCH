@@ -677,13 +677,12 @@ class SonoffCameraController:
         """Alias for goto_home."""
         return self.goto_home()
 
-    def move_manual(self, direction: str, speed: float = 0.3) -> bool:
+    def move_manual(self, direction: str, speed: float = 0.3, step: float = 30.0) -> bool:
         """Manual PTZ movement: left/right/up/down/stop."""
         if direction == "stop":
             return self.stop()
 
         pos = self.get_position()
-        step = 10.0
         new_pan, new_tilt = pos.pan, pos.tilt
 
         if direction == "left":
