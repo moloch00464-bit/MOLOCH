@@ -2731,11 +2731,20 @@ class MolochService:
             self._save_settings()
             logger.info(f"[PTZ] Home gesetzt: Pan={home_pan:.1f}, Tilt={home_tilt:.1f}")
         elif action == 'ptz_move':
-            self._cam.ptz_move(cmd.get('direction', ''), cmd.get('speed', 0.3))
+            try:
+                self._cam.ptz_move(cmd.get('direction', ''), cmd.get('speed', 0.3))
+            except Exception as e:
+                logger.error(f"[IPC] ptz_move fehlgeschlagen: {e}")
         elif action == 'ptz_goto':
-            self._cam.ptz_goto(cmd.get('position', ''))
+            try:
+                self._cam.ptz_goto(cmd.get('position', ''))
+            except Exception as e:
+                logger.error(f"[IPC] ptz_goto fehlgeschlagen: {e}")
         elif action == 'ptz_calibrate':
-            self._cam.ptz_calibrate()
+            try:
+                self._cam.ptz_calibrate()
+            except Exception as e:
+                logger.error(f"[IPC] ptz_calibrate fehlgeschlagen: {e}")
         elif action == 'set_fan':
             # Lüfter-Stufe manuell setzen (0=aus, 1-4=Stufen, -1=auto)
             level = int(cmd.get('level', -1))
