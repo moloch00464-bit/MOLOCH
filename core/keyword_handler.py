@@ -115,6 +115,18 @@ class KeywordHandler:
             return self._action_diagnostics()
         elif action == "ptz_command":
             return self._action_ptz_command(text)
+        elif action == "fan_off":
+            return self._action_fan(0, response)
+        elif action == "fan_low":
+            return self._action_fan(1, response)
+        elif action == "fan_high":
+            return self._action_fan(3, response)
+        elif action == "fan_auto":
+            return self._action_fan(-1, response)
+        elif action == "led_command":
+            return self._action_led_command(text, response)
+        elif action == "power_status":
+            return self._action_power_status()
         else:
             logger.warning(f"[KEYWORD] Unbekannte Aktion: {action}")
             return None
@@ -298,6 +310,94 @@ class KeywordHandler:
             logger.info("[KEYWORD] PTZ Arbiter → MANUELL (voice_command)")
         except Exception as e:
             logger.debug(f"[KEYWORD] Arbiter setzen fehlgeschlagen: {e}")
+
+    def _action_fan(self, level: int, response: str) -> str:
+        """Lüfter direkt steuern via ThermalManager.
+
+        level: 0=aus, 1=niedrig, 2=mittel, 3=hoch, 4=max, -1=auto (Kernel)
+        """
+        try:
+            from core.hardware.thermal_manager import get_thermal_manager
+            tm = get_thermal_manager()
+            if level < 0:
+                # Auto: Schreibrecht deaktivieren, Kernel regelt wieder
+                tm._can_write_fan = False
+                logger.info("[KEYWORD] Lüfter: AUTO (Kernel)")
+            else:
+                tm._can_write_fan = True
+                tm._write_fan_state(level)
+                logger.info(f"[KEYWORD] Lüfter: Stufe {level}")
+        except Exception as e:
+            logger.error(f"[KEYWORD] Lüfter-Steuerung fehlgeschlagen: {e}")
+            return "Lüfter-Steuerung nicht verfügbar."
+        return response
+
+    def _action_led_command(self, text: str, response: str) -> str:
+        """RGB-LED am ReSpeaker per Sprache steuern.
+
+        Erkennt Farbe und Modus aus dem Text.
+        """
+        lower = text.lower()
+        farbe = "weiss"
+        modus = "statisch"
+
+        # Farbe erkennen
+        farben = ["rot", "gruen", "grün", "blau", "gelb", "cyan",
+                  "magenta", "weiss", "weiß", "aus", "regenbogen"]
+        for f in farben:
+            if f in lower:
+                farbe = f.replace("grün", "gruen").replace("weiß", "weiss")
+                break
+
+        # Modus erkennen
+        if "blink" in lower:
+            modus = "blinkend"
+        elif "pulsier" in lower:
+            modus = "pulsierend"
+        elif "regenbogen" in lower:
+            farbe = "regenbogen"
+            modus = ""
+
+        try:
+            from core.hardware.rgb_led_controller import get_rgb_led
+            led = get_rgb_led()
+            if modus:
+                led.set_color(farbe, modus)
+            else:
+                led.send_command(f"LED:{farbe}")
+            logger.info(f"[KEYWORD] LED: {farbe} {modus}")
+        except Exception as e:
+            logger.error(f"[KEYWORD] LED-Steuerung fehlgeschlagen: {e}")
+            return "LED nicht erreichbar."
+
+        if farbe == "aus":
+            return "LED aus."
+        antwort = f"LED {farbe}"
+        if modus:
+            antwort += f" {modus}"
+        return antwort + "."
+
+    def _action_power_status(self) -> str:
+        """Akku- und Stromversorgungsstatus abfragen."""
+        try:
+            from core.hardware.power_monitor import get_power_monitor
+            pm = get_power_monitor()
+            state = pm.get_status()
+            if not pm._available:
+                return "Stromversorgung: Netzteil aktiv, kein Akkustatus verfügbar."
+            quelle = state.get("power_source", "unbekannt")
+            pct = state.get("battery_pct", -1)
+            charging = state.get("is_charging", False)
+            watts = state.get("power_watts", 0)
+            if quelle == "akku":
+                return (f"Akkubetrieb: {pct}% geladen"
+                        + (" (lädt)" if charging else "") + f", {watts:.1f}W Verbrauch.")
+            else:
+                return (f"Netzteil aktiv, Akku {pct}%"
+                        + (" (lädt)" if charging else " (voll)") + f", {watts:.1f}W.")
+        except Exception as e:
+            logger.error(f"[KEYWORD] Power-Status fehlgeschlagen: {e}")
+            return "Stromstatus nicht verfügbar."
 
     # =========================================================================
     # IPC Helper
