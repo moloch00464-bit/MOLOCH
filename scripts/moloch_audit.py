@@ -840,13 +840,16 @@ def test_smoothed_scheduler():
 @auto_test("HEF-Modelle vorhanden", "modelle")
 def test_hef_files():
     hefs = {
-        "yolov8m_h10.hef": "YOLO Person",
+        "yolov11m_h10.hef": "YOLO Person (v11)",
         "scrfd_10g.hef": "SCRFD Face",
         "arcface_mobilefacenet.hef": "ArcFace",
         "yolov8s_pose_h10.hef": "Pose",
         "face_attr_resnet_v1_18.hef": "FaceAttr",
         "repvgg_a0_person_reid_512.hef": "ReID",
         "hand_landmark_lite.hef": "Hand",
+        "r3d_18.hef": "Activity (r3d_18)",
+        "person_attr_resnet_v1_18.hef": "PersonAttr",
+        "yolo_world_v2s.hef": "YOLO-World v2s",
     }
     base = "/mnt/moloch-data/hailo/models/"
     missing = []
@@ -1289,6 +1292,135 @@ def test_voice_pipeline_ready():
     return True, f"Voice bereit, Whisper={whisper}, TTS={tts}"
 
 # ============================================================
+# KEYWORD HANDLER (2026-04-09)
+# ============================================================
+
+@auto_test("keywords.json parsebar", "keyword")
+def test_keywords_json_loadable():
+    kw_path = os.path.join(MOLOCH_HOME, "config", "keywords.json")
+    if not os.path.exists(kw_path):
+        return False, "keywords.json nicht gefunden"
+    try:
+        with open(kw_path) as f:
+            data = json.load(f)
+        cats = data.get("categories", [])
+        total_kw = sum(len(c.get("keywords", [])) for c in cats)
+        return True, f"{len(cats)} Kategorien, {total_kw} Keywords"
+    except json.JSONDecodeError as e:
+        return False, f"JSON Parse-Error: {e}"
+
+@auto_test("KeywordHandler ladbar", "keyword")
+def test_keyword_handler_init():
+    try:
+        sys.path.insert(0, MOLOCH_HOME)
+        from core.keyword_handler import get_keyword_handler
+        kh = get_keyword_handler()
+        n_cats = len(kh._categories) if hasattr(kh, '_categories') else -1
+        if n_cats <= 0:
+            return False, f"Keine Kategorien geladen ({n_cats})"
+        return True, f"{n_cats} Kategorien aktiv"
+    except Exception as e:
+        return False, f"Init fehlgeschlagen: {e}"
+
+@auto_test("Keyword-Actions vollstaendig", "keyword")
+def test_keyword_actions_complete():
+    required = [
+        "owner_confirm", "calm_down", "ptz_command",
+        "fan_off", "fan_auto", "led_command",
+        "diagnostics", "power_status",
+    ]
+    try:
+        kw_path = os.path.join(MOLOCH_HOME, "config", "keywords.json")
+        with open(kw_path) as f:
+            data = json.load(f)
+        found = {c.get("action") for c in data.get("categories", [])}
+        missing = [a for a in required if a not in found]
+        if missing:
+            return False, f"Fehlende Actions: {', '.join(missing)}"
+        return True, f"{len(required)} Pflicht-Actions definiert"
+    except Exception as e:
+        return False, f"Fehler: {e}"
+
+# ============================================================
+# NPU WORKER NEU (2026-04-09)
+# ============================================================
+
+@auto_test("ActivityWorker aktiv", "npu_workers")
+def test_activity_worker_status():
+    data = read_status()
+    if not data:
+        return False, "Kein Status"
+    workers = data.get("worker_health", {})
+    aw = workers.get("ActivityWorker", {})
+    if not aw.get("running", False):
+        return False, "ActivityWorker nicht running"
+    if not aw.get("models_loaded", False):
+        return False, "ActivityWorker nicht loaded"
+    infs = aw.get("total_inferences", 0)
+    errs = aw.get("total_errors", 0)
+    return True, f"Inferences={infs}, Errors={errs}"
+
+@auto_test("PersonAttrWorker aktiv", "npu_workers")
+def test_person_attr_worker_status():
+    data = read_status()
+    if not data:
+        return False, "Kein Status"
+    workers = data.get("worker_health", {})
+    pw = workers.get("PersonAttrWorker", {})
+    if not pw.get("running", False):
+        return False, "PersonAttrWorker nicht running"
+    if not pw.get("models_loaded", False):
+        return False, "PersonAttrWorker nicht loaded"
+    infs = pw.get("total_inferences", 0)
+    errs = pw.get("total_errors", 0)
+    return True, f"Inferences={infs}, Errors={errs}"
+
+@auto_test("YOLOWorldWorker aktiv", "npu_workers")
+def test_yolo_world_worker_status():
+    data = read_status()
+    if not data:
+        return False, "Kein Status"
+    workers = data.get("worker_health", {})
+    yw = workers.get("YOLOWorldWorker", {})
+    if not yw.get("running", False):
+        return False, "YOLOWorldWorker nicht running"
+    if not yw.get("models_loaded", False):
+        return False, "YOLOWorldWorker nicht loaded"
+    infs = yw.get("total_inferences", 0)
+    errs = yw.get("total_errors", 0)
+    return True, f"Inferences={infs}, Errors={errs}"
+
+# ============================================================
+# IPC / VOICE TAGS (2026-04-09)
+# ============================================================
+
+@auto_test("IPC Hardware-Actions registriert", "ipc_actions")
+def test_ipc_hardware_actions():
+    svc_path = os.path.join(MOLOCH_HOME, "core", "moloch_service.py")
+    if not os.path.exists(svc_path):
+        return False, "moloch_service.py nicht gefunden"
+    with open(svc_path) as f:
+        code = f.read()
+    actions = ["ptz_move", "ptz_goto", "set_fan", "led_set"]
+    missing = [a for a in actions if f"== '{a}'" not in code]
+    if missing:
+        return False, f"Fehlende: {', '.join(missing)}"
+    return True, f"{len(actions)} IPC-Actions registriert"
+
+@auto_test("Voice Hardware-Tags [PTZ/FAN/LED]", "voice_tags")
+def test_voice_hardware_tags():
+    vp_path = os.path.join(MOLOCH_HOME, "core", "voice_pipeline.py")
+    if not os.path.exists(vp_path):
+        return False, "voice_pipeline.py nicht gefunden"
+    with open(vp_path) as f:
+        code = f.read()
+    tags = ["[PTZ:", "[FAN:", "[LED:"]
+    missing = [t for t in tags if t not in code]
+    if missing:
+        return False, f"Fehlende Tags: {', '.join(missing)}"
+    return True, "PTZ/FAN/LED Tags implementiert"
+
+# ============================================================
 # TEST RUNNER
 # ============================================================
 
@@ -1387,6 +1519,20 @@ def run_auto_tests():
 
     print("\n  ─── VOICE PIPELINE ───")
     test_voice_pipeline_ready()
+
+    print("\n  ─── KEYWORD HANDLER ───")
+    test_keywords_json_loadable()
+    test_keyword_handler_init()
+    test_keyword_actions_complete()
+
+    print("\n  ─── NPU WORKER (NEU) ───")
+    test_activity_worker_status()
+    test_person_attr_worker_status()
+    test_yolo_world_worker_status()
+
+    print("\n  ─── IPC / VOICE TAGS ───")
+    test_ipc_hardware_actions()
+    test_voice_hardware_tags()
 
 def run_interactive_tests():
     """Interaktive Tests — brauchen User vor der Kamera."""
