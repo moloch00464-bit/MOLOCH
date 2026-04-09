@@ -249,7 +249,7 @@
                 "usv status",
                 "stromstatus"
             ]
-        }
+        },
         {
             "id": "diagnostics",
             "description": "Systemdiagnose ausfuehren — Moloch prueft seinen eigenen Zustand",
