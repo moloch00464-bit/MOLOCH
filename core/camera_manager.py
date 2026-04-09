@@ -926,7 +926,7 @@ class CameraManager:
     # Panel Command Handler (PTZ / Cloud / Snapshot)
     # =================================================================
 
-    def ptz_move(self, direction, speed=0.3):
+    def ptz_move(self, direction, speed=0.3, step=30.0):
         """PTZ Bewegung in eine Richtung oder Home."""
         self._last_manual_ptz = time.time()
         from core.hardware.camera import get_camera_controller
@@ -936,8 +936,8 @@ class CameraManager:
         if direction == 'home':
             cam.goto_home()
         elif direction in ('up', 'down', 'left', 'right'):
-            cam.move_manual(direction, speed=speed)
-        logger.info(f"[PTZ] move {direction}")
+            cam.move_manual(direction, speed=speed, step=step)
+        logger.info(f"[PTZ] move {direction} step={step}")
 
     def ptz_goto(self, position):
         """PTZ zu vordefinierter Position fahren."""
