@@ -99,18 +99,32 @@
                 "schwenk links",
                 "schau nach links",
                 "dreh nach links",
+                "kamera nach links",
+                "kamera links",
+                "beweg die kamera links",
+                "dreh die kamera links",
                 "schwenk nach rechts",
                 "schwenk rechts",
                 "schau nach rechts",
                 "dreh nach rechts",
+                "kamera nach rechts",
+                "kamera rechts",
+                "beweg die kamera rechts",
+                "dreh die kamera rechts",
                 "schwenk nach oben",
                 "schwenk hoch",
                 "schau nach oben",
                 "schau hoch",
+                "kamera hoch",
+                "kamera nach oben",
+                "dreh die kamera hoch",
                 "schwenk nach unten",
                 "schwenk runter",
                 "schau nach unten",
                 "schau runter",
+                "kamera runter",
+                "kamera nach unten",
+                "dreh die kamera runter",
                 "schau zur tuer",
                 "schau zur tür",
                 "blick zur tuer",
@@ -121,9 +135,121 @@
                 "home position",
                 "zurueck zur home",
                 "park position",
-                "dreh dich um"
+                "dreh dich um",
+                "kamera home",
+                "kamera zurück",
+                "kamera mitte"
             ]
         },
+        {
+            "id": "fan_off",
+            "description": "Lüfter ausschalten (Stufe 0)",
+            "action": "fan_off",
+            "response": "Lüfter aus.",
+            "keywords": [
+                "lüfter aus",
+                "luefter aus",
+                "lüfter stopp",
+                "lüfter abschalten",
+                "kühlung aus",
+                "kühlung abschalten"
+            ]
+        },
+        {
+            "id": "fan_high",
+            "description": "Lüfter auf hohe Stufe (3-4)",
+            "action": "fan_high",
+            "response": "Lüfter auf hohe Stufe.",
+            "keywords": [
+                "lüfter höher",
+                "lüfter hoch",
+                "lüfter hochdrehen",
+                "lüfter volle kraft",
+                "lüfter maximum",
+                "luefter hoch",
+                "mehr kühlung",
+                "stell den lüfter höher",
+                "dreh den lüfter hoch",
+                "noctua hoch",
+                "noctua höher"
+            ]
+        },
+        {
+            "id": "fan_low",
+            "description": "Lüfter auf niedrige Stufe (1)",
+            "action": "fan_low",
+            "response": "Lüfter auf Stufe 1.",
+            "keywords": [
+                "lüfter leise",
+                "lüfter runter",
+                "lüfter niedriger",
+                "lüfter leiser",
+                "luefter runter",
+                "weniger kühlung",
+                "noctua runter",
+                "noctua leiser"
+            ]
+        },
+        {
+            "id": "fan_auto",
+            "description": "Lüfter auf automatische Regelung zurücksetzen",
+            "action": "fan_auto",
+            "response": "Lüfter auf automatisch.",
+            "keywords": [
+                "lüfter automatisch",
+                "lüfter auto",
+                "kühlung automatisch",
+                "luefter automatisch",
+                "noctua automatisch"
+            ]
+        },
+        {
+            "id": "led_command",
+            "description": "RGB-LED am ReSpeaker steuern (Farbe/Modus)",
+            "action": "led_command",
+            "response": "",
+            "keywords": [
+                "led rot",
+                "led grün",
+                "led gruen",
+                "led blau",
+                "led gelb",
+                "led cyan",
+                "led magenta",
+                "led weiss",
+                "led weiß",
+                "led aus",
+                "led blinken",
+                "led blinkend",
+                "led pulsieren",
+                "led pulsierend",
+                "led regenbogen",
+                "mach die led",
+                "zeig mir led",
+                "led farbe"
+            ]
+        },
+        {
+            "id": "power_status",
+            "description": "Akkustand und Stromversorgung abfragen",
+            "action": "power_status",
+            "response": "",
+            "keywords": [
+                "akkustand",
+                "akku",
+                "batterie",
+                "stromversorgung",
+                "netzteil",
+                "akkubetrieb",
+                "wie viel akku",
+                "wie ist der akku",
+                "läuft du auf akku",
+                "bist du am strom",
+                "pipower",
+                "usv status",
+                "stromstatus"
+            ]
+        }
         {
             "id": "diagnostics",
             "description": "Systemdiagnose ausfuehren — Moloch prueft seinen eigenen Zustand",
