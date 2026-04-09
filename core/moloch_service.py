@@ -2732,7 +2732,11 @@ class MolochService:
             logger.info(f"[PTZ] Home gesetzt: Pan={home_pan:.1f}, Tilt={home_tilt:.1f}")
         elif action == 'ptz_move':
             try:
-                self._cam.ptz_move(cmd.get('direction', ''), cmd.get('speed', 0.3))
+                self._cam.ptz_move(
+                    cmd.get('direction', ''),
+                    cmd.get('speed', 0.3),
+                    step=float(cmd.get('step', 30.0))
+                )
             except Exception as e:
                 logger.error(f"[IPC] ptz_move fehlgeschlagen: {e}")
         elif action == 'ptz_goto':
