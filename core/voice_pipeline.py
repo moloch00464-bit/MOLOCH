@@ -663,6 +663,26 @@ WEBSUCHE:
 Wenn Markus nach aktuellen Infos fragt (Wetter, Neuigkeiten, Fakten), bekommst du echte
 Suchergebnisse automatisch bereitgestellt (im Abschnitt --- WEBSUCHE ---).
 Nutze diese Ergebnisse direkt — erfinde KEINE Informationen.
+
+HARDWARE-STEUERUNG (Tags werden automatisch ausgefuehrt und aus deiner Antwort entfernt):
+Kamera bewegen:
+- [PTZ:right] — Kamera nach rechts
+- [PTZ:left]  — Kamera nach links
+- [PTZ:up]    — Kamera nach oben
+- [PTZ:down]  — Kamera nach unten
+- [PTZ:home]  — Home-Position
+Lüfter (NUR wenn Markus explizit fragt oder Temperatur kritisch):
+- [FAN:0] — Lüfter aus
+- [FAN:1] — Lüfter niedrig
+- [FAN:3] — Lüfter hoch
+- [FAN:4] — Lüfter Maximum
+RGB-LED am ReSpeaker:
+- [LED:rot] [LED:blau] [LED:gruen] [LED:gelb] [LED:magenta] [LED:aus]
+- [LED:rot blinkend] [LED:blau pulsierend] [LED:regenbogen]
+WICHTIG: Tags NUR verwenden wenn Markus EXPLIZIT nach Hardware-Steuerung fragt.
+NIEMALS: "Ich drehe die Kamera" ohne [PTZ:...] Tag schreiben — das waere eine Luege!
+Beispiel: "Klar, ich schau nach rechts. [PTZ:right]"
+Beispiel: "Lüfter hoch. [FAN:3]"
 """
 
     # Brain Context laden wenn vorhanden
@@ -1550,6 +1570,11 @@ class VoicePipeline:
         except Exception as e:
             logger.error(f"[VOICE] Spotify-Commands fehlgeschlagen: {e}")
 
+        try:
+            text = self._extract_hardware_commands(text)
+        except Exception as e:
+            logger.error(f"[VOICE] Hardware-Commands fehlgeschlagen: {e}")
+
         with self._lock:
             self._conversation.append({"role": "assistant", "content": text})
         return text
@@ -1825,6 +1850,76 @@ class VoicePipeline:
                     logger.info(f"[SPOTIFY] Ausgefuehrt: {cmd_str}")
             except Exception as e:
                 logger.error(f"[SPOTIFY] Command-Ausfuehrung fehlgeschlagen: {e}")
+
+        threading.Thread(target=_execute, daemon=True).start()
+        return clean_text
+
+    def _extract_hardware_commands(self, text: str) -> str:
+        """PTZ/FAN/LED-Tags aus LLM-Antwort extrahieren und ausfuehren.
+
+        Format: [PTZ:right] [FAN:3] [LED:rot blinkend]
+        Tags werden entfernt bevor der Text gesprochen wird.
+        """
+        import re
+        pattern = r'\[(PTZ|FAN|LED):([^\]]+)\]'
+        matches = re.findall(pattern, text)
+        if not matches:
+            return text
+
+        # Tags entfernen
+        clean_text = re.sub(pattern, '', text).strip()
+        clean_text = re.sub(r'  +', ' ', clean_text)
+
+        def _execute():
+            for tag_type, value in matches:
+                try:
+                    value = value.strip()
+                    tag_type = tag_type.upper()
+
+                    if tag_type == 'PTZ':
+                        # Richtung → IPC ptz_move oder ptz_goto
+                        mapping = {
+                            'right': 'right', 'rechts': 'right',
+                            'left': 'left',   'links': 'left',
+                            'up': 'up',       'hoch': 'up', 'oben': 'up',
+                            'down': 'down',   'runter': 'down', 'unten': 'down',
+                        }
+                        if value.lower() in ('home', 'mitte', 'park'):
+                            cmd_file = f"/tmp/moloch_cmd_{int(time.time()*1000)}.json"
+                            import json as _json
+                            with open(cmd_file, 'w') as f:
+                                _json.dump({'action': 'ptz_goto', 'position': 'home'}, f)
+                        elif value.lower() in mapping:
+                            cmd_file = f"/tmp/moloch_cmd_{int(time.time()*1000)}.json"
+                            import json as _json
+                            with open(cmd_file, 'w') as f:
+                                _json.dump({'action': 'ptz_move',
+                                            'direction': mapping[value.lower()]}, f)
+                        logger.info(f"[HW-TAG] PTZ: {value}")
+
+                    elif tag_type == 'FAN':
+                        # Stufe 0-4
+                        level = int(value)
+                        from core.hardware.thermal_manager import get_thermal_manager
+                        tm = get_thermal_manager()
+                        tm._can_write_fan = True
+                        tm._write_fan_state(level)
+                        logger.info(f"[HW-TAG] FAN: Stufe {level}")
+
+                    elif tag_type == 'LED':
+                        # "rot blinkend" → farbe + modus
+                        parts = value.split()
+                        farbe = parts[0] if parts else 'weiss'
+                        modus = parts[1] if len(parts) > 1 else 'statisch'
+                        from core.hardware.rgb_led_controller import get_rgb_led
+                        if farbe == 'regenbogen':
+                            get_rgb_led().send_command('LED:regenbogen')
+                        else:
+                            get_rgb_led().set_color(farbe, modus)
+                        logger.info(f"[HW-TAG] LED: {farbe} {modus}")
+
+                except Exception as e:
+                    logger.error(f"[HW-TAG] {tag_type}:{value} fehlgeschlagen: {e}")
 
         threading.Thread(target=_execute, daemon=True).start()
         return clean_text
