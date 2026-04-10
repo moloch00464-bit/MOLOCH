@@ -88,6 +88,7 @@ class PersonAttrWorker(BaseWorker):
         self._model = None
         self._out_names = []
         self._out_shapes = {}
+        self._sigmoid_thresh = SIGMOID_THRESHOLD  # IPC-steuerbar
 
     def _load_models(self, vdevice):
         if not os.path.exists(PERSON_ATTR_HEF):
@@ -135,7 +136,7 @@ class PersonAttrWorker(BaseWorker):
             aktive = [
                 ATTR_LABELS[i]
                 for i in range(min(len(scores), len(ATTR_LABELS)))
-                if scores[i] >= SIGMOID_THRESHOLD
+                if scores[i] >= self._sigmoid_thresh
             ]
 
             results.append({

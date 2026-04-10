@@ -146,6 +146,7 @@ class ActivityWorker(BaseWorker):
         self._out_shapes = {}
         self._frame_buffer: deque = deque(maxlen=CLIP_FRAMES)
         self._buffer_lock = threading.Lock()
+        self._min_conf = 0.4  # IPC-steuerbar: Mindest-Score fuer Activity
 
     def _load_models(self, vdevice):
         if not os.path.exists(ACTIVITY_HEF):
@@ -213,7 +214,7 @@ class ActivityWorker(BaseWorker):
 
         # Relevant-Flag: nur Moloch-relevante Aktivitaeten weiterleiten
         # r3d_18 gibt sonst "snowmobiling", "riding mule" etc. aus — das ist physisch falsch
-        relevant = any(kw in top_label for kw in RELEVANT_KEYWORDS)
+        relevant = any(kw in top_label for kw in RELEVANT_KEYWORDS) and top_score >= self._min_conf
 
         if relevant:
             logger.info("[ActivityWorker] %s (%.2f)", top_label, top_score)

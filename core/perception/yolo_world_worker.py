@@ -140,6 +140,7 @@ class YOLOWorldWorker(BaseWorker):
         self._classes: List[str] = []
         self._embeddings: Optional[np.ndarray] = None  # [1, 80, 512] float32
         self._embed_lock = threading.Lock()
+        self._conf_thresh = CONF_THRESH  # IPC-steuerbar
 
     def _load_models(self, vdevice):
         if not os.path.exists(YOLO_WORLD_HEF):
@@ -234,7 +235,7 @@ class YOLOWorldWorker(BaseWorker):
 
         self._model.run([bindings], INFERENCE_TIMEOUT_MS)
 
-        detections = _decode_yolo_world(bufs, CONF_THRESH, classes)
+        detections = _decode_yolo_world(bufs, self._conf_thresh, classes)
 
         if detections:
             top = detections[0]
