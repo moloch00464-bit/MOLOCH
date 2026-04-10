@@ -1677,10 +1677,11 @@ class TappasPipeline:
         if getattr(self, '_roi_dispatcher', None):
             try:
                 with self._lock:
-                    all_dets = [d for d in self._detections if d.get("class") == "person"]
-                # Pose-Ergebnis direkt aus ResultCollector — umgeht Frame-Sync-Problem
+                    person_dets = [d for d in self._detections if d.get("class") == "person"]
+                all_dets = list(person_dets)
+                # Pose-Keypoints nur einmischen wenn YOLO Person sieht — verhindert Ghost-Landmarks
                 rc = getattr(self, '_result_collector', None)
-                if rc:
+                if person_dets and rc:
                     pose_res = rc.get_latest("PoseWorker")
                     if pose_res and pose_res.data.get("poses"):
                         for pose in pose_res.data["poses"][:2]:
