@@ -589,7 +589,7 @@ class MolochService:
         """
         POLL_INTERVAL = 0.05  # 20 Hz — fluessige BBox-Updates fuer Panel
         OFFLINE_POLL = 1.0   # 1 Hz wenn Pipeline offline
-        STATUS_WRITE_MOD = 1  # Status-JSON bei jedem Tick schreiben (20 Hz, /dev/shm = RAM)
+        STATUS_WRITE_MOD = 5  # Status-JSON jeden 5. Tick (4 Hz, Panel pollt nur 2 Hz)
         _last_pframe_id = None
         _decision_counter = 0  # DecisionEngine nur jeden 20. Frame (= 1 Hz bei 20 Hz Loop)
         _status_write_counter = 0
