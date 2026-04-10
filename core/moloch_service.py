@@ -2446,6 +2446,25 @@ class MolochService:
             if attr_val and value is not None and hasattr(self._inference, attr_val):
                 setattr(self._inference, attr_val, float(value))
                 logger.info(f"[IPC] Threshold: {attr} = {float(value):.3f}")
+            # Worker-spezifische Thresholds (nicht in InferenceEngine)
+            elif attr == 'activity_conf' and value is not None:
+                if hasattr(self, '_tappas') and self._tappas:
+                    aw = getattr(self._tappas, '_activity_worker', None)
+                    if aw:
+                        aw._min_conf = float(value)
+                        logger.info(f"[IPC] Activity Confidence = {float(value):.3f}")
+            elif attr == 'person_attr_thresh' and value is not None:
+                if hasattr(self, '_tappas') and self._tappas:
+                    pw = getattr(self._tappas, '_person_attr_worker', None)
+                    if pw:
+                        pw._sigmoid_thresh = float(value)
+                        logger.info(f"[IPC] PersonAttr Threshold = {float(value):.3f}")
+            elif attr == 'yolo_world_conf' and value is not None:
+                if hasattr(self, '_tappas') and self._tappas:
+                    yw = getattr(self._tappas, '_yolo_world_worker', None)
+                    if yw:
+                        yw._conf_thresh = float(value)
+                        logger.info(f"[IPC] YOLO-World Confidence = {float(value):.3f}")
         elif action == 'set_hand_params':
             if self._perception:
                 if cmd.get('disable_occlusion'):
