@@ -284,6 +284,33 @@
                 "gesicht speichern",
                 "lern mein gesicht"
             ]
+        },
+        {
+            "id": "describe_scene",
+            "description": "Szenen-Beschreibung per Qwen2-VL abfragen",
+            "action": "describe_scene",
+            "response": "Ich schaue.",
+            "keywords": [
+                "was siehst du",
+                "beschreib was du siehst",
+                "was ist zu sehen",
+                "beschreib den raum",
+                "szene beschreiben",
+                "wie sieht es aus"
+            ]
+        },
+        {
+            "id": "depth_query",
+            "description": "Tiefenschaetzung abfragen",
+            "action": "depth_query",
+            "response": "Ich messe.",
+            "keywords": [
+                "wie weit weg",
+                "wie weit ist das",
+                "wie nah bin ich",
+                "entfernung messen",
+                "distanz messen"
+            ]
         }
     ]
 }

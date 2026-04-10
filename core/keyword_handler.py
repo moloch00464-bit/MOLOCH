@@ -127,6 +127,10 @@ class KeywordHandler:
             return self._action_led_command(text, response)
         elif action == "power_status":
             return self._action_power_status()
+        elif action == "describe_scene":
+            return self._action_describe_scene()
+        elif action == "depth_query":
+            return self._action_depth_query()
         else:
             logger.warning(f"[KEYWORD] Unbekannte Aktion: {action}")
             return None
@@ -405,6 +409,36 @@ class KeywordHandler:
         except Exception as e:
             logger.error(f"[KEYWORD] Power-Status fehlgeschlagen: {e}")
             return "Stromstatus nicht verfügbar."
+
+    def _action_describe_scene(self) -> str:
+        """Szene via Qwen2-VL-2B beschreiben (Frame aus SHM)."""
+        try:
+            from core.perception.npu_extras import get_npu_extras
+            extras = get_npu_extras()
+            desc = extras.vlm_describe()
+            if desc:
+                logger.info(f"[KEYWORD] VLM-Beschreibung: {desc[:80]}")
+                return desc
+            return "Ich kann gerade nichts erkennen."
+        except Exception as e:
+            logger.error(f"[KEYWORD] VLM-Beschreibung fehlgeschlagen: {e}")
+            return "Visuelle Analyse nicht verfuegbar."
+
+    def _action_depth_query(self) -> str:
+        """Tiefenschaetzung per DepthWorker abfragen."""
+        try:
+            from core.perception.vision_workers import get_worker_registry
+            reg = get_worker_registry()
+            result = reg.get_depth_result() if hasattr(reg, "get_depth_result") else None
+            if result and result.get("depth_m", 0) > 0:
+                d = result["depth_m"]
+                if d < 1.0:
+                    return f"Etwa {int(d * 100)} Zentimeter vor mir."
+                return f"Ungefaehr {d:.1f} Meter entfernt."
+            return "Tiefenmessung nicht verfuegbar."
+        except Exception as e:
+            logger.error(f"[KEYWORD] Tiefe fehlgeschlagen: {e}")
+            return "Tiefenanalyse nicht verfuegbar."
 
     # =========================================================================
     # IPC Helper
