@@ -68,8 +68,9 @@ class PoseWorker(BaseWorker):
         logger.info("[PoseWorker] YOLOv8s-Pose geladen — Outputs: %d", len(self._pose_out_names))
 
     def _process(self, item: WorkItem) -> WorkerResult:
-        # Guard: Kein Mensch erkannt → keine Pose-Inference (verhindert Ghost-Keypoints)
-        has_person = any(d.get("class") == "person" for d in (item.detections or []))
+        # Guard: Kein Mensch/Gesicht erkannt → keine Pose-Inference (verhindert Ghost-Keypoints)
+        # "face" als Fallback: bei Nahaufnahme erkennt YOLO keinen vollen Koerper
+        has_person = any(d.get("class") in ("person", "face") for d in (item.detections or []))
         if not has_person:
             return WorkerResult(
                 worker_name="PoseWorker",

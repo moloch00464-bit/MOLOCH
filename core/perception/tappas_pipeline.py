@@ -1677,8 +1677,10 @@ class TappasPipeline:
         if getattr(self, '_roi_dispatcher', None):
             try:
                 with self._lock:
+                    # Person + Face mitgeben: YOLO-Person fuer Koerper, Face als Fallback bei Nahaufnahme
                     person_dets = [d for d in self._detections if d.get("class") == "person"]
-                all_dets = list(person_dets)
+                    face_dets = [d for d in self._detections if d.get("class") == "face"]
+                all_dets = person_dets + face_dets
                 # Pose-Keypoints nur einmischen wenn YOLO Person sieht — verhindert Ghost-Landmarks
                 rc = getattr(self, '_result_collector', None)
                 if person_dets and rc:
