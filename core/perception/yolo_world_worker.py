@@ -39,8 +39,15 @@ EMBED_FILE  = os.path.join(EMBED_DIR, "default_embeddings.npy")
 CLASS_FILE  = os.path.join(EMBED_DIR, "default_classes.json")
 
 NUM_CLASSES = 80
-CONF_THRESH = 0.35
+CONF_THRESH = 0.50
 REG_MAX = 16   # DFL bins
+
+# Klassen die im Raum NICHT existieren — False Positives rausfiltern
+ROOM_BLACKLIST = {
+    "elevator", "stair", "car", "fire extinguisher", "first aid kit",
+    "ceiling", "wall", "floor",  # Trivial, kein Mehrwert
+    "__pad__", "unknown object", "body",  # Meta-Klassen
+}
 
 # Strides der 3 YOLO-Scales fuer 640x640 Input
 STRIDES = [8, 16, 32]
@@ -111,7 +118,7 @@ def _decode_yolo_world(outputs: Dict, conf_thresh: float, classes: List[str],
             cls_id = int(best_cls[idx[k]])
             score  = float(max_scores[idx[k]])
             label  = classes[cls_id] if cls_id < len(classes) else f"cls_{cls_id}"
-            if label == "__pad__":
+            if label in ROOM_BLACKLIST:
                 continue
             results.append({
                 "label": label,
