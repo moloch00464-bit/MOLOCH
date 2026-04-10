@@ -80,16 +80,26 @@ MODEL_DEFS = [
         ("Min. Keypoint Score", "thresholds", "pose_kpt_thresh",
          0.1, 0.9, 0.50, 0.05, "", "Keypoints unter diesem Score werden ausgeblendet"),
     ]),
-    ("Person-ReID", "repvgg_a0_person_reid_512.hef (5.1 MB)", False, [
-        # INAKTIV: Valve-Oeffnung crasht (cv2::resize Bug in kompiliertem SO)
-        # HEF geladen im NPU-RAM, aber Valve geschlossen
+    ("Person-ReID", "repvgg_a0_person_reid_512.hef (5.1 MB)", True, [
+        # Kein konfigurierbarer Threshold — ReID nutzt Cosine-Similarity
     ]),
-    ("Hand Landmark", "hand_landmark_lite.hef (5.3 MB)", False, [
+    ("Hand Landmark", "hand_landmark_lite.hef (5.3 MB)", True, [
         ("Confidence", "thresholds", "hand_conf",
          0.1, 0.9, 0.65, 0.05, "", "Hand/Gesten Detection Confidence"),
         ("Presence Thresh", "thresholds", "hand_presence",
          0.1, 0.9, 0.50, 0.05, "", "Ab welchem Score eine Hand als 'da' gilt"),
-        # INAKTIV: Valve-Oeffnung crasht (cv2::resize Bug in kompiliertem SO)
+    ]),
+    ("Activity (r3d_18)", "r3d_18.hef (14 MB)", True, [
+        ("Min. Confidence", "thresholds", "activity_conf",
+         0.1, 0.9, 0.40, 0.05, "", "Minimale Confidence fuer Aktivitaetserkennung"),
+    ]),
+    ("Person-Attribute", "person_attr_resnet_v1_18.hef (1.2 MB)", True, [
+        ("Sigmoid Threshold", "thresholds", "person_attr_thresh",
+         0.1, 0.9, 0.50, 0.05, "", "Ab welchem Score ein Attribut als aktiv gilt"),
+    ]),
+    ("YOLO-World v2s", "yolo_world_v2s.hef (27 MB)", True, [
+        ("Confidence", "thresholds", "yolo_world_conf",
+         0.1, 0.9, 0.35, 0.05, "", "Zero-Shot Object Detection Confidence"),
     ]),
 ]
 
