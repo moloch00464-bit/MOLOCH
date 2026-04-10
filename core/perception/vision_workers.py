@@ -277,9 +277,34 @@ class ResultCollector:
                 if worker.is_alive():
                     logger.warning("[ResultCollector] Worker %s haengt!", name)
 
+    def get_depth_result(self) -> Optional[dict]:
+        """Letztes DepthWorker-Ergebnis als Dict (fuer keyword_handler)."""
+        result = self.get_latest("DepthWorker")
+        if result and result.success:
+            return result.data
+        return None
+
     def get_health(self) -> Dict[str, Dict]:
         """Health-Status aller Worker (Snapshot-Pattern: Lock nur fuer Kopie)."""
         with self._lock:
             snapshot = list(self._workers.items())  # Nur Snapshot unter Lock
         # Iteration lock-frei — kein Deadlock mit Worker-Threads
         return {name: worker.get_health() for name, worker in snapshot}
+
+
+# ============================================================
+# Modul-Level Registry — wird von TappasPipeline gesetzt
+# ============================================================
+
+_registry_instance: Optional[ResultCollector] = None
+
+
+def set_worker_registry(collector: ResultCollector):
+    """Von TappasPipeline aufgerufen sobald ResultCollector bereit ist."""
+    global _registry_instance
+    _registry_instance = collector
+
+
+def get_worker_registry() -> Optional[ResultCollector]:
+    """ResultCollector-Instanz holen (None wenn Pipeline noch nicht gestartet)."""
+    return _registry_instance

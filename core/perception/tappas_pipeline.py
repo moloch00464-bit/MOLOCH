@@ -52,6 +52,7 @@ from core.perception.pose_worker import PoseWorker, ReIDWorker, HandWorker
 from core.perception.person_attr_worker import PersonAttrWorker
 from core.perception.activity_worker import ActivityWorker
 from core.perception.yolo_world_worker import YOLOWorldWorker
+from core.perception.depth_worker import DepthWorker
 
 logger = logging.getLogger("TappasPipeline")
 
@@ -390,9 +391,17 @@ class TappasPipeline:
             self._result_collector.register_worker(self._yolo_world_worker)
             self._roi_dispatcher.register_worker(self._yolo_world_worker, every_n_frames=60)
 
+            # DepthWorker: Monokulare Tiefenschaetzung (alle 10 Frames, Vollbild)
+            self._depth_worker = DepthWorker()
+            self._result_collector.register_worker(self._depth_worker)
+            self._roi_dispatcher.register_worker(self._depth_worker, every_n_frames=10)
+
             self._result_collector.start_all()
             self._activity_frame_counter = 0
-            logger.info("[WORKERS] 7 Worker gestartet: Face(2), Pose(3), Hand(4), ReID(5), PersonAttr(6), Activity(30), YOLOWorld(60)")
+            # Modul-Level Registry setzen — fuer keyword_handler Zugriff
+            from core.perception.vision_workers import set_worker_registry
+            set_worker_registry(self._result_collector)
+            logger.info("[WORKERS] 8 Worker gestartet: Face(2), Pose(3), Hand(4), ReID(5), PersonAttr(6), Activity(30), YOLOWorld(60), Depth(10)")
         except Exception as e:
             logger.error("[WORKERS] Worker-Start fehlgeschlagen: %s", e)
             self._face_worker = None
