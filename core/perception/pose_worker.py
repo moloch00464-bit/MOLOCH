@@ -98,7 +98,7 @@ class PoseWorker(BaseWorker):
         outputs = {n: bufs[n].copy() for n in self._pose_out_names}
 
         # Decode
-        poses = decode_yolov8_pose(outputs, 640, 640, conf_thresh=0.3)
+        poses = decode_yolov8_pose(outputs, 640, 640, conf_thresh=0.2)
 
         # Keypoints von Model-Space (640x640) auf normalisierte [0,1] Coords umrechnen
         for pose in poses:
@@ -256,7 +256,7 @@ class HandWorker(BaseWorker):
             # Beide Handgelenke pruefen
             for idx, side in [(self.LEFT_WRIST, "L"), (self.RIGHT_WRIST, "R")]:
                 kp = kpts[idx]
-                if len(kp) < 3 or kp[2] < 0.15:
+                if len(kp) < 3 or kp[2] < 0.1:
                     continue  # Confidence zu niedrig
                 # Normalisierte Coords [0,1] → Pixel
                 cx, cy = kp[0], kp[1]
