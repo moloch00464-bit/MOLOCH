@@ -9,13 +9,17 @@ Temperaturkurve (2026-04-02 angepasst):
   (cooling_device0, Level 1 ab 50°C) gar nicht anspringen muss.
   Der Noctua soll die CPU unter 50°C halten.
 
-  <42°C   → 25%  (leises Grundrauschen)
+  <42°C   → 30%  (leises Grundrauschen, Minimum)
   42-47°C → 40%  (praeventiv hochdrehen)
   47-52°C → 60%  (CPU-Kuehler Schwelle naht)
   52-60°C → 80%  (CPU-Kuehler sollte jetzt schon wieder ausgehen)
   >60°C   → 100% (Notfall — alles rein)
 
   Hysterese: 3°C nach unten (verhindert Oszillation)
+
+Kooperativ: Wenn der Pi5 Active Cooler (cooling_device0) aktiv ist,
+  legt der Noctua +15% Duty drauf, um die CPU schneller zu kuehlen.
+  Die Erhoehung bleibt bis die Temperatur unter die Hysterese faellt.
 
 Fail-Safe: Bei Fehler wird Luefter auf 100% gesetzt.
 """
@@ -34,6 +38,9 @@ POLL_INTERVALL = 5  # Sekunden zwischen Messungen
 
 # Pi5 Built-in Fan Controller hat 4 Kanaele — diesen NICHT verwenden
 PI5_BUILTIN_NPWM = 4
+
+# Pi5 Active Cooler State (cooling_device0): 0=aus, 1-3=aktiv
+CPU_FAN_STATE = "/sys/class/thermal/cooling_device0/cur_state"
 
 
 def _finde_pwm_chip():
@@ -89,8 +96,17 @@ def pwm_init(chip_pfad, kanal_pfad):
         pass
 
     pwm_schreiben(f"{kanal_pfad}/period", PWM_PERIOD_NS)
-    pwm_schreiben(f"{kanal_pfad}/duty_cycle", int(PWM_PERIOD_NS * 0.25))
+    pwm_schreiben(f"{kanal_pfad}/duty_cycle", int(PWM_PERIOD_NS * 0.30))
     pwm_schreiben(f"{kanal_pfad}/enable", 1)
+
+
+def cpu_fan_state_lesen():
+    """Pi5 Active Cooler State lesen (0=aus, 1-3=aktiv)."""
+    try:
+        with open(CPU_FAN_STATE) as f:
+            return int(f.read().strip())
+    except (OSError, ValueError):
+        return 0
 
 
 def temperatur_lesen():
@@ -105,7 +121,7 @@ def temperatur_lesen():
 
 
 # Hysterese-Zustand: letzter Duty-Wert merken
-_letzter_duty_pct = 0.25
+_letzter_duty_pct = 0.30
 
 
 def temp_zu_duty(temp):
@@ -136,7 +152,7 @@ def temp_zu_duty(temp):
 
     # Unter 42°C: Grunddrehzahl, aber mit Hysterese
     # Nur runterschalten wenn Temp 3°C unter der letzten Schwelle liegt
-    if _letzter_duty_pct > 0.25:
+    if _letzter_duty_pct > 0.30:
         # Finde die Schwelle die zum letzten Duty gehoert
         for schwelle, duty_pct in stufen:
             if duty_pct == _letzter_duty_pct:
@@ -145,8 +161,8 @@ def temp_zu_duty(temp):
                     return int(PWM_PERIOD_NS * _letzter_duty_pct)
                 break
 
-    _letzter_duty_pct = 0.25
-    return int(PWM_PERIOD_NS * 0.25)   # 25% Grunddrehzahl
+    _letzter_duty_pct = 0.30
+    return int(PWM_PERIOD_NS * 0.30)   # 30% Grunddrehzahl (Minimum)
 
 
 def main():
@@ -164,9 +180,20 @@ def main():
             try:
                 temp = temperatur_lesen()
                 duty = temp_zu_duty(temp)
+
+                # Kooperativ: Wenn Pi5 Active Cooler aktiv, Noctua +15%
+                cpu_fan = cpu_fan_state_lesen()
+                if cpu_fan > 0:
+                    duty_pct = duty / PWM_PERIOD_NS
+                    duty_pct = min(1.0, duty_pct + 0.15)
+                    duty = int(PWM_PERIOD_NS * duty_pct)
+                    print(f"Temp: {temp:.1f}°C → Fan: {duty_pct*100:.0f}% "
+                          f"[Kooperativ: CPU-Fan={cpu_fan}, +15%]", flush=True)
+                else:
+                    pct = (duty / PWM_PERIOD_NS) * 100
+                    print(f"Temp: {temp:.1f}°C → Fan: {pct:.0f}%", flush=True)
+
                 pwm_schreiben(f"{kanal_pfad}/duty_cycle", duty)
-                pct = (duty / PWM_PERIOD_NS) * 100
-                print(f"Temp: {temp:.1f}°C → Fan: {pct:.0f}%", flush=True)
             except Exception as e:
                 # Messfehler: Luefter sicher auf 100% setzen
                 print(f"WARNUNG Messfehler: {e} → Luefter auf 100%", file=sys.stderr, flush=True)
