@@ -389,12 +389,12 @@ class PreviewModule:
                                 for (a, b) in COCO_PAIRS:
                                     if a < len(kpts) and b < len(kpts):
                                         ka, kb = kpts[a], kpts[b]
-                                        if len(ka) > 2 and len(kb) > 2 and ka[2] > 0.2 and kb[2] > 0.2:
+                                        if len(ka) > 2 and len(kb) > 2 and ka[2] > 0.1 and kb[2] > 0.1:
                                             ax, ay = int(ka[0]*cw), int(ka[1]*ch)
                                             bx, by = int(kb[0]*cw), int(kb[1]*ch)
                                             draw.line([ax, ay, bx, by], fill=(255, 165, 0), width=1)
                                 for kp in kpts:
-                                    if len(kp) > 2 and kp[2] > 0.2:
+                                    if len(kp) > 2 and kp[2] > 0.1:
                                         kpx, kpy = int(kp[0]*cw), int(kp[1]*ch)
                                         draw.ellipse([kpx-2, kpy-2, kpx+2, kpy+2], fill=(255, 165, 0))
 
