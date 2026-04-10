@@ -1511,7 +1511,7 @@ class TappasPipeline:
             pose_age = frame_id - getattr(pose_result, 'frame_id', 0) if pose_result else 999
             # Pose-Daten wenn Ergebnis frisch (<= 12 Frames) — KEIN persons-Check
             # (PoseWorker laeuft auch ohne YOLO-Person-Detection)
-            if pose_result and pose_result.data.get("poses") and pose_age <= 5:
+            if pose_result and pose_result.data.get("poses") and pose_age <= 15:
                 # Max 2 Poses — mehr erzeugt visuelles Chaos im Preview
                 for pose in pose_result.data["poses"][:2]:
                     kpts = pose.get("keypoints")
@@ -1681,9 +1681,9 @@ class TappasPipeline:
                     person_dets = [d for d in self._detections if d.get("class") == "person"]
                     face_dets = [d for d in self._detections if d.get("class") == "face"]
                 all_dets = person_dets + face_dets
-                # Pose-Keypoints nur einmischen wenn YOLO Person sieht — verhindert Ghost-Landmarks
+                # Pose-Keypoints einmischen wenn Person ODER Gesicht erkannt — Nahaufnahme-Fallback
                 rc = getattr(self, '_result_collector', None)
-                if person_dets and rc:
+                if (person_dets or face_dets) and rc:
                     pose_res = rc.get_latest("PoseWorker")
                     if pose_res and pose_res.data.get("poses"):
                         for pose in pose_res.data["poses"][:2]:
