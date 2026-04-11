@@ -113,37 +113,36 @@ def _build_inner_state_text(state: Dict, templates: Dict) -> str:
 
 def build_system_prompt(mode: str, vision: Dict, state: Dict,
                         templates: Dict, settings: Dict) -> str:
-    """Vollständigen System-Prompt zusammenbauen (v1.4).
+    """Vollständigen System-Prompt zusammenbauen (v1.5).
 
-    Reihenfolge: Stil zuerst (hoechste Prioritaet fuer kleines Modell),
-    dann Persona, dann Kontext, dann globale Instruktionen.
+    Reihenfolge: Persona ZUERST (Identitaets-Anker fuer kleines Modell),
+    dann Stil/Tension, dann Kontext, dann globale Instruktionen.
     """
     features = settings.get("features", {})
     parts = []
 
-    # Stil-Regeln ZUERST — kleines Modell (Qwen2.5-1.5B) folgt fruehen Instruktionen besser
-    style_rules = templates.get("style_rules", "")
-    if style_rules:
-        parts.append(style_rules + "\n")
-
-    # Tension-Reaktion direkt nach Stil — gilt immer, unabhaengig von Zone
-    tension_rules = templates.get("tension_rules", "")
-    if tension_rules:
-        parts.append(tension_rules + "\n")
-
-    # Basis-Persona (Guardian / Shadow / Berserker)
+    # 1. Basis-Persona ZUERST — Qwen2.5-1.5B braucht den Identitaets-Anker als erstes
     base = templates.get("system_prompts", {}).get(mode, "")
     parts.append(base)
 
-    # Visueller Kontext: wen/was sieht Moloch gerade
+    # 2. Stil + Tension direkt nach Persona — wirken auf etablierte Identitaet
+    style_rules = templates.get("style_rules", "")
+    if style_rules:
+        parts.append("\n" + style_rules)
+
+    tension_rules = templates.get("tension_rules", "")
+    if tension_rules:
+        parts.append("\n" + tension_rules)
+
+    # 3. Visueller Kontext: wen/was sieht Moloch gerade
     if features.get("vision_context_in_prompt", True):
         parts.append(_build_vision_text(vision, templates))
 
-    # Innerer Zustand: Tension, Dominance, Zone
+    # 4. Innerer Zustand: Tension, Dominance, Zone
     if features.get("inner_state_in_prompt", True):
         parts.append(_build_inner_state_text(state, templates))
 
-    # Global Instructions: Emergenz + Intent + Stabilitaet
+    # 5. Global Instructions: Emergenz + Intent + Stabilitaet
     global_instr = templates.get("global_instructions", "")
     if global_instr:
         parts.append("\n" + global_instr)
