@@ -503,9 +503,12 @@ class TappasPipeline:
                         health[name] = {"error": "get_health() fehlgeschlagen"}
             dispatcher = getattr(self, '_roi_dispatcher', None)
             if dispatcher:
-                health["_dispatcher"] = dispatcher.get_stats()
-        except Exception:
-            pass  # Status-JSON darf nie wegen worker_health crashen
+                try:
+                    health["_dispatcher"] = dispatcher.get_stats()
+                except Exception:
+                    health["_dispatcher"] = {"error": "get_stats() fehlgeschlagen"}
+        except Exception as e:
+            logger.debug(f"[WORKER-HEALTH] Fehler: {e}")
         return health
 
     def get_npu_sched_mode(self) -> str:
@@ -2006,6 +2009,11 @@ class TappasPipeline:
                 pf.gender = best_attr_face["gender"]
             if best_attr_face.get("smiling") is not None:
                 pf.emotion = "happy" if best_attr_face["smiling"] else "neutral"
+            # Head Pose: (pitch, yaw, roll) vom FaceWorker
+            hp = best_attr_face.get("head_pose")
+            if hp and len(hp) >= 2:
+                pf.head_pitch = float(hp[0])
+                pf.head_yaw = float(hp[1])
 
         # Perception Router: Szenario + aktive Modelle
         pf.scenario = self._scheduler.get_scenario()
