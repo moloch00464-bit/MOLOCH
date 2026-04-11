@@ -135,6 +135,11 @@ def build_system_prompt(mode: str, vision: Dict, state: Dict,
     if style_rules:
         parts.append("\n" + style_rules)
 
+    # Tension-Reaktion: Sprache skaliert mit Tension-Wert (v1.3)
+    tension_rules = templates.get("tension_rules", "")
+    if tension_rules:
+        parts.append("\n" + tension_rules)
+
     return "".join(parts)
 
 
