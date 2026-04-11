@@ -434,16 +434,16 @@ class NpuExtras:
                 try:
                     self._vlm.clear_context()
                     self._vlm.release()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"[NPU-EXTRAS] VLM Release Fehler: {e}")
                 self._vlm = None
 
             for cfg in [self._clip_configured, self._ocr_det_configured, self._ocr_rec_configured]:
                 if cfg:
                     try:
                         cfg.shutdown()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"[NPU-EXTRAS] Config Shutdown Fehler: {e}")
             self._clip_configured = None
             self._clip_model = None
             self._ocr_det_configured = None
@@ -454,8 +454,8 @@ class NpuExtras:
             if self._vdevice:
                 try:
                     self._vdevice.release()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.error(f"[NPU-EXTRAS] VDevice Release Fehler: {e}")
                 self._vdevice = None
 
             logger.info("[NPU-EXTRAS] Alle Modelle freigegeben")
