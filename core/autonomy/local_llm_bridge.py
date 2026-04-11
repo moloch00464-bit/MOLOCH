@@ -215,6 +215,13 @@ class LocalLLMBridge:
             prompt = prompt[-allowed:]
             logger.info(f"[LLM] force_local: Prompt auf {len(prompt)} Zeichen gekuerzt (Tension/Shadow/Berserker)")
 
+        # Vision pausieren — hailo-ollama braucht NPU-Zugriff
+        if self._vision_pause_callback:
+            try:
+                self._vision_pause_callback()
+            except Exception as e:
+                logger.warning(f"[LLM-BRIDGE] Vision-Pause fehlgeschlagen: {e}")
+
         resp = None
         try:
             messages = []
@@ -280,6 +287,12 @@ class LocalLLMBridge:
         finally:
             if resp is not None:
                 resp.close()
+            # Vision wieder starten
+            if self._vision_resume_callback:
+                try:
+                    self._vision_resume_callback()
+                except Exception as e:
+                    logger.warning(f"[LLM-BRIDGE] Vision-Resume fehlgeschlagen: {e}")
 
     def _load_api_key(self, provider: str) -> Optional[str]:
         """API Key aus config/api_keys.json laden."""
