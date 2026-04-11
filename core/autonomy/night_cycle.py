@@ -94,14 +94,21 @@ class NightCycle:
         while self._running:
             try:
                 now = datetime.now()
-                today = now.strftime("%Y-%m-%d")
 
-                # Nur zwischen 23:00 und 06:00
-                if NIGHT_START_HOUR <= now.hour or now.hour < NIGHT_END_HOUR:
-                    # Schon heute gelaufen?
-                    if self._last_run_date != today:
-                        logger.info(f"[NIGHT] Starte Tagesverarbeitung fuer {today}")
-                        self._run_cycle(today)
+                # processing_date = der Tag der verarbeitet werden soll
+                # 23:XX → heute (Tag der gerade endet)
+                # 00:XX-05:XX → gestern (Tag der gerade endete)
+                # 06:XX-22:XX → None (tagsueber nichts tun)
+                if now.hour >= NIGHT_START_HOUR:
+                    processing_date = now.strftime("%Y-%m-%d")
+                elif now.hour < NIGHT_END_HOUR:
+                    processing_date = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+                else:
+                    processing_date = None
+
+                if processing_date and self._last_run_date != processing_date:
+                    logger.info(f"[NIGHT] Starte Tagesverarbeitung fuer {processing_date}")
+                    self._run_cycle(processing_date)
             except Exception as e:
                 logger.error(f"[NIGHT] Cycle-Loop Fehler: {e}")
 
@@ -187,42 +194,77 @@ class NightCycle:
         bridge = get_llm_bridge()
 
         # Kontext aus Tages-Ergebnissen zusammenbauen
-        episodes = cycle_result.get("steps", {}).get("episodes", {})
         stats = cycle_result.get("steps", {}).get("stats", {})
-        events = stats.get("event_counts", {})
+        events = stats.get("by_type", {})
 
-        prompt_lines = [f"Datum: {date}"]
-        if episodes.get("count"):
-            prompt_lines.append(f"Episoden heute: {episodes['count']}")
-        if events:
-            top = sorted(events.items(), key=lambda x: x[1], reverse=True)[:5]
-            prompt_lines.append("Haeufigste Ereignisse: " + ", ".join(f"{k}={v}" for k, v in top))
+        prompt_lines = [f"=== Tagesbericht {date} ==="]
 
-        # Tages-Introspections als Kontext einbauen
+        # Personen-Statistiken aus Sampling
+        person_min = stats.get("person_minutes", 0)
+        markus_min = stats.get("markus_minutes", 0)
+        first_seen = stats.get("first_seen")
+        last_seen = stats.get("last_seen")
+
+        if person_min > 0:
+            prompt_lines.append(f"Personen erkannt: {person_min} Minuten (Markus: {markus_min} Min)")
+            if first_seen and last_seen:
+                prompt_lines.append(f"Erste Erkennung: {first_seen}, Letzte: {last_seen}")
+        else:
+            prompt_lines.append("Keine Personen erkannt heute.")
+
+        # Aktivitaeten
+        activities = stats.get("activities", {})
+        if activities:
+            act_str = ", ".join(f"{k} ({v}x)" for k, v in
+                                sorted(activities.items(), key=lambda x: x[1], reverse=True))
+            prompt_lines.append(f"Aktivitaeten: {act_str}")
+
+        # Interessante Events (ohne context_update — redundant)
+        interesting = {k: v for k, v in events.items() if k != "context_update"}
+        if interesting:
+            top = sorted(interesting.items(), key=lambda x: x[1], reverse=True)[:5]
+            prompt_lines.append("Ereignisse: " + ", ".join(f"{k}={v}" for k, v in top))
+
+        # Music Stats
+        music = cycle_result.get("steps", {}).get("music", {})
+        if music.get("processed", 0) > 0:
+            remaining = music.get("remaining", 0)
+            removed = music.get("removed", 0)
+            prompt_lines.append(f"Musik-Assoziationen: {remaining}" +
+                                (f" ({removed} entfernt)" if removed else ""))
+
+        # Tages-Introspektionen als Kontext einbauen
         try:
-            import json as _json
             _refl_path = f"/mnt/moloch-data/memory/reflections/{date}.jsonl"
             if os.path.exists(_refl_path):
                 _thoughts = []
                 with open(_refl_path, "r") as f:
                     for line in f:
                         try:
-                            _entry = _json.loads(line.strip())
+                            _entry = json.loads(line.strip())
                             if _entry.get("thought"):
-                                _thoughts.append(_entry["thought"][:80])
+                                _thoughts.append(_entry["thought"][:100])
                         except Exception:
                             pass
                 if _thoughts:
-                    prompt_lines.append(f"Meine Gedanken heute ({len(_thoughts)}x):")
-                    for t in _thoughts[-5:]:  # Letzte 5 Gedanken
+                    # Max 8 Gedanken, gleichmaessig verteilt
+                    if len(_thoughts) > 8:
+                        step = len(_thoughts) // 8
+                        _thoughts = _thoughts[::step][:8]
+                    prompt_lines.append(f"Meine Gedanken ({len(_thoughts)}x):")
+                    for t in _thoughts:
                         prompt_lines.append(f"  - {t}")
         except Exception:
             pass
 
-        prompt = "\n".join(prompt_lines) + "\n\nFasse den Tag in 2-3 Saetzen zusammen."
+        prompt = "\n".join(prompt_lines)
+        prompt += "\n\nReflektiere NUR basierend auf diesen Daten. Erfinde nichts."
         system = (
-            "Du bist M.O.L.O.C.H., ein autonomes KI-System. "
-            "Reflektiere knapp ueber den vergangenen Tag. Deutsch, praegnant."
+            "Du bist M.O.L.O.C.H., ein KI-System auf einem Raspberry Pi. "
+            "Du beobachtest einen Raum mit einer PTZ-Kamera. "
+            "Reflektiere knapp ueber den vergangenen Tag. "
+            "Beziehe dich AUSSCHLIESSLICH auf die gegebenen Daten. "
+            "Erfinde KEINE Fakten. Deutsch, 2-3 Saetze."
         )
 
         text = bridge.generate(prompt=prompt, system=system, max_tokens=256, use_local=True)
@@ -300,32 +342,77 @@ class NightCycle:
             return {"error": str(e)}
 
     def _compute_daily_stats(self, date: str) -> Dict[str, Any]:
-        """Tages-Statistiken aus Event-Logs berechnen."""
+        """Tages-Statistiken aus Event-Logs berechnen (mit Sampling)."""
         event_log_dir = os.path.expanduser("~/moloch/logs/events")
         log_file = os.path.join(event_log_dir, f"events_{date}.jsonl")
 
         if not os.path.exists(log_file):
             return {"events": 0, "note": "Kein Event-Log fuer heute"}
 
-        event_counts: Dict[str, int] = {}
-        total = 0
+        SAMPLE_STRIDE = 500  # Jede 500. Zeile parsen (Pi-schonend)
+        by_type: Dict[str, int] = {}
+        person_samples = 0
+        markus_samples = 0
+        activity_counts: Dict[str, int] = {}
+        first_person_ts: Optional[float] = None
+        last_person_ts: Optional[float] = None
+        sampled = 0
+        line_count = 0
+
         try:
             with open(log_file) as f:
-                for line in f:
+                for line_num, line in enumerate(f):
+                    line_count = line_num + 1
+                    if line_num % SAMPLE_STRIDE != 0:
+                        continue
                     try:
                         evt = json.loads(line.strip())
-                        et = evt.get("event_type", "unknown")
-                        event_counts[et] = event_counts.get(et, 0) + 1
-                        total += 1
-                    except json.JSONDecodeError:
+                    except (json.JSONDecodeError, ValueError):
                         continue
+
+                    et = evt.get("event_type", "unknown")
+                    by_type[et] = by_type.get(et, 0) + 1
+
+                    if et == "context_update":
+                        sampled += 1
+                        p = evt.get("payload", evt)
+                        ts = p.get("timestamp", 0)
+                        pc = p.get("person_count", 0)
+                        fid = p.get("face_id")
+                        act = p.get("activity", "unknown")
+
+                        activity_counts[act] = activity_counts.get(act, 0) + 1
+
+                        if pc > 0:
+                            person_samples += 1
+                            if first_person_ts is None:
+                                first_person_ts = ts
+                            last_person_ts = ts
+
+                        if fid == "markus":
+                            markus_samples += 1
         except Exception as e:
             return {"error": str(e)}
 
-        return {
-            "events": total,
-            "by_type": event_counts,
+        # Hochrechnung: ~20 Events/Sek → 500 Events ≈ 25 Sekunden
+        minutes_per_sample = SAMPLE_STRIDE / 20.0 / 60.0
+
+        result: Dict[str, Any] = {
+            "events": line_count,
+            "by_type": by_type,
+            "sampled": sampled,
         }
+
+        if sampled > 0:
+            result["person_minutes"] = round(person_samples * minutes_per_sample)
+            result["markus_minutes"] = round(markus_samples * minutes_per_sample)
+            result["activities"] = activity_counts
+            if first_person_ts:
+                result["first_seen"] = datetime.fromtimestamp(first_person_ts).strftime("%H:%M")
+            if last_person_ts:
+                result["last_seen"] = datetime.fromtimestamp(last_person_ts).strftime("%H:%M")
+
+        return result
 
     def _save_result(self, date: str, result: Dict[str, Any]):
         """Ergebnis persistent auf SSD2 speichern."""
