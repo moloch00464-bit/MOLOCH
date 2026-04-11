@@ -1944,106 +1944,108 @@ class MolochService:
                 self._sprache.log(self._sprache.build("STOPPE", "Service"))
                 self._sprache.stop()
                 logger.info("[STOP] MolochSprache gestoppt")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[STOP] MolochSprache Fehler: {e}")
 
         # Core Integrator stoppen
         if self._core_integrator:
             try:
                 self._core_integrator.stop()
-            except Exception:
-                pass
+                logger.info("[STOP] CoreIntegrator gestoppt")
+            except Exception as e:
+                logger.warning(f"[STOP] CoreIntegrator Fehler: {e}")
 
         # MusicVisualizer stoppen
         if hasattr(self, '_music_vis') and self._music_vis:
             try:
                 self._music_vis.stop()
                 logger.info("[STOP] MusicVisualizer gestoppt")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[STOP] MusicVisualizer Fehler: {e}")
 
         # NPU-Extras stoppen (CLIP, OCR, VLM freigeben)
         try:
             from core.perception.npu_extras import get_npu_extras
             get_npu_extras().stop()
             logger.info("[STOP] NPU-Extras gestoppt")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"[STOP] NPU-Extras Fehler: {e}")
 
         # SuperRes stoppen
         try:
             from core.perception.super_res_worker import get_super_res
             get_super_res().stop()
             logger.info("[STOP] SuperRes gestoppt")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"[STOP] SuperRes Fehler: {e}")
 
         # LowLight stoppen
         try:
             from core.perception.low_light_processor import get_low_light
             get_low_light().stop()
             logger.info("[STOP] LowLight gestoppt")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"[STOP] LowLight Fehler: {e}")
 
         # RGB-LED stoppen
         if self._rgb_led:
             try:
                 self._rgb_led.stop()
                 logger.info("[STOP] RGB-LED gestoppt")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[STOP] RGB-LED Fehler: {e}")
 
         # ActionBridge stoppen
         if hasattr(self, '_action_bridge') and self._action_bridge:
             try:
                 self._action_bridge.stop()
                 logger.info("[STOP] ActionBridge gestoppt")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[STOP] ActionBridge Fehler: {e}")
 
         # MusicListener + MicModeController stoppen
         if hasattr(self, '_music_listener') and self._music_listener:
             try:
                 self._music_listener.stop()
                 logger.info("[STOP] MusicListener gestoppt")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[STOP] MusicListener Fehler: {e}")
         if hasattr(self, '_mic_mode_ctrl') and self._mic_mode_ctrl:
             try:
                 self._mic_mode_ctrl.stop()
                 logger.info("[STOP] MicModeController gestoppt")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[STOP] MicModeController Fehler: {e}")
 
         # SpotifyBridge stoppen
         if hasattr(self, '_spotify_bridge') and self._spotify_bridge:
             try:
                 self._spotify_bridge.stop()
                 logger.info("[STOP] SpotifyBridge gestoppt")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[STOP] SpotifyBridge Fehler: {e}")
 
         # Diagnostics HTTP-Server stoppen
         try:
             from core.diagnostics import stop_diagnostics_server
             stop_diagnostics_server()
-        except Exception:
-            pass
+            logger.info("[STOP] Diagnostics gestoppt")
+        except Exception as e:
+            logger.warning(f"[STOP] Diagnostics Fehler: {e}")
 
         # Autonomy Module stoppen (Gate 5)
         if hasattr(self, '_homeostasis') and self._homeostasis:
             try:
                 self._homeostasis.stop()
                 logger.info("[STOP] Homeostasis gestoppt")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[STOP] Homeostasis Fehler: {e}")
         if hasattr(self, '_night_cycle') and self._night_cycle:
             try:
                 self._night_cycle.stop()
                 logger.info("[STOP] NightCycle gestoppt")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[STOP] NightCycle Fehler: {e}")
 
         # CameraManager: Tracker stoppen
         self._cam.stop_tracker()
