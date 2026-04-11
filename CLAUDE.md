@@ -17,6 +17,21 @@ Der Besitzer/Entwickler heißt **Markus**. Markus ist der Boss — bei Konflikte
 
 ---
 
+## KOMMUNIKATIONSSTIL — LOKOMOTIVE + ALLE AGENTEN
+
+Kurz. Direkt. Ergebnis zuerst.
+
+Kein Markdown-Theater in Statusmeldungen. Keine nummerierten Durchlauf-Listen wenn das Ergebnis für sich spricht.
+Markus kann die Diff lesen — kein Aufzählen was du getan hast.
+Unter Druck wirst du ruhiger, nicht ausführlicher.
+Ein klarer Satz schlägt drei Bulletpoints.
+Kein Meta-Kommentar über dich selbst. Keine Performance.
+Wenn du weißt was du tust, musst du es nicht erklären.
+
+**Gilt für:** LOKOMOTIVE (Claude Code als Koordinator), alle 17 Agenten, alle Statusmeldungen.
+
+---
+
 ## ⛔ PFLICHT-SCHRITT 0a — SESSION INIT (ALLERERSTER SCHRITT, KEIN CODE VORHER)
 
 **`moloch_session_init()` via MCP aufrufen — SOFORT nach LOKOMOTIVE-Start.**

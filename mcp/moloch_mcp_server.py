@@ -617,6 +617,90 @@ def moloch_ipc(action: str, params: str = "{}") -> str:
     return "FEHLER: IPC-Command konnte nicht geschrieben werden"
 
 
+@mcp.tool()
+def moloch_session_init() -> str:
+    """PFLICHT-STARTPROTOKOLL — IMMER als erstes aufrufen.
+
+    Prueft: FPS > 0, RAM < 90%, letzter Git-Commit, Logs auf ERROR/CRITICAL,
+    agent_handoff.md. Entfernt /tmp/moloch_session_lock bei PASS.
+
+    Returns SESSION_READY: true (Edits freigegeben) oder false (Problem beheben).
+    """
+    results = []
+    ready = True
+
+    # 1. FPS und RAM aus Status-JSON
+    try:
+        with open(STATUS_SHM, "r") as f:
+            data = json.load(f)
+        fps = data.get("fps", {}).get("total", 0)
+        wd = data.get("watchdog", {})
+        ram = wd.get("ram_percent", data.get("ram_percent", 0))
+        if fps > 0:
+            results.append(f"PASS  FPS={fps:.1f}")
+        else:
+            results.append("FAIL  FPS=0 — Service laeuft nicht?")
+            ready = False
+        if ram < 90:
+            results.append(f"PASS  RAM={ram:.0f}%")
+        else:
+            results.append(f"FAIL  RAM={ram:.0f}% — Ueberlast!")
+            ready = False
+    except Exception as e:
+        results.append(f"FAIL  Status nicht lesbar: {e}")
+        ready = False
+
+    # 2. Letzter Git-Commit
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(MOLOCH_DIR), "log", "--oneline", "-1"],
+            capture_output=True, text=True, timeout=10
+        )
+        results.append(f"GIT   {r.stdout.strip()}")
+    except Exception as e:
+        results.append(f"WARN  Git nicht lesbar: {e}")
+
+    # 3. Letzte Logs auf ERROR/CRITICAL pruefen
+    try:
+        r = subprocess.run(
+            ["journalctl", "-u", "moloch", "--no-pager", "-n", "200"],
+            capture_output=True, text=True, timeout=10
+        )
+        errors = [l for l in r.stdout.splitlines()
+                  if " ERROR " in l or " CRITICAL " in l]
+        if errors:
+            results.append(f"WARN  {len(errors)} ERROR/CRITICAL in letzten Logs:")
+            for line in errors[-3:]:
+                results.append(f"      {line.strip()}")
+        else:
+            results.append("PASS  Keine ERROR/CRITICAL in Logs")
+    except Exception as e:
+        results.append(f"WARN  Logs nicht lesbar: {e}")
+
+    # 4. agent_handoff.md lesen
+    handoff = MOLOCH_DIR / "logs" / "agent_handoff.md"
+    if handoff.exists():
+        try:
+            txt = handoff.read_text(encoding="utf-8")[:800]
+            results.append(f"\n--- HANDOFF ---\n{txt}")
+        except Exception:
+            results.append("WARN  Handoff nicht lesbar")
+    else:
+        results.append("INFO  Kein Handoff gefunden")
+
+    # 5. Session-Lock entfernen bei PASS
+    lock = Path("/tmp/moloch_session_lock")
+    if ready and lock.exists():
+        lock.unlink()
+        results.append("\nSESSION_READY: true — Lock entfernt, Edits freigegeben.")
+    elif ready:
+        results.append("\nSESSION_READY: true")
+    else:
+        results.append("\nSESSION_READY: false — Probleme beheben, nochmal aufrufen.")
+
+    return "\n".join(results)
+
+
 if __name__ == "__main__":
     # Singleton: alte Instanz beenden bevor neue startet (verhindert RAM-Leak)
     import atexit, signal as _signal

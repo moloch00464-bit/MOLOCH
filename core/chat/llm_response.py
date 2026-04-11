@@ -130,6 +130,11 @@ def build_system_prompt(mode: str, vision: Dict, state: Dict,
     if global_instr:
         parts.append("\n" + global_instr)
 
+    # Stil-Regeln: kein Markdown-Theater, lakonisch, unter Druck ruhiger (v1.3)
+    style_rules = templates.get("style_rules", "")
+    if style_rules:
+        parts.append("\n" + style_rules)
+
     return "".join(parts)
 
 

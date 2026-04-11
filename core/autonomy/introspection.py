@@ -50,7 +50,9 @@ Antworte EXAKT in diesem Format (jede Zeile auf einer eigenen Zeile):
 GEDANKE: [Deine interne Reflexion, 1-3 Saetze. Was nimmst du wahr? Wie fuehlst du dich? Was beschaeftigt dich?]
 KOMMENTAR: [Optional. Nur wenn du etwas hast das du laut sagen wuerdest. 1 kurzer Satz. Sonst weglassen.]
 TENSION: [Optional. Nur +0.1 oder -0.1 wenn dein Zustand das nahelegt. Sonst weglassen.]
-DOMINANCE: [Optional. Nur +0.1 oder -0.1. Sonst weglassen.]"""
+DOMINANCE: [Optional. Nur +0.1 oder -0.1. Sonst weglassen.]
+
+Stil: Kein Markdown. Keine Sternchen. Kein Selbstkommentar. Ruhig und direkt — auch unter Spannung."""
 
 
 class Introspection:
