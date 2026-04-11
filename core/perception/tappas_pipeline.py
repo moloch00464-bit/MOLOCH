@@ -2026,6 +2026,10 @@ class TappasPipeline:
         real_active.append("yolo")  # YOLO laeuft immer
         pf.active_models = sorted(real_active)
 
+        # OCR-Texte (wenn OCR-Worker aktiv)
+        if self._last_ocr_texts:
+            pf.ocr_texts = list(self._last_ocr_texts)
+
         # Action Inference (Temporal Pose Buffer)
         try:
             pf.person_action = get_action_inferrer()._last_action
