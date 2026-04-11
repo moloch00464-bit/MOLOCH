@@ -94,11 +94,15 @@ class LocalLLMBridge:
     def ask_external(self, prompt: str, system: str = "",
                      max_tokens: int = 256,
                      temperature: float = 0.8,
-                     top_p: float = 0.95) -> Optional[str]:
+                     top_p: float = 0.95,
+                     force_local: bool = False) -> Optional[str]:
         """Konversation: Qwen2.5 lokal → DeepSeek API → Stille.
 
         Fuer Echtzeit-Dialog mit Markus. Kurze Antworten, Deutsch.
         temperature/top_p steuern Guardian- vs Shadow-Tonalität.
+        force_local=True: kein Cloud-Fallback, Prompt wird gekuerzt wenn noetig.
+        Wird bei hoher Tension / Shadow / Berserker gesetzt — Cloud-Safety-Training
+        wuerde Gegenseitigkeit blockieren.
         """
         with self._lock:
             self._request_count += 1
@@ -108,14 +112,16 @@ class LocalLLMBridge:
                                        model=OLLAMA_MODEL_CHAT,
                                        timeout=OLLAMA_TIMEOUT_CHAT,
                                        temperature=temperature,
-                                       top_p=top_p)
+                                       top_p=top_p,
+                                       force_local=force_local)
         if result:
             return result
 
-        # 2. DeepSeek API (Cloud-Fallback)
-        result = self._generate_deepseek(prompt, system, max_tokens)
-        if result:
-            return result
+        # 2. DeepSeek API (Cloud-Fallback) — nur wenn nicht force_local
+        if not force_local:
+            result = self._generate_deepseek(prompt, system, max_tokens)
+            if result:
+                return result
 
         # 3. Stille
         self._last_provider = "stille"
@@ -167,16 +173,20 @@ class LocalLLMBridge:
                          max_tokens: int, model: str,
                          timeout: int,
                          temperature: float = 0.8,
-                         top_p: float = 0.95) -> Optional[str]:
+                         top_p: float = 0.95,
+                         force_local: bool = False) -> Optional[str]:
         """hailo-ollama Chat API (Port 8000) mit Circuit-Breaker."""
         if not self._ollama_available:
             return None
 
-        # Circuit-Breaker: Backoff aktiv? → sofort zur Cloud
+        # Circuit-Breaker: Backoff aktiv?
+        # Bei force_local trotzdem versuchen — Moloch soll lokal antworten
         if time.monotonic() < self._ollama_backoff_until:
-            verbleibend = int(self._ollama_backoff_until - time.monotonic())
-            logger.info(f"[LLM] Ollama Backoff aktiv ({verbleibend}s), direkt Cloud")
-            return None
+            if not force_local:
+                verbleibend = int(self._ollama_backoff_until - time.monotonic())
+                logger.info(f"[LLM] Ollama Backoff aktiv ({verbleibend}s), direkt Cloud")
+                return None
+            logger.info("[LLM] force_local: ignoriere Backoff, versuche lokal")
 
         # Health-Check: nicht erreichbar → Fehlerzaehler erhoehen
         if not self._is_ollama_running():
@@ -190,11 +200,20 @@ class LocalLLMBridge:
             logger.debug("[LLM-BRIDGE] hailo-ollama nicht erreichbar")
             return None
 
-        # Input-Length-Check: zu langer Prompt → direkt Cloud-Fallback (kein Circuit-Breaker-Zaehler)
+        # Input-Length-Check
         input_len = len(system) + len(prompt)
         if input_len > OLLAMA_MAX_INPUT_CHARS:
-            logger.info(f"[LLM] Input zu lang ({input_len} Zeichen > {OLLAMA_MAX_INPUT_CHARS}) → Cloud-Fallback")
-            return None
+            if not force_local:
+                logger.info(f"[LLM] Input zu lang ({input_len} Zeichen > {OLLAMA_MAX_INPUT_CHARS}) → Cloud-Fallback")
+                return None
+            # force_local: Prompt kuerzen statt zur Cloud zu fallen
+            # System-Prompt bleibt intact, User-Prompt wird von hinten beibehalten
+            allowed = OLLAMA_MAX_INPUT_CHARS - len(system) - 100
+            if allowed < 300:
+                logger.warning("[LLM] force_local: System-Prompt zu lang, kein Platz fuer User-Input")
+                return None
+            prompt = prompt[-allowed:]
+            logger.info(f"[LLM] force_local: Prompt auf {len(prompt)} Zeichen gekuerzt (Tension/Shadow/Berserker)")
 
         resp = None
         try:

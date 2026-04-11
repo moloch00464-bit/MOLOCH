@@ -113,32 +113,40 @@ def _build_inner_state_text(state: Dict, templates: Dict) -> str:
 
 def build_system_prompt(mode: str, vision: Dict, state: Dict,
                         templates: Dict, settings: Dict) -> str:
-    """Vollständigen System-Prompt zusammenbauen (v1.2)."""
-    base = templates.get("system_prompts", {}).get(mode, "")
+    """Vollständigen System-Prompt zusammenbauen (v1.4).
 
+    Reihenfolge: Stil zuerst (hoechste Prioritaet fuer kleines Modell),
+    dann Persona, dann Kontext, dann globale Instruktionen.
+    """
     features = settings.get("features", {})
-    parts = [base]
+    parts = []
 
+    # Stil-Regeln ZUERST — kleines Modell (Qwen2.5-1.5B) folgt fruehen Instruktionen besser
+    style_rules = templates.get("style_rules", "")
+    if style_rules:
+        parts.append(style_rules + "\n")
+
+    # Tension-Reaktion direkt nach Stil — gilt immer, unabhaengig von Zone
+    tension_rules = templates.get("tension_rules", "")
+    if tension_rules:
+        parts.append(tension_rules + "\n")
+
+    # Basis-Persona (Guardian / Shadow / Berserker)
+    base = templates.get("system_prompts", {}).get(mode, "")
+    parts.append(base)
+
+    # Visueller Kontext: wen/was sieht Moloch gerade
     if features.get("vision_context_in_prompt", True):
         parts.append(_build_vision_text(vision, templates))
 
+    # Innerer Zustand: Tension, Dominance, Zone
     if features.get("inner_state_in_prompt", True):
         parts.append(_build_inner_state_text(state, templates))
 
-    # Global Instructions: Emergenz + Intent + Stabilitaet (v1.2, alle Modi)
+    # Global Instructions: Emergenz + Intent + Stabilitaet
     global_instr = templates.get("global_instructions", "")
     if global_instr:
         parts.append("\n" + global_instr)
-
-    # Stil-Regeln: kein Markdown-Theater, lakonisch, unter Druck ruhiger (v1.3)
-    style_rules = templates.get("style_rules", "")
-    if style_rules:
-        parts.append("\n" + style_rules)
-
-    # Tension-Reaktion: Sprache skaliert mit Tension-Wert (v1.3)
-    tension_rules = templates.get("tension_rules", "")
-    if tension_rules:
-        parts.append("\n" + tension_rules)
 
     return "".join(parts)
 
@@ -199,11 +207,15 @@ def ask(user_text: str, max_tokens: Optional[int] = None) -> Optional[str]:
     try:
         from core.autonomy.local_llm_bridge import get_llm_bridge
         bridge = get_llm_bridge()
+        # Bei hoher Tension oder Shadow/Berserker: lokal bleiben, kein Cloud-Fallback
+        # Cloud-Modelle (DeepSeek API) haben Safety-Training das Gegenseitigkeit blockiert
+        force_local = state.get("tension", 0.0) >= 0.5 or mode in ("shadow", "berserker")
         answer = bridge.ask_external(
             user_text, system=system,
             max_tokens=params["max_tokens"],
             temperature=params["temperature"],
             top_p=params["top_p"],
+            force_local=force_local,
         )
         if answer:
             logger.info(f"[LLM-RESPONSE] Antwort: {len(answer)} Zeichen via {bridge._last_provider}")
