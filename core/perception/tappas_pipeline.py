@@ -230,7 +230,7 @@ class TappasPipeline:
         self._cl_enabled = True           # Feature aktiv
         self._cl_interval_sec = 30.0      # Min. Sekunden zwischen Speicherungen
         self._cl_last_save = 0.0          # Zeitstempel letzte Speicherung
-        self._cl_min_sim = 0.55           # Min. Similarity (muss schon als Owner erkannt sein)
+        self._cl_min_sim = 0.40           # Min. Similarity (= Live-Threshold, lernt alle erkannten Matches)
         self._cl_max_sim = 0.92           # Max. Similarity (ueber 0.92 = bekannter Winkel)
         self._cl_min_scrfd = 0.70         # Min. SCRFD Confidence (Gesicht gut sichtbar)
         self._cl_max_embeddings = 50      # Max. Embeddings pro Person
