@@ -94,7 +94,7 @@ get_file_domain() {
     esac
     # Nach Dateiname
     case "$BASENAME" in
-        moloch_service.py|core_integrator.py|ipc_router.py|camera_manager.py|\
+        moloch_service.py|core_integrator.py|ipc_router.py|\
         status.py|environment_watcher.py|\
         moloch_mcp_server.py|settings.json)
             echo "service" ;;
@@ -112,7 +112,7 @@ get_file_domain() {
             echo "voice" ;;
         camera.py|ptz_calibration.py|thermal_manager.py|\
         led_controller.py|rgb_led_controller.py|cloud_controller.py|\
-        ewelink_controller.py)
+        ewelink_controller.py|camera_manager.py)
             echo "hardware" ;;
         unconscious_engine.py|tao_engine.py|anima_mappings.py)
             echo "unconscious" ;;
