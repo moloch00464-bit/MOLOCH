@@ -410,14 +410,19 @@ class TTSEngine:
                 pass
 
 
-# Global TTS engine instance
+# Global TTS engine instance (Singleton — NIEMALS mehrfach instanziieren!)
 _tts_engine: Optional[TTSEngine] = None
+_tts_lock = threading.Lock()
 
 
 def get_tts_engine() -> Optional[TTSEngine]:
-    """Get or create the global TTS engine instance."""
+    """Get or create the global TTS engine instance (thread-safe Singleton)."""
     global _tts_engine
-    if _tts_engine is None:
+    if _tts_engine is not None:
+        return _tts_engine
+    with _tts_lock:
+        if _tts_engine is not None:
+            return _tts_engine
         try:
             _tts_engine = TTSEngine()
         except Exception as e:

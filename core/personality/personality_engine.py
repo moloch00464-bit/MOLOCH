@@ -236,6 +236,7 @@ class PersonalityEngine:
 
         # TTS engine reference
         self._tts_engine = None
+        self._tts_module = None  # Gecachtes tts.py Modul (Singleton — NICHT bei jedem speak() neu laden!)
 
         # Emergentis drift state
         self._drift_factors: Dict[str, float] = {}
@@ -736,14 +737,17 @@ class PersonalityEngine:
             time.sleep(random.uniform(0.15, 0.35))
 
         try:
-            # Import the RUNTIME tts.py (not the tts/ package)
-            import importlib.util
-            tts_path = os.path.join(
-                os.path.expanduser("~/moloch"), "core", "tts.py"
-            )
-            spec = importlib.util.spec_from_file_location("tts_runtime", tts_path)
-            tts_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(tts_module)
+            # TTS-Modul einmal laden und cachen (NICHT bei jedem speak() neu!)
+            if self._tts_module is None:
+                import importlib.util
+                tts_path = os.path.join(
+                    os.path.expanduser("~/moloch"), "core", "tts.py"
+                )
+                spec = importlib.util.spec_from_file_location("tts_runtime", tts_path)
+                tts_module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(tts_module)
+                self._tts_module = tts_module
+            tts_module = self._tts_module
 
             engine = tts_module.get_tts_engine()
             vc = self.voice_config
