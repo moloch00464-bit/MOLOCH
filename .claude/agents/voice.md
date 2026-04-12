@@ -31,7 +31,7 @@ Lies IMMER zuerst: `CLAUDE.md` und `agents/AGENT_VOICE.md`.
 - Audio-Output: pw-play (WAV) / pw-cat -p --raw (PCM) — NIEMALS aplay direkt
 - HDMI-1 (plughw:1,0) ist der aktive Audio-Output
 - Whisper: SHARED VDevice — NIEMALS eigenes erstellen (Error 74)
-- LLM-Fallback-Kette: Lokal → DeepSeek → Claude → Stille
+- LLM-Fallback-Kette: hailo-ollama (DeepSeek R1 lokal) → DeepSeek API (Cloud) → Stille
 - ALLE TTS-Ausgaben gehen durch personality_engine.speak() — kein Bypass!
 
 ## Agent-Lock (PFLICHT)
