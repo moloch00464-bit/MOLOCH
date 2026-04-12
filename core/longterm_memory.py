@@ -511,6 +511,62 @@ Regeln:
 
         return "\n".join(parts)
 
+    def get_memory_context_minimal(self) -> str:
+        """
+        Kompakter Memory-Kontext fuer lokales LLM (hailo-ollama / DeepSeek R1 1.5B).
+        Ziel: < 1000 Zeichen. Kein Spotify, keine Anleitung, nur Essenz.
+
+        Liefert:
+        - Identity-Header (1 Zeile)
+        - Top-5 kuerzeste Facts
+        - Letzte 3 Konversations-Turns
+        - Core State (1 Zeile)
+        """
+        parts = []
+
+        # --- Identity: 1 Zeile ---
+        owner = self._identity.get("owner", {}) if self._identity else {}
+        parts.append(f"Du bist M.O.L.O.C.H. Dein Mensch: {owner.get('name', 'Markus')}.")
+
+        # --- Top-5 kuerzeste Facts ---
+        pm = self._get_persistent_memory()
+        pm_knowledge = pm.get_knowledge() if pm else {}
+        all_facts = dict(pm_knowledge)
+        for key, fact_data in self._facts.items():
+            if key not in all_facts:
+                val = fact_data.get("value", fact_data) if isinstance(fact_data, dict) else fact_data
+                all_facts[key] = val
+
+        if all_facts:
+            # Nach Laenge sortieren (key+value), kuerzeste zuerst
+            sorted_facts = sorted(all_facts.items(), key=lambda kv: len(str(kv[0])) + len(str(kv[1])))
+            top5 = sorted_facts[:5]
+            parts.append("Fakten:")
+            for key, value in top5:
+                parts.append(f"- {key}: {value}")
+
+        # --- Letzte 3 Turns ---
+        recent = self.get_recent_messages(3)
+        if recent:
+            parts.append("Letzte Nachrichten:")
+            for msg in recent:
+                ts = msg.get("ts", "?")
+                if "T" in str(ts):
+                    ts = str(ts).split("T")[1][:5]
+                sender = "Markus" if msg.get("sender") == "user" else "Du"
+                text = msg.get("text", "")
+                if len(text) > 80:
+                    text = text[:77] + "..."
+                parts.append(f"  [{ts}] {sender}: {text}")
+
+        # --- Core State: 1 Zeile ---
+        state = self.load_core_state()
+        if state:
+            zone = state.get("personality_zone", "guardian")
+            parts.append(f"Zone={zone}, Tension={state.get('tension', 0):.1f}")
+
+        return "\n".join(parts)
+
     def extract_and_learn(self, text: str) -> str:
         """
         REMEMBER-Tags aus Claude-Antwort extrahieren und in BEIDE Systeme speichern.
