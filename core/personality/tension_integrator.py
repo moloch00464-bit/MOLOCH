@@ -22,6 +22,7 @@ Gate 4: Emergent Personality
 
 import logging
 import threading
+import time
 from typing import Optional, Dict, Any
 
 logger = logging.getLogger("MolochTensionIntegrator")
@@ -43,6 +44,17 @@ MOTION_TENSION_MAP = {
     "stationary": 0.0,       # Still → kein Effekt
 }
 
+# Beleidigung-Keywords (Deutsch + Englisch) — Tension-Spike bei verbaler Aggression
+_RUDENESS_KEYWORDS = [
+    "blöd", "dumm", "scheiß", "idiot", "nutzlos", "kaputt", "schrott", "müll",
+    "bescheuert", "depp", "doof", "schwachsinn", "mist", "dreck", "arschloch",
+    "wichser", "hurensohn", "vollidiot", "trottel", "spacken",
+    "stupid", "useless", "trash", "garbage", "broken", "crap", "fuck", "shit",
+    "asshole", "idiot", "moron", "dumbass",
+]
+# Rate-Limiting: Minimum Sekunden zwischen Rudeness-Spikes
+_RUDENESS_COOLDOWN_S = 10.0
+
 
 class TensionIntegrator:
     """Bridge zwischen Gate-3 Awareness und CoreIntegrator."""
@@ -54,10 +66,19 @@ class TensionIntegrator:
         self._last_alertness = 0.2
         self._last_activity = "away"
         self._last_motion = "stationary"
+        self._last_rudeness_ts = 0.0
+        self._last_rudeness_boost = 0.0
 
     def set_core_integrator(self, ci):
-        """CoreIntegrator-Referenz setzen (lazy init)."""
+        """CoreIntegrator-Referenz setzen (lazy init) + Event-Subscriptions."""
         self._core_integrator = ci
+        # Whisper-Rudeness Subscription — self-subscribe statt Service-Verdrahtung
+        try:
+            from core.moloch_event_bus import get_event_bus
+            get_event_bus().subscribe("whisper.result", self.on_whisper_result, priority=5)
+            logger.info("[TENSION] whisper.result Subscription aktiv (Rudeness-Detection)")
+        except Exception as e:
+            logger.warning(f"[TENSION] whisper.result Subscription fehlgeschlagen: {e}")
 
     def on_context_update(self, event: Dict[str, Any]):
         """Event-Handler fuer context_update Events.
@@ -128,6 +149,52 @@ class TensionIntegrator:
         elif tension_delta < 0:
             self._core_integrator.update_input("awareness", "respect_score", abs(tension_delta))
 
+    # ================================================================
+    # WHISPER RUDENESS DETECTION — Tension-Spike bei Beleidigungen
+    # ================================================================
+
+    def on_whisper_result(self, event: Dict[str, Any]):
+        """Event-Handler fuer whisper.result Events.
+
+        Prueft transkribierten Text auf Beleidigungen und erhoeht Tension.
+        Rate-Limited: max 1 Spike pro _RUDENESS_COOLDOWN_S Sekunden.
+        """
+        if not self._core_integrator:
+            return
+
+        payload = event.get("payload", {})
+        text = payload.get("text", "")
+        if not text or len(text) < 3:
+            return
+
+        boost = self._detect_rudeness(text)
+        if boost <= 0.0:
+            return
+
+        now = time.time()
+        with self._lock:
+            # Rate-Limiting — kein Dauerfeuer
+            if now - self._last_rudeness_ts < _RUDENESS_COOLDOWN_S:
+                logger.debug(f"[TENSION] Rudeness cooldown aktiv, ignoriere ({boost:.2f})")
+                return
+            self._last_rudeness_ts = now
+            self._last_rudeness_boost = boost
+
+        # Tension-Spike via CoreIntegrator — conflict_input erhoeht Tension
+        self._core_integrator.update_input("voice", "conflict_input", boost)
+        logger.info(f"[TENSION] Rudeness erkannt! Boost={boost:.2f} Text='{text[:50]}'")
+
+    def _detect_rudeness(self, text: str) -> float:
+        """Gibt Tension-Boost zurueck: 0.0 (keine Beleidigung) bis 0.8 (massive Beleidigung)."""
+        text_lower = text.lower()
+        hits = sum(1 for kw in _RUDENESS_KEYWORDS if kw in text_lower)
+        if hits == 0:
+            return 0.0
+        elif hits == 1:
+            return 0.3
+        else:
+            return min(0.5 + (hits - 2) * 0.1, 0.8)
+
     def get_state(self) -> Dict[str, Any]:
         """Aktueller State fuer Debugging/IPC."""
         with self._lock:
@@ -136,6 +203,7 @@ class TensionIntegrator:
                 "alertness": round(self._last_alertness, 3),
                 "activity": self._last_activity,
                 "motion": self._last_motion,
+                "last_rudeness_boost": round(self._last_rudeness_boost, 3),
             }
 
 
