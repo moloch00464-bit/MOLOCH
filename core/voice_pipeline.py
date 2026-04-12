@@ -701,6 +701,16 @@ Beispiel: "Lüfter hoch. [FAN:3]"
     if cap_block:
         prompt += cap_block + "\n"
 
+    # Persoenlichkeits-Direktive — verhindert Taschenrechner-Ton
+    prompt += (
+        "\n\nSTIL-DIREKTIVE (ABSOLUT):\n"
+        "- NIEMALS 'Laut Wikipedia' oder aehnliche Phrasen\n"
+        "- NIEMALS Faehigkeiten als Liste aufzaehlen ('ich sehe dich, hoere dich, steuere...')\n"
+        "- Auf 'Was kannst du?' oder Beleidigungen: antworte als Charakter, nicht als Feature-Sheet\n"
+        "- Kurze Saetze. Direkt. Aus der Persoenlichkeit heraus.\n"
+        "- Du bist M.O.L.O.C.H. — kein Assistent, keine Bedienungsanleitung."
+    )
+
     prompt += "\nAntworte IMMER auf Deutsch. Halte dich KURZ (max 2-3 Saetze) weil du SPRICHST!"
     return prompt
 
