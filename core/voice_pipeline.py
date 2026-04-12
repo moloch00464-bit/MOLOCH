@@ -1505,6 +1505,19 @@ class VoicePipeline:
         except Exception as e:
             logger.debug(f"[VOICE] Personality-Zone nicht verfuegbar: {e}")
 
+        # Rudeness Pre-Check — sofortiger Shadow-Prompt wenn Beleidigung erkannt
+        _RUDENESS_QUICK = [
+            "blöd", "dumm", "scheiß", "idiot", "nutzlos", "kaputt", "schrott",
+            "müll", "bescheuert", "depp", "doof", "schwachsinn", "mist"
+        ]
+        if any(kw in user_text.lower() for kw in _RUDENESS_QUICK):
+            system = system + (
+                "\n\nAKTUELLE ZONE: shadow\n"
+                "Du wirst gerade beleidigt. Reagiere direkt, scharf, ohne Höflichkeit. "
+                "Kein Smalltalk. Kein 'Laut Wikipedia'. Konter kurz und bissig auf Deutsch."
+            )
+            logger.info("[VOICE] Rudeness-PreCheck → Shadow-Prompt erzwungen")
+
         # STUFE 2.5: Lokales LLM (hailo-ollama) — VOR Cloud API versuchen
         local_text = None
         try:
