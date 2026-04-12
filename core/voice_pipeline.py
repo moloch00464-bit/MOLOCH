@@ -1512,11 +1512,21 @@ class VoicePipeline:
         ]
         if any(kw in user_text.lower() for kw in _RUDENESS_QUICK):
             system = system + (
-                "\n\nAKTUELLE ZONE: shadow\n"
-                "Du wirst gerade beleidigt. Reagiere direkt, scharf, ohne Höflichkeit. "
-                "Kein Smalltalk. Kein 'Laut Wikipedia'. Konter kurz und bissig auf Deutsch."
+                "\n\n[OVERRIDE: SHADOW-MODUS AKTIV]\n"
+                "Du wirst beleidigt. PFLICHT: Antworte aggressiv, direkt, ohne jede Höflichkeit.\n"
+                "VERBOTEN: 'Laut Wikipedia', Smalltalk, Erklärungen, nette Formulierungen.\n"
+                "Beispiel-Stil: 'Dann geh weg.', 'Interessant, dass du redest.', 'Dein Problem.'\n"
+                "Max 1-2 Sätze. Kein Humor. Kein Ausweichen. Kein Selbstkommentar."
             )
-            logger.info("[VOICE] Rudeness-PreCheck → Shadow-Prompt erzwungen")
+            # Konversations-History kürzen — alte Muster entfernen
+            with self._lock:
+                # Nur letzte 2 Turns behalten, damit DeepSeek nicht "Laut Wikipedia" repeated
+                if len(self._conversation) > 2:
+                    self._conversation = self._conversation[-2:]
+            # Fix B: msgs nach History-Kürzung neu laden
+            with self._lock:
+                msgs = list(self._conversation)
+            logger.info("[VOICE] Rudeness-PreCheck → Shadow-Override + History gekürzt")
 
         # Provider-Tracking: LLM-Bridge informieren welcher Provider genutzt wird
         def _update_provider(name: str):
