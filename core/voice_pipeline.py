@@ -2608,10 +2608,10 @@ class VoicePipeline:
         ).start()
 
     def _generate_spontaneous_comment(self, integrator_state: dict):
-        """Spontanen Kommentar via DeepSeek API generieren und sprechen."""
-        if not self._claude_available or not self._deepseek_key:
-            return
+        """Spontanen Kommentar via LocalLLM-Bridge generieren und sprechen.
 
+        Fallback-Kette: hailo-ollama (lokal) → DeepSeek Cloud → Stille.
+        """
         self._last_spontaneous = time.time()
 
         # System-Prompt fuer spontanen Kommentar
@@ -2622,7 +2622,9 @@ Sage etwas Kurzes, Relevantes. MAX 1 Satz. Beispiele:
 - "Interessantes Tracking heute."
 - "Alles ruhig hier. Mir ist fast langweilig."
 - "Na, Feierabend oder noch ne Runde?"
-Sei natuerlich. Kein erzwungener Humor. Situationsbezogen."""
+Sei natuerlich. Kein erzwungener Humor. Situationsbezogen.
+Antworte immer auf Deutsch. Niemals Englisch oder andere Sprachen.
+Wenn dir nichts Situationsrelevantes einfaellt: Antworte exakt mit dem Wort SCHWEIG"""
 
         # Memory-Kontext fuer Relevanz
         try:
@@ -2666,39 +2668,29 @@ Sei natuerlich. Kein erzwungener Humor. Situationsbezogen."""
         _user_prompt = f"Spontaner Kommentar jetzt. Anlass: {_reason}" if _reason else "Spontaner Kommentar jetzt."
 
         try:
-            import requests
-            r = requests.post(
-                self._deepseek_url,
-                headers={
-                    "Authorization": f"Bearer {self._deepseek_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": self._deepseek_model,
-                    "messages": [
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": _user_prompt},
-                    ],
-                    "max_tokens": 80,
-                    "temperature": 0.9,
-                },
-                timeout=10.0,
+            from core.autonomy.local_llm_bridge import get_llm_bridge
+            text = get_llm_bridge().ask_external(
+                prompt=_user_prompt,
+                system=system,
+                max_tokens=80,
+                temperature=0.65,
             )
-            r.raise_for_status()
-            text = r.json()["choices"][0]["message"]["content"].strip()
-            if text:
-                logger.info(f"[SPONTAN] Kommentar: {text}")
-                self._emit_message("MOLOCH", f"[spontan] {text}")
-                # Speichern
-                try:
-                    get_memory().save_message("moloch", text, source="spontaneous")
-                except Exception:
-                    pass
-                # Sprechen
-                if self._voice_enabled:
-                    self._speak(text)
+            text = text.strip() if text else None
+            if not text or text.upper() == "SCHWEIG" or len(text) < 4:
+                logger.info("[SPONTAN] LLM hat SCHWEIG zurueckgegeben — kein TTS")
+                return
+            logger.info(f"[SPONTAN] Kommentar: {text}")
+            self._emit_message("MOLOCH", f"[spontan] {text}")
+            # Speichern
+            try:
+                get_memory().save_message("moloch", text, source="spontaneous")
+            except Exception:
+                pass
+            # Sprechen
+            if self._voice_enabled:
+                self._speak(text)
         except Exception as e:
-            logger.error(f"[SPONTAN] DeepSeek API Fehler: {e}")
+            logger.error(f"[SPONTAN] LLM Fehler: {e}")
 
     def test_voice(self, text: str = "Moloch ist online. Sprach-Pipeline funktioniert."):
         """Voice Test — spricht Text direkt aus."""
