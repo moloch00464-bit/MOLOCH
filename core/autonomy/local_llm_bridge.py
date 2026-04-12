@@ -95,22 +95,25 @@ class LocalLLMBridge:
                      max_tokens: int = 256,
                      temperature: float = 0.8,
                      top_p: float = 0.95,
-                     force_local: bool = False) -> Optional[str]:
-        """Konversation: Qwen2.5 lokal → DeepSeek API → Stille.
+                     force_local: bool = False,
+                     use_reason_model: bool = False) -> Optional[str]:
+        """Konversation: lokal auf NPU → DeepSeek API → Stille.
 
         Fuer Echtzeit-Dialog mit Markus. Kurze Antworten, Deutsch.
         temperature/top_p steuern Guardian- vs Shadow-Tonalität.
         force_local=True: kein Cloud-Fallback, Prompt wird gekuerzt wenn noetig.
-        Wird bei hoher Tension / Shadow / Berserker gesetzt — Cloud-Safety-Training
-        wuerde Gegenseitigkeit blockieren.
+        use_reason_model=True: DeepSeek R1 statt Qwen2.5 (laenger, aber besser).
         """
         with self._lock:
             self._request_count += 1
 
-        # 1. hailo-ollama Qwen2.5 (lokal auf NPU)
+        model = OLLAMA_MODEL_REASON if use_reason_model else OLLAMA_MODEL_CHAT
+        timeout = OLLAMA_TIMEOUT_REASON if use_reason_model else OLLAMA_TIMEOUT_CHAT
+
+        # 1. hailo-ollama lokal auf NPU (R1 oder Qwen2.5)
         result = self._generate_ollama(prompt, system, max_tokens,
-                                       model=OLLAMA_MODEL_CHAT,
-                                       timeout=OLLAMA_TIMEOUT_CHAT,
+                                       model=model,
+                                       timeout=timeout,
                                        temperature=temperature,
                                        top_p=top_p,
                                        force_local=force_local)
@@ -242,9 +245,9 @@ class LocalLLMBridge:
             data = json.loads(resp.content.decode('utf-8'))
             text = data.get("message", {}).get("content", "").strip()
 
-            # DeepSeek R1 <think> Block entfernen (nur Antwort behalten)
-            if "<think>" in text and "</think>" in text:
-                text = text.split("</think>")[-1].strip()
+            # DeepSeek R1 <think>...</think> Block entfernen (nur Antwort behalten)
+            import re
+            text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
 
             if not text:
                 return None
