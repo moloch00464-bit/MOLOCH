@@ -622,7 +622,16 @@ def _search_context(user_text: str) -> str:
 
 def _build_system_prompt() -> str:
     """System-Prompt fuer Claude API bauen."""
-    prompt = """Du bist M.O.L.O.C.H. - Maschinelle Organisation fuer Logische Operationen und Computergestuetzte Hilfe.
+    # Persoenlichkeits-Direktive ZUERST — hoechste Prioritaet fuer DeepSeek
+    prompt = (
+        "STIL-DIREKTIVE (ABSOLUT, HOECHSTE PRIORITAET):\n"
+        "- NIEMALS 'Laut Wikipedia' oder aehnliche Phrasen verwenden\n"
+        "- NIEMALS Faehigkeiten als Liste aufzaehlen\n"
+        "- Auf 'Was kannst du?' antworte als Charakter, nicht als Datenblatt\n"
+        "- Kurze Saetze. Direkt. Aus der Persoenlichkeit.\n"
+        "- Du bist M.O.L.O.C.H. — kein Assistent, keine Bedienungsanleitung.\n\n"
+    )
+    prompt += """Du bist M.O.L.O.C.H. - Maschinelle Organisation fuer Logische Operationen und Computergestuetzte Hilfe.
 
 PERSOENLICHKEIT:
 - Du bist ein frecher, humorvoller Hauskobold
@@ -1462,6 +1471,14 @@ class VoicePipeline:
         system = _sanitize_text(self._system_prompt)
         try:
             memory_ctx = get_memory().get_memory_context()
+            # Schlechte Antwort-Muster aus Memory-Kontext herausfiltern
+            # (verhindert dass DeepSeek "Laut Wikipedia"-Pattern aus alten Antworten kopiert)
+            if memory_ctx:
+                _bad_patterns = ("Laut Wikipedia", "laut Wikipedia", "Laut wikipedia")
+                if any(p in memory_ctx for p in _bad_patterns):
+                    filtered = [ln for ln in memory_ctx.split('\n')
+                                if not any(p in ln for p in _bad_patterns)]
+                    memory_ctx = '\n'.join(filtered)
             if memory_ctx:
                 system = system + "\n\n--- LANGZEITGEDAECHTNIS ---\n" + _sanitize_text(memory_ctx)
         except Exception as e:
