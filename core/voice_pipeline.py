@@ -2669,7 +2669,12 @@ Wenn dir nichts Situationsrelevantes einfaellt: Antworte exakt mit dem Wort SCHW
 
         try:
             from core.autonomy.local_llm_bridge import get_llm_bridge
-            text = get_llm_bridge().ask_external(
+            bridge = get_llm_bridge()
+            # Spontane Kommentare NUR lokal (hailo-ollama) — kein Cloud-Fallback
+            if not bridge._is_ollama_running():
+                logger.debug("[SPONTAN] hailo-ollama offline — Kommentar unterdrückt, kein API-Call")
+                return
+            text = bridge.ask_external(
                 prompt=_user_prompt,
                 system=system,
                 max_tokens=80,
