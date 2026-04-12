@@ -11,7 +11,7 @@ Prioritaet (Fallback-Kette):
   (Claude API wurde entfernt — nur DeepSeek als Cloud-Fallback)
 
 Zwei Rollen:
-  - ask_external(prompt) → Qwen2.5 fuer Konversation (Deutsch)
+  - ask_external(prompt) → DeepSeek R1 fuer Konversation (Deutsch)
   - reason_internal(prompt) → DeepSeek R1 fuer Selbstdiagnose/Logik
 
 WICHTIG: hailo-ollama muss separat laufen (systemd oder manuell).
@@ -34,9 +34,9 @@ logger = logging.getLogger("LocalLLMBridge")
 
 # hailo-ollama Konfiguration
 OLLAMA_HOST = "http://localhost:8000"
-OLLAMA_MODEL_CHAT = "qwen2.5-instruct:1.5b"
+OLLAMA_MODEL_CHAT = "deepseek_r1_distill_qwen:1.5b"    # R1 = Hauptmodell fuer alles
 OLLAMA_MODEL_REASON = "deepseek_r1_distill_qwen:1.5b"
-OLLAMA_TIMEOUT_CHAT = 30      # Qwen antwortet in ~26s — nach 30s → Cloud-Fallback
+OLLAMA_TIMEOUT_CHAT = 90      # R1 braucht ~80s (Chain-of-Thought) — 30s war zu kurz
 OLLAMA_TIMEOUT_REASON = 120   # DeepSeek R1 braucht ~80s (Chain-of-Thought)
 OLLAMA_MAX_INPUT_CHARS = 12000  # ~3000 Tokens Safety-Limit (Qwen2.5-1.5B: 4096 Kontext, 256 Output)
 
