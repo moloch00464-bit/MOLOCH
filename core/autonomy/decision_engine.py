@@ -286,19 +286,19 @@ class DecisionEngine:
         reason = ""
         params = {}
 
-        # Hohes Engagement + bekannte Person → Kommentar
+        # Hohes Engagement + bekannte Person → Kommentar (nur bei wirklich hohem Score)
         if self._engagement > 0.7 and self._face_id and self._face_id != "unknown":
-            score = 0.35
+            score = 0.50
             reason = "high_engagement"
             params = {"type": "observation"}
-        # Mood-Wechsel zu dark → Kommentar
+        # Mood-Wechsel zu dark → Warnung (echte Dringlichkeit, NICHT aendern)
         elif self._mood == "dark" and self._tension > 0.8:
             score = 0.40
             reason = "dark_mood_warning"
             params = {"type": "warning"}
-        # Lange allein → Begruessung bei Rueckkehr
+        # Lange allein → Begruessung bei Rueckkehr (zurueckhaltender)
         elif self._mood == "calm" and self._face_id and self._engagement > 0.5:
-            score = 0.32
+            score = 0.44
             reason = "welcome_back"
             params = {"type": "greeting"}
 
