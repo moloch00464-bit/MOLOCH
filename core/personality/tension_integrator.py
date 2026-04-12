@@ -23,7 +23,7 @@ Gate 4: Emergent Personality
 import logging
 import threading
 import time
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 logger = logging.getLogger("MolochTensionIntegrator")
 
@@ -55,6 +55,20 @@ _RUDENESS_KEYWORDS = [
 # Rate-Limiting: Minimum Sekunden zwischen Rudeness-Spikes
 _RUDENESS_COOLDOWN_S = 10.0
 
+# Anger-Floor: Tension darf nach Beleidigung nicht sofort wieder sinken
+_ANGER_FLOOR_DURATION_S = 45.0          # Wie lange Zorn-Basis aktiv
+_ANGER_SUSTAIN_INTERVAL_S = 3.0         # Re-Injektions-Takt (Sekunden)
+
+# Besaenftigung: Keywords die Tension senken
+_APPEASEMENT_KEYWORDS: List[str] = [
+    "sorry", "entschuldigung", "tut mir leid", "bitte", "danke", "schön",
+    "toll", "super", "gut gemacht", "prima", "klasse", "wunderbar",
+    "ich mag dich", "du bist gut", "respekt", "brav", "okay okay",
+    "alles gut", "peace", "calm down", "beruhig dich",
+]
+_APPEASEMENT_BASE_BOOST = -0.25         # Basis-Senkung bei Besaenftigung
+_APPEASEMENT_RESISTANCE_DURING_ANGER = 0.25  # Nur 25% Wirkung bei aktivem Floor
+
 
 class TensionIntegrator:
     """Bridge zwischen Gate-3 Awareness und CoreIntegrator."""
@@ -68,6 +82,12 @@ class TensionIntegrator:
         self._last_motion = "stationary"
         self._last_rudeness_ts = 0.0
         self._last_rudeness_boost = 0.0
+        # Anger-Floor State
+        self._anger_floor_until = 0.0
+        self._anger_floor_value = 0.0
+        self._anger_sustain_thread: Optional[threading.Thread] = None
+        # Besaenftigung State
+        self._last_appeasement_boost = 0.0
 
     def set_core_integrator(self, ci):
         """CoreIntegrator-Referenz setzen (lazy init) + Event-Subscriptions."""
@@ -167,6 +187,9 @@ class TensionIntegrator:
         if not text or len(text) < 3:
             return
 
+        # Besaenftigung pruefen (unabhaengig von Rudeness)
+        self._check_appeasement(text)
+
         boost = self._detect_rudeness(text)
         if boost <= 0.0:
             return
@@ -184,6 +207,73 @@ class TensionIntegrator:
         self._core_integrator.update_input("voice", "conflict_input", boost)
         logger.info(f"[TENSION] Rudeness erkannt! Boost={boost:.2f} Text='{text[:50]}'")
 
+        # Anger-Floor starten — Tension darf nicht sofort wieder sinken
+        with self._lock:
+            self._anger_floor_until = now + _ANGER_FLOOR_DURATION_S
+            self._anger_floor_value = boost * 0.8
+            # Nur einen Sustain-Thread gleichzeitig
+            if self._anger_sustain_thread is None or not self._anger_sustain_thread.is_alive():
+                t = threading.Thread(target=self._sustain_anger_floor, daemon=True,
+                                     name="AngerFloor")
+                self._anger_sustain_thread = t
+                t.start()
+        return  # fruehe Rueckkehr — Appeasement wird separat geprueft
+
+    def _sustain_anger_floor(self):
+        """Background-Thread: re-injiziert conflict_input waehrend Anger-Floor aktiv."""
+        while True:
+            time.sleep(_ANGER_SUSTAIN_INTERVAL_S)
+            with self._lock:
+                remaining = self._anger_floor_until - time.time()
+                if remaining <= 0:
+                    logger.info("[TENSION] Anger-Floor abgelaufen")
+                    return
+                # Linear fallend: 100% am Start → 0% am Ende
+                ratio = remaining / _ANGER_FLOOR_DURATION_S
+                inject = self._anger_floor_value * ratio
+            if self._core_integrator and inject > 0.01:
+                self._core_integrator.update_input("voice", "conflict_input", inject)
+                logger.debug(f"[TENSION] Anger-Floor inject={inject:.3f} remaining={remaining:.1f}s")
+
+    # ================================================================
+    # BESAENFTIGUNG (Appeasement) — nette Worte senken Tension
+    # ================================================================
+
+    def _check_appeasement(self, text: str):
+        """Prueft Text auf Besaenftigung und senkt Tension entsprechend."""
+        boost = self._detect_appeasement(text)
+        if boost >= 0.0:
+            return
+        # Bei aktivem Anger-Floor: Wirkung stark reduziert
+        with self._lock:
+            anger_active = time.time() < self._anger_floor_until
+        if anger_active:
+            effective = boost * _APPEASEMENT_RESISTANCE_DURING_ANGER
+            logger.info(f"[TENSION] Besaenftigung bei aktivem Zorn: {boost:.2f} → {effective:.2f} (25%)")
+            # Starke Besaenftigung kann Anger-Floor vorzeitig beenden
+            if boost <= -0.3:
+                with self._lock:
+                    self._anger_floor_until = min(self._anger_floor_until,
+                                                   time.time() + 10.0)
+                logger.info("[TENSION] Starke Besaenftigung — Anger-Floor verkuerzt auf 10s")
+            boost = effective
+        with self._lock:
+            self._last_appeasement_boost = boost
+        # Negativer Wert → respect_score erhoeht → Tension sinkt
+        self._core_integrator.update_input("voice", "respect_score", abs(boost))
+        logger.info(f"[TENSION] Besaenftigung erkannt: boost={boost:.2f} Text='{text[:50]}'")
+
+    def _detect_appeasement(self, text: str) -> float:
+        """Gibt negativen Boost zurueck (-0.2 bis -0.3) bei Besaenftigung, sonst 0.0."""
+        text_lower = text.lower()
+        hits = sum(1 for kw in _APPEASEMENT_KEYWORDS if kw in text_lower)
+        if hits == 0:
+            return 0.0
+        elif hits == 1:
+            return -0.2
+        else:
+            return max(-0.3, -0.2 - (hits - 1) * 0.05)
+
     def _detect_rudeness(self, text: str) -> float:
         """Gibt Tension-Boost zurueck: 0.0 (keine Beleidigung) bis 0.8 (massive Beleidigung)."""
         text_lower = text.lower()
@@ -198,12 +288,17 @@ class TensionIntegrator:
     def get_state(self) -> Dict[str, Any]:
         """Aktueller State fuer Debugging/IPC."""
         with self._lock:
+            now = time.time()
+            anger_remaining = max(0.0, self._anger_floor_until - now)
             return {
                 "context_score": round(self._last_context_score, 3),
                 "alertness": round(self._last_alertness, 3),
                 "activity": self._last_activity,
                 "motion": self._last_motion,
                 "last_rudeness_boost": round(self._last_rudeness_boost, 3),
+                "anger_floor_active": anger_remaining > 0,
+                "anger_floor_remaining_s": round(anger_remaining, 1),
+                "last_appeasement_boost": round(self._last_appeasement_boost, 3),
             }
 
 
