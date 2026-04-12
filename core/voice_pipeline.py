@@ -1518,20 +1518,6 @@ class VoicePipeline:
             )
             logger.info("[VOICE] Rudeness-PreCheck → Shadow-Prompt erzwungen")
 
-        # STUFE 2.5: Lokales LLM (hailo-ollama) — VOR Cloud API versuchen
-        local_text = None
-        try:
-            from core.autonomy.local_llm_bridge import get_llm_bridge
-            bridge = get_llm_bridge()
-            if bridge._ollama_available and bridge._is_ollama_running():
-                logger.info("[VOICE] Versuche lokales LLM (Qwen2.5)...")
-                local_text = bridge.ask_external(
-                    prompt=user_text, system=system, max_tokens=256)
-                if local_text and len(local_text) > 5:
-                    logger.info(f"[VOICE] Lokales LLM: {len(local_text)} Zeichen")
-        except Exception as e:
-            logger.debug(f"[VOICE] Lokales LLM nicht verfuegbar: {e}")
-
         # Provider-Tracking: LLM-Bridge informieren welcher Provider genutzt wird
         def _update_provider(name: str):
             try:
@@ -1540,15 +1526,13 @@ class VoicePipeline:
             except Exception:
                 pass
 
-        if local_text and len(local_text) > 5:
-            text = local_text
-            _update_provider("lokal_qwen")
-        else:
-            # STUFE 3: DeepSeek API Call — Timeout 15s, kein Retry
+        # STUFE 1: DeepSeek API — primaeres LLM (V3, 671B MoE)
+        text = None
+        if self._claude_available and self._deepseek_key:
             try:
-                import requests
+                import requests as _req
                 api_msgs = [{"role": "system", "content": system}] + msgs
-                r = requests.post(
+                r = _req.post(
                     self._deepseek_url,
                     headers={
                         "Authorization": f"Bearer {self._deepseek_key}",
@@ -1565,13 +1549,34 @@ class VoicePipeline:
                 r.raise_for_status()
                 text = r.json()["choices"][0]["message"]["content"].strip()
                 _update_provider("api_deepseek")
+                logger.info(f"[VOICE] DeepSeek V3: {len(text)} Zeichen")
             except Exception as e:
-                logger.error(f"[VOICE] DeepSeek API Fehler: {e}")
-                _update_provider("stille")
-                with self._lock:
-                    if self._conversation and self._conversation[-1].get("role") == "user":
-                        self._conversation.pop()
-                return None
+                logger.warning(f"[VOICE] DeepSeek API fehlgeschlagen, versuche lokal: {e}")
+
+        # STUFE 2: hailo-ollama Fallback (Qwen2.5-1.5B, offline)
+        if not text or len(text) < 5:
+            try:
+                from core.autonomy.local_llm_bridge import get_llm_bridge
+                bridge = get_llm_bridge()
+                if bridge._ollama_available and bridge._is_ollama_running():
+                    logger.info("[VOICE] Fallback auf lokales LLM (Qwen2.5)...")
+                    local_text = bridge.ask_external(
+                        prompt=user_text, system=system, max_tokens=256)
+                    if local_text and len(local_text) > 5:
+                        text = local_text
+                        _update_provider("lokal_qwen")
+                        logger.info(f"[VOICE] Lokales LLM Fallback: {len(text)} Zeichen")
+            except Exception as e:
+                logger.debug(f"[VOICE] Lokales LLM Fallback nicht verfuegbar: {e}")
+
+        # Kein LLM konnte antworten
+        if not text or len(text) < 5:
+            logger.error("[VOICE] Kein LLM verfuegbar (DeepSeek + lokal fehlgeschlagen)")
+            _update_provider("stille")
+            with self._lock:
+                if self._conversation and self._conversation[-1].get("role") == "user":
+                    self._conversation.pop()
+            return None
 
         try:
             text = get_memory().extract_and_learn(text)
