@@ -503,10 +503,10 @@ def _get_hardware_status() -> str:
         _fps_raw = _hs.get("fps", {})
         _fps_val = (_fps_raw.get("total", 0) if isinstance(_fps_raw, dict)
                     else float(_fps_raw or 0))
-        if 0 < _fps_val < 10:
-            result += "\nDeine Augen arbeiten schlecht — Bilder ruckeln stark."
-        elif 0 < _fps_val < 15:
-            result += "\nDeine Augen sind etwas traege."
+        if 0 < _fps_val < 3:
+            result += "\nVision fast tot — unter 3 FPS."
+        elif 0 < _fps_val < 8:
+            result += "\nVision langsam — unter 8 FPS."
     except Exception:
         pass
 
@@ -1465,8 +1465,23 @@ class VoicePipeline:
 
         # System-Prompt einmalig aufbauen (gilt fuer alle Versuche)
         system = _sanitize_text(self._system_prompt)
+        # Pruefen ob lokales LLM verfuegbar (minimaler Kontext fuer R1 1.5B)
+        _local_llm_available = False
         try:
-            memory_ctx = get_memory().get_memory_context()
+            from core.autonomy.local_llm_bridge import get_llm_bridge as _get_bridge
+            _b = _get_bridge()
+            _local_llm_available = _b._ollama_available and _b._is_ollama_running()
+        except Exception:
+            pass
+
+        try:
+            if _local_llm_available:
+                try:
+                    memory_ctx = get_memory().get_memory_context_minimal()
+                except AttributeError:
+                    memory_ctx = get_memory().get_memory_context()
+            else:
+                memory_ctx = get_memory().get_memory_context()
             # Schlechte Antwort-Muster aus Memory-Kontext herausfiltern
             # (verhindert dass DeepSeek "Laut Wikipedia"-Pattern aus alten Antworten kopiert)
             if memory_ctx:
