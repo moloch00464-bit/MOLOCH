@@ -62,8 +62,11 @@ RAM_WARN_PERCENT       = 85.0   # % — Warnung
 RAM_CRITICAL_PERCENT   = 92.0   # % — LLM stoppen
 DISK_WARN_PERCENT      = 90.0   # % — Platzmangel
 CHECK_INTERVAL         = 3.0    # Sekunden zwischen Checks
-ONVIF_RECONNECT_COOLDOWN = 30.0 # Sekunden nach Reconnect-Versuch
-OLLAMA_STARTUP_GRACE_S   = 60.0 # Sekunden Anlaufzeit — kein llm_dead-Pain
+ONVIF_RECONNECT_COOLDOWN  = 30.0  # Sekunden nach Reconnect-Versuch
+OLLAMA_STARTUP_GRACE_S    = 60.0  # Sekunden Anlaufzeit — kein llm_dead-Pain
+PIPELINE_RESTART_COOLDOWN = 30.0  # Sekunden zwischen Pipeline-Restart-Versuchen
+CAMERA_CHECK_INTERVAL     = 15.0  # Cache-TTL fuer Kamera-TCP-Check (Sekunden)
+CAMERA_IP                 = "192.168.178.25"  # Sonoff Kamera RTSP-IP
 
 
 class MolochWatchdog:
@@ -101,6 +104,10 @@ class MolochWatchdog:
         self._onvif_lock = threading.Lock()
         self._onvif_last_reconnect = 0.0
         self._pipeline_restart_count = 0
+        self._last_pipeline_restart  = 0.0   # Letzter Restart-Versuch (monotonic)
+        self._pipeline_stopped_since = 0.0   # 0.0 = laeuft, >0 = gestoppt seit (monotonic)
+        self._camera_reachable       = True  # Letzter bekannter Kamera-Status
+        self._last_camera_check      = 0.0   # Zeitpunkt letzter TCP-Check (monotonic)
         self._throttled = False
         self._llm_paused = False
 
@@ -233,7 +240,10 @@ class MolochWatchdog:
             self._warnings.append(msg)
             self._set_pain("pipeline_freeze", 1.0,
                            "Meine Augen... ich sehe nichts mehr.", cooldown=300)
-            if self._on_pipeline_restart:
+            now = time.monotonic()
+            if (self._on_pipeline_restart
+                    and now - self._last_pipeline_restart >= PIPELINE_RESTART_COOLDOWN):
+                self._last_pipeline_restart = now
                 self._pipeline_restart_count += 1
                 try:
                     self._on_pipeline_restart()
@@ -243,13 +253,36 @@ class MolochWatchdog:
             self._set_pain("pipeline_freeze", 0.0)
 
     def _check_pipeline_running(self):
-        """Prüft ob TAPPAS-Pipeline noch lebt."""
+        """Prüft ob TAPPAS-Pipeline noch lebt. Startet neu wenn Kamera wieder erreichbar."""
         if self._inference is None:
             return
-        if not getattr(self._inference, '_running', True):
-            msg = "TAPPAS-Pipeline ist nicht mehr aktiv"
-            logger.warning(f"[WATCHDOG] {msg}")
-            self._warnings.append(msg)
+        pipeline_ok = getattr(self._inference, '_running', True)
+        if not pipeline_ok:
+            now = time.monotonic()
+            if self._pipeline_stopped_since == 0.0:
+                self._pipeline_stopped_since = now
+                logger.warning("[WATCHDOG] TAPPAS-Pipeline gestoppt — warte auf Kamera")
+            stopped_for = now - self._pipeline_stopped_since
+            self._warnings.append(f"TAPPAS gestoppt seit {stopped_for:.0f}s")
+            self._set_pain("pipeline_dead", 0.9,
+                           "Meine Augen... ich sehe nichts mehr.", cooldown=300)
+            # Restart: nur wenn Cooldown abgelaufen UND Kamera TCP:554 erreichbar
+            if (self._on_pipeline_restart
+                    and now - self._last_pipeline_restart >= PIPELINE_RESTART_COOLDOWN
+                    and self._is_camera_reachable()):
+                logger.warning("[WATCHDOG] Kamera erreichbar — Pipeline-Restart nach "
+                               f"{stopped_for:.0f}s Ausfall")
+                self._last_pipeline_restart = now
+                self._pipeline_restart_count += 1
+                try:
+                    self._on_pipeline_restart()
+                except Exception as e:
+                    logger.error(f"[WATCHDOG] Pipeline-Restart fehlgeschlagen: {e}")
+        else:
+            if self._pipeline_stopped_since > 0.0:
+                logger.info("[WATCHDOG] Pipeline laeuft wieder")
+                self._pipeline_stopped_since = 0.0
+            self._set_pain("pipeline_dead", 0.0)
 
     def _check_onvif(self):
         """ONVIF-Fehler-Counter auswerten. Bei >N → Schmerz + Reconnect."""
@@ -335,6 +368,23 @@ class MolochWatchdog:
                     self._set_pain(key, 0.0)
             except Exception as e:
                 logger.debug(f"[WATCHDOG] Disk-Check {name}: {e}")
+
+    def _is_camera_reachable(self) -> bool:
+        """TCP-Check auf RTSP-Port 554 der Kamera. Gecacht (CAMERA_CHECK_INTERVAL)."""
+        now = time.monotonic()
+        if now - self._last_camera_check >= CAMERA_CHECK_INTERVAL:
+            self._last_camera_check = now
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(2.0)
+                result = s.connect_ex((CAMERA_IP, 554))
+                s.close()
+                self._camera_reachable = (result == 0)
+                if not self._camera_reachable:
+                    logger.warning(f"[WATCHDOG] Kamera {CAMERA_IP}:554 nicht erreichbar")
+            except Exception:
+                self._camera_reachable = False
+        return self._camera_reachable
 
     def _check_microphone(self):
         """ReSpeaker WiFi-Mic erreichbar? (HTTP Port 80 an 10.42.0.2)."""
@@ -534,6 +584,9 @@ class MolochWatchdog:
             "frame_age":               self._last_frame_age,
             "onvif_consecutive_errors": onvif_errors,
             "pipeline_restarts":       self._pipeline_restart_count,
+            "pipeline_stopped_since":  round(time.monotonic() - self._pipeline_stopped_since, 1)
+                                       if self._pipeline_stopped_since > 0.0 else 0.0,
+            "camera_reachable":        self._camera_reachable,
             "throttled":               self._throttled,
             "llm_paused":              self._llm_paused,
             "active_pains":            active_pains,
