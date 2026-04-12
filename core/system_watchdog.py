@@ -63,6 +63,7 @@ RAM_CRITICAL_PERCENT   = 92.0   # % — LLM stoppen
 DISK_WARN_PERCENT      = 90.0   # % — Platzmangel
 CHECK_INTERVAL         = 3.0    # Sekunden zwischen Checks
 ONVIF_RECONNECT_COOLDOWN = 30.0 # Sekunden nach Reconnect-Versuch
+OLLAMA_STARTUP_GRACE_S   = 60.0 # Sekunden Anlaufzeit — kein llm_dead-Pain
 
 
 class MolochWatchdog:
@@ -109,6 +110,9 @@ class MolochWatchdog:
         self._last_ram_percent = 0.0
         self._last_frame_age = 0.0
         self._warnings: list = []
+
+        # Startzeit — für Anlauf-Gnadenfrist bei llm_dead
+        self._start_time = time.monotonic()
 
     # =========================================================================
     # Dependency Injection
@@ -354,12 +358,20 @@ class MolochWatchdog:
                            "Ich bin isoliert.", cooldown=600)
 
     def _check_ollama(self):
-        """hailo-ollama LLM-Service erreichbar? (Port 8000)."""
+        """hailo-ollama LLM-Service erreichbar? (Port 8000).
+
+        Anlauf-Gnadenfrist: Kein Pain waehrend der ersten OLLAMA_STARTUP_GRACE_S
+        Sekunden — hailo-ollama braucht ~30s bis es bereit ist.
+        Danach: system_stress (Severity 0.4, ≤0.5) statt hardware_pain (0.7).
+        """
+        if time.monotonic() - self._start_time < OLLAMA_STARTUP_GRACE_S:
+            return  # Anlauf — noch nicht pruefen
         try:
             urllib.request.urlopen("http://localhost:8000", timeout=2)
             self._set_pain("llm_dead", 0.0)
         except Exception:
-            self._set_pain("llm_dead", 0.7,
+            # 0.4 → faellt in system_stress-Bereich (≤0.5), kein hardware_pain-Spike
+            self._set_pain("llm_dead", 0.4,
                            "Mein Verstand antwortet nicht mehr.", cooldown=600)
 
     # =========================================================================
