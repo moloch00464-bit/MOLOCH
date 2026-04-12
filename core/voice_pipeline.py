@@ -2668,21 +2668,14 @@ Wenn dir nichts Situationsrelevantes einfaellt: Antworte exakt mit dem Wort SCHW
         _user_prompt = f"Spontaner Kommentar jetzt. Anlass: {_reason}" if _reason else "Spontaner Kommentar jetzt."
 
         try:
-            # DeepSeek V3 (Cloud) — primäres LLM für spontane Kommentare
-            if not self._claude_available or not self._deepseek_key:
-                return
-            import requests as _req
-            _resp = _req.post(
-                self._deepseek_url,
-                headers={"Authorization": f"Bearer {self._deepseek_key}",
-                         "Content-Type": "application/json"},
-                json={"model": self._deepseek_model,
-                      "messages": [{"role": "system", "content": system},
-                                   {"role": "user", "content": _user_prompt}],
-                      "max_tokens": 80, "temperature": 0.65},
-                timeout=10,
+            # DeepSeek R1 lokal (hailo-ollama) → DeepSeek V3 Cloud nur Fallback
+            from core.autonomy.local_llm_bridge import get_llm_bridge
+            text = get_llm_bridge().ask_external(
+                prompt=_user_prompt,
+                system=system,
+                max_tokens=80,
+                temperature=0.65,
             )
-            text = _resp.json()["choices"][0]["message"]["content"].strip() if _resp.ok else None
             text = text.strip() if text else None
             if not text or text.upper() == "SCHWEIG" or len(text) < 4:
                 logger.info("[SPONTAN] LLM hat SCHWEIG zurueckgegeben — kein TTS")
