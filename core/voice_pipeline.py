@@ -1448,14 +1448,10 @@ class VoicePipeline:
     # =========================================================================
 
     def _chat(self, user_text: str) -> Optional[str]:
-        """Text an Claude API senden und Antwort holen.
+        """LLM-Antwort holen: lokal (DeepSeek R1) → Cloud (DeepSeek API) → Stille.
 
-        SDK retried 529 intern 2x. Wir machen KEINEN Extra-Retry mehr.
         Laeuft in separatem Thread (_api_and_respond), blockiert nicht die Pipeline.
         """
-        if not self._claude_available or not self._deepseek_key:
-            logger.warning("[VOICE] DeepSeek API nicht verfuegbar")
-            return None
 
         # Surrogates entfernen (Whisper/Bluetooth liefert manchmal kaputte Umlaute)
         user_text = _sanitize_text(user_text)
@@ -1563,52 +1559,53 @@ class VoicePipeline:
             except Exception:
                 pass
 
-        # STUFE 1: DeepSeek API — primaeres LLM (V3, 671B MoE)
+        # STUFE 1: Lokales DeepSeek R1 (hailo-ollama) — primaeres LLM
         text = None
-        if self._claude_available and self._deepseek_key:
-            try:
-                import requests as _req
-                api_msgs = [{"role": "system", "content": system}] + msgs
-                r = _req.post(
-                    self._deepseek_url,
-                    headers={
-                        "Authorization": f"Bearer {self._deepseek_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": self._deepseek_model,
-                        "messages": api_msgs,
-                        "max_tokens": 512,
-                        "temperature": 0.8,
-                    },
-                    timeout=15.0,
-                )
-                r.raise_for_status()
-                text = r.json()["choices"][0]["message"]["content"].strip()
-                _update_provider("api_deepseek")
-                logger.info(f"[VOICE] DeepSeek V3: {len(text)} Zeichen")
-            except Exception as e:
-                logger.warning(f"[VOICE] DeepSeek API fehlgeschlagen, versuche lokal: {e}")
+        try:
+            from core.autonomy.local_llm_bridge import get_llm_bridge
+            bridge = get_llm_bridge()
+            if bridge._ollama_available and bridge._is_ollama_running():
+                logger.info("[VOICE] Lokales DeepSeek R1 (hailo-ollama)...")
+                local_text = bridge.ask_external(
+                    prompt=user_text, system=system, max_tokens=256,
+                    use_reason_model=True)
+                if local_text and len(local_text) > 5:
+                    text = local_text
+                    _update_provider("lokal_deepseek_r1")
+                    logger.info(f"[VOICE] Lokales R1: {len(text)} Zeichen")
+        except Exception as e:
+            logger.debug(f"[VOICE] Lokales LLM nicht verfuegbar: {e}")
 
-        # STUFE 2: hailo-ollama Fallback (Qwen2.5-1.5B, offline)
+        # STUFE 2: DeepSeek API Fallback — wenn lokal nicht verfuegbar
         if not text or len(text) < 5:
-            try:
-                from core.autonomy.local_llm_bridge import get_llm_bridge
-                bridge = get_llm_bridge()
-                if bridge._ollama_available and bridge._is_ollama_running():
-                    logger.info("[VOICE] Fallback auf lokales LLM (Qwen2.5)...")
-                    local_text = bridge.ask_external(
-                        prompt=user_text, system=system, max_tokens=256)
-                    if local_text and len(local_text) > 5:
-                        text = local_text
-                        _update_provider("lokal_qwen")
-                        logger.info(f"[VOICE] Lokales LLM Fallback: {len(text)} Zeichen")
-            except Exception as e:
-                logger.debug(f"[VOICE] Lokales LLM Fallback nicht verfuegbar: {e}")
+            if self._claude_available and self._deepseek_key:
+                try:
+                    import requests as _req
+                    api_msgs = [{"role": "system", "content": system}] + msgs
+                    r = _req.post(
+                        self._deepseek_url,
+                        headers={
+                            "Authorization": f"Bearer {self._deepseek_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "model": self._deepseek_model,
+                            "messages": api_msgs,
+                            "max_tokens": 512,
+                            "temperature": 0.8,
+                        },
+                        timeout=15.0,
+                    )
+                    r.raise_for_status()
+                    text = r.json()["choices"][0]["message"]["content"].strip()
+                    _update_provider("api_deepseek")
+                    logger.info(f"[VOICE] DeepSeek API Fallback: {len(text)} Zeichen")
+                except Exception as e:
+                    logger.warning(f"[VOICE] DeepSeek API Fallback fehlgeschlagen: {e}")
 
         # Kein LLM konnte antworten
         if not text or len(text) < 5:
-            logger.error("[VOICE] Kein LLM verfuegbar (DeepSeek + lokal fehlgeschlagen)")
+            logger.error("[VOICE] Kein LLM verfuegbar (lokal R1 + DeepSeek API fehlgeschlagen)")
             _update_provider("stille")
             with self._lock:
                 if self._conversation and self._conversation[-1].get("role") == "user":
