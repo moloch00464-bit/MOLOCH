@@ -1985,6 +1985,18 @@ class VoicePipeline:
         self._whisper_status = "Denke..."
         self._emit_message(sender, text)
 
+        # Event Bus: Text-Input auch als whisper.result publishen (fuer TensionIntegrator etc.)
+        try:
+            from core.moloch_event_bus import get_event_bus
+            get_event_bus().publish(
+                event_type="whisper.result",
+                payload={"text": text, "source": "text_input"},
+                source="voice_pipeline",
+                priority=9,
+            )
+        except Exception:
+            pass  # Event Bus optional
+
         # Langzeitgedaechtnis: Text SOFORT speichern
         mem_sender = "claude" if sender == "Claude" else "user"
         try:
