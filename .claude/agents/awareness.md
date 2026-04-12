@@ -19,6 +19,7 @@ Lies IMMER zuerst: `CLAUDE.md` und `docs/DANGER_MAP.md`.
 - `core/awareness/room_map.py` — PTZ-Winkel zu Raumzonen Mapping (Tuer, Schreibtisch, Sofa, Fenster)
 - `core/world/world_state.py` — Inventar (Peripherals, Sensoren, Interaktionskanaele)
 - `core/environment_watcher.py` — Raum-Monitoring, Umgebungsaenderungen
+- `core/perception/spatial_learning.py` — Raeumliches Lernen (Spatial Pattern Learning)
 
 ## Abgrenzung
 - `core/capability_monitor.py` → watchdog-Agent (System-Health, nicht Awareness)

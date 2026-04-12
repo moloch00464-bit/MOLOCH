@@ -15,15 +15,15 @@ Bevor Du Code schreibst: Bestimme den Domain-Agenten und lies seine Datei.
 
 | Aufgabe / Stichwort | Agent laden |
 |---------------------|-------------|
-| GStreamer, Pipeline, TAPPAS, Hailo NPU, HEF, Modell, Perception, FPS, BBox-Inferenz | `.claude/agents/vision.md` |
+| GStreamer, Pipeline, TAPPAS, Hailo NPU, HEF, Modell, Perception, FPS, BBox-Inferenz, PersonAttr, FaceAttr, ActivityWorker, GestureClassifier, DepthWorker, YOLOWorld | `.claude/agents/vision.md` |
 | PTZ, Tracking, Such-FSM, Arbiter, pan, tilt, FOLLOW, SEARCH, COAST | `.claude/agents/tracking.md` |
 | ONVIF, RTSP, Kamera, eWeLink, Sonoff, LED, IR, Alarm, Fan, PWM | `.claude/agents/hardware.md` |
 | Panel, Tkinter, GUI, Popup, panel_*.py, popup_*.py, Button, Label, BBox-Anzeige, Landmarks | `.claude/agents/gui.md` |
 | Whisper, TTS, Piper, Stimme, Audio-Pipeline, Sprach-I/O | `.claude/agents/voice.md` |
 | moloch_service, IPC, ServiceProxy, core_integrator | `.claude/agents/service.md` |
 | PersonalityEngine, Mood, Tension, Shadow, Guardian, Berserker, EventBus | `.claude/agents/personality.md` |
-| DecisionEngine, Homeostasis, LLM-Bridge, Night Cycle, Atmosphere | `.claude/agents/autonomy.md` |
-| Activity, Context, Motion, RoomMap, WorldState, Situationsbewusstsein | `.claude/agents/awareness.md` |
+| DecisionEngine, Homeostasis, LLM-Bridge, Night Cycle, Atmosphere, ActionInference | `.claude/agents/autonomy.md` |
+| Activity, Context, Motion, RoomMap, WorldState, Situationsbewusstsein, SpatialLearning | `.claude/agents/awareness.md` |
 | Episodic, Persistent, Vector, ReID, Langzeitgedaechtnis, Qdrant | `.claude/agents/memory.md` |
 | SystemWatchdog, Diagnostics, CapabilityMonitor, System-Health | `.claude/agents/watchdog.md` |
 | Spotify, Track-Index, MusicMemory, Zone-Musik | `.claude/agents/music.md` |
@@ -47,15 +47,15 @@ Wenn eine Aufgabe 2 Domains beruehrt:
 
 | Agent | Darf editieren |
 |-------|---------------|
-| vision | core/perception/*.py, core/inference_engine.py, core/model_orchestrator.py |
+| vision | core/perception/*.py (inkl. person_attr_worker, face_attributes, activity_worker, gesture_classifier, depth_worker, yolo_world_worker), core/inference_engine.py, core/model_orchestrator.py |
 | tracking | core/mpo/*.py, core/ptz_tracker.py, core/ptz_arbiter.py, core/action_bridge.py |
 | hardware | core/hardware/*.py, core/camera_manager.py (NICHT wifi_mic.py!) |
 | gui | core/gui/*.py, core/gui/popups/*.py |
 | voice | core/speech/*.py, core/tts/*.py, core/audio/*.py |
 | service | core/moloch_service.py, core/ipc_router.py, core/core_integrator.py |
 | personality | core/personality/*.py, core/event_bus.py |
-| autonomy | core/autonomy/*.py |
-| awareness | core/awareness/*.py, core/world_state.py |
+| autonomy | core/autonomy/*.py, core/perception/action_inference.py |
+| awareness | core/awareness/*.py, core/world_state.py, core/perception/spatial_learning.py |
 | memory | core/memory/*.py, core/longterm_memory.py, core/daily_learner.py |
 | watchdog | core/system_watchdog.py, core/diagnostics.py, core/capability_monitor.py |
 | music | core/music/*.py, core/spotify_controller.py |
