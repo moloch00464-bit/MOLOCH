@@ -80,11 +80,7 @@ get_file_domain() {
         */mpo*)                   echo "tracking";    return ;;
         */mcp*)                   echo "service";     return ;;
         */personality*)           echo "personality"; return ;;
-        */autonomy*)
-            case "$BASENAME" in
-                local_llm_bridge.py|introspection.py) echo "deepseek"; return ;;
-            esac
-            echo "autonomy"; return ;;
+        */autonomy*)              echo "autonomy";    return ;;
         */awareness*)             echo "awareness";   return ;;
         */memory*)                echo "memory";      return ;;
         */music*)                 echo "music";       return ;;
@@ -104,9 +100,7 @@ get_file_domain() {
             echo "service" ;;
         tappas_pipeline.py|vision_workers.py|roi_dispatcher.py|face_pipeline.py|\
         pose_worker.py|perception_engine.py|inference_engine.py|model_scheduler.py|\
-        model_orchestrator.py|hailo_manager.py|super_res_worker.py|low_light_processor.py|\
-        person_attr_worker.py|face_attributes.py|activity_worker.py|\
-        gesture_classifier.py|depth_worker.py|yolo_world_worker.py)
+        model_orchestrator.py|hailo_manager.py|super_res_worker.py|low_light_processor.py)
             echo "vision" ;;
         autonomous_tracker.py|ptz_arbiter.py|ptz_tracker.py|action_bridge.py|\
         ptz_orchestrator.py|mode_manager.py|arbitration.py|person_reid.py)
@@ -135,10 +129,10 @@ get_file_domain() {
         personality_engine.py|mood.py|tension_integrator.py|event_bus.py)
             echo "personality" ;;
         decision_engine.py|homeostasis.py|introspection.py|llm_bridge.py|\
-        night_cycle.py|atmosphere.py|preference_learner.py|action_inference.py)
+        night_cycle.py|atmosphere.py|preference_learner.py)
             echo "autonomy" ;;
-        context_evaluator.py|motion_analyzer.py|\
-        room_map.py|world_state.py|spatial_learning.py)
+        activity_worker.py|context_evaluator.py|motion_analyzer.py|\
+        room_map.py|world_state.py)
             echo "awareness" ;;
         moloch_audit.py|stress_test*.py|chaos_*.py)
             echo "stresstest" ;;

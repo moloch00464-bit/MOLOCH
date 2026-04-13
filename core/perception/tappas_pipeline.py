@@ -356,70 +356,52 @@ class TappasPipeline:
             self._roi_dispatcher = ROIDispatcher()
             self._result_collector = ResultCollector()
 
-            # disabled_workers aus settings.json lesen
-            _disabled = set()
-            try:
-                import json as _json
-                with open(os.path.join(os.path.dirname(__file__), '../../config/settings.json')) as _sf:
-                    _disabled = set(_json.load(_sf).get('disabled_workers', []))
-            except Exception:
-                pass
-
-            # Essentielle Worker (IMMER aktiv)
+            # FaceWorker: SCRFD + ArcFace + FaceAttr (jeden 2. Frame)
             self._face_worker = FaceWorker()
             self._result_collector.register_worker(self._face_worker)
             self._roi_dispatcher.register_worker(self._face_worker, every_n_frames=2)
 
+            # PoseWorker: YOLOv8s Pose (jeden 3. Frame)
             self._pose_worker = PoseWorker()
             self._result_collector.register_worker(self._pose_worker)
             self._roi_dispatcher.register_worker(self._pose_worker, every_n_frames=3)
 
+            # ReIDWorker: Person ReID (jeden 5. Frame)
             self._reid_worker = ReIDWorker()
             self._result_collector.register_worker(self._reid_worker)
             self._roi_dispatcher.register_worker(self._reid_worker, every_n_frames=5)
 
+            # HandWorker: Hand Landmarks (jeden 4. Frame)
             self._hand_worker = HandWorker()
             self._result_collector.register_worker(self._hand_worker)
             self._roi_dispatcher.register_worker(self._hand_worker, every_n_frames=4)
 
-            # Optionale Worker (deaktivierbar via disabled_workers)
-            _worker_count = 4
-            if 'PersonAttrWorker' not in _disabled:
-                self._person_attr_worker = PersonAttrWorker()
-                self._result_collector.register_worker(self._person_attr_worker)
-                self._roi_dispatcher.register_worker(self._person_attr_worker, every_n_frames=6)
-                _worker_count += 1
-            else:
-                logger.info("[WORKERS] PersonAttrWorker deaktiviert (Geist-Leitung)")
+            # PersonAttrWorker: Kleidung, Alter, Zubehoer (jeden 6. Frame)
+            self._person_attr_worker = PersonAttrWorker()
+            self._result_collector.register_worker(self._person_attr_worker)
+            self._roi_dispatcher.register_worker(self._person_attr_worker, every_n_frames=6)
 
-            if 'ActivityWorker' not in _disabled:
-                self._activity_worker = ActivityWorker()
-                self._result_collector.register_worker(self._activity_worker)
-                _worker_count += 1
-            else:
-                logger.info("[WORKERS] ActivityWorker deaktiviert (Geist-Leitung)")
+            # ActivityWorker: r3d_18 Aktivitaetserkennung (Frame-Puffer + Inference alle 30 Frames)
+            self._activity_worker = ActivityWorker()
+            self._result_collector.register_worker(self._activity_worker)
+            # KEIN ROI-Dispatcher — push_frame() direkt in _on_appsink_sample()
 
-            if 'YOLOWorldWorker' not in _disabled:
-                self._yolo_world_worker = YOLOWorldWorker()
-                self._result_collector.register_worker(self._yolo_world_worker)
-                self._roi_dispatcher.register_worker(self._yolo_world_worker, every_n_frames=60)
-                _worker_count += 1
-            else:
-                logger.info("[WORKERS] YOLOWorldWorker deaktiviert (Geist-Leitung)")
+            # YOLOWorldWorker: Zero-Shot Objektsuche (alle 60 Frames via ROI-Dispatcher)
+            self._yolo_world_worker = YOLOWorldWorker()
+            self._result_collector.register_worker(self._yolo_world_worker)
+            self._roi_dispatcher.register_worker(self._yolo_world_worker, every_n_frames=60)
 
-            if 'DepthWorker' not in _disabled:
-                self._depth_worker = DepthWorker()
-                self._result_collector.register_worker(self._depth_worker)
-                self._roi_dispatcher.register_worker(self._depth_worker, every_n_frames=10)
-                _worker_count += 1
-            else:
-                logger.info("[WORKERS] DepthWorker deaktiviert (Geist-Leitung)")
+            # DepthWorker: Monokulare Tiefenschaetzung (alle 10 Frames, Vollbild)
+            self._depth_worker = DepthWorker()
+            self._result_collector.register_worker(self._depth_worker)
+            self._roi_dispatcher.register_worker(self._depth_worker, every_n_frames=10)
 
             self._result_collector.start_all()
             self._activity_frame_counter = 0
+            # Modul-Level Registry setzen — fuer keyword_handler Zugriff
             from core.perception.vision_workers import set_worker_registry
             set_worker_registry(self._result_collector)
-            logger.info("[WORKERS] %d Worker gestartet (4 essentiell + %d optional)", _worker_count, _worker_count - 4)
+            logger.info("[WORKERS] 8 Worker gestartet: Face(2), Pose(3), Hand(4), ReID(5), PersonAttr(6), Activity(30), YOLOWorld(60), Depth(10)")
         except Exception as e:
             logger.error("[WORKERS] Worker-Start fehlgeschlagen: %s", e)
             self._face_worker = None
@@ -466,16 +448,6 @@ class TappasPipeline:
         self._cleanup_shm()
 
         logger.info("TAPPAS Pipeline gestoppt + aufgeraeumt")
-
-    def pause_for_llm(self):
-        """Vision pausieren damit hailo-ollama die NPU nutzen kann."""
-        logger.info("[TAPPAS] Vision pausiert fuer LLM-Inference")
-        self.stop()
-
-    def resume_after_llm(self):
-        """Vision wieder starten nach LLM-Inference."""
-        logger.info("[TAPPAS] Vision wieder aktiv nach LLM-Inference")
-        self.start()
 
     def is_running(self) -> bool:
         return self._running

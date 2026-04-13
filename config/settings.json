@@ -6,8 +6,8 @@
     "scrfd_nms": 0.75,
     "arcface_thresh": 0.7,
     "yolo_conf": 0.9,
-    "pose_conf": 0.4,
-    "hand_conf": 0.9,
+    "pose_conf": 0.55,
+    "hand_conf": 0.6,
     "person_min_height": 0.17,
     "person_min_area": 0.035,
     "pose_nms": 0.55,
@@ -42,11 +42,11 @@
   "orchestration_mode": "adaptive",
   "active_models": [],
   "mpo": {
-    "tension_tau": 560.0,
-    "dominance_drift": 0.044,
+    "tension_tau": 340.0,
+    "dominance_drift": 0.03,
     "zone_hysteresis": 0.25,
-    "berserker_threshold": 0.98,
-    "thermal_damping_start": 78.0
+    "berserker_threshold": 0.89,
+    "thermal_damping_start": 73.0
   },
   "gestures": {
     "wave_enabled": true,
@@ -108,11 +108,5 @@
     "autonomous_search_ttl": 3600,
     "autonomous_search_city": "Nuernberg",
     "autonomous_search_max_per_session": 20
-  },
-  "disabled_workers": [
-    "ActivityWorker",
-    "DepthWorker",
-    "YOLOWorldWorker",
-    "PersonAttrWorker"
-  ]
+  }
 }

@@ -20,7 +20,6 @@ Lies IMMER zuerst: `CLAUDE.md` und `docs/DANGER_MAP.md`.
 - `core/autonomy/night_cycle.py` — Tages-Zusammenfassung, Musik-Memory-Decay
 - `core/autonomy/atmosphere_controller.py` — Musik + LED + PTZ als unified State
 - `core/autonomy/preference_learner.py` — Reinforcement Learning aus Verhalten
-- `core/perception/action_inference.py` — Aktion-Inferenz aus Perception-Kontext
 - `core/net/internet_bridge.py`, `core/net/autonomous_search.py` — Web-Suche
 
 ## Abgrenzung

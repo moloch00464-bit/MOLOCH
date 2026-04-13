@@ -1,14 +1,12 @@
 ---
 name: moloch-mcp
-description: MCP-Tool Referenz fuer MOLOCH. 22 Tools (17 Haupt + 5 Unterbewusstsein) mit Beschreibung und Beispielen. Nutze MCP statt manueller SSH/IPC-Hacks.
+description: MCP-Tool Referenz fuer MOLOCH. Alle 17 Tools mit Beschreibung und Beispielen. Nutze MCP statt manueller SSH/IPC-Hacks.
 user-invocable: true
 ---
 
-# M.O.L.O.C.H. MCP-Tools (22 Tools)
+# M.O.L.O.C.H. MCP-Tools
 
 **Regel: IMMER MCP-Tools — NIEMALS SSH, NIEMALS cat /dev/shm/, NIEMALS journalctl per Bash.**
-
-**2 MCP-Server:** `moloch_mcp_server.py` (17 Tools) + `moloch_unconscious_mcp.py` (5 Tools)
 
 ---
 
@@ -83,18 +81,6 @@ user-invocable: true
 
 ---
 
-## Unterbewusstsein (moloch-unconscious MCP-Server)
-
-| Tool | Beschreibung | Beispiel |
-|------|-------------|---------|
-| `uc_get_state` | Aktueller Unterbewusstsein-Zustand (Tension, Mood, FPS, Temp) | `uc_get_state()` |
-| `uc_get_mood` | Letzter Mood-Impuls aus moloch_impulse.json | `uc_get_mood()` |
-| `uc_get_history` | Letzte N Concern-Eintraege (RAM-Trends, FPS-Drops) | `uc_get_history(n=10)` |
-| `uc_inject_impulse` | Impuls direkt ins Unterbewusstsein | `uc_inject_impulse(impulse_type="shadow", reason="test")` |
-| `uc_reflect` | Selbstreflexion mit optionaler Frage | `uc_reflect(question="Wie fuehle ich mich?")` |
-
----
-
 ## Wann welches Tool?
 
 | Ich will... | Nutze |
@@ -108,7 +94,4 @@ user-invocable: true
 | Mit MOLOCH reden | `moloch_say(text="...")` |
 | MOLOCHs Stimmung beeinflussen | `moloch_nudge(key="...", value=...)` |
 | Parameter aendern | `moloch_ipc(action="set_threshold", params="...")` |
-| Regressionstest | `moloch_audit()` → 72+ Tests |
-| Unterbewusstsein lesen | `uc_get_state()`, `uc_get_mood()`, `uc_get_history()` |
-| Impuls injizieren | `uc_inject_impulse(impulse_type="shadow", reason="test")` |
-| Unterbewusstsein reflektieren | `uc_reflect(question="Wie fuehle ich mich?")` |
+| Regressionstest | `moloch_audit()` → 54 Tests |

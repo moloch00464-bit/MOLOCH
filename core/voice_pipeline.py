@@ -1466,14 +1466,8 @@ class VoicePipeline:
                 self._conversation = self._conversation[-10:]
             msgs = list(self._conversation)  # Kopie fuer API-Call
 
-        # System-Prompt: Kurzer Prompt fuer lokales R1 1.5B (4096 Token Limit)
-        # Der volle _system_prompt ist zu lang — R1 verliert sich und antwortet Englisch
-        system = (
-            "SPRACHE: Du antwortest IMMER auf Deutsch. NIEMALS Englisch.\n"
-            "Du bist M.O.L.O.C.H., eine KI auf einem Raspberry Pi. "
-            "Dein Mensch heisst Markus. Du bist direkt, frech, kurz.\n"
-            "Antworte in 1-2 Saetzen. Kein Smalltalk. Kein Aufzaehlen."
-        )
+        # System-Prompt einmalig aufbauen (gilt fuer alle Versuche)
+        system = _sanitize_text(self._system_prompt)
         # Pruefen ob lokales LLM verfuegbar (minimaler Kontext fuer R1 1.5B)
         _local_llm_available = False
         try:
@@ -1482,61 +1476,62 @@ class VoicePipeline:
             _local_llm_available = _b._ollama_available and _b._is_ollama_running()
         except Exception:
             pass
-        # Nur wenn KEIN lokales LLM: vollen System-Prompt verwenden (fuer Cloud/groessere Modelle)
-        if not _local_llm_available:
-            system = _sanitize_text(self._system_prompt)
 
-        # Kontext-Anreicherung: bei R1 1.5B nur Wahrnehmung (Token-Limit!)
-        if _local_llm_available:
-            # R1 1.5B: NUR kurze Wahrnehmung, kein Memory/HW/Introspection/Websuche
-            perception_ctx = _perception_to_text()
-            if perception_ctx:
-                system = system + "\nWahrnehmung: " + _sanitize_text(perception_ctx[:300])
-        else:
-            # Cloud/groessere Modelle: voller Kontext
-            try:
+        try:
+            if _local_llm_available:
+                try:
+                    memory_ctx = get_memory().get_memory_context_minimal()
+                except AttributeError:
+                    memory_ctx = get_memory().get_memory_context()
+            else:
                 memory_ctx = get_memory().get_memory_context()
-                if memory_ctx:
-                    _bad_patterns = ("Laut Wikipedia", "laut Wikipedia", "Laut wikipedia")
-                    if any(p in memory_ctx for p in _bad_patterns):
-                        filtered = [ln for ln in memory_ctx.split('\n')
-                                    if not any(p in ln for p in _bad_patterns)]
-                        memory_ctx = '\n'.join(filtered)
-                if memory_ctx:
-                    system = system + "\n\n--- LANGZEITGEDAECHTNIS ---\n" + _sanitize_text(memory_ctx)
-            except Exception as e:
-                logger.error(f"[VOICE] Memory-Kontext laden fehlgeschlagen: {e}")
+            # Schlechte Antwort-Muster aus Memory-Kontext herausfiltern
+            # (verhindert dass DeepSeek "Laut Wikipedia"-Pattern aus alten Antworten kopiert)
+            if memory_ctx:
+                _bad_patterns = ("Laut Wikipedia", "laut Wikipedia", "Laut wikipedia")
+                if any(p in memory_ctx for p in _bad_patterns):
+                    filtered = [ln for ln in memory_ctx.split('\n')
+                                if not any(p in ln for p in _bad_patterns)]
+                    memory_ctx = '\n'.join(filtered)
+            if memory_ctx:
+                system = system + "\n\n--- LANGZEITGEDAECHTNIS ---\n" + _sanitize_text(memory_ctx)
+        except Exception as e:
+            logger.error(f"[VOICE] Memory-Kontext laden fehlgeschlagen: {e}")
 
-            perception_ctx = _perception_to_text()
-            if perception_ctx:
-                system = system + "\n\n--- AKTUELLE WAHRNEHMUNG ---\n" + _sanitize_text(perception_ctx)
+        perception_ctx = _perception_to_text()
+        if perception_ctx:
+            system = system + "\n\n--- AKTUELLE WAHRNEHMUNG ---\n" + _sanitize_text(perception_ctx)
 
-            hw_status = _get_hardware_status()
-            if hw_status:
-                system = system + "\n" + _sanitize_text(hw_status)
+        # Hardware-Status (live Werte bei jedem Call)
+        hw_status = _get_hardware_status()
+        if hw_status:
+            system = system + "\n" + _sanitize_text(hw_status)
 
-            try:
-                from core.autonomy.introspection import get_introspection
-                _intro_state = get_introspection().get_state()
-                _last_thought = _intro_state.get("last_thought")
-                if _last_thought:
-                    system = system + f"\n\n--- LETZTER GEDANKE ---\n{_last_thought}"
-            except Exception:
-                pass
+        # Letzte Selbstreflexion (NPU Introspection)
+        try:
+            from core.autonomy.introspection import get_introspection
+            _intro_state = get_introspection().get_state()
+            _last_thought = _intro_state.get("last_thought")
+            if _last_thought:
+                system = system + f"\n\n--- LETZTER GEDANKE ---\n{_last_thought}"
+        except Exception:
+            pass
 
-            try:
-                from core.net.internet_bridge import get_internet_bridge
-                bridge = get_internet_bridge()
-                if bridge.online:
-                    system = system + f"\nINTERNET: ONLINE ({bridge.latency_ms}ms Latenz)"
-                else:
-                    system = system + "\nINTERNET: OFFLINE (kein Internetzugang gerade)"
-            except Exception:
-                pass
+        # Internet-Status
+        try:
+            from core.net.internet_bridge import get_internet_bridge
+            bridge = get_internet_bridge()
+            if bridge.online:
+                system = system + f"\nINTERNET: ONLINE ({bridge.latency_ms}ms Latenz)"
+            else:
+                system = system + "\nINTERNET: OFFLINE (kein Internetzugang gerade)"
+        except Exception:
+            pass  # Internet-Bridge optional
 
-            search_ctx = _search_context(user_text)
-            if search_ctx:
-                system = system + "\n\n--- WEBSUCHE ---\n" + search_ctx
+        # Echtzeit-Websuche bei Info-Fragen
+        search_ctx = _search_context(user_text)
+        if search_ctx:
+            system = system + "\n\n--- WEBSUCHE ---\n" + search_ctx
 
         try:
             from core.personality.personality_engine import get_personality_engine
@@ -1582,25 +1577,53 @@ class VoicePipeline:
             except Exception:
                 pass
 
-        # Lokales DeepSeek R1 (hailo-ollama) — NUR lokal, KEIN Cloud-Fallback
+        # STUFE 1: Lokales DeepSeek R1 (hailo-ollama) — primaeres LLM
         text = None
         try:
             from core.autonomy.local_llm_bridge import get_llm_bridge
             bridge = get_llm_bridge()
-            logger.info("[VOICE] Lokales DeepSeek R1 (hailo-ollama, force_local)...")
-            local_text = bridge.ask_external(
-                prompt=user_text, system=system, max_tokens=256,
-                use_reason_model=True, force_local=True)
-            if local_text and len(local_text) > 5:
-                text = local_text
-                _update_provider("lokal_deepseek_r1")
-                logger.info(f"[VOICE] Lokales R1: {len(text)} Zeichen")
+            if bridge._ollama_available and bridge._is_ollama_running():
+                logger.info("[VOICE] Lokales DeepSeek R1 (hailo-ollama)...")
+                local_text = bridge.ask_external(
+                    prompt=user_text, system=system, max_tokens=256,
+                    use_reason_model=True)
+                if local_text and len(local_text) > 5:
+                    text = local_text
+                    _update_provider("lokal_deepseek_r1")
+                    logger.info(f"[VOICE] Lokales R1: {len(text)} Zeichen")
         except Exception as e:
             logger.debug(f"[VOICE] Lokales LLM nicht verfuegbar: {e}")
 
+        # STUFE 2: DeepSeek API Fallback — wenn lokal nicht verfuegbar
+        if not text or len(text) < 5:
+            if self._claude_available and self._deepseek_key:
+                try:
+                    import requests as _req
+                    api_msgs = [{"role": "system", "content": system}] + msgs
+                    r = _req.post(
+                        self._deepseek_url,
+                        headers={
+                            "Authorization": f"Bearer {self._deepseek_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "model": self._deepseek_model,
+                            "messages": api_msgs,
+                            "max_tokens": 512,
+                            "temperature": 0.8,
+                        },
+                        timeout=15.0,
+                    )
+                    r.raise_for_status()
+                    text = r.json()["choices"][0]["message"]["content"].strip()
+                    _update_provider("api_deepseek")
+                    logger.info(f"[VOICE] DeepSeek API Fallback: {len(text)} Zeichen")
+                except Exception as e:
+                    logger.warning(f"[VOICE] DeepSeek API Fallback fehlgeschlagen: {e}")
+
         # Kein LLM konnte antworten
         if not text or len(text) < 5:
-            logger.error("[VOICE] Kein LLM verfuegbar (hailo-ollama lokal nicht erreichbar oder Timeout)")
+            logger.error("[VOICE] Kein LLM verfuegbar (lokal R1 + DeepSeek API fehlgeschlagen)")
             _update_provider("stille")
             with self._lock:
                 if self._conversation and self._conversation[-1].get("role") == "user":
@@ -2603,25 +2626,55 @@ Sei natuerlich. Kein erzwungener Humor. Situationsbezogen.
 Antworte immer auf Deutsch. Niemals Englisch oder andere Sprachen.
 Wenn dir nichts Situationsrelevantes einfaellt: Antworte exakt mit dem Wort SCHWEIG"""
 
-        # Nur Wahrnehmungs-Kontext — R1 1.5B hat nur 4096 Token, nicht ueberfluten
+        # Memory-Kontext fuer Relevanz
+        try:
+            memory_ctx = get_memory().get_memory_context()
+            if memory_ctx:
+                system += "\n\n--- KONTEXT ---\n" + memory_ctx
+        except Exception:
+            pass
+
+        # Wahrnehmungs-Kontext
         perception_ctx = _perception_to_text()
         if perception_ctx:
-            # Auf 300 Zeichen kuerzen fuer R1
-            system += "\nWahrnehmung: " + perception_ctx[:300]
+            system += "\n\n--- AKTUELLE WAHRNEHMUNG ---\n" + perception_ctx
+
+        # Hardware-Status (live)
+        hw_status = _get_hardware_status()
+        if hw_status:
+            system += "\n" + hw_status
+
+        # Letzte Selbstreflexion
+        try:
+            from core.autonomy.introspection import get_introspection
+            _intro = get_introspection().get_state()
+            if _intro.get("last_thought"):
+                system += f"\n\n--- DEIN LETZTER GEDANKE ---\n{_intro['last_thought']}"
+        except Exception:
+            pass
+
+        # Personality Zone
+        try:
+            from core.personality.personality_engine import get_personality_engine
+            pe = get_personality_engine()
+            zone_addon = pe.get_zone_system_prompt_addon()
+            if zone_addon:
+                system += zone_addon
+        except Exception:
+            pass
 
         # Grund der Entscheidung als User-Prompt einbauen
         _reason = integrator_state.get("reason", "")
         _user_prompt = f"Spontaner Kommentar jetzt. Anlass: {_reason}" if _reason else "Spontaner Kommentar jetzt."
 
         try:
-            # DeepSeek R1 lokal (hailo-ollama) — KEIN Cloud-Fallback bei spontanen Kommentaren
+            # DeepSeek R1 lokal (hailo-ollama) → DeepSeek V3 Cloud nur Fallback
             from core.autonomy.local_llm_bridge import get_llm_bridge
             text = get_llm_bridge().ask_external(
                 prompt=_user_prompt,
                 system=system,
                 max_tokens=80,
                 temperature=0.65,
-                force_local=True,
             )
             text = text.strip() if text else None
             if not text or text.upper() == "SCHWEIG" or len(text) < 4:
