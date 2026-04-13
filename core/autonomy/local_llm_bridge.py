@@ -33,7 +33,7 @@ from typing import Optional, Dict, Callable
 logger = logging.getLogger("LocalLLMBridge")
 
 # hailo-ollama Konfiguration
-OLLAMA_HOST = "http://localhost:8000"
+OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:8000")
 OLLAMA_MODEL_CHAT = "deepseek_r1_distill_qwen:1.5b"    # R1 = Hauptmodell fuer alles
 OLLAMA_MODEL_REASON = "deepseek_r1_distill_qwen:1.5b"
 OLLAMA_TIMEOUT_CHAT = 90      # R1 braucht ~80s (Chain-of-Thought) — 30s war zu kurz
@@ -218,75 +218,92 @@ class LocalLLMBridge:
             prompt = prompt[-allowed:]
             logger.info(f"[LLM] force_local: Prompt auf {len(prompt)} Zeichen gekuerzt (Tension/Shadow/Berserker)")
 
-        # Vision-Pause DEAKTIVIERT — hailo-ollama nutzt SHARED VDevice,
-        # Hailo-Scheduler time-sliced automatisch. TAPPAS stoppen wuerde
-        # alle Worker mit HAILO_COMMUNICATION_CLOSED(62) crashen → SIGTRAP.
+        # Vision pausieren damit hailo-ollama die NPU exklusiv nutzen kann
+        _vision_paused = False
+        if self._vision_pause_callback:
+            try:
+                self._vision_pause_callback()
+                _vision_paused = True
+                logger.info("[LLM] Vision pausiert fuer LLM-Inference")
+                time.sleep(1)  # 1s warten bis NPU frei
+            except Exception as e:
+                logger.warning(f"[LLM] Vision-Pause fehlgeschlagen: {e}")
 
-        resp = None
         try:
-            messages = []
-            if system:
-                messages.append({"role": "system", "content": system})
-            messages.append({"role": "user", "content": prompt})
+            resp = None
+            try:
+                messages = []
+                if system:
+                    messages.append({"role": "system", "content": system})
+                messages.append({"role": "user", "content": prompt})
 
-            resp = self._http.post(
-                f"{OLLAMA_HOST}/api/chat",
-                json={"model": model, "messages": messages, "stream": False,
-                      "options": {"num_predict": max_tokens,
-                                  "temperature": temperature,
-                                  "top_p": top_p}},
-                timeout=timeout)
-            resp.raise_for_status()
-            # Explizit UTF-8 dekodieren — resp.json() kann bei fehlendem charset-Header
-            # Latin-1 waehlen → Umlaute werden als Ã¼ statt ü dargestellt
-            data = json.loads(resp.content.decode('utf-8'))
-            text = data.get("message", {}).get("content", "").strip()
+                resp = self._http.post(
+                    f"{OLLAMA_HOST}/api/chat",
+                    json={"model": model, "messages": messages, "stream": False,
+                          "options": {"num_predict": max_tokens,
+                                      "temperature": temperature,
+                                      "top_p": top_p}},
+                    timeout=timeout)
+                resp.raise_for_status()
+                # Explizit UTF-8 dekodieren — resp.json() kann bei fehlendem charset-Header
+                # Latin-1 waehlen → Umlaute werden als Ã¼ statt ü dargestellt
+                data = json.loads(resp.content.decode('utf-8'))
+                text = data.get("message", {}).get("content", "").strip()
 
-            # DeepSeek R1 <think>...</think> Block entfernen (nur Antwort behalten)
-            import re
-            text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+                # DeepSeek R1 <think>...</think> Block entfernen (nur Antwort behalten)
+                import re
+                text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
 
-            if not text:
+                if not text:
+                    return None
+
+                # Erfolg: Circuit-Breaker zuruecksetzen
+                self._ollama_fail_count = 0
+                self._ollama_backoff_until = 0.0
+                self._last_provider = f"lokal_{model.split(':')[0]}"
+                logger.info(
+                    f"[LLM-BRIDGE] {model}: {len(text)} Zeichen in "
+                    f"{data.get('total_duration', 0) // 1_000_000}ms"
+                )
+                return text
+
+            except (requests.exceptions.ConnectionError,
+                    requests.exceptions.Timeout) as e:
+                # Verbindungsfehler waehrend Generation → Fehlerzaehler
+                self._ollama_fail_count += 1
+                if self._ollama_fail_count >= 3:
+                    self._ollama_backoff_until = time.monotonic() + self.OLLAMA_BACKOFF_SEC
+                    logger.warning(
+                        f"[LLM] Ollama {self._ollama_fail_count}x Verbindungsfehler → "
+                        f"{self.OLLAMA_BACKOFF_SEC}s Cloud-Backoff"
+                    )
+                logger.warning(f"[LLM-BRIDGE] hailo-ollama ({model}) Verbindungsfehler: {e}")
                 return None
 
-            # Erfolg: Circuit-Breaker zuruecksetzen
-            self._ollama_fail_count = 0
-            self._ollama_backoff_until = 0.0
-            self._last_provider = f"lokal_{model.split(':')[0]}"
-            logger.info(
-                f"[LLM-BRIDGE] {model}: {len(text)} Zeichen in "
-                f"{data.get('total_duration', 0) // 1_000_000}ms"
-            )
-            return text
+            except Exception as e:
+                # HTTP 500 und andere Fehler: auch im Circuit-Breaker zaehlen
+                self._ollama_fail_count += 1
+                if self._ollama_fail_count >= 3:
+                    self._ollama_backoff_until = time.monotonic() + self.OLLAMA_BACKOFF_SEC
+                    logger.warning(
+                        f"[LLM] Ollama {self._ollama_fail_count}x Fehler → "
+                        f"{self.OLLAMA_BACKOFF_SEC}s Cloud-Backoff aktiv"
+                    )
+                logger.warning(f"[LLM-BRIDGE] hailo-ollama ({model}) Fehler: {e}")
+                return None
 
-        except (requests.exceptions.ConnectionError,
-                requests.exceptions.Timeout) as e:
-            # Verbindungsfehler waehrend Generation → Fehlerzaehler
-            self._ollama_fail_count += 1
-            if self._ollama_fail_count >= 3:
-                self._ollama_backoff_until = time.monotonic() + self.OLLAMA_BACKOFF_SEC
-                logger.warning(
-                    f"[LLM] Ollama {self._ollama_fail_count}x Verbindungsfehler → "
-                    f"{self.OLLAMA_BACKOFF_SEC}s Cloud-Backoff"
-                )
-            logger.warning(f"[LLM-BRIDGE] hailo-ollama ({model}) Verbindungsfehler: {e}")
-            return None
-
-        except Exception as e:
-            # HTTP 500 und andere Fehler: auch im Circuit-Breaker zaehlen
-            self._ollama_fail_count += 1
-            if self._ollama_fail_count >= 3:
-                self._ollama_backoff_until = time.monotonic() + self.OLLAMA_BACKOFF_SEC
-                logger.warning(
-                    f"[LLM] Ollama {self._ollama_fail_count}x Fehler → "
-                    f"{self.OLLAMA_BACKOFF_SEC}s Cloud-Backoff aktiv"
-                )
-            logger.warning(f"[LLM-BRIDGE] hailo-ollama ({model}) Fehler: {e}")
-            return None
+            finally:
+                if resp is not None:
+                    resp.close()
 
         finally:
-            if resp is not None:
-                resp.close()
+            # Vision IMMER wieder starten — auch bei Fehler
+            if _vision_paused and self._vision_resume_callback:
+                try:
+                    self._vision_resume_callback()
+                    logger.info("[LLM] Vision wieder aktiv")
+                except Exception as e:
+                    logger.warning(f"[LLM] Vision-Resume fehlgeschlagen: {e}")
 
     def _load_api_key(self, provider: str) -> Optional[str]:
         """API Key aus config/api_keys.json laden."""
