@@ -225,7 +225,7 @@ class LocalLLMBridge:
                 self._vision_pause_callback()
                 _vision_paused = True
                 logger.info("[LLM] Vision pausiert fuer LLM-Inference")
-                time.sleep(1)  # 1s warten bis NPU frei
+                time.sleep(3)  # 3s warten bis TAPPAS NPU vollstaendig freigegeben hat
             except Exception as e:
                 logger.warning(f"[LLM] Vision-Pause fehlgeschlagen: {e}")
 
@@ -300,6 +300,9 @@ class LocalLLMBridge:
             # Vision IMMER wieder starten — auch bei Fehler
             if _vision_paused and self._vision_resume_callback:
                 try:
+                    # hailo-ollama mit KEEP_ALIVE=0 gibt NPU sofort frei nach Inference
+                    # Trotzdem 2s warten fuer saubere Freigabe
+                    time.sleep(2)
                     self._vision_resume_callback()
                     logger.info("[LLM] Vision wieder aktiv")
                 except Exception as e:
