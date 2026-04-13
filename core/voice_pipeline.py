@@ -1466,8 +1466,14 @@ class VoicePipeline:
                 self._conversation = self._conversation[-10:]
             msgs = list(self._conversation)  # Kopie fuer API-Call
 
-        # System-Prompt einmalig aufbauen (gilt fuer alle Versuche)
-        system = _sanitize_text(self._system_prompt)
+        # System-Prompt: Kurzer Prompt fuer lokales R1 1.5B (4096 Token Limit)
+        # Der volle _system_prompt ist zu lang — R1 verliert sich und antwortet Englisch
+        system = (
+            "SPRACHE: Du antwortest IMMER auf Deutsch. NIEMALS Englisch.\n"
+            "Du bist M.O.L.O.C.H., eine KI auf einem Raspberry Pi. "
+            "Dein Mensch heisst Markus. Du bist direkt, frech, kurz.\n"
+            "Antworte in 1-2 Saetzen. Kein Smalltalk. Kein Aufzaehlen."
+        )
         # Pruefen ob lokales LLM verfuegbar (minimaler Kontext fuer R1 1.5B)
         _local_llm_available = False
         try:
@@ -1476,62 +1482,61 @@ class VoicePipeline:
             _local_llm_available = _b._ollama_available and _b._is_ollama_running()
         except Exception:
             pass
+        # Nur wenn KEIN lokales LLM: vollen System-Prompt verwenden (fuer Cloud/groessere Modelle)
+        if not _local_llm_available:
+            system = _sanitize_text(self._system_prompt)
 
-        try:
-            if _local_llm_available:
-                try:
-                    memory_ctx = get_memory().get_memory_context_minimal()
-                except AttributeError:
-                    memory_ctx = get_memory().get_memory_context()
-            else:
+        # Kontext-Anreicherung: bei R1 1.5B nur Wahrnehmung (Token-Limit!)
+        if _local_llm_available:
+            # R1 1.5B: NUR kurze Wahrnehmung, kein Memory/HW/Introspection/Websuche
+            perception_ctx = _perception_to_text()
+            if perception_ctx:
+                system = system + "\nWahrnehmung: " + _sanitize_text(perception_ctx[:300])
+        else:
+            # Cloud/groessere Modelle: voller Kontext
+            try:
                 memory_ctx = get_memory().get_memory_context()
-            # Schlechte Antwort-Muster aus Memory-Kontext herausfiltern
-            # (verhindert dass DeepSeek "Laut Wikipedia"-Pattern aus alten Antworten kopiert)
-            if memory_ctx:
-                _bad_patterns = ("Laut Wikipedia", "laut Wikipedia", "Laut wikipedia")
-                if any(p in memory_ctx for p in _bad_patterns):
-                    filtered = [ln for ln in memory_ctx.split('\n')
-                                if not any(p in ln for p in _bad_patterns)]
-                    memory_ctx = '\n'.join(filtered)
-            if memory_ctx:
-                system = system + "\n\n--- LANGZEITGEDAECHTNIS ---\n" + _sanitize_text(memory_ctx)
-        except Exception as e:
-            logger.error(f"[VOICE] Memory-Kontext laden fehlgeschlagen: {e}")
+                if memory_ctx:
+                    _bad_patterns = ("Laut Wikipedia", "laut Wikipedia", "Laut wikipedia")
+                    if any(p in memory_ctx for p in _bad_patterns):
+                        filtered = [ln for ln in memory_ctx.split('\n')
+                                    if not any(p in ln for p in _bad_patterns)]
+                        memory_ctx = '\n'.join(filtered)
+                if memory_ctx:
+                    system = system + "\n\n--- LANGZEITGEDAECHTNIS ---\n" + _sanitize_text(memory_ctx)
+            except Exception as e:
+                logger.error(f"[VOICE] Memory-Kontext laden fehlgeschlagen: {e}")
 
-        perception_ctx = _perception_to_text()
-        if perception_ctx:
-            system = system + "\n\n--- AKTUELLE WAHRNEHMUNG ---\n" + _sanitize_text(perception_ctx)
+            perception_ctx = _perception_to_text()
+            if perception_ctx:
+                system = system + "\n\n--- AKTUELLE WAHRNEHMUNG ---\n" + _sanitize_text(perception_ctx)
 
-        # Hardware-Status (live Werte bei jedem Call)
-        hw_status = _get_hardware_status()
-        if hw_status:
-            system = system + "\n" + _sanitize_text(hw_status)
+            hw_status = _get_hardware_status()
+            if hw_status:
+                system = system + "\n" + _sanitize_text(hw_status)
 
-        # Letzte Selbstreflexion (NPU Introspection)
-        try:
-            from core.autonomy.introspection import get_introspection
-            _intro_state = get_introspection().get_state()
-            _last_thought = _intro_state.get("last_thought")
-            if _last_thought:
-                system = system + f"\n\n--- LETZTER GEDANKE ---\n{_last_thought}"
-        except Exception:
-            pass
+            try:
+                from core.autonomy.introspection import get_introspection
+                _intro_state = get_introspection().get_state()
+                _last_thought = _intro_state.get("last_thought")
+                if _last_thought:
+                    system = system + f"\n\n--- LETZTER GEDANKE ---\n{_last_thought}"
+            except Exception:
+                pass
 
-        # Internet-Status
-        try:
-            from core.net.internet_bridge import get_internet_bridge
-            bridge = get_internet_bridge()
-            if bridge.online:
-                system = system + f"\nINTERNET: ONLINE ({bridge.latency_ms}ms Latenz)"
-            else:
-                system = system + "\nINTERNET: OFFLINE (kein Internetzugang gerade)"
-        except Exception:
-            pass  # Internet-Bridge optional
+            try:
+                from core.net.internet_bridge import get_internet_bridge
+                bridge = get_internet_bridge()
+                if bridge.online:
+                    system = system + f"\nINTERNET: ONLINE ({bridge.latency_ms}ms Latenz)"
+                else:
+                    system = system + "\nINTERNET: OFFLINE (kein Internetzugang gerade)"
+            except Exception:
+                pass
 
-        # Echtzeit-Websuche bei Info-Fragen
-        search_ctx = _search_context(user_text)
-        if search_ctx:
-            system = system + "\n\n--- WEBSUCHE ---\n" + search_ctx
+            search_ctx = _search_context(user_text)
+            if search_ctx:
+                system = system + "\n\n--- WEBSUCHE ---\n" + search_ctx
 
         try:
             from core.personality.personality_engine import get_personality_engine
@@ -2598,42 +2603,11 @@ Sei natuerlich. Kein erzwungener Humor. Situationsbezogen.
 Antworte immer auf Deutsch. Niemals Englisch oder andere Sprachen.
 Wenn dir nichts Situationsrelevantes einfaellt: Antworte exakt mit dem Wort SCHWEIG"""
 
-        # Memory-Kontext fuer Relevanz
-        try:
-            memory_ctx = get_memory().get_memory_context()
-            if memory_ctx:
-                system += "\n\n--- KONTEXT ---\n" + memory_ctx
-        except Exception:
-            pass
-
-        # Wahrnehmungs-Kontext
+        # Nur Wahrnehmungs-Kontext — R1 1.5B hat nur 4096 Token, nicht ueberfluten
         perception_ctx = _perception_to_text()
         if perception_ctx:
-            system += "\n\n--- AKTUELLE WAHRNEHMUNG ---\n" + perception_ctx
-
-        # Hardware-Status (live)
-        hw_status = _get_hardware_status()
-        if hw_status:
-            system += "\n" + hw_status
-
-        # Letzte Selbstreflexion
-        try:
-            from core.autonomy.introspection import get_introspection
-            _intro = get_introspection().get_state()
-            if _intro.get("last_thought"):
-                system += f"\n\n--- DEIN LETZTER GEDANKE ---\n{_intro['last_thought']}"
-        except Exception:
-            pass
-
-        # Personality Zone
-        try:
-            from core.personality.personality_engine import get_personality_engine
-            pe = get_personality_engine()
-            zone_addon = pe.get_zone_system_prompt_addon()
-            if zone_addon:
-                system += zone_addon
-        except Exception:
-            pass
+            # Auf 300 Zeichen kuerzen fuer R1
+            system += "\nWahrnehmung: " + perception_ctx[:300]
 
         # Grund der Entscheidung als User-Prompt einbauen
         _reason = integrator_state.get("reason", "")
