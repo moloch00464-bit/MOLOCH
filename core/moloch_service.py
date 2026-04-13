@@ -1319,10 +1319,10 @@ class MolochService:
             # Vision-Callbacks registrieren: LLM pausiert/resumet TAPPAS Pipeline
             if self._llm_bridge and USE_TAPPAS and self._inference:
                 self._llm_bridge.set_vision_callbacks(
-                    pause_fn=self._inference.stop,
-                    resume_fn=lambda: self._inference.start(),
+                    pause_fn=self._inference.pause_for_llm,
+                    resume_fn=self._inference.resume_after_llm,
                 )
-                logger.info("[INIT] LLM Bridge: Vision-Callbacks registriert (stop/start TAPPAS)")
+                logger.info("[INIT] LLM Bridge: Vision-Callbacks registriert (pause/resume TAPPAS)")
             self._tentacle_bridge = get_tentacle_bridge()
             self._preference_learner = get_preference_learner()
             logger.info("[INIT] Gate 7-10 Module bereit (LLM/Tentacle/Preferences)")
