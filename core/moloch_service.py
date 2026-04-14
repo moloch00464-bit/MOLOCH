@@ -1855,10 +1855,11 @@ class MolochService:
         self._system_watchdog.start()
         logger.info("[START] System-Watchdog gestartet")
 
-        # Spontane Kommentare Monitor starten (CoreIntegrator-gesteuert)
-        if self._voice_pipeline:
-            self._voice_pipeline.start_spontaneous_monitor()
-            logger.info("[START] Spontane-Kommentare-Monitor gestartet")
+        # Spontane Kommentare DEAKTIVIERT — spart API-Kosten, nur Push-to-Talk
+        # if self._voice_pipeline:
+        #     self._voice_pipeline.start_spontaneous_monitor()
+        #     logger.info("[START] Spontane-Kommentare-Monitor gestartet")
+        logger.info("[START] Spontane Kommentare deaktiviert (nur Push-to-Talk)")
 
         # Tageszeit-Begruessung (verzoegert, nach Cloud-Init)
         def _startup_greeting():
@@ -2878,14 +2879,9 @@ class MolochService:
                     logger.warning(f"[IPC] Core-Nudge Fehler: {e}")
 
         elif action == 'trigger_spontaneous':
-            # Spontanen Kommentar ausloesen (Moloch redet "von sich aus")
-            # Format: {"action": "trigger_spontaneous", "reason": "..."}
+            # Spontane Kommentare DEAKTIVIERT — spart API-Kosten
             reason = cmd.get('reason', 'claude_impulse')
-            if self._voice_pipeline:
-                self._voice_pipeline._emit_message(
-                    "Claude", f"[provoke] {reason}")
-                self._voice_pipeline.trigger_spontaneous(reason)
-                logger.info(f"[IPC] Spontan-Trigger: {reason}")
+            logger.info(f"[IPC] Spontan-Trigger IGNORIERT (deaktiviert): {reason}")
 
         elif action == 'trigger_reflect':
             # Selbstreflexion ausloesen
