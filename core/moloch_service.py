@@ -1621,11 +1621,9 @@ class MolochService:
                         except Exception as _e:
                             logger.debug(f"[DECISION] PTZ Fehler: {_e}")
                 elif action == "speak" and self._voice_pipeline:
-                    try:
-                        self._voice_pipeline.trigger_spontaneous(reason)
-                        logger.info(f"[DECISION] Speak ausgeloest ({reason})")
-                    except Exception as _e:
-                        logger.debug(f"[DECISION] Speak Fehler: {_e}")
+                    # Spontane Aussagen DEAKTIVIERT — siehe a701a38 + Follow-Up
+                    # self._voice_pipeline.trigger_spontaneous(reason)
+                    logger.info(f"[DECISION] Speak IGNORIERT (spontan deaktiviert): {reason}")
                 elif action == "reflect":
                     try:
                         from core.autonomy.introspection import get_introspection
@@ -1649,8 +1647,9 @@ class MolochService:
                             # Laut aussprechen wenn Kommentar vorhanden
                             comment = result.get("comment")
                             if comment and _svc._voice_pipeline:
-                                _svc._voice_pipeline.trigger_spontaneous(comment)
-                                logger.info(f"[DECISION] Reflexion laut: {comment[:60]}")
+                                # Spontane Aussagen DEAKTIVIERT — Reflexion nur stumm geloggt
+                                # _svc._voice_pipeline.trigger_spontaneous(comment)
+                                logger.info(f"[DECISION] Reflexion IGNORIERT (spontan deaktiviert): {comment[:60]}")
 
                         threading.Thread(
                             target=_do_reflect, daemon=True,
@@ -2909,7 +2908,9 @@ class MolochService:
                                             abs(d_nudge))
                     comment = result.get("comment")
                     if comment and _svc._voice_pipeline:
-                        _svc._voice_pipeline.trigger_spontaneous(comment)
+                        # Spontane Aussagen DEAKTIVIERT — IPC-Reflect nur stumm geloggt
+                        # _svc._voice_pipeline.trigger_spontaneous(comment)
+                        logger.info(f"[IPC] Reflect IGNORIERT (spontan deaktiviert): {comment[:60]}")
                     logger.info(f"[IPC] Reflect fertig: {result}")
 
                 import threading
