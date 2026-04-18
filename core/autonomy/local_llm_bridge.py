@@ -35,18 +35,18 @@ logger = logging.getLogger("LocalLLMBridge")
 
 # hailo-ollama Konfiguration
 OLLAMA_HOST = "http://localhost:8000"
-OLLAMA_MODEL_CHAT = "deepseek_r1_distill_qwen:1.5b"    # R1 = Hauptmodell fuer alles
-OLLAMA_MODEL_REASON = "deepseek_r1_distill_qwen:1.5b"
-OLLAMA_TIMEOUT_CHAT = 90      # R1 braucht ~80s (Chain-of-Thought) — 30s war zu kurz
-OLLAMA_TIMEOUT_REASON = 120   # DeepSeek R1 braucht ~80s (Chain-of-Thought)
-OLLAMA_MAX_INPUT_CHARS = 12000  # ~3000 Tokens Safety-Limit (Qwen2.5-1.5B: 4096 Kontext, 256 Output)
+OLLAMA_MODEL_CHAT = "qwen2.5:1.5b"    # HailoRT 5.3.0 + SHARED VDevice — R1 SEGV war 5.1.1-Bug
+OLLAMA_MODEL_REASON = "qwen2.5:1.5b"
+OLLAMA_TIMEOUT_CHAT = 30      # Qwen2.5 ~3-7s verifiziert auf 5.3.0 (2026-04-18)
+OLLAMA_TIMEOUT_REASON = 60    # Reasoning-Prompts etwas groesser
+OLLAMA_MAX_INPUT_CHARS = 12000  # ~3000 Tokens Safety-Limit (Qwen2.5-1.5B: 4096 Kontext)
 
 # llm_mode Flag — gelesen aus config/settings.json Key "llm_mode"
 LLM_MODE_OFF = "off"                # kein LLM ueberhaupt
 LLM_MODE_CLOUD_ONLY = "cloud_only"  # nur DeepSeek Cloud, kein hailo-ollama
 LLM_MODE_LOCAL_FIRST = "local_first"  # hailo-ollama zuerst, Cloud als Fallback
 LLM_MODE_VALID = {LLM_MODE_OFF, LLM_MODE_CLOUD_ONLY, LLM_MODE_LOCAL_FIRST}
-LLM_MODE_DEFAULT = LLM_MODE_CLOUD_ONLY  # hailo-ollama-R1 wirft deterministisch SEGV
+LLM_MODE_DEFAULT = LLM_MODE_LOCAL_FIRST  # HailoRT 5.3.0 + qwen2.5:1.5b laeuft stabil parallel zu TAPPAS
 
 _SETTINGS_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
