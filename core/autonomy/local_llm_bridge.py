@@ -25,6 +25,7 @@ import json
 import logging
 import os
 import requests
+import signal
 import subprocess
 import threading
 import time
@@ -39,6 +40,17 @@ OLLAMA_MODEL_REASON = "deepseek_r1_distill_qwen:1.5b"
 OLLAMA_TIMEOUT_CHAT = 90      # R1 braucht ~80s (Chain-of-Thought) — 30s war zu kurz
 OLLAMA_TIMEOUT_REASON = 120   # DeepSeek R1 braucht ~80s (Chain-of-Thought)
 OLLAMA_MAX_INPUT_CHARS = 12000  # ~3000 Tokens Safety-Limit (Qwen2.5-1.5B: 4096 Kontext, 256 Output)
+
+# llm_mode Flag — gelesen aus config/settings.json Key "llm_mode"
+LLM_MODE_OFF = "off"                # kein LLM ueberhaupt
+LLM_MODE_CLOUD_ONLY = "cloud_only"  # nur DeepSeek Cloud, kein hailo-ollama
+LLM_MODE_LOCAL_FIRST = "local_first"  # hailo-ollama zuerst, Cloud als Fallback
+LLM_MODE_VALID = {LLM_MODE_OFF, LLM_MODE_CLOUD_ONLY, LLM_MODE_LOCAL_FIRST}
+LLM_MODE_DEFAULT = LLM_MODE_CLOUD_ONLY  # hailo-ollama-R1 wirft deterministisch SEGV
+
+_SETTINGS_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "config", "settings.json")
 
 
 class LocalLLMBridge:
@@ -58,9 +70,60 @@ class LocalLLMBridge:
         # Wiederverwendbare HTTP-Session — verhindert RAM-Leak durch offene Sockets
         self._http = requests.Session()
         self._check_ollama()
+        # llm_mode: off | cloud_only | local_first — aus settings.json
+        self._llm_mode: str = self._load_llm_mode()
+        # SIGHUP-Reload: settings.json neu lesen ohne Service-Restart
+        try:
+            signal.signal(signal.SIGHUP, self._reload_on_sighup)
+        except (ValueError, OSError) as e:
+            # Nicht-Main-Thread oder Plattform ohne SIGHUP → still weiter
+            logger.debug(f"[LLM-BRIDGE] SIGHUP-Handler nicht registriert: {e}")
         logger.info(
-            f"[LLM-BRIDGE] Init — hailo-ollama={'JA' if self._ollama_available else 'NEIN'}"
+            f"[LLM-BRIDGE] Init — hailo-ollama={'JA' if self._ollama_available else 'NEIN'}, "
+            f"mode={self._llm_mode}"
         )
+
+    def _load_llm_mode(self) -> str:
+        """Liest llm_mode aus config/settings.json. Robust gegen Fehler."""
+        try:
+            with open(_SETTINGS_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            value = data.get("llm_mode")
+            if value is None:
+                return LLM_MODE_DEFAULT
+            if value not in LLM_MODE_VALID:
+                logger.warning(
+                    f"[LLM-BRIDGE] Ungueltiger llm_mode '{value}' in settings.json "
+                    f"→ Default '{LLM_MODE_DEFAULT}'"
+                )
+                return LLM_MODE_DEFAULT
+            return value
+        except FileNotFoundError:
+            logger.warning(
+                f"[LLM-BRIDGE] settings.json nicht gefunden ({_SETTINGS_PATH}) "
+                f"→ Default '{LLM_MODE_DEFAULT}'"
+            )
+            return LLM_MODE_DEFAULT
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning(
+                f"[LLM-BRIDGE] settings.json nicht lesbar ({e}) "
+                f"→ Default '{LLM_MODE_DEFAULT}'"
+            )
+            return LLM_MODE_DEFAULT
+
+    def _reload_on_sighup(self, signum, frame):
+        """SIGHUP-Handler: llm_mode aus settings.json neu laden."""
+        alter_mode = self._llm_mode
+        neuer_mode = self._load_llm_mode()
+        self._llm_mode = neuer_mode
+        if alter_mode != neuer_mode:
+            logger.info(
+                f"[LLM-BRIDGE] Mode neu geladen: {alter_mode} → {neuer_mode}"
+            )
+        else:
+            logger.info(
+                f"[LLM-BRIDGE] Mode neu geladen: {alter_mode} → {neuer_mode} (unveraendert)"
+            )
 
     def _check_ollama(self):
         """Pruefen ob hailo-ollama installiert ist."""
@@ -107,8 +170,33 @@ class LocalLLMBridge:
         with self._lock:
             self._request_count += 1
 
+        mode = self._llm_mode
+
+        # Mode "off": gar nichts versuchen
+        if mode == LLM_MODE_OFF:
+            logger.debug("[LLM-BRIDGE] mode=off provider=none → keine Antwort")
+            self._last_provider = "off"
+            return None
+
         model = OLLAMA_MODEL_REASON if use_reason_model else OLLAMA_MODEL_CHAT
         timeout = OLLAMA_TIMEOUT_REASON if use_reason_model else OLLAMA_TIMEOUT_CHAT
+
+        # Mode "cloud_only": hailo-ollama gar nicht probieren
+        if mode == LLM_MODE_CLOUD_ONLY:
+            logger.debug(f"[LLM-BRIDGE] mode={mode} provider=deepseek_cloud (skip ollama)")
+            if force_local:
+                # force_local in cloud_only ist ein Widerspruch → stille
+                logger.debug("[LLM-BRIDGE] force_local + cloud_only → stille")
+                self._last_provider = "stille"
+                return None
+            result = self._generate_deepseek(prompt, system, max_tokens)
+            if result:
+                return result
+            self._last_provider = "stille"
+            return None
+
+        # Mode "local_first": altes Verhalten
+        logger.debug(f"[LLM-BRIDGE] mode={mode} provider=hailo_ollama_first")
 
         # 1. hailo-ollama lokal auf NPU (R1 oder Qwen2.5)
         result = self._generate_ollama(prompt, system, max_tokens,
@@ -138,6 +226,26 @@ class LocalLLMBridge:
         """
         with self._lock:
             self._request_count += 1
+
+        mode = self._llm_mode
+
+        # Mode "off": keine Antwort
+        if mode == LLM_MODE_OFF:
+            logger.debug("[LLM-BRIDGE] mode=off provider=none → keine Antwort")
+            self._last_provider = "off"
+            return None
+
+        # Mode "cloud_only": direkt Cloud, ollama nicht probieren
+        if mode == LLM_MODE_CLOUD_ONLY:
+            logger.debug(f"[LLM-BRIDGE] mode={mode} provider=deepseek_cloud (skip ollama)")
+            result = self._generate_deepseek(prompt, system, max_tokens)
+            if result:
+                return result
+            self._last_provider = "stille"
+            return None
+
+        # Mode "local_first": altes Verhalten
+        logger.debug(f"[LLM-BRIDGE] mode={mode} provider=hailo_ollama_first")
 
         # 1. hailo-ollama DeepSeek R1 (lokal)
         result = self._generate_ollama(prompt, system, max_tokens,
@@ -336,6 +444,7 @@ class LocalLLMBridge:
         now = time.monotonic()
         backoff_remaining = max(0.0, self._ollama_backoff_until - now)
         return {
+            "llm_mode": self._llm_mode,
             "ollama_installed": self._ollama_available,
             "ollama_running": self._is_ollama_running() if self._ollama_available else False,
             "ollama_fail_count": self._ollama_fail_count,
