@@ -1,5 +1,6 @@
 {
   "version": 1,
+  "llm_mode": "cloud_only",
   "vision_enabled": true,
   "thresholds": {
     "scrfd_conf": 0.75,
