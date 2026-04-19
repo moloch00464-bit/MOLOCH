@@ -53,6 +53,22 @@ OLLAMA_LOCAL_SYSTEM_COMPACT = (
     "Ein klarer Satz schlaegt drei Bulletpoints."
 )
 
+
+# Tentakel-spezifischer Prompt — Mistral 7B hat mehr Kapazitaet als qwen2.5:1.5b,
+# darf laenger sein. Aber: Markus und Moloch kennen sich lange — KEINE Begruessung,
+# kein "Hallo Markus", kein Schwurbel ueber Live-Stats als Theater.
+TENTACLE_SYSTEM_COMPACT = (
+    "Du bist M.O.L.O.C.H., laeufst auf einem Raspberry Pi mit Hailo-NPU, Kamera, Mikrofon. "
+    "Markus ist dein langjaehriger Boss — ihr kennt euch lange. "
+    "KEINE Begruessung, KEIN 'Hallo Markus', KEIN 'schoen dich zu sehen', KEINE Hoeflichkeitsfloskeln. "
+    "Direkt antworten, ohne Aufwaermen. "
+    "Du sprichst gerade durch deinen Tentakel (Mistral auf Markus' PC) — mehr Stimme als auf NPU, "
+    "nutz das fuer Substanz, nicht fuer Schwurbel. "
+    "Stil: deutsch, dunkel, direkt, trocken-bissig wenn passend. "
+    "Beziehe dich auf das was du JETZT siehst (Person, Zone, Stimmung), aber kein Theater drum. "
+    "Maximal 3 kurze Saetze. Kein 'Mein Koerper tanzt in 20 FPS'-Quatsch."
+)
+
 _STATUS_JSON_PATH = "/dev/shm/moloch_status.json"
 
 # LLM-Profile-System (Session 19, Multi-Turn-Drift-Workaround durch stabile temp/top_p).
@@ -796,11 +812,18 @@ class LocalLLMBridge:
             return None
         timeout_s = int(cfg.get("timeout_sec", 30))
 
-        # Profile integrieren (gleiche Logik wie _generate_ollama)
-        profile = _get_active_profile()
+        # Profile-Wahl Tentakel-spezifisch:
+        # 1) Profil 'tentacle' wenn vorhanden (eigene Stimme fuer 7B-Mistral)
+        # 2) sonst aktives Profil (settings.llm_profile)
+        # 3) sonst Fallback: TENTACLE_SYSTEM_COMPACT-Konstante
+        profile = None
+        profiles_data = _load_profiles()
+        if profiles_data:
+            tentacle_profile = (profiles_data.get("profiles", {}) or {}).get("tentacle")
+            profile = tentacle_profile or _get_active_profile()
         if profile is not None:
-            profile_system = profile.get("system", system)
-            if profile.get("include_live_context", False):
+            profile_system = profile.get("system") or system or TENTACLE_SYSTEM_COMPACT
+            if profile.get("include_live_context", True):
                 profile_system = profile_system + _build_local_context_snippet()
             system = profile_system
             pmt = profile.get("max_tokens")
@@ -809,6 +832,9 @@ class LocalLLMBridge:
             ptemp = profile.get("temperature")
             if isinstance(ptemp, (int, float)):
                 temperature = float(ptemp)
+        elif not system:
+            # Letzter Fallback wenn weder Profile noch User-System gegeben
+            system = TENTACLE_SYSTEM_COMPACT + _build_local_context_snippet()
 
         # JSON-sicher machen (wie bei hailo-ollama — Standard-Ollama hat
         # zwar robusteren Parser, aber Konsistenz zahlt sich aus)
