@@ -55,6 +55,62 @@ OLLAMA_LOCAL_SYSTEM_COMPACT = (
 
 _STATUS_JSON_PATH = "/dev/shm/moloch_status.json"
 
+# LLM-Profile-System (Session 19, Multi-Turn-Drift-Workaround durch stabile temp/top_p).
+# config/llm_profiles.json definiert die System-Prompts + Sampling-Settings pro Modus.
+# settings.json Key 'llm_profile' ueberschreibt den 'active'-Default aus profiles.json.
+_PROFILES_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "config", "llm_profiles.json")
+
+# Cache: (mtime, data) — neu laden nur wenn File geaendert. Erlaubt Live-Switch via GUI.
+_profiles_cache: Dict = {"mtime": 0.0, "data": None, "settings_mtime": 0.0, "settings_active": None}
+
+
+def _load_profiles() -> Optional[Dict]:
+    """Liest llm_profiles.json mit mtime-Cache. Gibt {profiles, active} oder None."""
+    try:
+        mtime = os.path.getmtime(_PROFILES_PATH)
+    except OSError:
+        return None
+    if _profiles_cache["data"] is not None and _profiles_cache["mtime"] == mtime:
+        return _profiles_cache["data"]
+    try:
+        with open(_PROFILES_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        _profiles_cache["data"] = data
+        _profiles_cache["mtime"] = mtime
+        return data
+    except Exception as e:
+        logger.warning(f"[LLM-PROFILES] Lesefehler: {e}")
+        return None
+
+
+def _get_active_profile() -> Optional[Dict]:
+    """Aktives Profil-Dict zurueckgeben. settings.llm_profile > profiles.active.
+
+    Returns dict mit keys: system, include_live_context, max_tokens, temperature.
+    None wenn keine Profile-Datei existiert oder aktives Profil nicht definiert.
+    """
+    data = _load_profiles()
+    if not data:
+        return None
+    profiles = data.get("profiles", {}) or {}
+    if not profiles:
+        return None
+    # settings.json Key 'llm_profile' hat Vorrang (mit eigenem mtime-Cache)
+    settings_active = None
+    try:
+        smtime = os.path.getmtime(_SETTINGS_PATH)
+        if _profiles_cache["settings_mtime"] != smtime:
+            with open(_SETTINGS_PATH, "r", encoding="utf-8") as f:
+                _profiles_cache["settings_active"] = json.load(f).get("llm_profile")
+            _profiles_cache["settings_mtime"] = smtime
+        settings_active = _profiles_cache["settings_active"]
+    except (OSError, ValueError):
+        pass
+    active_key = settings_active or data.get("active") or "chat"
+    return profiles.get(active_key) or profiles.get("chat") or next(iter(profiles.values()), None)
+
 
 def _build_local_context_snippet() -> str:
     """Live-Kontext aus moloch_status.json bauen (Vision + Inner State).
@@ -373,10 +429,25 @@ class LocalLLMBridge:
             def _flatten(s: str) -> str:
                 return s.replace('\r\n', ' ').replace('\n', ' ').replace('\r', ' ')
 
-            # Langer System-Prompt -> kompakter Moloch-Prompt (Qwen2.5-1.5B-kompatibel).
-            # Volle build_system_prompt()-Ausgabe (>= 400 Zeichen) wird auf Charakter-DNA reduziert,
-            # angereichert um Live-Kontext (Vision + Inner State) aus moloch_status.json.
-            if system and len(system) > OLLAMA_LOCAL_SYSTEM_MAX:
+            # LLM-Profile-System hat Vorrang: aktives Profil aus llm_profiles.json laden.
+            # settings.llm_profile > profiles.active. Profile bringt eigene system/temp/tokens mit.
+            # Fallback (kein Profil-File): bisheriger Compact-Override + Live-Kontext.
+            profile = _get_active_profile()
+            if profile is not None:
+                profile_system = profile.get("system", OLLAMA_LOCAL_SYSTEM_COMPACT)
+                if profile.get("include_live_context", False):
+                    profile_system = profile_system + _build_local_context_snippet()
+                system = profile_system
+                # Profile-Sampling ueberschreibt Caller-Defaults
+                pmt = profile.get("max_tokens")
+                if isinstance(pmt, int) and pmt > 0:
+                    max_tokens = pmt
+                ptemp = profile.get("temperature")
+                if isinstance(ptemp, (int, float)):
+                    temperature = float(ptemp)
+                logger.info(f"[LLM] Profil aktiv: {profile.get('system','')[:30]}... ({len(system)} Zeichen, max_tokens={max_tokens}, temp={temperature})")
+            elif system and len(system) > OLLAMA_LOCAL_SYSTEM_MAX:
+                # Fallback wenn keine Profile-Datei: alter Compact-Pfad
                 ctx = _build_local_context_snippet()
                 system = OLLAMA_LOCAL_SYSTEM_COMPACT + ctx
                 logger.info(f"[LLM] System-Prompt gekuerzt -> kompakte Persona + Kontext ({len(system)} Zeichen)")
