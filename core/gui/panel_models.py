@@ -90,6 +90,71 @@ except ImportError:
     PiPower5Popup = None
 
 
+class _Tooltip:
+    """Leichter Tkinter-Tooltip — Toplevel-Popup beim Hover ueber ein Widget.
+
+    Erscheint mit kleinem Delay (350ms) damit kein Flackern bei schnellem Drueberfahren.
+    Bricht bei Leave/Click sauber ab.
+    """
+
+    def __init__(self, widget, text: str, delay_ms: int = 350, wrap_px: int = 360):
+        self._widget = widget
+        self._text = text
+        self._delay = delay_ms
+        self._wrap = wrap_px
+        self._tip = None
+        self._after_id = None
+        widget.bind("<Enter>", self._schedule, add="+")
+        widget.bind("<Leave>", self._hide, add="+")
+        widget.bind("<ButtonPress>", self._hide, add="+")
+
+    def _schedule(self, _evt=None):
+        self._cancel()
+        self._after_id = self._widget.after(self._delay, self._show)
+
+    def _cancel(self):
+        if self._after_id is not None:
+            try:
+                self._widget.after_cancel(self._after_id)
+            except Exception:
+                pass
+            self._after_id = None
+
+    def _show(self):
+        if self._tip is not None:
+            return
+        try:
+            x = self._widget.winfo_rootx() + 16
+            y = self._widget.winfo_rooty() + self._widget.winfo_height() + 6
+        except Exception:
+            return
+        self._tip = tk.Toplevel(self._widget)
+        self._tip.wm_overrideredirect(True)
+        self._tip.wm_geometry(f"+{x}+{y}")
+        try:
+            lbl = tk.Label(
+                self._tip, text=self._text, justify=tk.LEFT,
+                bg="#1f1f1f", fg=FG_WHITE, font=FONT_SMALL,
+                relief=tk.SOLID, borderwidth=1,
+                wraplength=self._wrap, padx=8, pady=6,
+            )
+            lbl.pack()
+        except Exception:
+            self._hide()
+
+    def _hide(self, _evt=None):
+        self._cancel()
+        if self._tip is not None:
+            try:
+                self._tip.destroy()
+            except Exception:
+                pass
+            self._tip = None
+
+    def update_text(self, text: str):
+        self._text = text
+
+
 class ModelsModule:
     """Model Controls und Popup-Buttons im uebergebenen LabelFrame."""
 
@@ -538,12 +603,29 @@ class ModelsModule:
                     bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
                 ).pack(side=tk.LEFT, pady=2)
             else:
-                # Radio-Buttons (Tkinter-Style: schlichte Buttons mit Highlight)
+                # Profile-Beschreibungen — was jeder Modus tatsaechlich tut.
+                # Kurz und konkret, keine Marketing-Sprache.
+                profile_help = {
+                    "chat":         "Normale Konversation. Kurz, frech, dunkel-humorvoll. Default-Modus fuer alltaegliche Fragen.",
+                    "introspect":   "Selbstreflexion mit Live-Vision + Inner State (Person, Zone, Tension, Dominance). Persoenlich, oft poetisch. Fuer 'Wie geht es dir?', 'Was siehst du?'.",
+                    "technical":    "Sachlich-praezise Antworten. Fakten zuerst, Persoenlichkeit minimal. Fuer technische Fragen, Diagnosen, Erklaerungen.",
+                    "dark":         "Berserker-Modus. Ein Satz, scharf, trocken-bissig. Hoechste Temperatur — kann unvorhersehbar sein.",
+                    "multi_person": "Mehrere Personen vor der Kamera unterscheiden ('markus macht X, rebecca macht Y'). Mit Live-Vision-Kontext.",
+                }
                 for i, key in enumerate(profile_keys):
                     display = self._llm_display_names.get(key, key.capitalize())
                     meta = profiles[key]
                     max_tok = meta.get("max_tokens", "?")
-                    tooltip = f"{key} | max_tokens={max_tok}"
+                    temp = meta.get("temperature", "?")
+                    live = "ja" if meta.get("include_live_context") else "nein"
+                    desc = profile_help.get(key, "")
+                    tooltip_txt = (
+                        f"{display}  ({key})\n"
+                        f"---\n"
+                        f"{desc}\n"
+                        f"---\n"
+                        f"max_tokens={max_tok}  |  temperature={temp}  |  Live-Kontext: {live}"
+                    )
                     btn = tk.Button(
                         self._llm_btn_frame,
                         text=display,
@@ -556,13 +638,8 @@ class ModelsModule:
                     )
                     btn.grid(row=0, column=i, padx=2, pady=2)
                     self._llm_btn_refs[key] = btn
-                    # Einfacher Tooltip via bind
-                    btn.bind("<Enter>", lambda e, t=tooltip, b=btn: b.config(
-                        text=t[:12],
-                    ))
-                    btn.bind("<Leave>", lambda e, d=display, b=btn: b.config(
-                        text=d,
-                    ))
+                    # Echtes Tooltip-Popup (Toplevel) — kein Button-Text-Swap mehr.
+                    _Tooltip(btn, tooltip_txt)
 
             self._llm_last_profile_keys = profile_keys
 
