@@ -53,6 +53,30 @@ OLLAMA_LOCAL_SYSTEM_COMPACT = (
     "Ein klarer Satz schlaegt drei Bulletpoints."
 )
 
+_STATUS_JSON_PATH = "/dev/shm/moloch_status.json"
+
+
+def _build_local_context_snippet() -> str:
+    """Live-Kontext aus moloch_status.json bauen (Vision + Inner State).
+
+    Gibt eine Einzeiler-Ergaenzung zum Compact-Prompt zurueck, damit Qwen2.5
+    wissen kann wen er sieht und wie er sich fuehlt. Leerer String bei Fehler.
+    """
+    try:
+        with open(_STATUS_JSON_PATH, 'r') as f:
+            st = json.load(f)
+        face = st.get('face_id') or ('unbekannte Person' if st.get('person_detected') else 'niemand')
+        core = st.get('core', {}) or {}
+        zone = core.get('zone', 'guardian')
+        tension = core.get('tension', st.get('tension', 0.0))
+        dominance = core.get('dominance', 0.0)
+        return (
+            f" JETZT: Du siehst {face}. "
+            f"Zone {zone}, Tension {tension:+.1f}, Dominance {dominance:+.1f}."
+        )
+    except Exception:
+        return ""
+
 # llm_mode Flag — gelesen aus config/settings.json Key "llm_mode"
 LLM_MODE_OFF = "off"                # kein LLM ueberhaupt
 LLM_MODE_CLOUD_ONLY = "cloud_only"  # nur DeepSeek Cloud, kein hailo-ollama
@@ -350,10 +374,12 @@ class LocalLLMBridge:
                 return s.replace('\r\n', ' ').replace('\n', ' ').replace('\r', ' ')
 
             # Langer System-Prompt -> kompakter Moloch-Prompt (Qwen2.5-1.5B-kompatibel).
-            # Volle build_system_prompt()-Ausgabe (>= 400 Zeichen) wird auf Charakter-DNA reduziert.
+            # Volle build_system_prompt()-Ausgabe (>= 400 Zeichen) wird auf Charakter-DNA reduziert,
+            # angereichert um Live-Kontext (Vision + Inner State) aus moloch_status.json.
             if system and len(system) > OLLAMA_LOCAL_SYSTEM_MAX:
-                logger.info(f"[LLM] System-Prompt {len(system)} Zeichen -> kompakte Moloch-Persona fuer lokal")
-                system = OLLAMA_LOCAL_SYSTEM_COMPACT
+                ctx = _build_local_context_snippet()
+                system = OLLAMA_LOCAL_SYSTEM_COMPACT + ctx
+                logger.info(f"[LLM] System-Prompt gekuerzt -> kompakte Persona + Kontext ({len(system)} Zeichen)")
 
             messages = []
             if system:
