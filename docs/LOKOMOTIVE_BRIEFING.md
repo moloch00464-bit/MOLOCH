@@ -46,6 +46,7 @@ Der Besitzer/Entwickler heißt **Markus**. Markus ist der Boss — bei Konflikte
 | Spotify, Track-Index, MusicMemory, Zone-Musik | `.claude/agents/music.md` |
 | hailo-ollama, DeepSeek, LLM-Bridge, Meta-Entscheidung, Philosophie | `.claude/agents/deepseek.md` |
 | ESP32, WiFi-Mic, ReSpeaker, Firmware, Peripherie, Tentakel | `.claude/agents/tentacle.md` |
+| LLM-Tentakel, Ollama-PC, STT-Bridge, TTS-Bridge, Chat-UI, Pi<->PC LAN | `.claude/agents/bridge.md` |
 | TaoEngine, Unterbewusstsein, Mood-Impulse, Self-Tune, Anima | `.claude/agents/unconscious.md` |
 | Chaos, Stresstest, Absturz, Lasttest, Stabilität | `.claude/agents/stresstest.md` |
 
@@ -67,6 +68,7 @@ Der Besitzer/Entwickler heißt **Markus**. Markus ist der Boss — bei Konflikte
 | music | core/music/*.py, core/spotify_controller.py |
 | deepseek | core/local_llm_bridge.py, core/deepseek_client.py, core/llm_response.py |
 | tentacle | core/audio/wifi_mic.py, core/hardware/camera_cloud_bridge.py, firmware/ |
+| bridge | core/bridge/*.py (NEU), config/settings.json keys: tentacle_llm/stt_bridge/tts_bridge |
 | unconscious | core/unconscious_engine.py, core/tao_engine.py, config/anima_mappings.json |
 | stresstest | scripts/*.py, Tests |
 

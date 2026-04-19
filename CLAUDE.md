@@ -96,6 +96,7 @@ Session:       moloch_session_init  ← PFLICHT als erstes!
 | Spotify, Track-Index, MusicMemory, Zone-Musik | `.claude/agents/music.md` |
 | hailo-ollama, DeepSeek, LLM-Bridge, Meta-Entscheidung, Philosophie | `.claude/agents/deepseek.md` |
 | ESP32, WiFi-Mic, ReSpeaker, Firmware, Peripherie, Tentakel | `.claude/agents/tentacle.md` |
+| LLM-Tentakel, Ollama-PC, STT-Bridge, TTS-Bridge, Chat-UI, Pi<->PC LAN | `.claude/agents/bridge.md` |
 | TaoEngine, Unterbewusstsein, Mood-Impulse, Self-Tune, Anima | `.claude/agents/unconscious.md` |
 | BBox/Landmark-Skalierung, Letterbox-Korrektur, Koordinaten-Transformation, Anzeige-Bug, Keypoints versetzt | `.claude/agents/coordinates.md` |
 | Chaos, Stresstest, Absturz, Lasttest, Stabilität | `.claude/agents/stresstest.md` |
@@ -118,6 +119,7 @@ Session:       moloch_session_init  ← PFLICHT als erstes!
 | music | core/music/*.py, core/spotify_controller.py |
 | deepseek | core/local_llm_bridge.py, core/deepseek_client.py, core/llm_response.py |
 | tentacle | core/audio/wifi_mic.py, core/hardware/camera_cloud_bridge.py, firmware/ |
+| bridge | core/bridge/*.py (NEU), config/settings.json keys: tentacle_llm/stt_bridge/tts_bridge |
 | unconscious | core/unconscious_engine.py, core/tao_engine.py, config/anima_mappings.json |
 | coordinates | core/perception/hailo_postprocess.py, core/gui/panel_preview.py (Koordinaten-Math only) |
 | stresstest | scripts/*.py, Tests |
