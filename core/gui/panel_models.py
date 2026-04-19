@@ -34,6 +34,7 @@ from core.gui.panel_styles import (
 _CONFIG_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "config")
 _SETTINGS_PATH = os.path.join(_CONFIG_DIR, "settings.json")
 _LLM_PROFILES_PATH = os.path.join(_CONFIG_DIR, "llm_profiles.json")
+_CAPS_PATH = os.path.join(_CONFIG_DIR, "system_capabilities.json")
 
 # Audio Popup importieren (optional, Fehler faengt Panel nicht ab)
 try:
@@ -561,6 +562,17 @@ class ModelsModule:
         )
         self._lbl_llm_active.pack(side=tk.LEFT, padx=5)
 
+        # Tentakel-Status (eigene Zeile): zeigt Ollama auf Markus-Rechner
+        tentacle_row = tk.Frame(self._llm_section, bg=BG_FRAME)
+        tentacle_row.pack(fill=tk.X, padx=8, pady=(0, 2))
+        tk.Label(
+            tentacle_row, text="Tentakel:", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
+        ).pack(side=tk.LEFT)
+        self._lbl_tentacle = tk.Label(
+            tentacle_row, text="--", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
+        )
+        self._lbl_tentacle.pack(side=tk.LEFT, padx=5)
+
         # Profil-Buttons (werden beim ersten _update_llm_section befuellt)
         self._llm_btn_frame = tk.Frame(self._llm_section, bg=BG_FRAME)
         self._llm_btn_frame.pack(fill=tk.X, padx=8, pady=(0, 6))
@@ -655,6 +667,36 @@ class ModelsModule:
                     btn.config(bg=BG_BUTTON, fg=FG_LABEL, text=display)
         else:
             self._lbl_llm_active.config(text="--", fg=FG_DIM)
+
+        # Tentakel-Status aus system_capabilities.json lesen
+        self._update_tentacle_status()
+
+    def _update_tentacle_status(self):
+        """Tentakel-Anzeige aktualisieren. Quelle: system_capabilities.json + settings.json."""
+        enabled = True
+        try:
+            with open(_SETTINGS_PATH, "r", encoding="utf-8") as fh:
+                s = json.load(fh)
+            enabled = bool((s.get("tentacle_llm", {}) or {}).get("enabled", True))
+        except Exception:
+            pass
+        if not enabled:
+            self._lbl_tentacle.config(text="deaktiviert", fg=FG_DIM)
+            return
+        try:
+            with open(_CAPS_PATH, "r", encoding="utf-8") as fh:
+                caps = json.load(fh)
+            t = (caps.get("tentacle_llm", {}) or {})
+            reachable = bool(t.get("reachable", False))
+            model = t.get("model") or ""
+        except Exception:
+            reachable = False
+            model = ""
+        if reachable:
+            label = f"online ({model})" if model else "online"
+            self._lbl_tentacle.config(text=label, fg=STATUS_GREEN)
+        else:
+            self._lbl_tentacle.config(text="offline — nur NPU", fg=FG_DIM)
 
     def _select_llm_profile(self, profile_key: str):
         """Profil auswaehlen: settings.json schreiben + GUI sofort aktualisieren."""
