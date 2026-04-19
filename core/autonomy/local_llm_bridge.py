@@ -403,18 +403,41 @@ class LocalLLMBridge:
             self._last_provider = "stille"
             return None
 
-        # Mode "local_first": altes Verhalten
-        logger.debug(f"[LLM-BRIDGE] mode={mode} provider=hailo_ollama_first")
+        # Mode "local_first": Tentakel-Routing + Fallback-Kette
+        chosen = self._choose_provider(prompt, system, force_local, caller="ask")
+        logger.debug(f"[LLM-BRIDGE] mode={mode} chosen={chosen}")
 
-        # 1. hailo-ollama lokal auf NPU (R1 oder Qwen2.5)
-        result = self._generate_ollama(prompt, system, max_tokens,
-                                       model=model,
-                                       timeout=timeout,
-                                       temperature=temperature,
-                                       top_p=top_p,
-                                       force_local=force_local)
-        if result:
-            return result
+        if chosen == "tentacle":
+            # 1a. Tentakel zuerst (komplexer Prompt)
+            result = self._generate_tentacle(prompt, system, max_tokens,
+                                             temperature=temperature, top_p=top_p)
+            if result:
+                return result
+            # 1b. Fallback auf NPU wenn Tentakel still
+            result = self._generate_ollama(prompt, system, max_tokens,
+                                           model=model,
+                                           timeout=timeout,
+                                           temperature=temperature,
+                                           top_p=top_p,
+                                           force_local=force_local)
+            if result:
+                return result
+        else:
+            # 1. hailo-ollama lokal auf NPU (kurzer Prompt)
+            result = self._generate_ollama(prompt, system, max_tokens,
+                                           model=model,
+                                           timeout=timeout,
+                                           temperature=temperature,
+                                           top_p=top_p,
+                                           force_local=force_local)
+            if result:
+                return result
+            # 1b. Fallback auf Tentakel wenn NPU still (und Tentakel verfuegbar)
+            if not force_local and _load_tentacle_cfg().get("enabled"):
+                result = self._generate_tentacle(prompt, system, max_tokens,
+                                                 temperature=temperature, top_p=top_p)
+                if result:
+                    return result
 
         # 2. DeepSeek API (Cloud-Fallback) — nur wenn nicht force_local
         if not force_local:
@@ -425,6 +448,27 @@ class LocalLLMBridge:
         # 3. Stille
         self._last_provider = "stille"
         return None
+
+    def _choose_provider(self, prompt: str, system: str,
+                         force_local: bool, caller: str = "ask") -> str:
+        """Waehlt 'tentacle' oder 'ollama' basierend auf Komplexitaet + Caller.
+
+        force_local -> immer 'ollama' (NPU). Tentakel ist LAN, nicht streng 'lokal'.
+        caller='reason' -> Tentakel bevorzugt (internes Denken braucht Substanz).
+        sonst: prompt+system >= complexity_threshold -> 'tentacle', sonst 'ollama'.
+        """
+        if force_local:
+            return "ollama"
+        cfg = _load_tentacle_cfg()
+        if not cfg.get("enabled"):
+            return "ollama"
+        if time.monotonic() < self._tentacle_backoff_until:
+            return "ollama"
+        if caller == "reason":
+            return "tentacle"
+        threshold = int(cfg.get("complexity_threshold", 120))
+        total = len(prompt or "") + len(system or "")
+        return "tentacle" if total >= threshold else "ollama"
 
     def reason_internal(self, prompt: str, system: str = "",
                         max_tokens: int = 512) -> Optional[str]:
@@ -452,22 +496,39 @@ class LocalLLMBridge:
             self._last_provider = "stille"
             return None
 
-        # Mode "local_first": altes Verhalten
-        logger.debug(f"[LLM-BRIDGE] mode={mode} provider=hailo_ollama_first")
+        # Mode "local_first": Reasoning bevorzugt Tentakel (mehr Substanz)
+        chosen = self._choose_provider(prompt, system, force_local=False, caller="reason")
+        logger.debug(f"[LLM-BRIDGE] reason_internal chosen={chosen}")
 
-        # 1. hailo-ollama DeepSeek R1 (lokal)
-        result = self._generate_ollama(prompt, system, max_tokens,
-                                       model=OLLAMA_MODEL_REASON,
-                                       timeout=OLLAMA_TIMEOUT_REASON)
-        if result:
-            return result
+        if chosen == "tentacle":
+            result = self._generate_tentacle(prompt, system, max_tokens)
+            if result:
+                return result
+            # Fallback NPU
+            result = self._generate_ollama(prompt, system, max_tokens,
+                                           model=OLLAMA_MODEL_REASON,
+                                           timeout=OLLAMA_TIMEOUT_REASON)
+            if result:
+                return result
+        else:
+            # 1. hailo-ollama lokal
+            result = self._generate_ollama(prompt, system, max_tokens,
+                                           model=OLLAMA_MODEL_REASON,
+                                           timeout=OLLAMA_TIMEOUT_REASON)
+            if result:
+                return result
+            # 1b. Fallback Tentakel
+            if _load_tentacle_cfg().get("enabled"):
+                result = self._generate_tentacle(prompt, system, max_tokens)
+                if result:
+                    return result
 
-        # 2. DeepSeek API als Fallback
+        # 2. DeepSeek API als Fallback (wenn Keys noch da sind, sonst stille)
         result = self._generate_deepseek(prompt, system, max_tokens)
         if result:
             return result
 
-        # 3. Stille (kein Claude fuer internes Reasoning)
+        # 3. Stille
         self._last_provider = "stille"
         return None
 
