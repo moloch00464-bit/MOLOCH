@@ -1047,15 +1047,26 @@ def test_hailo_ollama_models():
     except Exception as e:
         return False, f"Fehler: {e}"
 
-@auto_test("DeepSeek API Key vorhanden", "llm")
+@auto_test("DeepSeek API Key Status (NPU-only ok)", "llm")
 def test_deepseek_api_key():
+    """PASS auch wenn api_keys.json deaktiviert wurde (NPU-only-Modus, Session 19)."""
     keys_file = os.path.join(MOLOCH_HOME, "config/api_keys.json")
+    if not os.path.exists(keys_file):
+        # Pruefen ob als .disabled_* umbenannt — dann ist NPU-only-Modus aktiv
+        cfg_dir = os.path.join(MOLOCH_HOME, "config")
+        try:
+            disabled = [f for f in os.listdir(cfg_dir) if f.startswith("api_keys.json.disabled")]
+            if disabled:
+                return True, f"NPU-only-Modus aktiv (Cloud disabled: {disabled[0]})"
+        except OSError:
+            pass
+        return False, "api_keys.json fehlt (auch keine .disabled-Variante)"
     try:
         with open(keys_file) as f:
             keys = json.load(f)
         key = keys.get("deepseek", {}).get("api_key", "")
         if key and len(key) > 10:
-            return True, f"Key vorhanden ({len(key)} Zeichen)"
+            return True, f"Key vorhanden ({len(key)} Zeichen) — Cloud-Fallback verfuegbar"
         return False, "Kein Key oder zu kurz"
     except Exception as e:
         return False, f"Datei nicht lesbar: {e}"
@@ -1350,50 +1361,197 @@ def test_keyword_actions_complete():
 # NPU WORKER NEU (2026-04-09)
 # ============================================================
 
-@auto_test("ActivityWorker aktiv", "npu_workers")
+# --- 3 Worker (Activity/PersonAttr/YOLOWorld) wurden in Session 19 deaktiviert
+#     wegen HAILO_MAX_NETWORK_GROUPS=8. Tests akzeptieren JETZT 'fehlend' als PASS,
+#     melden FAIL nur wenn der Worker zwar registriert ist aber crasht.
+
+@auto_test("ActivityWorker (deaktiviert OK)", "npu_workers")
 def test_activity_worker_status():
     data = read_status()
     if not data:
         return False, "Kein Status"
     workers = data.get("worker_health", {})
+    if "ActivityWorker" not in workers:
+        return True, "deaktiviert (Session 19 HAILO_MAX_NETWORK_GROUPS=8 Constraint)"
     aw = workers.get("ActivityWorker", {})
     if not aw.get("running", False):
-        return False, "ActivityWorker nicht running"
-    if not aw.get("models_loaded", False):
-        return False, "ActivityWorker nicht loaded"
-    infs = aw.get("total_inferences", 0)
-    errs = aw.get("total_errors", 0)
-    return True, f"Inferences={infs}, Errors={errs}"
+        return False, "registriert aber nicht running"
+    return True, f"aktiv: Inferences={aw.get('total_inferences',0)}, Errors={aw.get('total_errors',0)}"
 
-@auto_test("PersonAttrWorker aktiv", "npu_workers")
+@auto_test("PersonAttrWorker (deaktiviert OK)", "npu_workers")
 def test_person_attr_worker_status():
     data = read_status()
     if not data:
         return False, "Kein Status"
     workers = data.get("worker_health", {})
+    if "PersonAttrWorker" not in workers:
+        return True, "deaktiviert (Session 19, Bug A1 + Slot-Constraint)"
     pw = workers.get("PersonAttrWorker", {})
     if not pw.get("running", False):
-        return False, "PersonAttrWorker nicht running"
-    if not pw.get("models_loaded", False):
-        return False, "PersonAttrWorker nicht loaded"
-    infs = pw.get("total_inferences", 0)
-    errs = pw.get("total_errors", 0)
-    return True, f"Inferences={infs}, Errors={errs}"
+        return False, "registriert aber nicht running"
+    return True, f"aktiv: Inferences={pw.get('total_inferences',0)}, Errors={pw.get('total_errors',0)}"
 
-@auto_test("YOLOWorldWorker aktiv", "npu_workers")
+@auto_test("YOLOWorldWorker (deaktiviert OK)", "npu_workers")
 def test_yolo_world_worker_status():
     data = read_status()
     if not data:
         return False, "Kein Status"
     workers = data.get("worker_health", {})
+    if "YOLOWorldWorker" not in workers:
+        return True, "deaktiviert (Session 19, Bug A3 + Slot-Constraint)"
     yw = workers.get("YOLOWorldWorker", {})
     if not yw.get("running", False):
-        return False, "YOLOWorldWorker nicht running"
-    if not yw.get("models_loaded", False):
-        return False, "YOLOWorldWorker nicht loaded"
-    infs = yw.get("total_inferences", 0)
-    errs = yw.get("total_errors", 0)
-    return True, f"Inferences={infs}, Errors={errs}"
+        return False, "registriert aber nicht running"
+    return True, f"aktiv: Inferences={yw.get('total_inferences',0)}, Errors={yw.get('total_errors',0)}"
+
+# ============================================================
+# SESSION 19 STACK (2026-04-19): HailoRT 5.3.0 + 4 Worker + LLM-Profiles
+# ============================================================
+
+@auto_test("HailoRT Firmware 5.3.0", "session19")
+def test_hailort_firmware_version():
+    """Firmware-Version aus 'hailortcli fw-control identify' parsen."""
+    try:
+        out = subprocess.check_output(
+            "hailortcli fw-control identify 2>&1 | grep 'Firmware Version'",
+            shell=True, timeout=10
+        ).decode().strip()
+        # Format: "Firmware Version: 5.3.0 (release,app)"
+        if "5.3.0" in out:
+            return True, out.replace("Firmware Version:", "FW").strip()
+        return False, f"Unerwartete FW: {out[:80]}"
+    except Exception as e:
+        return False, f"hailortcli Fehler: {e}"
+
+@auto_test("4 NPU-Worker exakt (Face/Pose/ReID/Depth)", "session19")
+def test_worker_count_exact():
+    """Genau die 4 Session-19-Worker registriert, keine zusaetzlichen.
+
+    Filtert Eintraege mit '_'-Prefix (z.B. '_dispatcher' = ROI-Dispatcher,
+    kein NPU-Worker mit Network-Group).
+    """
+    expected = {"FaceWorker", "PoseWorker", "ReIDWorker", "DepthWorker"}
+    data = read_status()
+    if not data:
+        return False, "Kein Status"
+    raw = set(data.get("worker_health", {}).keys())
+    workers = {w for w in raw if not w.startswith("_")}  # Dispatcher etc. ignorieren
+    extra = workers - expected
+    missing = expected - workers
+    if missing:
+        return False, f"Fehlt: {','.join(sorted(missing))}"
+    if extra:
+        return False, f"Unerwartet aktiv: {','.join(sorted(extra))} (Slot-Risiko fuer Qwen)"
+    return True, "4/4 erwartete Worker aktiv, keine zusaetzlichen NPU-Worker"
+
+@auto_test("llm_profiles.json valide (5 Profile)", "session19")
+def test_llm_profiles_valid():
+    """config/llm_profiles.json: 5 Profile mit allen Pflicht-Keys."""
+    path = os.path.join(MOLOCH_HOME, "config", "llm_profiles.json")
+    if not os.path.exists(path):
+        return False, "llm_profiles.json fehlt"
+    expected_keys = {"chat", "introspect", "technical", "dark", "multi_person"}
+    required_fields = {"system", "include_live_context", "max_tokens", "temperature"}
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        profiles = data.get("profiles", {})
+        if set(profiles.keys()) != expected_keys:
+            return False, f"Profile-Keys: {sorted(profiles.keys())} != erwartet {sorted(expected_keys)}"
+        for key, prof in profiles.items():
+            missing = required_fields - set(prof.keys())
+            if missing:
+                return False, f"{key} fehlt Felder: {','.join(sorted(missing))}"
+        return True, f"5 Profile valide, active='{data.get('active','?')}'"
+    except Exception as e:
+        return False, f"Parse-Fehler: {e}"
+
+@auto_test("hailo-ollama systemd-Service aktiv", "session19")
+def test_hailo_ollama_service_active():
+    try:
+        out = subprocess.check_output(
+            "systemctl is-active hailo-ollama.service",
+            shell=True, timeout=5
+        ).decode().strip()
+        if out == "active":
+            return True, "active"
+        return False, f"Status: {out}"
+    except subprocess.CalledProcessError as e:
+        return False, f"inactive ({e.output.decode().strip()})"
+    except Exception as e:
+        return False, f"systemctl Fehler: {e}"
+
+@auto_test("HAILO_OLLAMA_VDEVICE_GROUP_ID=SHARED gesetzt", "session19")
+def test_hailo_vdevice_shared():
+    """systemd Environment muss SHARED enthalten — sonst Error 74 bei Parallel-LLM."""
+    try:
+        out = subprocess.check_output(
+            "systemctl show hailo-ollama.service -p Environment 2>/dev/null",
+            shell=True, timeout=5
+        ).decode().strip()
+        if "HAILO_OLLAMA_VDEVICE_GROUP_ID=SHARED" in out:
+            return True, "SHARED VDevice gesetzt"
+        return False, f"VDevice nicht SHARED: {out[:100]}"
+    except Exception as e:
+        return False, f"systemctl Fehler: {e}"
+
+@auto_test("LLM-Bridge antwortet lokal", "session19")
+def test_llm_bridge_local():
+    """Mini-Inference-Call gegen /api/chat — Antwort > 0 Zeichen, Latenz < 60s."""
+    try:
+        import urllib.request
+        body = json.dumps({
+            "model": "qwen2.5:1.5b",
+            "messages": [{"role": "user", "content": "ping"}],
+            "stream": False,
+            "options": {"num_predict": 5}
+        }).encode()
+        req = urllib.request.Request(
+            "http://localhost:8000/api/chat",
+            data=body, headers={"Content-Type": "application/json"}
+        )
+        t0 = time.monotonic()
+        resp = urllib.request.urlopen(req, timeout=60)
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        data = json.loads(resp.read().decode("utf-8"))
+        text = data.get("message", {}).get("content", "").strip()
+        if not text:
+            return False, f"Leere Antwort nach {elapsed_ms}ms"
+        return True, f"{len(text)} Zeichen in {elapsed_ms}ms"
+    except Exception as e:
+        return False, f"Call Fehler: {e}"
+
+@auto_test("settings.llm_profile gueltig", "session19")
+def test_settings_llm_profile():
+    """settings.json Key 'llm_profile' muss einer der 5 valid Werte sein."""
+    valid = {"chat", "introspect", "technical", "dark", "multi_person"}
+    path = os.path.join(MOLOCH_HOME, "config", "settings.json")
+    try:
+        with open(path) as f:
+            s = json.load(f)
+        prof = s.get("llm_profile")
+        if prof is None:
+            return True, "Key fehlt — Bridge nutzt profiles.active als Default"
+        if prof in valid:
+            return True, f"llm_profile='{prof}'"
+        return False, f"Ungueltig: '{prof}' (erlaubt: {sorted(valid)})"
+    except Exception as e:
+        return False, f"Lesefehler: {e}"
+
+@auto_test("qwen2.5:1.5b im Model-Store", "session19")
+def test_qwen_model_present():
+    """/api/tags muss qwen2.5:1.5b exakt enthalten."""
+    try:
+        import urllib.request
+        resp = urllib.request.urlopen("http://localhost:8000/api/tags", timeout=5)
+        data = json.loads(resp.read().decode())
+        names = [m.get("name", "") for m in data.get("models", [])]
+        if "qwen2.5:1.5b" in names:
+            return True, f"qwen2.5:1.5b vorhanden ({len(names)} Modelle total)"
+        return False, f"qwen2.5:1.5b fehlt. Vorhanden: {names[:5]}"
+    except Exception as e:
+        return False, f"API Fehler: {e}"
+
 
 # ============================================================
 # IPC / VOICE TAGS (2026-04-09)
@@ -1530,10 +1688,20 @@ def run_auto_tests():
     test_keyword_handler_init()
     test_keyword_actions_complete()
 
-    print("\n  ─── NPU WORKER (NEU) ───")
+    print("\n  ─── NPU WORKER ───")
     test_activity_worker_status()
     test_person_attr_worker_status()
     test_yolo_world_worker_status()
+
+    print("\n  ─── SESSION 19 STACK (5.3.0 + Profiles + 4 Worker) ───")
+    test_hailort_firmware_version()
+    test_worker_count_exact()
+    test_llm_profiles_valid()
+    test_hailo_ollama_service_active()
+    test_hailo_vdevice_shared()
+    test_llm_bridge_local()
+    test_settings_llm_profile()
+    test_qwen_model_present()
 
     print("\n  ─── IPC / VOICE TAGS ───")
     test_ipc_hardware_actions()
