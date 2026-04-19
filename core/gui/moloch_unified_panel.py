@@ -661,9 +661,9 @@ class MolochUnifiedPanel:
             model_frame, "ArcFace", self.arcface_var, "arcface",
             [("Thresh", self.arcface_thresh_var, 0.3, 0.9)])
 
-        # YOLOv8m
+        # YOLOv11m (Key-Alias "yolov8m" aus Legacy-Migration)
         self._yolov8m_fps = self._build_model_section(
-            model_frame, "YOLOv8m", self.yolo_var, "yolov8m",
+            model_frame, "YOLOv11m", self.yolo_var, "yolov8m",
             [("Conf", self.yolo_conf_var, 0.1, 0.9)])
 
         # Hand Landmark

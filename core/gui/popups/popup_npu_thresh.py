@@ -8,7 +8,7 @@ Eigenstaendiges Toplevel-Fenster mit Scrollbar fuer:
 1. NPU Modell-Schwellwerte:
    - SCRFD Confidence, SCRFD NMS
    - ArcFace Aehnlichkeit
-   - YOLOv8m Confidence
+   - YOLOv11m Confidence
    - Pose Confidence
    - Hand Landmark Confidence
 
@@ -61,7 +61,7 @@ MODEL_DEFS = [
         ("Aehnlichkeit", "thresholds", "arcface_thresh",
          0.3, 0.9, 0.65, 0.05, "", "Wie aehnlich muss ein Gesicht sein? (hoeher = strenger)"),
     ]),
-    ("YOLOv8m Person", "yolov8m_h10.hef (21 MB)", True, [
+    ("YOLOv11m Person", "yolov11m_h10.hef (21 MB)", True, [
         ("Confidence", "thresholds", "yolo_conf",
          0.1, 0.9, 0.5, 0.05, "", "Person Detection (hoeher = weniger Fehlalarme)"),
         ("Min. Hoehe", "thresholds", "person_min_height",

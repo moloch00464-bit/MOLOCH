@@ -4,7 +4,7 @@ M.O.L.O.C.H. NPU Dashboard Popup — Gate 1
 ============================================
 
 Zeigt Live-Daten:
-- FPS pro Modell (SCRFD, ArcFace, YOLOv8m)
+- FPS pro Modell (SCRFD, ArcFace, YOLOv11m)
 - Event Bus Rate + Silence-Level
 - Action Bridge State + Alter
 - Letzte 5 Decisions aus Ringbuffer

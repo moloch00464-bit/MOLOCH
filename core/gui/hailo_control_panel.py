@@ -304,7 +304,7 @@ class HailoControlPanel:
             "arcface", [("Thresh", self.arcface_thresh, 0.3, 0.9)])
 
         self._build_model_section(
-            ctrl_frame, "YOLOv8m Person", self.yolo_enabled,
+            ctrl_frame, "YOLOv11m Person", self.yolo_enabled,
             "yolov8m", [("Conf", self.yolo_conf, 0.1, 0.9)])
 
         self._build_model_section(

@@ -533,7 +533,7 @@ class HardwarePopup:
     _HEF_FILES = {
         "scrfd": "scrfd_10g.hef",
         "arcface": "arcface_mobilefacenet.hef",
-        "yolov8m": "yolov8m_h10.hef",
+        "yolov8m": "yolov11m_h10.hef",
         "pose": "yolov8s_pose_h10.hef",
         "hand_landmark": "hand_landmark_lite.hef",
         "face_attr": "face_attr_resnet_v1_18.hef",

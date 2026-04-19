@@ -10,7 +10,7 @@ Threshold Slider:
 - SCRFD Erkennungsschwelle (0.1-0.9, default 0.5, Schritt 0.05)
 - SCRFD Ueberlappungsfilter (0.1-0.9, default 0.4, Schritt 0.05)
 - ArcFace Aehnlichkeit (0.3-0.9, default 0.6, Schritt 0.05)
-- YOLOv8m Erkennungsschwelle (0.1-0.9, default 0.5, Schritt 0.05)
+- YOLOv11m Erkennungsschwelle (0.1-0.9, default 0.5, Schritt 0.05)
 
 Hand-Verdeckung:
 - Zeitlimit (1-10s), Trefferfolge (1-10), Aktualitaet (0.5-5.0s)
@@ -41,7 +41,7 @@ THRESHOLD_DEFS = [
     ("SCRFD Erkennung", "scrfd_conf", 0.1, 0.9, 0.5, 0.05),
     ("SCRFD Überlappung", "scrfd_nms", 0.1, 0.9, 0.4, 0.05),
     ("ArcFace Ähnlichkeit", "arcface_thresh", 0.3, 0.9, 0.6, 0.05),
-    ("YOLOv8m Erkennung", "yolo_conf", 0.1, 0.9, 0.5, 0.05),
+    ("YOLOv11m Erkennung", "yolo_conf", 0.1, 0.9, 0.5, 0.05),
 ]
 
 # Hand-Occlusion Definitionen: (Anzeigename, settings-key, min, max, default, schritt, einheit)
