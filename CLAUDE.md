@@ -221,6 +221,14 @@ LLM-Profile-System (chat/introspect/technical/dark/multi_person) via
 `config/llm_profiles.json`, Switch via `settings.json` Key `llm_profile`
 (GUI-Reiter 'LLM-Modus' im Panel Modelle).
 
+LLM-Tentakel (Session 20): Ollama auf Markus-Rechner via LAN
+(`settings.tentacle_llm.host`, Default `markus-pc.local:11434`).
+Moloch waehlt automatisch: Prompt+System >= `complexity_threshold` (120 Zeichen)
+oder Reasoning-Aufruf -> Tentakel mit groesserem Modell (mehr Substanz,
+Netzwerk-Latenz). Kurze Fragen bleiben auf NPU. Auto-Discovery-Modell wenn
+`model` leer. Watchdog probed alle 30 Min, Status in
+`system_capabilities.json.tentacle_llm`, Anzeige im GUI.
+
 Feature-Flag: MOLOCH_USE_TAPPAS=1 (in ~/.profile)
 ```
 

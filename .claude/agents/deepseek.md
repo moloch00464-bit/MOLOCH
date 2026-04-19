@@ -33,8 +33,15 @@ Lies IMMER zuerst: `CLAUDE.md`, `agents/AGENT_DEEPSEEK.md` und `docs/DANGER_MAP.
 - Anthropic Key: ebenfalls in api_keys.json (Claude als 3. Fallback)
 
 ## Kritische Regeln
-- Fallback-Kette IMMER: hailo-ollama (Port 8000) → DeepSeek Cloud → Claude → Stille
-- Im NPU-only Modus (api_keys.json deaktiviert): hailo-ollama → Stille
+- Fallback-Kette Session 20: Routing per `_choose_provider()`:
+  - kurze Fragen (< 120 Zeichen) -> **hailo-ollama** (NPU qwen2.5) -> Tentakel-Fallback -> Cloud -> Stille
+  - lange Fragen oder Reasoning -> **Tentakel** (Ollama auf Markus-Rechner) -> NPU-Fallback -> Cloud -> Stille
+  - `force_local=True` -> nur NPU (Tentakel ist LAN, nicht streng 'lokal')
+- Tentakel-Config in `settings.tentacle_llm`: host (mDNS markus-pc.local default),
+  port 11434, model ('' = Auto-Discovery), complexity_threshold=120, timeout 30s,
+  backoff 300s. Kann via GUI-Anzeige im Panel Modelle ueberwacht werden.
+- Im NPU-only Modus (api_keys.json deaktiviert + Tentakel offline):
+  hailo-ollama → Stille
 - hailo-ollama teilt NPU mit TAPPAS (SHARED VDevice) — kein Konflikt wenn richtig konfiguriert
 - KEIN eigenes VDevice erstellen — nur `set_vdevice(service._vdevice)` nutzen
 - LLM-Antworten NUR via personality_engine.speak() ausgeben — kein Bypass!

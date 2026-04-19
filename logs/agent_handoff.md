@@ -1,3 +1,109 @@
+# Agent Handoff — 2026-04-20 (Session 20 — LLM-Tentakel integriert)
+# Letzter Commit: bbc832d | Audit: 72/72 PASS | FPS: 20.0 | RAM: 37% | NPU-FW: 5.3.0
+
+---
+
+## SESSION 20 — LLM-TENTAKEL (Ollama auf Markus-Rechner) integriert
+
+**Kernidee:** Moloch bekommt einen zweiten lokalen LLM-Pfad — ein Ollama auf
+Markus' Rechner (LAN). Bridge routet automatisch: kurze Fragen bleiben auf NPU
+qwen2.5 (schnell), lange/komplexe Fragen und internes Reasoning gehen zum
+Tentakel (groesseres Modell -> mehr Substanz). Cloud bleibt aus.
+
+### Commits (7 Phasen, 7 Commits)
+
+| Commit | Phase |
+|--------|-------|
+| `bd29a1c` | Phase 1: tentacle_llm Config-Schema in settings.json + capabilities |
+| `46014ae` | Phase 2: _generate_tentacle + Circuit-Breaker + Auto-Discovery |
+| `5c27bc2` | Phase 3: _choose_provider komplexitaets-basiertes Routing |
+| `73e0eb4` | Phase 4: Watchdog mit Tentakel-Probe + CSV-Spalten |
+| `1b29053` | Phase 5: GUI Tentakel-Status-Label |
+| `bbc832d` | Phase 6: 2 neue Audit-Tests (72/72 PASS) |
+| (folgt) | Phase 7: Doku + Handoff |
+
+### Wie es funktioniert
+
+```
+User/Vision -> ask_external() / reason_internal()
+                     ↓
+             _choose_provider():
+             - force_local=True                     -> ollama (NPU)
+             - caller='reason'                      -> tentacle
+             - prompt+system >= 120 Zeichen         -> tentacle
+             - sonst                                -> ollama
+                     ↓
+      +-- tentacle? --+
+      |               |
+      ↓               ↓
+  _generate_        _generate_
+  tentacle          ollama
+  (LAN Ollama)      (NPU qwen2.5)
+      |               |
+      ↓               ↓
+  bei Fail: NPU   bei Fail: Tentakel
+      |               |
+      ↓               ↓
+  Cloud (wenn Keys da) -> Stille
+```
+
+### Config (settings.json.tentacle_llm)
+
+```json
+{
+  "enabled": true,
+  "host": "markus-pc.local",
+  "port": 11434,
+  "model": "",
+  "complexity_threshold": 120,
+  "timeout_sec": 30,
+  "backoff_sec": 300
+}
+```
+
+- `model=""` -> Auto-Discovery via `/api/tags` (waehlt groesstes Chat-Modell)
+- `host` ist mDNS-Default, User kann auf LAN-IP umstellen
+- `complexity_threshold` = Zeichen-Schwelle Prompt+System
+
+### Live-Monitoring
+
+- `config/system_capabilities.json.tentacle_llm` wird vom Watchdog alle 30 Min
+  gesetzt: `{reachable, model, last_probe_ts}`
+- `logs/npu_watchdog.csv` hat 3 neue Spalten:
+  `tentacle_reachable`, `tentacle_latency_ms`, `tentacle_model`
+- GUI "LLM-Modus"-Sektion zeigt: `Tentakel: online (<model>)` oder `offline — nur NPU`
+
+### Was NICHT getestet ist (fuer naechste Session)
+
+- Ollama auf Markus-Rechner war waehrend Session 20 offline — alle Tentakel-
+  Code-Pfade sind geschrieben + statisch validiert (Audit 72/72), aber noch
+  nie live gegen einen echten Ollama-Server laufen gelassen.
+- Auto-Discovery-Model-Wahl (groesstes nicht-Embedding) ungetestet.
+- `_generate_tentacle` Circuit-Breaker: 3x FAIL -> 5 Min Backoff ungetestet.
+- Provider-Crossover bei Fails ungetestet.
+
+### Naechste Session: `SESSION_20_START_HERE.md` (Repo-Root)
+
+Dort steht:
+- PRIO 1: Ollama auf Markus-Rechner starten, Modell pullen, Test-Prompts schicken
+- PRIO 2: Prompt-Tuning fuer das groessere Tentakel-Modell
+- PRIO 3: Multi-Person-Toggle (offen seit Session 19)
+- PRIO 4: Per-Provider-Prompts (Profile-Erweiterung)
+
+### Status-Soll nach dem Handoff
+
+- `systemctl is-active moloch hailo-ollama moloch-npu-watchdog` -> active active active
+- `python3 scripts/moloch_audit.py --auto` -> 72/72 PASS
+- `config/system_capabilities.json.tentacle_llm.last_probe_ts` < 60 Min alt
+
+### Rollback
+
+- Tentakel stoert -> `settings.tentacle_llm.enabled=false` (1s mtime-Cache, kein Restart)
+- Watchdog-Tentakel-Probes belasten LAN -> `TENTACLE_PROBE_TIMEOUT` auf 1s
+- Komplett-Rollback Session 20 -> `git revert bd29a1c..bbc832d`
+
+---
+
 # Agent Handoff — 2026-04-19 (Session 19 ABSOLUT FINAL — NPU-Only Permanent)
 # Letzter Commit: 3de5f6f | Audit: 70/70 PASS | FPS: 20.0 | RAM: 37% | NPU-FW: 5.3.0
 
