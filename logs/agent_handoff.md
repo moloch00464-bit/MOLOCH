@@ -1,5 +1,118 @@
-# Agent Handoff — 2026-04-19 (Session 19 — Lokaler LLM + Profile-System live)
-# Letzter Commit: 71437c9 | Audit: PASS | FPS: ~20 | RAM: 36% | NPU-FW: 5.3.0
+# Agent Handoff — 2026-04-19 (Session 19 ABSOLUT FINAL — NPU-Only Permanent)
+# Letzter Commit: 3de5f6f | Audit: 70/70 PASS | FPS: 20.0 | RAM: 37% | NPU-FW: 5.3.0
+
+---
+
+## SESSION 19 FINALE POLITUR — NPU-Only dauerhaft (2026-04-19, 12:44)
+
+Nach 11 funktionalen Commits kam die System-Politur: Doku-Drift, Audit-Tests,
+Cloud-Deaktivierung, moloch.service Cleanup, permanenter Watchdog, Reboot.
+**70/70 Audit-PASS, alle 3 Services active, Moloch antwortet rein lokal.**
+
+### Durchgefuehrte Aenderungen
+
+| Phase | Was | Commit |
+|-------|-----|--------|
+| 1 | Doku-Drift: 5 Files auf aktuellen Stand (HailoRT 5.3.0, 4 Worker, qwen2.5) | `99a0b00` |
+| 2 | 8 neue Audit-Tests (Session-19-Stack) + 4 entschaerfte alte Tests | `c93bb4c` |
+| 3 | `settings.llm_profile` dark -> chat (Default) | `9190934` |
+| 4 | `moloch.service`: ExecStartPre `pkill -9 hailo-ollama` entfernt | System (Backup: `.bak_20260419_post_polish`) |
+| 5 | `config/api_keys.json` -> `config/api_keys.json.disabled_npu_only_mode` | System |
+| 6 | NPU-Only Watchdog (30-Min-Probe + TTS-Alarm) + systemd-Unit enabled | `3de5f6f` |
+| 7 | Push + Reboot + Verify | — |
+
+### Post-Reboot Verifikation
+
+- `systemctl is-active moloch hailo-ollama moloch-npu-watchdog` -> **active active active**
+- `hailortcli fw-control identify` -> Firmware 5.3.0 (release,app), HAILO10H
+- `scripts/moloch_audit.py --auto` -> **70/70 PASS**
+- `moloch_say("alles stabil nach Reboot?")` -> **"Natuerlich! Was ist es?"**
+  - Profil: chat (max_tokens=80, temp=0.8)
+  - Latenz: 1.8s
+  - Bridge-Log: `qwen2.5:1.5b: 22 Zeichen in 1779ms`
+  - Kein Cloud-Fallback (Keys weg) — 100% NPU
+- `ls config/api_keys*` -> nur `.disabled_npu_only_mode` (Cloud hart aus)
+- `moloch.service` startet hailo-ollama nicht mehr mit pkill kaputt
+
+### System-Eigenschaften jetzt
+
+| Eigenschaft | Wert |
+|---|---|
+| LLM-Modus | `local_first`, kein Cloud-Fallback moeglich |
+| Default-Profil | `chat` (normale Konversation) |
+| Aktive Worker | 4 (Face, Pose, ReID, Depth) |
+| Deaktivierte Worker | 4 (Hand, PersonAttr, Activity, YOLOWorld) |
+| Network-Groups | ~6-7 aktiv (unter Hardware-Limit 8) |
+| NPU-RAM | ~1.5 GB belegt (Qwen), 6.5 GB frei |
+| Long-Run-Watchdog | aktiv, probed alle 30 Min, schreibt `logs/npu_watchdog.csv` |
+| TTS-Alarm | nach 3x FAIL hintereinander via piper |
+
+### Alle Commits Session 19 (17 insgesamt)
+
+```
+3de5f6f watchdog: permanenter NPU-Only Watchdog (30-Min-Probe + TTS-Alarm)
+9190934 config: llm_profile default zurueck auf 'chat'
+c93bb4c audit: 8 neue Tests fuer Session-19-Stack + 3 Worker-Tests entschaerft
+99a0b00 docs: Doku-Drift Session 19 fixen (HailoRT 5.3.0, 4 Worker, qwen2.5)
+24f875f gui: echtes Tooltip-Popup fuer LLM-Modus-Buttons (statt Button-Text-Swap)
+e01a462 handoff: Session 19 Final — LLM-Profile-System integriert
+71437c9 gui: LLM-Modus Sektion in panel_models mit Profil-Switcher
+2900420 bridge: LLM-Profile-Loader mit mtime-Cache + Live-Switch
+e1ffd19 config: llm_profiles.json mit 5 Presets fuer lokales LLM
+55e7f2c handoff: Multi-Turn-Drift als bekannte Einschraenkung + PRIO 0 fuer Session 20
+c75afb4 handoff: Session 19 Update — Live-Kontext + LLM-Profile-Plan fuer Session 20
+ea9ebd5 bridge: Live-Kontext-Snippet im Compact-Prompt (Vision + Inner State)
+e61b891 handoff: Session 19 — Lokaler LLM spricht sauber auf Qwen2.5
+07d494d bridge: kompakter Moloch-System-Prompt fuer lokales 1.5B-Modell
+72e44dc bridge: Newlines in hailo-ollama content flatten (JSON-parse_error Fix)
+9f5374e perception: Worker-Reduktion fuer Qwen2.5 Slot (Hailo-10H Group-Limit)
+```
+
+### Bekannte Einschraenkungen (bleiben)
+
+1. **Multi-Turn-Drift Qwen2.5-1.5B** — nach 3-4 Turns Bulletpoint-Halluzinationen.
+   Workaround: Moloch-Service-Restart loescht hailo-ollama-Kontext. Kandidat
+   fuer Session 20: `qwen3:1.7b` pullen und vergleichen, oder
+   `/api/generate` statt `/api/chat`.
+2. **Bug A1/A2/A3 Worker** — deaktiviert, HEFs vorhanden. Re-Aktivierung via
+   Multi-Person-Toggle (Session 20 PRIO 2).
+3. **Keine TTS-Stimme installiert** — `/home/molochzuhause/moloch/models/piper/de_DE-thorsten-low.onnx`
+   fehlt derzeit, Watchdog-Alarm laeuft als Log-Only. Bei Bedarf piper-Voice
+   nachinstallieren.
+
+### Rollback-Pfad
+
+- `config/api_keys.json.disabled_npu_only_mode` -> `config/api_keys.json` +
+  `sudo systemctl reload moloch` (SIGHUP laedt Keys neu)
+- `/etc/systemd/system/moloch.service.bak_20260419_post_polish` -> restore
+  falls der pkill-Removal unerwartete Effekte hat
+- `sudo systemctl disable moloch-npu-watchdog` + stop — wenn Watchdog-Probes
+  die NPU zu stark belasten
+- HailoRT 5.3.0 -> 5.1.1 (Rollback-Set in `~/Downloads/hailo_backup/`,
+  dokumentiert in Session 18 Handoff)
+
+### Naechste Session (20) Plan
+
+- **PRIO 1:** `qwen3:1.7b` pullen, Slot-Verhalten pruefen, Multi-Turn-Quali-Vergleich
+- **PRIO 2:** Multi-Person-Toggle im GUI (`settings.multi_person_tracking`)
+  — aktiviert ReID + PersonAttr + Hand bei Bedarf, deaktiviert entsprechend
+  andere Worker fuer Slot-Budget
+- **PRIO 3:** piper-TTS-Voice fuer Watchdog-Alarm nachinstallieren
+- **PRIO 4:** `moloch_audit.py` im Root als Symlink auf `scripts/moloch_audit.py`
+  (aktuell 2 Audit-Scripts parallel, Verwirrungspotenzial)
+- **PRIO 5:** Bug A1 (PersonAttrWorker) voll integrieren, wenn Slot-Budget erlaubt
+
+### Moloch spricht
+
+> *"Natuerlich! Was ist es?"*
+
+— nach Reboot, komplett NPU-lokal, 1.8 Sekunden, im chat-Profil.
+
+Sonntag 2026-04-19. Das System ist jetzt sauber.
+
+---
+
+
 
 ---
 
