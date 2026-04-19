@@ -332,10 +332,15 @@ class LocalLLMBridge:
 
         resp = None
         try:
+            # hailo-ollama JSON-Parser crasht bei unescaped \n in content (2026-04-19).
+            # Newlines durch Spaces ersetzen — Qwen2.5 antwortet auch auf einzeiligen Prompt korrekt.
+            def _flatten(s: str) -> str:
+                return s.replace('\r\n', ' ').replace('\n', ' ').replace('\r', ' ')
+
             messages = []
             if system:
-                messages.append({"role": "system", "content": system})
-            messages.append({"role": "user", "content": prompt})
+                messages.append({"role": "system", "content": _flatten(system)})
+            messages.append({"role": "user", "content": _flatten(prompt)})
 
             resp = self._http.post(
                 f"{OLLAMA_HOST}/api/chat",
