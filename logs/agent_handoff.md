@@ -31,13 +31,31 @@ alle heute geloest. Moloch antwortet jetzt **lokal, auf Deutsch, in 3.8 Sekunden
   kompakte 290-Zeichen-Moloch-Persona umschalten (nur Charakter-DNA). Cloud-Calls
   bleiben beim vollen Prompt.
 
-### Verifikation (lokal, Cloud-Keys disabled)
+### Verifikation (lokal, Cloud-Keys disabled waehrend Test)
 
-Test `moloch_say("Laufst du jetzt komplett lokal auf deiner NPU?")`:
-- Bridge-Log: `System-Prompt 5669 Zeichen -> kompakte Moloch-Persona fuer lokal`
-- Bridge-Log: `qwen2.5:1.5b: 75 Zeichen in 3843ms`
-- Moloch-Antwort: **"Natuerlich, aber ich muss mit der NPU erst noch die letzten Werte berechnen."**
-- Deutsch, einzeiliger Satz, kontextuell, kein Cloud-Fallback (Keys waren deaktiviert).
+**Test 1 — einfache Frage:** `moloch_say("Laufst du jetzt komplett lokal auf deiner NPU?")`
+- `System-Prompt 5669 Zeichen -> kompakte Moloch-Persona fuer lokal`
+- `qwen2.5:1.5b: 75 Zeichen in 3843ms`
+- Antwort: **"Natuerlich, aber ich muss mit der NPU erst noch die letzten Werte berechnen."**
+
+**Test 2 — Selbstreflexion mit Live-Kontext (ea9ebd5):** `moloch_say("Wen siehst du, welche Zone, welche Stimmung?")`
+- Antwort: **"Ich sehe dich, Markus. Zone Guardian, Stimmung entspannt. Die Kamera
+  ist fast blind — unter 1 FPS. Fuehle mich wie ein mueder Wachhund mit
+  verschlafenen Augen."**
+- Erkennt Person + Zone + Stimmung + FPS-Anomalie + Charakter-Metapher.
+
+### Bekannte Einschraenkung: Multi-Turn-Drift bei Qwen2.5-1.5B
+
+Nach 3-4 aufeinanderfolgenden Turns faellt die Qualitaet:
+- Latenz steigt von 3.8s auf 30s+ (kumulativer Context-Payload in hailo-ollama)
+- Modell ignoriert Stil-Regeln ("keine Listen") -> generiert Bulletpoints mit Fett-Markup
+- Halluzinationen nehmen zu ("Veranstaltungsgruppensitzung", "grundliche Person")
+- hailo-ollama-Log zeigt `Continuation detected, sending X new messages` — der Server
+  haelt internen Gespraechsverlauf, Qwen2.5-1.5B verarbeitet das chaotisch.
+
+**Workaround bis Session 20:** Moloch-Service-Restart loescht hailo-ollama-Kontext.
+**Echter Fix (Session 20):** Bridge-seitiger Context-Reset pro Call oder Umstieg
+auf `/api/generate` (single-shot) — siehe TODO-Liste.
 
 ### Commits dieser Session
 
@@ -48,6 +66,14 @@ Test `moloch_say("Laufst du jetzt komplett lokal auf deiner NPU?")`:
 | `07d494d` | bridge: kompakter Moloch-Prompt fuer lokales 1.5B-Modell |
 
 ### TODO naechste Sessions
+
+**PRIO 0 — Multi-Turn-Context-Reset (blockiert saubere Konversation):**
+Qwen2.5-1.5B driftet nach 3-4 Turns in Bulletpoint-Halluzinationen ab, weil
+hailo-ollama intern den Gespraechsverlauf behaelt. Optionen fuer Session 20:
+- `/api/generate` (single-shot) statt `/api/chat` (session-based) — einfachster Weg
+- ODER Bridge sendet bei jedem Call explizit einen Reset-Marker / neue session_id
+- ODER Context-History in der Bridge serverseitig clearen bevor jeder Call
+- Untersuchen: welche hailo-ollama-Parameter steuern das (keep_alive, reset, etc.)
 
 **PRIO 1 — LLM-Profile-System (Konzept fuer Session 20):**
 Statt ein Compact-Prompt-Fit-All mehrere Profile als Presets, via GUI umschaltbar.
