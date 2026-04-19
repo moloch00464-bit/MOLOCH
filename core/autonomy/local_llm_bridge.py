@@ -219,6 +219,43 @@ _SETTINGS_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     "config", "settings.json")
 
+_CAPS_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "config", "system_capabilities.json")
+
+# Tentakel-LLM Cache (settings.json.tentacle_llm mit mtime-Cache)
+_tentacle_cfg_cache: Dict = {"mtime": 0.0, "data": None}
+
+
+def _load_tentacle_cfg() -> Dict:
+    """Liest settings.json.tentacle_llm mit mtime-Cache. Fallback auf Defaults."""
+    defaults = {
+        "enabled": False,  # Default aus wenn Key fehlt — kein ueberraschender LAN-Traffic
+        "host": "markus-pc.local",
+        "port": 11434,
+        "model": "",
+        "complexity_threshold": 120,
+        "timeout_sec": 30,
+        "backoff_sec": 300,
+    }
+    try:
+        mtime = os.path.getmtime(_SETTINGS_PATH)
+    except OSError:
+        return defaults
+    if _tentacle_cfg_cache["data"] is not None and _tentacle_cfg_cache["mtime"] == mtime:
+        return _tentacle_cfg_cache["data"]
+    try:
+        with open(_SETTINGS_PATH, "r", encoding="utf-8") as f:
+            s = json.load(f)
+        cfg = dict(defaults)
+        cfg.update(s.get("tentacle_llm", {}) or {})
+        _tentacle_cfg_cache["data"] = cfg
+        _tentacle_cfg_cache["mtime"] = mtime
+        return cfg
+    except Exception as e:
+        logger.warning(f"[LLM-TENTACLE] Config-Lesefehler: {e} — nutze Defaults")
+        return defaults
+
 
 class LocalLLMBridge:
     """Einheitliche LLM-Schnittstelle mit Fallback-Kette."""
@@ -234,6 +271,10 @@ class LocalLLMBridge:
         self._ollama_fail_count: int = 0
         self._ollama_backoff_until: float = 0.0
         self.OLLAMA_BACKOFF_SEC: int = 300  # 5 Minuten Cloud-Backoff
+        # Circuit-Breaker: Tentakel (Ollama auf Markus-Rechner, LAN)
+        self._tentacle_fail_count: int = 0
+        self._tentacle_backoff_until: float = 0.0
+        self._tentacle_model_cached: Optional[str] = None  # nach erstem Discovery gecached
         # Wiederverwendbare HTTP-Session — verhindert RAM-Leak durch offene Sockets
         self._http = requests.Session()
         self._check_ollama()
@@ -606,6 +647,155 @@ class LocalLLMBridge:
             return data.get(provider, {}).get("api_key")
         except Exception:
             return None
+
+    # ========================================================================
+    # TENTAKEL-LLM (Ollama auf Markus-Rechner, LAN) — Session 20
+    # ========================================================================
+
+    def _tentacle_url(self, cfg: Dict) -> str:
+        return f"http://{cfg['host']}:{cfg['port']}"
+
+    def _is_tentacle_running(self, cfg: Optional[Dict] = None) -> bool:
+        """HTTP-Ping gegen Tentakel-Ollama (/api/tags)."""
+        if cfg is None:
+            cfg = _load_tentacle_cfg()
+        if not cfg.get("enabled"):
+            return False
+        resp = None
+        try:
+            resp = self._http.get(f"{self._tentacle_url(cfg)}/api/tags", timeout=2)
+            return resp.status_code == 200
+        except Exception:
+            return False
+        finally:
+            if resp is not None:
+                resp.close()
+
+    def _discover_tentacle_model(self, cfg: Dict) -> Optional[str]:
+        """Waehlt ein Chat-Modell aus /api/tags wenn cfg.model leer ist.
+
+        Heuristik: groesstes Modell nach 'size' (Byte), embedding-Modelle raus.
+        Ergebnis wird in self._tentacle_model_cached gecached.
+        """
+        model = cfg.get("model") or ""
+        if model:
+            return model
+        if self._tentacle_model_cached:
+            return self._tentacle_model_cached
+        try:
+            resp = self._http.get(f"{self._tentacle_url(cfg)}/api/tags", timeout=3)
+            resp.raise_for_status()
+            data = resp.json()
+            candidates = []
+            for m in data.get("models", []) or []:
+                name = m.get("name", "")
+                if not name:
+                    continue
+                lname = name.lower()
+                if any(x in lname for x in ("embed", "embedding", "nomic-embed")):
+                    continue
+                size = int(m.get("size", 0) or 0)
+                candidates.append((size, name))
+            if not candidates:
+                logger.warning("[LLM-TENTACLE] /api/tags leer — kein Modell verfuegbar")
+                return None
+            candidates.sort(reverse=True)
+            chosen = candidates[0][1]
+            self._tentacle_model_cached = chosen
+            logger.info(f"[LLM-TENTACLE] Auto-Discovery: nutze '{chosen}'")
+            return chosen
+        except Exception as e:
+            logger.warning(f"[LLM-TENTACLE] Auto-Discovery Fehler: {e}")
+            return None
+
+    def _generate_tentacle(self, prompt: str, system: str,
+                           max_tokens: int,
+                           temperature: float = 0.7,
+                           top_p: float = 0.95) -> Optional[str]:
+        """Ollama-Tentakel auf LAN-Rechner (Standard-Ollama-API /api/chat)."""
+        cfg = _load_tentacle_cfg()
+        if not cfg.get("enabled"):
+            return None
+        # Circuit-Breaker
+        if time.monotonic() < self._tentacle_backoff_until:
+            verbleibend = int(self._tentacle_backoff_until - time.monotonic())
+            logger.debug(f"[LLM-TENTACLE] Backoff aktiv ({verbleibend}s)")
+            return None
+        if not self._is_tentacle_running(cfg):
+            self._tentacle_fail_count += 1
+            if self._tentacle_fail_count >= 3:
+                self._tentacle_backoff_until = time.monotonic() + cfg.get("backoff_sec", 300)
+                logger.warning(
+                    f"[LLM-TENTACLE] {self._tentacle_fail_count}x unreachable → "
+                    f"{cfg.get('backoff_sec',300)}s Backoff"
+                )
+            return None
+        model = self._discover_tentacle_model(cfg)
+        if not model:
+            return None
+        timeout_s = int(cfg.get("timeout_sec", 30))
+
+        # Profile integrieren (gleiche Logik wie _generate_ollama)
+        profile = _get_active_profile()
+        if profile is not None:
+            profile_system = profile.get("system", system)
+            if profile.get("include_live_context", False):
+                profile_system = profile_system + _build_local_context_snippet()
+            system = profile_system
+            pmt = profile.get("max_tokens")
+            if isinstance(pmt, int) and pmt > 0:
+                max_tokens = pmt
+            ptemp = profile.get("temperature")
+            if isinstance(ptemp, (int, float)):
+                temperature = float(ptemp)
+
+        # JSON-sicher machen (wie bei hailo-ollama — Standard-Ollama hat
+        # zwar robusteren Parser, aber Konsistenz zahlt sich aus)
+        def _flatten(s: str) -> str:
+            return (s or "").replace('\r\n', ' ').replace('\n', ' ').replace('\r', ' ')
+
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": _flatten(system)})
+        messages.append({"role": "user", "content": _flatten(prompt)})
+
+        resp = None
+        try:
+            t0 = time.monotonic()
+            resp = self._http.post(
+                f"{self._tentacle_url(cfg)}/api/chat",
+                json={"model": model, "messages": messages, "stream": False,
+                      "options": {"num_predict": max_tokens,
+                                  "temperature": temperature,
+                                  "top_p": top_p}},
+                timeout=timeout_s)
+            resp.raise_for_status()
+            data = json.loads(resp.content.decode('utf-8'))
+            text = (data.get("message", {}) or {}).get("content", "").strip()
+            import re
+            text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+            if not text:
+                return None
+            self._tentacle_fail_count = 0
+            self._tentacle_backoff_until = 0.0
+            self._last_provider = f"tentacle_{model.split(':')[0]}"
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            logger.info(f"[LLM-BRIDGE] tentacle {model}: {len(text)} Zeichen in {elapsed_ms}ms")
+            return text
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+            self._tentacle_fail_count += 1
+            if self._tentacle_fail_count >= 3:
+                self._tentacle_backoff_until = time.monotonic() + cfg.get("backoff_sec", 300)
+            logger.warning(f"[LLM-TENTACLE] {model} Verbindungsfehler: {e}")
+            return None
+        except Exception as e:
+            logger.warning(f"[LLM-TENTACLE] {model} Fehler: {e}")
+            return None
+        finally:
+            if resp is not None:
+                resp.close()
+
+    # ========================================================================
 
     def _generate_deepseek(self, prompt: str, system: str,
                            max_tokens: int) -> Optional[str]:
