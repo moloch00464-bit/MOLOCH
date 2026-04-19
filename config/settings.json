@@ -109,5 +109,6 @@
     "autonomous_search_ttl": 3600,
     "autonomous_search_city": "Nuernberg",
     "autonomous_search_max_per_session": 20
-  }
+  },
+  "llm_profile": "chat"
 }
