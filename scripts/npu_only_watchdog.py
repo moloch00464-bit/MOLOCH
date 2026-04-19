@@ -44,11 +44,17 @@ LOG_DIR = Path("/home/molochzuhause/moloch/logs")
 CSV_PATH = LOG_DIR / "npu_watchdog.csv"
 JSONL_PATH = LOG_DIR / "npu_watchdog.jsonl"
 
+# Tentakel (Session 20): Ollama auf Markus-Rechner (LAN) — Probe + Caps-Update
+SETTINGS_PATH = Path("/home/molochzuhause/moloch/config/settings.json")
+CAPS_PATH = Path("/home/molochzuhause/moloch/config/system_capabilities.json")
+TENTACLE_PROBE_TIMEOUT = 3  # HTTP /api/tags muss schnell antworten
+
 CSV_HEADER = [
     "timestamp_iso", "elapsed_run_s", "probe_status",
     "latency_ms", "response_chars", "model",
     "hailo_ollama_active", "hailo_ollama_pid",
     "fail_streak", "alarm_fired",
+    "tentacle_reachable", "tentacle_latency_ms", "tentacle_model",
 ]
 
 # === Logging ===
@@ -148,6 +154,63 @@ def append_jsonl(payload: dict):
         f.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
 
+def probe_tentacle():
+    """Pingt Ollama auf Markus-Rechner (settings.json.tentacle_llm).
+
+    Gibt (reachable: bool, latency_ms: int, model: str|None) zurueck.
+    Aktualisiert system_capabilities.json.tentacle_llm atomar.
+    """
+    try:
+        with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
+            cfg = json.load(f).get("tentacle_llm", {}) or {}
+    except Exception:
+        cfg = {}
+    if not cfg.get("enabled"):
+        _update_caps({"reachable": False, "model": None, "last_probe_ts": int(time.time())})
+        return False, 0, None
+    url = f"http://{cfg.get('host','markus-pc.local')}:{int(cfg.get('port',11434))}/api/tags"
+    t0 = time.monotonic()
+    try:
+        r = requests.get(url, timeout=TENTACLE_PROBE_TIMEOUT)
+        latency_ms = int((time.monotonic() - t0) * 1000)
+        if r.status_code != 200:
+            _update_caps({"reachable": False, "model": None, "last_probe_ts": int(time.time())})
+            return False, latency_ms, None
+        data = r.json()
+        models = data.get("models", []) or []
+        # groesstes Modell (Bytes) als repraesentativ, embedding filtern
+        candidates = [(int(m.get("size", 0) or 0), m.get("name", ""))
+                      for m in models if m.get("name")
+                      and not any(x in m.get("name", "").lower()
+                                  for x in ("embed", "nomic-embed"))]
+        candidates.sort(reverse=True)
+        preferred = cfg.get("model") or (candidates[0][1] if candidates else None)
+        _update_caps({"reachable": True, "model": preferred,
+                      "last_probe_ts": int(time.time())})
+        return True, latency_ms, preferred
+    except Exception as e:
+        log.debug("Tentakel-Probe Fehler: %s", e)
+        _update_caps({"reachable": False, "model": None, "last_probe_ts": int(time.time())})
+        return False, int((time.monotonic() - t0) * 1000), None
+
+
+def _update_caps(tentacle_status: dict):
+    """system_capabilities.json.tentacle_llm atomar updaten."""
+    try:
+        with open(CAPS_PATH, "r", encoding="utf-8") as f:
+            caps = json.load(f)
+    except Exception:
+        caps = {}
+    caps["tentacle_llm"] = tentacle_status
+    tmp = CAPS_PATH.with_suffix(".json.tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(caps, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, CAPS_PATH)
+    except Exception as e:
+        log.warning("capabilities-Write Fehler: %s", e)
+
+
 def main():
     log.info("Start (Interval=%ds, Timeout=%ds, Modell=%s)",
              WATCHDOG_INTERVAL_SEC, PROBE_TIMEOUT_SEC, PROBE_MODEL)
@@ -161,6 +224,8 @@ def main():
 
             active, pid = get_service_state()
             status, latency_ms, resp_chars = do_probe()
+            # Tentakel-Probe parallel (best-effort, kein Alarm bei offline)
+            tentacle_reachable, tentacle_latency_ms, tentacle_model = probe_tentacle()
 
             if status == "ok":
                 fail_streak = 0
@@ -186,15 +251,21 @@ def main():
                 "hailo_ollama_pid": pid,
                 "fail_streak": fail_streak,
                 "alarm_fired": int(alarm_fired),
+                "tentacle_reachable": int(tentacle_reachable),
+                "tentacle_latency_ms": tentacle_latency_ms,
+                "tentacle_model": tentacle_model or "",
             }
             append_csv(row)
             append_jsonl(row)
 
+            tentacle_str = (f"Tentacle[ok,{tentacle_latency_ms}ms,{tentacle_model}]"
+                            if tentacle_reachable else "Tentacle[offline]")
             if status == "ok":
-                log.info("OK %dms (%dch) — service=%s pid=%d", latency_ms, resp_chars, active, pid)
+                log.info("OK %dms (%dch) — service=%s pid=%d %s",
+                         latency_ms, resp_chars, active, pid, tentacle_str)
             else:
-                log.warning("FAIL[%s] %dms — streak=%d service=%s pid=%d",
-                            status, latency_ms, fail_streak, active, pid)
+                log.warning("FAIL[%s] %dms — streak=%d service=%s pid=%d %s",
+                            status, latency_ms, fail_streak, active, pid, tentacle_str)
         except Exception as e:
             log.exception("Watchdog-Iteration Exception: %s", e)
         # Sleep bis zum naechsten Probe
