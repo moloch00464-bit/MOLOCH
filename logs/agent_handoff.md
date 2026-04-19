@@ -49,13 +49,29 @@ Test `moloch_say("Laufst du jetzt komplett lokal auf deiner NPU?")`:
 
 ### TODO naechste Sessions
 
-- **Multi-Person-Toggle im GUI** (panel_models Reiter): schaltet ReID + PersonAttr
-  + Hand ein/aus via `settings.multi_person_tracking` — fuer Szenarien mit Rebecca.
-- **qwen3:1.7b testen** (groesser, neuer, evtl. bessere Antworten).
-- **Bug A1 (PersonAttrWorker)** fixen, dann Multi-Person-Mode erweitern.
-- **Kompakter Prompt tunen**: aktuell generisch, koennte Vision-Kontext + Mood
-  in <100 Zeichen Zusatz bekommen (z.B. "Du siehst: markus").
+**PRIO 1 — LLM-Profile-System (Konzept fuer Session 20):**
+Statt ein Compact-Prompt-Fit-All mehrere Profile als Presets, via GUI umschaltbar.
+
+- `config/llm_profiles.json` mit mindestens:
+  - `chat` (normale Konversation, aktuelle Compact-DNA)
+  - `introspect` (Selbstreflexion, automatisch mit Live-Kontext-Snippet)
+  - `technical` (praezise Fakten-Antworten, weniger Persona)
+  - `dark` (Berserker-Modus, scharfe kurze Saetze)
+  - `multi_person` (mehrere Personen-Unterscheidung, Rebecca-tauglich)
+- Settings-Key `llm_profile` (default `chat`), Live umschaltbar ohne Restart.
+- Bridge liest Profil aus Settings statt harten `OLLAMA_LOCAL_SYSTEM_COMPACT`.
+- Live-Kontext-Snippet (face_id, zone, tension, dominance) automatisch nur bei
+  Profilen die ihn brauchen (`introspect`, `multi_person`).
+- Neuer GUI-Reiter "Chat-Modus" oder Dropdown im Reiter Modelle mit den Presets.
+
+**PRIO 2 — weitere Baustellen:**
+- **Multi-Person-Toggle im GUI**: Worker-Auswahl via Profile verknuepfen
+  (Multi-Person-Profil -> ReID + PersonAttr + Hand; Chat-Profil -> minimal).
+- **qwen3:1.7b testen** (groesser, evtl. antwortet auch langen Prompt sauber).
+- **Bug A1 (PersonAttrWorker)** fixen, dann Multi-Person-Profil erweitern.
 - **hailo_ollama.service ExecStartPre=sleep 30 koennte kleiner** wenn Load-Zeit OK.
+- **moloch.service ExecStartPre=pkill hailo-ollama entfernen** — seit SHARED
+  VDevice nicht mehr noetig, spart 30-60s Restart-Delay.
 
 ### Offene Basis-Baustelle
 
