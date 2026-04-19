@@ -126,9 +126,28 @@ def _build_local_context_snippet() -> str:
         zone = core.get('zone', 'guardian')
         tension = core.get('tension', st.get('tension', 0.0))
         dominance = core.get('dominance', 0.0)
+        # Qwen2.5-1.5B versteht Zahlen mit Vorzeichen oft falsch -> semantisch uebersetzen.
+        # Tension: -1 entspannt  0 neutral  +1 angespannt
+        if tension <= -0.5:
+            tension_word = "entspannt"
+        elif tension <= 0.2:
+            tension_word = "ruhig"
+        elif tension <= 0.6:
+            tension_word = "aufmerksam"
+        else:
+            tension_word = "angespannt"
+        # Dominance: -1 zurueckhaltend  0 neutral  +1 selbstsicher
+        if dominance <= -0.5:
+            dom_word = "zurueckhaltend"
+        elif dominance <= 0.2:
+            dom_word = "neutral"
+        elif dominance <= 0.6:
+            dom_word = "praesent"
+        else:
+            dom_word = "selbstsicher"
         return (
             f" JETZT: Du siehst {face}. "
-            f"Zone {zone}, Tension {tension:+.1f}, Dominance {dominance:+.1f}."
+            f"Zone {zone}, Stimmung {tension_word}, Haltung {dom_word}."
         )
     except Exception:
         return ""
