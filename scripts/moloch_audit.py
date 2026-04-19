@@ -1554,6 +1554,66 @@ def test_qwen_model_present():
 
 
 # ============================================================
+# SESSION 20 STACK (2026-04-20): LLM-Tentakel (Ollama auf LAN-Rechner)
+# ============================================================
+
+@auto_test("tentacle_llm Config valide", "session20")
+def test_tentacle_config_valid():
+    """settings.json muss tentacle_llm-Block mit allen Pflicht-Keys haben."""
+    required = {"enabled", "host", "port", "model",
+                "complexity_threshold", "timeout_sec", "backoff_sec"}
+    path = os.path.join(MOLOCH_HOME, "config", "settings.json")
+    try:
+        with open(path) as f:
+            s = json.load(f)
+        cfg = s.get("tentacle_llm")
+        if not isinstance(cfg, dict):
+            return False, "tentacle_llm-Block fehlt"
+        missing = required - set(cfg.keys())
+        if missing:
+            return False, f"Fehlende Keys: {','.join(sorted(missing))}"
+        return True, (f"host={cfg.get('host')} port={cfg.get('port')} "
+                      f"enabled={cfg.get('enabled')} threshold={cfg.get('complexity_threshold')}")
+    except Exception as e:
+        return False, f"Lesefehler: {e}"
+
+
+@auto_test("tentacle_llm erreichbar oder Backoff (kein stiller FAIL)", "session20")
+def test_tentacle_reachable_or_backoff():
+    """Tentakel darf offline sein — aber system_capabilities muss aktuell sein.
+
+    PASS wenn:
+    - reachable=True ODER
+    - enabled=False (User hat deaktiviert) ODER
+    - last_probe_ts < 60 min alt (Watchdog prueft aktiv)
+    FAIL nur wenn:
+    - enabled=True aber last_probe_ts alt (Watchdog hat Tentakel vergessen)
+    """
+    try:
+        with open(os.path.join(MOLOCH_HOME, "config", "settings.json")) as f:
+            cfg = json.load(f).get("tentacle_llm", {}) or {}
+        enabled = bool(cfg.get("enabled", False))
+    except Exception as e:
+        return False, f"settings-Fehler: {e}"
+    if not enabled:
+        return True, "tentacle_llm deaktiviert (User-Wahl)"
+    try:
+        with open(os.path.join(MOLOCH_HOME, "config", "system_capabilities.json")) as f:
+            caps = json.load(f).get("tentacle_llm", {}) or {}
+    except Exception as e:
+        return False, f"capabilities-Fehler: {e}"
+    reachable = bool(caps.get("reachable", False))
+    last_ts = int(caps.get("last_probe_ts", 0) or 0)
+    if reachable:
+        return True, f"online: {caps.get('model','?')}"
+    # offline aber Watchdog hat juengst probed -> PASS
+    age_s = int(time.time() - last_ts) if last_ts > 0 else 999999
+    if age_s < 60 * 60:
+        return True, f"offline, Watchdog aktiv (letzter Probe vor {age_s}s)"
+    return False, f"offline + Watchdog still (letzter Probe vor {age_s}s) — Watchdog pruefen"
+
+
+# ============================================================
 # IPC / VOICE TAGS (2026-04-09)
 # ============================================================
 
@@ -1702,6 +1762,10 @@ def run_auto_tests():
     test_llm_bridge_local()
     test_settings_llm_profile()
     test_qwen_model_present()
+
+    print("\n  ─── SESSION 20 STACK (LLM-Tentakel) ───")
+    test_tentacle_config_valid()
+    test_tentacle_reachable_or_backoff()
 
     print("\n  ─── IPC / VOICE TAGS ───")
     test_ipc_hardware_actions()
