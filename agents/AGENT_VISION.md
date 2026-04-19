@@ -24,7 +24,7 @@ scripts/train_faces_batch.py                   — Face-Training Script
 - TAPPAS 5.1.0 mit GStreamer 1.26.2
 - Feature-Flag: MOLOCH_USE_TAPPAS=1 in moloch.service
 - HEF-Modelle: /mnt/moloch-data/hailo/models/ (NIEMALS auf SSD1!)
-- NPU: Hailo-10H, 8GB LPDDR4, HailoRT 5.1.1
+- NPU: Hailo-10H, 8GB LPDDR4, HailoRT 5.3.0 (Library + Driver + Firmware)
 - Ein VDevice fuer alles (shared), NIEMALS zweites erstellen → Error 74
 - GStreamer ArcFace-Embeddings sind INKOMPATIBEL mit HailoRT-direkt Embeddings (BLOCKER!)
 - Letterbox-Preprocessing macht TAPPAS automatisch — KEIN cv2.resize

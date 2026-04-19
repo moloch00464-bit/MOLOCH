@@ -18,15 +18,23 @@ Lies IMMER zuerst: `CLAUDE.md`, `agents/AGENT_DEEPSEEK.md` und `docs/DANGER_MAP.
 - `core/chat/llm_response.py` — Personality-aware LLM Chat, System-Prompt-Building
 - `core/autonomy/introspection.py` — DeepSeek R1 Self-Reflection auf NPU
 
-## Hardware-Fakten
-- hailo-ollama: Port 8000, Binary installiert, KEIN systemd-Service (offener Bug PRIO 5)
-- Modell: deepseek_r1_distill_qwen:1.5b (~1.5B Parameter)
+## Hardware-Fakten (Stand Session 19, 2026-04-19)
+- hailo-ollama: Port 8000, systemd-Service AKTIV (`hailo-ollama.service`,
+  Environment `OLLAMA_KEEP_ALIVE=-1` + `HAILO_OLLAMA_VDEVICE_GROUP_ID=SHARED`)
+- Default-Modell: `qwen2.5:1.5b` (Qwen2.5 Instruct, NPU-stable seit HailoRT 5.3.0)
+- HailoRT: 5.3.0 (Library + Driver + Firmware), HAILO_MAX_NETWORK_GROUPS=8
+- DeepSeek R1 (deepseek_r1:1.5b in 5.3.0) — UNGETESTET, in 5.1.1 deterministischer SEGV
 - VDevice: SHARED (vdevice-group-id=SHARED) — NIEMALS zweites erstellen (Error 74)
-- DeepSeek Cloud API: Key in `config/api_keys.json` (OpenAI-kompatibel)
-- Anthropic Key: ebenfalls in api_keys.json
+- LLM-Profile-System (`config/llm_profiles.json`): 5 Presets (chat/introspect/technical/dark/multi_person)
+  - Switch via `settings.json` Key `llm_profile` (mtime-Cache, kein Restart noetig)
+  - GUI-Reiter "LLM-Modus" im Panel Modelle
+- DeepSeek Cloud API: Key in `config/api_keys.json` (kann via `.disabled_*`-Suffix
+  hart deaktiviert werden — User-Modus "NPU-only permanent")
+- Anthropic Key: ebenfalls in api_keys.json (Claude als 3. Fallback)
 
 ## Kritische Regeln
 - Fallback-Kette IMMER: hailo-ollama (Port 8000) → DeepSeek Cloud → Claude → Stille
+- Im NPU-only Modus (api_keys.json deaktiviert): hailo-ollama → Stille
 - hailo-ollama teilt NPU mit TAPPAS (SHARED VDevice) — kein Konflikt wenn richtig konfiguriert
 - KEIN eigenes VDevice erstellen — nur `set_vdevice(service._vdevice)` nutzen
 - LLM-Antworten NUR via personality_engine.speak() ausgeben — kein Bypass!

@@ -173,7 +173,7 @@ Lieber einmal zu viel rebooten als eine Session lang Symptome jagen.
 
 ```
 BRAIN:    Raspberry Pi 5, 4 GB RAM, 2x NVMe SSD
-NPU:      Hailo-10H (40 TOPS, 8 GB LPDDR4, Firmware 5.1.1)
+NPU:      Hailo-10H (40 TOPS, 8 GB LPDDR4, Firmware 5.3.0)
 KAMERA:   Sonoff CAM-PT2 (IP: 192.168.178.25, RTSP 1080p@20fps, ONVIF PTZ)
 AUDIO:    ReSpeaker Lite WiFi (ESP32-S3) + Piper TTS via HDMI
 STROM:    Pico Power 5 USV
@@ -201,15 +201,25 @@ Stage 1: GStreamer TAPPAS
   → YOLO Detection (20 FPS, ~200 MB RAM)
   → liefert BBoxen + Person-IDs
 
-Stage 2: HailoRT-Direct Worker-Threads (parallel)
-  → SCRFD (Gesichtsdetektion, scrfd_10g.hef)
-  → ArcFace (Gesichtserkennung, arcface_mobilefacenet.hef)
-  → Pose (Körper-Keypoints, yolov8m_pose_h10.hef)
-  → ReID (Person Re-Identification, repvgg_a0_person_reid_512.hef)
-  → Hand (Handgesten, hand_landmark_lite.hef)
-  → FaceAttr (Alter/Geschlecht, face_attr_resnet_v1_18.hef)
-  → LowLight (Zero-DCE Enhancement, zero_dce.hef)
-  → SuperRes (Real-ESRGAN x2, real_esrgan_x2.hef)
+Stage 2: HailoRT-Direct Worker-Threads (parallel, AKTIV seit Session 19)
+  → FaceWorker  — SCRFD + ArcFace + FaceAttr (3 Modelle in 1 Worker)
+  → PoseWorker  — yolov8s_pose_h10.hef (Koerper-Keypoints)
+  → ReIDWorker  — repvgg_a0_person_reid_512.hef (Multi-Person-Trennung)
+  → DepthWorker — scdepthv3.hef (monokulare Tiefenschaetzung)
+
+Stage 2 — DEAKTIVIERT seit Session 19 wegen HAILO_MAX_NETWORK_GROUPS=8:
+  → HandWorker (Bug, SEGV-Race-History)
+  → PersonAttrWorker (Bug A1, nicht voll integriert)
+  → ActivityWorker (Bug A2, nicht voll integriert)
+  → YOLOWorldWorker (Bug A3, every 60 frames)
+  Re-Aktivierung via Multi-Person-Toggle geplant (Session 20+).
+
+Stage 3 (on-demand): SuperRes (Real-ESRGAN x2), LowLight (Zero-DCE)
+
+Lokales LLM: hailo-ollama 5.3.0 mit qwen2.5:1.5b — SHARED VDevice mit TAPPAS,
+LLM-Profile-System (chat/introspect/technical/dark/multi_person) via
+`config/llm_profiles.json`, Switch via `settings.json` Key `llm_profile`
+(GUI-Reiter 'LLM-Modus' im Panel Modelle).
 
 Feature-Flag: MOLOCH_USE_TAPPAS=1 (in ~/.profile)
 ```
@@ -585,10 +595,13 @@ def get_thing() -> "Thing":
 ## OFFENE BUGS
 
 1. **Kamera Hot-Plug**: Stecker raus/rein → nur Pi-Reboot hilft
-2. **ReID + Hand Race**: SEGV bei Pose-Detection Race → `reid_needed=False` als Workaround
-3. **person_attr_resnet_v1_18.hef**: Kleidung/Alter/Rucksack noch nicht vollständig integriert
-4. **hailo-ollama**: systemd-Service fehlt, läuft nicht beim Boot automatisch
-5. **MCP moloch_snapshot()**: erst nach MCP-Neustart volle Auflösung
+2. **Multi-Turn-Drift Qwen2.5-1.5B**: nach 3-4 Turns Bulletpoint-Halluzinationen,
+   Latenz steigt 3.8s → 32s. Workaround: Service-Restart loescht hailo-ollama
+   Conversation-Kontext. Echter Fix: qwen3:1.7b-Test oder Bridge-`/api/generate`-Switch.
+3. **A1: PersonAttr / A2: Activity / A3: YOLOWorld** — HEFs vorhanden, Worker
+   aber wegen HAILO_MAX_NETWORK_GROUPS=8 in Session 19 deaktiviert.
+   Re-Aktivierung in Multi-Person-Toggle geplant (settings.multi_person_tracking).
+4. **MCP moloch_snapshot()**: erst nach MCP-Neustart volle Auflösung
 
 ---
 

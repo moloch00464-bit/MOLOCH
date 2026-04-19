@@ -89,7 +89,7 @@ Der Besitzer/Entwickler heißt **Markus**. Markus ist der Boss — bei Konflikte
 
 ```
 BRAIN:    Raspberry Pi 5, 4 GB RAM, 2x NVMe SSD
-NPU:      Hailo-10H (40 TOPS, 8 GB LPDDR4, Firmware 5.1.1)
+NPU:      Hailo-10H (40 TOPS, 8 GB LPDDR4, Firmware 5.3.0)
 KAMERA:   Sonoff CAM-PT2 (IP: 192.168.178.25, RTSP 1080p@20fps, ONVIF PTZ)
 AUDIO:    ReSpeaker Lite WiFi (ESP32-S3) + Piper TTS via HDMI
 STROM:    Pico Power 5 USV
