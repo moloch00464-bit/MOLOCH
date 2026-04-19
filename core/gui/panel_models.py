@@ -15,6 +15,9 @@ Alle Commands via ServiceProxy._write_command().
 Importiert NUR panel_styles und tkinter.
 """
 
+import json
+import os
+import tempfile
 import tkinter as tk
 
 from core.gui.panel_styles import (
@@ -26,6 +29,11 @@ from core.gui.panel_styles import (
     FONT_BUTTON, FONT_LABEL, FONT_SMALL, FONT_MONO,
     STATUS_UPDATE_MS,
 )
+
+# Pfade fuer LLM-Profile und Settings
+_CONFIG_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "config")
+_SETTINGS_PATH = os.path.join(_CONFIG_DIR, "settings.json")
+_LLM_PROFILES_PATH = os.path.join(_CONFIG_DIR, "llm_profiles.json")
 
 # Audio Popup importieren (optional, Fehler faengt Panel nicht ab)
 try:
@@ -129,11 +137,16 @@ class ModelsModule:
         self.on_popup_supervisor = self._open_supervisor_popup
         self.on_popup_pipower5 = self._open_pipower5_popup
 
+        # LLM-Modus: Profil-Variable + Referenz auf Buttons
+        self._llm_profile_var = tk.StringVar(value="")
+        self._llm_btn_refs = {}   # key → Button-Widget
+
         # GUI aufbauen
         self._build_pipeline_status()
         self._build_npu_status()
         self._build_model_checkboxes()
         self._build_fps_display()
+        self._build_llm_profile_section()
         self._build_save_button()
         self._build_popup_buttons()
 
@@ -410,6 +423,176 @@ class ModelsModule:
         self._lbl_fps_detail.pack(side=tk.LEFT, padx=5)
 
     # =========================================================================
+    # LLM-Modus Sektion
+    # =========================================================================
+
+    def _load_llm_profiles(self):
+        """Laedt config/llm_profiles.json. Gibt (profiles_dict, active_key) zurueck.
+        Bei fehlender Datei: leeres Dict + None.
+        """
+        if not os.path.exists(_LLM_PROFILES_PATH):
+            return {}, None
+        try:
+            with open(_LLM_PROFILES_PATH, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            profiles = data.get("profiles", {})
+            active = data.get("active", None)
+            return profiles, active
+        except Exception:
+            return {}, None
+
+    def _read_active_from_settings(self):
+        """Liest llm_profile Key aus settings.json (ueberschreibt profiles.json active)."""
+        try:
+            with open(_SETTINGS_PATH, "r", encoding="utf-8") as fh:
+                s = json.load(fh)
+            return s.get("llm_profile", None)
+        except Exception:
+            return None
+
+    def _write_llm_profile_to_settings(self, profile_key: str):
+        """Schreibt llm_profile atomar in settings.json (NEVER #6: atomic write)."""
+        try:
+            with open(_SETTINGS_PATH, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            data["llm_profile"] = profile_key
+            fd, tmp = tempfile.mkstemp(dir=_CONFIG_DIR, suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    json.dump(data, fh, indent=2, ensure_ascii=False)
+                os.replace(tmp, _SETTINGS_PATH)
+            except OSError:
+                # NTFS-Fallback
+                with open(_SETTINGS_PATH, "w", encoding="utf-8") as fh:
+                    json.dump(data, fh, indent=2, ensure_ascii=False)
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+        except Exception as e:
+            print(f"[panel_models] LLM-Profil schreiben fehlgeschlagen: {e}")
+
+    def _build_llm_profile_section(self):
+        """LLM-Modus Sektion: aktuelles Profil + Radio-Buttons pro Profil."""
+        self._llm_section = tk.LabelFrame(
+            self._parent,
+            text="LLM-Modus",
+            bg=BG_FRAME,
+            fg=FG_LABEL,
+            font=FONT_LABEL,
+        )
+        self._llm_section.pack(fill=tk.X, padx=5, pady=(2, 2))
+
+        # Status-Zeile: "aktiv: chat"
+        status_row = tk.Frame(self._llm_section, bg=BG_FRAME)
+        status_row.pack(fill=tk.X, padx=8, pady=(4, 2))
+
+        tk.Label(
+            status_row, text="aktiv:", bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
+        ).pack(side=tk.LEFT)
+
+        self._lbl_llm_active = tk.Label(
+            status_row, text="--", bg=BG_FRAME, fg=ACCENT_CYAN, font=FONT_MONO,
+        )
+        self._lbl_llm_active.pack(side=tk.LEFT, padx=5)
+
+        # Profil-Buttons (werden beim ersten _update_llm_section befuellt)
+        self._llm_btn_frame = tk.Frame(self._llm_section, bg=BG_FRAME)
+        self._llm_btn_frame.pack(fill=tk.X, padx=8, pady=(0, 6))
+
+        # Anzeige-Namen fuer Profil-Keys
+        self._llm_display_names = {
+            "chat":         "Chat",
+            "introspect":   "Introspect",
+            "technical":    "Technical",
+            "dark":         "Dark",
+            "multi_person": "Multi",
+        }
+
+        # Einmalig aufbauen
+        self._llm_last_profile_keys = []
+        self._update_llm_section()
+
+    def _update_llm_section(self):
+        """Profile aus JSON laden, Buttons ggf. neu aufbauen, aktives Profil highlighten."""
+        profiles, active_from_file = self._load_llm_profiles()
+
+        # settings.json ueberschreibt active
+        active_from_settings = self._read_active_from_settings()
+        active = active_from_settings or active_from_file
+
+        profile_keys = list(profiles.keys())
+
+        # Buttons nur neu bauen wenn sich Profile geaendert haben
+        if profile_keys != self._llm_last_profile_keys:
+            # Alte Buttons loeschen
+            for w in self._llm_btn_frame.winfo_children():
+                w.destroy()
+            self._llm_btn_refs = {}
+
+            if not profile_keys:
+                # Platzhalter wenn profiles.json noch nicht existiert
+                tk.Label(
+                    self._llm_btn_frame,
+                    text="LLM-Profile noch nicht initialisiert",
+                    bg=BG_FRAME, fg=FG_DIM, font=FONT_SMALL,
+                ).pack(side=tk.LEFT, pady=2)
+            else:
+                # Radio-Buttons (Tkinter-Style: schlichte Buttons mit Highlight)
+                for i, key in enumerate(profile_keys):
+                    display = self._llm_display_names.get(key, key.capitalize())
+                    meta = profiles[key]
+                    max_tok = meta.get("max_tokens", "?")
+                    tooltip = f"{key} | max_tokens={max_tok}"
+                    btn = tk.Button(
+                        self._llm_btn_frame,
+                        text=display,
+                        width=8,
+                        bg=BG_BUTTON,
+                        fg=FG_LABEL,
+                        font=FONT_BUTTON,
+                        activebackground=BG_FRAME,
+                        command=lambda k=key: self._select_llm_profile(k),
+                    )
+                    btn.grid(row=0, column=i, padx=2, pady=2)
+                    self._llm_btn_refs[key] = btn
+                    # Einfacher Tooltip via bind
+                    btn.bind("<Enter>", lambda e, t=tooltip, b=btn: b.config(
+                        text=t[:12],
+                    ))
+                    btn.bind("<Leave>", lambda e, d=display, b=btn: b.config(
+                        text=d,
+                    ))
+
+            self._llm_last_profile_keys = profile_keys
+
+        # Aktives Profil highlighten + Label setzen
+        if active:
+            self._llm_profile_var.set(active)
+            self._lbl_llm_active.config(text=active, fg=ACCENT_CYAN)
+            for key, btn in self._llm_btn_refs.items():
+                display = self._llm_display_names.get(key, key.capitalize())
+                if key == active:
+                    btn.config(bg=BTN_ON_GREEN, fg=FG_WHITE)
+                else:
+                    btn.config(bg=BG_BUTTON, fg=FG_LABEL, text=display)
+        else:
+            self._lbl_llm_active.config(text="--", fg=FG_DIM)
+
+    def _select_llm_profile(self, profile_key: str):
+        """Profil auswaehlen: settings.json schreiben + GUI sofort aktualisieren."""
+        self._write_llm_profile_to_settings(profile_key)
+        self._llm_profile_var.set(profile_key)
+        self._lbl_llm_active.config(text=profile_key, fg=ACCENT_CYAN)
+        # Buttons neu highlighten
+        for key, btn in self._llm_btn_refs.items():
+            display = self._llm_display_names.get(key, key.capitalize())
+            if key == profile_key:
+                btn.config(bg=BTN_ON_GREEN, fg=FG_WHITE)
+            else:
+                btn.config(bg=BG_BUTTON, fg=FG_LABEL, text=display)
+
+    # =========================================================================
     # SAVE SETTINGS
     # =========================================================================
 
@@ -544,6 +727,9 @@ class ModelsModule:
 
             # NPU Scheduler + Tracking Status aktualisieren
             self._update_npu_status_display(status)
+
+        # LLM-Profil Anzeige aktualisieren (liest profiles.json + settings.json)
+        self._update_llm_section()
 
         # Widgets sofort neu zeichnen
         self._parent.update_idletasks()
