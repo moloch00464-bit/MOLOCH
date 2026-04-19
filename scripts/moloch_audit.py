@@ -1444,25 +1444,31 @@ def test_worker_count_exact():
         return False, f"Unerwartet aktiv: {','.join(sorted(extra))} (Slot-Risiko fuer Qwen)"
     return True, "4/4 erwartete Worker aktiv, keine zusaetzlichen NPU-Worker"
 
-@auto_test("llm_profiles.json valide (5 Profile)", "session19")
+@auto_test("llm_profiles.json valide (>=5 Profile)", "session19")
 def test_llm_profiles_valid():
     """config/llm_profiles.json: 5 Profile mit allen Pflicht-Keys."""
     path = os.path.join(MOLOCH_HOME, "config", "llm_profiles.json")
     if not os.path.exists(path):
         return False, "llm_profiles.json fehlt"
     expected_keys = {"chat", "introspect", "technical", "dark", "multi_person"}
+    optional_keys = {"tentacle"}  # Session 21+
     required_fields = {"system", "include_live_context", "max_tokens", "temperature"}
     try:
         with open(path) as f:
             data = json.load(f)
         profiles = data.get("profiles", {})
-        if set(profiles.keys()) != expected_keys:
-            return False, f"Profile-Keys: {sorted(profiles.keys())} != erwartet {sorted(expected_keys)}"
+        actual = set(profiles.keys())
+        missing_required = expected_keys - actual
+        unknown = actual - expected_keys - optional_keys
+        if missing_required:
+            return False, f"Fehlende Pflicht-Profile: {sorted(missing_required)}"
+        if unknown:
+            return False, f"Unbekannte Profile: {sorted(unknown)} (optional erlaubt: {sorted(optional_keys)})"
         for key, prof in profiles.items():
             missing = required_fields - set(prof.keys())
             if missing:
                 return False, f"{key} fehlt Felder: {','.join(sorted(missing))}"
-        return True, f"5 Profile valide, active='{data.get('active','?')}'"
+        return True, f"{len(profiles)} Profile valide, active='{data.get('active','?')}'"
     except Exception as e:
         return False, f"Parse-Fehler: {e}"
 
@@ -1610,6 +1616,17 @@ def test_tentacle_reachable_or_backoff():
     age_s = int(time.time() - last_ts) if last_ts > 0 else 999999
     if age_s < 60 * 60:
         return True, f"offline, Watchdog aktiv (letzter Probe vor {age_s}s)"
+    # Letzter Versuch: Watchdog hat noch nicht probed, aber Bridge koennte live sein
+    # (z.B. nach Service-Restart). Direkt curl /api/tags.
+    try:
+        host = cfg.get("host", "")
+        port = int(cfg.get("port", 11434))
+        import urllib.request as _u
+        with _u.urlopen(f"http://{host}:{port}/api/tags", timeout=5) as r:
+            if r.status == 200:
+                return True, f"live HTTP ok (Watchdog still vor {age_s}s)"
+    except Exception:
+        pass
     return False, f"offline + Watchdog still (letzter Probe vor {age_s}s) — Watchdog pruefen"
 
 
