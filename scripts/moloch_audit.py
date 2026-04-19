@@ -1647,6 +1647,109 @@ def test_voice_hardware_tags():
 # TEST RUNNER
 # ============================================================
 
+
+# === Session 21: Bridge-Agent / PC-Bridge / Tentakel-Haerte ===
+
+@auto_test("Bridge-Agent definiert", "session21")
+def test_bridge_agent_defined():
+    """.claude/agents/bridge.md existiert mit Frontmatter 'name: bridge'."""
+    p = os.path.join(MOLOCH_HOME, ".claude", "agents", "bridge.md")
+    if not os.path.exists(p):
+        return False, f"Datei fehlt: {p}"
+    head = open(p, "r", encoding="utf-8").read(500)
+    if "name: bridge" not in head:
+        return False, "Frontmatter ohne 'name: bridge'"
+    return True, "Bridge-Agent definiert"
+
+
+@auto_test("PC-Bridge-Skill definiert", "session21")
+def test_pc_bridge_skill_defined():
+    """.claude/skills/pc-bridge/SKILL.md existiert."""
+    p = os.path.join(MOLOCH_HOME, ".claude", "skills", "pc-bridge", "SKILL.md")
+    if not os.path.exists(p):
+        return False, f"Datei fehlt: {p}"
+    head = open(p, "r", encoding="utf-8").read(300)
+    if "name: pc-bridge" not in head:
+        return False, "Frontmatter ohne 'name: pc-bridge'"
+    return True, "PC-Bridge-Skill definiert"
+
+
+@auto_test("Tentakel-Routing-Logik", "session21")
+def test_tentacle_routing_logic():
+    """_choose_provider: kurz->ollama, lang->tentacle, force_local->ollama, reason->tentacle."""
+    try:
+        sys.path.insert(0, MOLOCH_HOME)
+        from core.autonomy.local_llm_bridge import LocalLLMBridge, _load_tentacle_cfg
+    except Exception as e:
+        return False, f"Import-Fehler: {e}"
+    cfg = _load_tentacle_cfg()
+    if not cfg.get("enabled"):
+        return True, "Tentakel disabled — Routing-Test skipped"
+    b = LocalLLMBridge.__new__(LocalLLMBridge)
+    b._tentacle_backoff_until = 0.0
+    cases = [
+        (("Hi", "", False, "ask"), "ollama"),
+        (("x" * 200, "", False, "ask"), "tentacle"),
+        (("x" * 200, "", True, "ask"), "ollama"),
+        (("Hi", "", False, "reason"), "tentacle"),
+    ]
+    for args, expected in cases:
+        got = b._choose_provider(*args)
+        if got != expected:
+            return False, f"choose_provider{args} -> '{got}', erwartet '{expected}'"
+    return True, "Routing korrekt fuer alle 4 Faelle"
+
+
+@auto_test("Tentakel-Circuit-Breaker-Attrs", "session21")
+def test_tentacle_circuit_breaker_attrs():
+    """Bridge-Singleton hat fail_count, backoff_until, model_cached."""
+    try:
+        sys.path.insert(0, MOLOCH_HOME)
+        from core.autonomy.local_llm_bridge import get_llm_bridge
+        b = get_llm_bridge()
+    except Exception as e:
+        return False, f"Import/Init-Fehler: {e}"
+    missing = [a for a in ("_tentacle_fail_count", "_tentacle_backoff_until", "_tentacle_model_cached") if not hasattr(b, a)]
+    if missing:
+        return False, f"Fehlende Attrs: {missing}"
+    return True, f"Attrs vorhanden, fail={b._tentacle_fail_count}"
+
+
+@auto_test("Tentakel-Host TCP erreichbar oder disabled", "session21")
+def test_tentacle_host_tcp_reachable():
+    """Wenn enabled=true: TCP-Connect zu host:port. Sonst PASS skip."""
+    path = os.path.join(MOLOCH_HOME, "config", "settings.json")
+    try:
+        with open(path, "r") as f:
+            cfg = json.load(f).get("tentacle_llm", {}) or {}
+    except Exception as e:
+        return False, f"settings.json nicht lesbar: {e}"
+    if not cfg.get("enabled"):
+        return True, "Tentakel disabled — TCP-Check skipped"
+    host = cfg.get("host", "")
+    port = int(cfg.get("port", 11434))
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(3)
+    try:
+        s.connect((host, port))
+        return True, f"TCP {host}:{port} erreichbar"
+    except (OSError, socket.timeout) as e:
+        caps_path = os.path.join(MOLOCH_HOME, "config", "system_capabilities.json")
+        try:
+            with open(caps_path, "r") as f:
+                caps = json.load(f).get("tentacle_llm", {}) or {}
+            if caps.get("status") in ("down", "backoff"):
+                return True, f"TCP unreachable, capabilities='{caps.get('status')}'"
+        except Exception:
+            pass
+        return False, f"TCP {host}:{port} unreachable: {e}"
+    finally:
+        try: s.close()
+        except Exception: pass
+
+
+
 def run_auto_tests():
     """Alle automatischen Tests."""
     print("\n  ─── SYSTEM ───")
@@ -1766,6 +1869,13 @@ def run_auto_tests():
     print("\n  ─── SESSION 20 STACK (LLM-Tentakel) ───")
     test_tentacle_config_valid()
     test_tentacle_reachable_or_backoff()
+
+    print("\n  --- SESSION 21 BRIDGE STACK ---")
+    test_bridge_agent_defined()
+    test_pc_bridge_skill_defined()
+    test_tentacle_routing_logic()
+    test_tentacle_circuit_breaker_attrs()
+    test_tentacle_host_tcp_reachable()
 
     print("\n  ─── IPC / VOICE TAGS ───")
     test_ipc_hardware_actions()
