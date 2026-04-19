@@ -119,5 +119,14 @@
     "complexity_threshold": 120,
     "timeout_sec": 30,
     "backoff_sec": 300
+  },
+  "tts_bridge": {
+    "enabled": true,
+    "host": "192.168.178.20",
+    "port": 9002,
+    "voice": "de-DE-ConradNeural",
+    "rate": "+0%",
+    "pitch": "+0Hz",
+    "timeout_sec": 30
   }
 }
