@@ -113,7 +113,7 @@
   "llm_profile": "introspect",
   "tentacle_llm": {
     "enabled": true,
-    "host": "markus-pc.local",
+    "host": "192.168.178.20",
     "port": 11434,
     "model": "",
     "complexity_threshold": 120,
