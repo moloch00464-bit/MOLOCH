@@ -128,5 +128,14 @@
     "rate": "+0%",
     "pitch": "+0Hz",
     "timeout_sec": 30
+  },
+  "stt_bridge": {
+    "enabled": true,
+    "host": "192.168.178.20",
+    "port": 9001,
+    "language": "de",
+    "beam_size": 5,
+    "vad_filter": true,
+    "timeout_sec": 60
   }
 }
