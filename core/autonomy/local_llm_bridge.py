@@ -121,34 +121,90 @@ def _build_local_context_snippet() -> str:
     try:
         with open(_STATUS_JSON_PATH, 'r') as f:
             st = json.load(f)
-        face = st.get('face_id') or ('unbekannte Person' if st.get('person_detected') else 'niemand')
+        person_detected = bool(st.get('person_detected'))
+        face = st.get('face_id') or ('unbekannte Person' if person_detected else 'niemand')
         core = st.get('core', {}) or {}
         zone = core.get('zone', 'guardian')
         tension = core.get('tension', st.get('tension', 0.0))
         dominance = core.get('dominance', 0.0)
+        time_period = core.get('time_period', '')
+        cpu_temp = core.get('cpu_temp', st.get('watchdog', {}).get('cpu_temp'))
+        npu_load = core.get('npu_load', 0.0)
+        trends = core.get('trends', {}) or {}
+        approaching = trends.get('approaching', False)
+        leaving = trends.get('leaving', False)
+        presence_s = trends.get('presence_duration', 0.0) or 0.0
+        absence_s = trends.get('absence_duration', 0.0) or 0.0
+        distance = trends.get('smoothed_distance', '') or ''
+        fps = st.get('fps', {}).get('total', 0)
+
         # Qwen2.5-1.5B versteht Zahlen mit Vorzeichen oft falsch -> semantisch uebersetzen.
-        # Tension: -1 entspannt  0 neutral  +1 angespannt
-        if tension <= -0.5:
-            tension_word = "entspannt"
-        elif tension <= 0.2:
-            tension_word = "ruhig"
-        elif tension <= 0.6:
-            tension_word = "aufmerksam"
-        else:
-            tension_word = "angespannt"
-        # Dominance: -1 zurueckhaltend  0 neutral  +1 selbstsicher
-        if dominance <= -0.5:
-            dom_word = "zurueckhaltend"
-        elif dominance <= 0.2:
-            dom_word = "neutral"
-        elif dominance <= 0.6:
-            dom_word = "praesent"
-        else:
-            dom_word = "selbstsicher"
-        return (
-            f" JETZT: Du siehst {face}. "
-            f"Zone {zone}, Stimmung {tension_word}, Haltung {dom_word}."
+        def _tension_word(t):
+            if t <= -0.5: return "entspannt"
+            if t <= 0.2: return "ruhig"
+            if t <= 0.6: return "aufmerksam"
+            return "angespannt"
+
+        def _dom_word(d):
+            if d <= -0.5: return "zurueckhaltend"
+            if d <= 0.2: return "neutral"
+            if d <= 0.6: return "praesent"
+            return "selbstsicher"
+
+        def _cpu_word(t):
+            if t is None: return ""
+            if t < 50: return "kuehl"
+            if t < 65: return "normal warm"
+            if t < 75: return "warm"
+            return "heiss"
+
+        def _npu_word(l):
+            if l < 0.15: return "ruhig"
+            if l < 0.5: return "aktiv"
+            if l < 0.8: return "beschaeftigt"
+            return "am Limit"
+
+        def _presence_phrase():
+            # Praesenz / Abwesenheits-Dauer als lesbarer Text
+            if person_detected:
+                if presence_s < 2:
+                    return f"gerade erst aufgetaucht"
+                if presence_s < 60:
+                    return f"seit {int(presence_s)}s im Bild"
+                return f"seit {int(presence_s//60)} min im Bild"
+            if absence_s > 5:
+                if absence_s < 60:
+                    return f"niemand im Bild seit {int(absence_s)}s"
+                return f"niemand im Bild seit {int(absence_s//60)} min"
+            return "gerade niemand im Bild"
+
+        parts = [
+            f"JETZT: {_presence_phrase()}."
+        ]
+        # Distanz-Key auf deutsches Wort mappen (near/medium/far kommen aus Perception)
+        _dist_map = {"near": "nah", "medium": "mittlere entfernung", "far": "weit weg"}
+        distance_de = _dist_map.get(distance, "")
+        if person_detected:
+            parts.append(f"Vor dir: {face}{(', ' + distance_de) if distance_de else ''}.")
+            if approaching:
+                parts.append("Kommt naeher.")
+            elif leaving:
+                parts.append("Entfernt sich.")
+        parts.append(
+            f"Zone {zone}, Stimmung {_tension_word(tension)}, Haltung {_dom_word(dominance)}."
         )
+        body_parts = []
+        if fps:
+            body_parts.append(f"Bild {int(fps)} FPS")
+        if cpu_temp is not None:
+            body_parts.append(f"CPU {_cpu_word(cpu_temp)}")
+        body_parts.append(f"NPU {_npu_word(npu_load)}")
+        if body_parts:
+            parts.append("Koerper: " + ", ".join(body_parts) + ".")
+        if time_period:
+            parts.append(f"Tageszeit: {time_period}.")
+
+        return " " + " ".join(parts)
     except Exception:
         return ""
 
