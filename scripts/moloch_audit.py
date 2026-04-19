@@ -1715,9 +1715,9 @@ def test_tentacle_circuit_breaker_attrs():
     return True, f"Attrs vorhanden, fail={b._tentacle_fail_count}"
 
 
-@auto_test("Tentakel-Host TCP erreichbar oder disabled", "session21")
+@auto_test("Tentakel-Host /api/tags erreichbar oder disabled", "session21")
 def test_tentacle_host_tcp_reachable():
-    """Wenn enabled=true: TCP-Connect zu host:port. Sonst PASS skip."""
+    """Wenn enabled=true: HTTP /api/tags (5s timeout). Backoff zaehlt als PASS."""
     path = os.path.join(MOLOCH_HOME, "config", "settings.json")
     try:
         with open(path, "r") as f:
@@ -1725,28 +1725,26 @@ def test_tentacle_host_tcp_reachable():
     except Exception as e:
         return False, f"settings.json nicht lesbar: {e}"
     if not cfg.get("enabled"):
-        return True, "Tentakel disabled — TCP-Check skipped"
+        return True, "Tentakel disabled — Check skipped"
     host = cfg.get("host", "")
     port = int(cfg.get("port", 11434))
-    import socket
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.settimeout(3)
+    import urllib.request
+    url = f"http://{host}:{port}/api/tags"
     try:
-        s.connect((host, port))
-        return True, f"TCP {host}:{port} erreichbar"
-    except (OSError, socket.timeout) as e:
+        with urllib.request.urlopen(url, timeout=5) as r:
+            if r.status == 200:
+                return True, f"HTTP {host}:{port}/api/tags ok"
+            return False, f"HTTP {r.status}"
+    except Exception as e:
         caps_path = os.path.join(MOLOCH_HOME, "config", "system_capabilities.json")
         try:
             with open(caps_path, "r") as f:
                 caps = json.load(f).get("tentacle_llm", {}) or {}
             if caps.get("status") in ("down", "backoff"):
-                return True, f"TCP unreachable, capabilities='{caps.get('status')}'"
+                return True, f"unreachable, capabilities={caps.get('status')!r}"
         except Exception:
             pass
-        return False, f"TCP {host}:{port} unreachable: {e}"
-    finally:
-        try: s.close()
-        except Exception: pass
+        return False, f"HTTP {url} fehlgeschlagen: {e}"
 
 
 
