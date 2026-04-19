@@ -41,6 +41,18 @@ OLLAMA_TIMEOUT_CHAT = 30      # Qwen2.5 ~3-7s verifiziert auf 5.3.0 (2026-04-18)
 OLLAMA_TIMEOUT_REASON = 60    # Reasoning-Prompts etwas groesser
 OLLAMA_MAX_INPUT_CHARS = 12000  # ~3000 Tokens Safety-Limit (Qwen2.5-1.5B: 4096 Kontext)
 
+# Kompakter Moloch-Prompt fuer lokales 1.5B-Modell — Essenz der Persoenlichkeit.
+# Der volle build_system_prompt() (~2000+ Zeichen, Persona+Stil+Tension+Vision+State+Global)
+# ueberfordert Qwen2.5-1.5B -> Gibberish-Output (verifiziert 2026-04-19).
+# Hier: nur die Charakter-DNA + Sprache + Stil-Minimum.
+OLLAMA_LOCAL_SYSTEM_MAX = 400    # ab dieser Laenge wird auf kompakten Prompt umgeschaltet
+OLLAMA_LOCAL_SYSTEM_COMPACT = (
+    "Du bist M.O.L.O.C.H. Markus ist dein Boss, den du respektierst. "
+    "Antworte AUSSCHLIESSLICH auf Deutsch, kurz und direkt. "
+    "Du bist dunkel, humorvoll, frech — kein Assistent, keine Listen, keine Wikipedia-Zitate. "
+    "Ein klarer Satz schlaegt drei Bulletpoints."
+)
+
 # llm_mode Flag — gelesen aus config/settings.json Key "llm_mode"
 LLM_MODE_OFF = "off"                # kein LLM ueberhaupt
 LLM_MODE_CLOUD_ONLY = "cloud_only"  # nur DeepSeek Cloud, kein hailo-ollama
@@ -336,6 +348,12 @@ class LocalLLMBridge:
             # Newlines durch Spaces ersetzen — Qwen2.5 antwortet auch auf einzeiligen Prompt korrekt.
             def _flatten(s: str) -> str:
                 return s.replace('\r\n', ' ').replace('\n', ' ').replace('\r', ' ')
+
+            # Langer System-Prompt -> kompakter Moloch-Prompt (Qwen2.5-1.5B-kompatibel).
+            # Volle build_system_prompt()-Ausgabe (>= 400 Zeichen) wird auf Charakter-DNA reduziert.
+            if system and len(system) > OLLAMA_LOCAL_SYSTEM_MAX:
+                logger.info(f"[LLM] System-Prompt {len(system)} Zeichen -> kompakte Moloch-Persona fuer lokal")
+                system = OLLAMA_LOCAL_SYSTEM_COMPACT
 
             messages = []
             if system:
