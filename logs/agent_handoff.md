@@ -1,3 +1,62 @@
+# Agent Handoff — 2026-04-19 (Session 19 — Lokaler LLM + Profile-System live)
+# Letzter Commit: 71437c9 | Audit: PASS | FPS: ~20 | RAM: 36% | NPU-FW: 5.3.0
+
+---
+
+## SESSION 19 NACHTRAG — LLM-PROFILE-SYSTEM (PRIO 0+1 erledigt)
+
+Nach den 3 Bug-Fixes (siehe Original-Bericht unten) wurde das **Profile-System**
+mit Hilfe von `autonomy`+`gui` Sub-Agenten gebaut. Multi-Turn-Drift ist nicht
+durch Context-Reset behoben (Recherche zeigte: hailo-ollama hat keinen sauberen
+API-Reset, `keep_alive=0` kostet 12s Reload-Overhead) — sondern durch
+**stabile Sampling-Settings pro Profil** abgemildert.
+
+### Architektur
+
+- `config/llm_profiles.json` — 5 Profile mit `system`, `include_live_context`, `max_tokens`, `temperature`
+- `core/autonomy/local_llm_bridge.py` — `_load_profiles()` + `_get_active_profile()` mit mtime-Cache
+- `core/gui/panel_models.py` — Sektion "LLM-Modus" mit Buttons + Live-Status
+
+### Profile
+
+| Profil | Use-Case | system_len | tokens | temp | live_ctx |
+|---|---|---|---|---|---|
+| chat | normale Konversation | 280 | 80 | 0.8 | nein |
+| introspect | Selbstreflexion | 270 | 120 | 0.6 | **ja** |
+| technical | praezise Antworten | 200 | 200 | 0.3 | nein |
+| dark | Berserker scharf | 220 | 60 | 1.0 | nein |
+| multi_person | mehrere Personen trennen | 230 | 150 | 0.7 | **ja** |
+
+### Switching
+
+- GUI (panel_models "LLM-Modus"): Klick -> `settings.json` Key `llm_profile` atomar geschrieben
+- Bridge merkt mtime-Aenderung -> naechster Call nutzt neues Profil ohne Service-Restart
+- Direkt-Edit `settings.json` funktioniert auch (gleicher Mechanismus)
+
+### Verifikation
+
+- Profil `dark` aktiviert -> Bridge-Log: `Profil aktiv: ...Berser... (233 Zeichen, max_tokens=60, temp=1.0)`, Antwort 108 Zeichen / 5.6s
+- Profil `introspect` aktiviert -> Bridge-Log: `Profil aktiv: ...Markus fr... (348 Zeichen, max_tokens=120, temp=0.6)`, Antwort 394 Zeichen / 18s, poetisch mit Live-Kontext
+- Charakteristisch unterschiedliche Stile bestaetigt
+
+### Bekannte Einschraenkung (bleibt)
+
+Multi-Turn-Drift bei Qwen2.5-1.5B ist **nicht vollstaendig** geloest — bei langen
+Konversationen mit High-Temperature-Profilen halluziniert das Modell weiter
+(Bsp. introspect-Antwort enthielt "Druck in meiner Hose steigt", "Eiskaelissen").
+Profile mildern es durch stabile temp/top_p, aber Modell-Groesse bleibt der harte
+Faktor. Echter Fix: `qwen3:1.7b` testen (groesser, neuer Architektur).
+
+### Commits
+
+| Commit | Inhalt |
+|--------|--------|
+| `e1ffd19` | config: llm_profiles.json mit 5 Presets |
+| `2900420` | bridge: Profile-Loader mit mtime-Cache + Live-Switch |
+| `71437c9` | gui: LLM-Modus Sektion in panel_models mit Profil-Switcher |
+
+---
+
 # Agent Handoff — 2026-04-19 (Session 19 — Lokaler LLM spricht auf Qwen2.5 sauber)
 # Letzter Commit: 07d494d | Audit: PASS | FPS: ~20 | RAM: 36% | NPU-FW: 5.3.0
 
