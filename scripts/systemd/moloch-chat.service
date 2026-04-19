@@ -1,0 +1,17 @@
+[Unit]
+Description=MOLOCH Chat-Server (FastAPI fuer PC-Chat-UI)
+After=moloch.service network-online.target
+Wants=moloch.service
+
+[Service]
+Type=simple
+User=molochzuhause
+Group=molochzuhause
+WorkingDirectory=/home/molochzuhause/moloch
+ExecStart=/usr/bin/python3 /home/molochzuhause/moloch/core/bridge/chat_server.py
+Restart=on-failure
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
