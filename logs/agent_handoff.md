@@ -1,3 +1,71 @@
+# Agent Handoff — 2026-04-19 (Session 19 — Lokaler LLM spricht auf Qwen2.5 sauber)
+# Letzter Commit: 07d494d | Audit: PASS | FPS: ~20 | RAM: 36% | NPU-FW: 5.3.0
+
+---
+
+## SESSION 19 — LOKALER LLM QUALITAETSTAUGLICH (2026-04-19)
+
+**Kernerkenntnis:** Nach dem 5.3.0-Upgrade aus Session 18 waren 3 Folgeprobleme offen,
+alle heute geloest. Moloch antwortet jetzt **lokal, auf Deutsch, in 3.8 Sekunden**.
+
+### Drei Bugs, drei Fixes
+
+**Bug 1: HAILO_RESOURCE_EXHAUSTED(81) beim Qwen-Load**
+- Ursache: `HAILO_MAX_NETWORK_GROUPS=8` (SDK-Header `hailort.h:52`),
+  Moloch hatte 11+ Groups (TAPPAS + 8 Worker + Whisper + Qwen).
+- Fix (Commit 9f5374e): 4 Worker mit Bug-Status oder Low-Use deaktiviert
+  (Hand, PersonAttr, Activity, YOLOWorld). ReID bleibt fuer Multi-Person-Trennung.
+  Active: Face(2), Pose(3), ReID(5), Depth(10) + TAPPAS + Qwen = 6 Groups.
+
+**Bug 2: HAILO_INTERNAL_FAILURE(8) `control character U+000A must be escaped`**
+- Ursache: hailo-ollama interner JSON/Template-Parser crasht an unescaped `\n`
+  im system/user `content`.
+- Fix (Commit 72e44dc): `_flatten()` ersetzt `\r\n`/`\n`/`\r` durch Spaces vor
+  dem Senden an `/api/chat`. Cloud-Call unberuehrt.
+
+**Bug 3: Moloch-Antwort = Gibberish "F**~\$\$*** ** **..."**
+- Ursache: Voller `build_system_prompt()` liefert 5669 Zeichen mit
+  Persona+Stil+Tension+Vision+State+Global. Das ist fuer DeepSeek R1/Claude
+  optimiert — Qwen2.5-1.5B ueberfordert, produziert Zeichen-Salat.
+- Fix (Commit 07d494d): Bei System-Prompt > 400 Zeichen automatisch auf
+  kompakte 290-Zeichen-Moloch-Persona umschalten (nur Charakter-DNA). Cloud-Calls
+  bleiben beim vollen Prompt.
+
+### Verifikation (lokal, Cloud-Keys disabled)
+
+Test `moloch_say("Laufst du jetzt komplett lokal auf deiner NPU?")`:
+- Bridge-Log: `System-Prompt 5669 Zeichen -> kompakte Moloch-Persona fuer lokal`
+- Bridge-Log: `qwen2.5:1.5b: 75 Zeichen in 3843ms`
+- Moloch-Antwort: **"Natuerlich, aber ich muss mit der NPU erst noch die letzten Werte berechnen."**
+- Deutsch, einzeiliger Satz, kontextuell, kein Cloud-Fallback (Keys waren deaktiviert).
+
+### Commits dieser Session
+
+| Commit | Inhalt |
+|--------|--------|
+| `9f5374e` | perception: 4 Worker deaktiviert fuer Qwen-Slot (Hand/PersonAttr/Activity/YOLOWorld) |
+| `72e44dc` | bridge: Newlines flatten fuer hailo-ollama JSON-Parser |
+| `07d494d` | bridge: kompakter Moloch-Prompt fuer lokales 1.5B-Modell |
+
+### TODO naechste Sessions
+
+- **Multi-Person-Toggle im GUI** (panel_models Reiter): schaltet ReID + PersonAttr
+  + Hand ein/aus via `settings.multi_person_tracking` — fuer Szenarien mit Rebecca.
+- **qwen3:1.7b testen** (groesser, neuer, evtl. bessere Antworten).
+- **Bug A1 (PersonAttrWorker)** fixen, dann Multi-Person-Mode erweitern.
+- **Kompakter Prompt tunen**: aktuell generisch, koennte Vision-Kontext + Mood
+  in <100 Zeichen Zusatz bekommen (z.B. "Du siehst: markus").
+- **hailo_ollama.service ExecStartPre=sleep 30 koennte kleiner** wenn Load-Zeit OK.
+
+### Offene Basis-Baustelle
+
+- **moloch.service ExecStartPre=pkill -9 hailo-ollama** — altes Verhalten aus
+  VDevice-Konflikt-Zeiten. Seit SHARED nicht mehr noetig, kostet 30s Restart-Delay.
+- **moloch_unified_panel.py** — `yolov8m`-Alias-Key bleibt (Umbenennung ist
+  Cross-Domain), Labels sind aber auf `YOLOv11m` korrigiert (Session 18).
+
+---
+
 # Agent Handoff — 2026-04-18 (Session 18 — HailoRT 5.3.0 Upgrade, lokales LLM live)
 # Letzter Commit: 277cf10 | Audit: 5/5 PASS | FPS: 20.0 | RAM: 35.9% | NPU-FW: 5.3.0
 
