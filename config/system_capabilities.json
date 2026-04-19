@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-04-01T22:35:56",
-  "generation_ms": 1940.8,
+  "generated": "2026-04-19T13:01:49",
+  "generation_ms": 1707.2,
   "summary": {
     "core_modules": "37/38",
     "external_deps": "11/11",
@@ -51,10 +51,10 @@
   "hardware": {
     "ram_gb": 3.9,
     "cpu_model": "Raspberry Pi 5 Model B Rev 1.1",
-    "hailo_device": true,
+    "hailo_device": false,
     "ssd1_code": {
       "total_gb": 457.9,
-      "free_gb": 382.0
+      "free_gb": 380.9
     },
     "ssd2_data": {
       "total_gb": 468.4,
@@ -433,5 +433,10 @@
       "name": "de_DE-thorsten-medium",
       "has_config": true
     }
-  ]
+  ],
+  "tentacle_llm": {
+    "reachable": false,
+    "model": null,
+    "last_probe_ts": 0
+  }
 }

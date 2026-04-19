@@ -110,5 +110,14 @@
     "autonomous_search_city": "Nuernberg",
     "autonomous_search_max_per_session": 20
   },
-  "llm_profile": "chat"
+  "llm_profile": "introspect",
+  "tentacle_llm": {
+    "enabled": true,
+    "host": "markus-pc.local",
+    "port": 11434,
+    "model": "",
+    "complexity_threshold": 120,
+    "timeout_sec": 30,
+    "backoff_sec": 300
+  }
 }
