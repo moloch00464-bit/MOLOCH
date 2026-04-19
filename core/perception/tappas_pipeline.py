@@ -366,30 +366,33 @@ class TappasPipeline:
             self._result_collector.register_worker(self._pose_worker)
             self._roi_dispatcher.register_worker(self._pose_worker, every_n_frames=3)
 
-            # ReIDWorker: Person ReID (jeden 5. Frame)
+            # ReIDWorker: Person ReID — fuer Multi-Person-Unterscheidung (Markus + Rebecca etc.)
+            # Trennt Personen anhand Koerper-Erscheinung wenn Gesichter kurzzeitig verdeckt.
             self._reid_worker = ReIDWorker()
             self._result_collector.register_worker(self._reid_worker)
             self._roi_dispatcher.register_worker(self._reid_worker, every_n_frames=5)
 
-            # HandWorker: Hand Landmarks (jeden 4. Frame)
-            self._hand_worker = HandWorker()
-            self._result_collector.register_worker(self._hand_worker)
-            self._roi_dispatcher.register_worker(self._hand_worker, every_n_frames=4)
-
-            # PersonAttrWorker: Kleidung, Alter, Zubehoer (jeden 6. Frame)
-            self._person_attr_worker = PersonAttrWorker()
-            self._result_collector.register_worker(self._person_attr_worker)
-            self._roi_dispatcher.register_worker(self._person_attr_worker, every_n_frames=6)
-
-            # ActivityWorker: r3d_18 Aktivitaetserkennung (Frame-Puffer + Inference alle 30 Frames)
-            self._activity_worker = ActivityWorker()
-            self._result_collector.register_worker(self._activity_worker)
-            # KEIN ROI-Dispatcher — push_frame() direkt in _on_appsink_sample()
-
-            # YOLOWorldWorker: Zero-Shot Objektsuche (alle 60 Frames via ROI-Dispatcher)
-            self._yolo_world_worker = YOLOWorldWorker()
-            self._result_collector.register_worker(self._yolo_world_worker)
-            self._roi_dispatcher.register_worker(self._yolo_world_worker, every_n_frames=60)
+            # --- 4 Worker DEAKTIVIERT fuer Qwen2.5 Slot (2026-04-19) ---
+            # Hailo-10H: HAILO_MAX_NETWORK_GROUPS=8. Vorher 11+ Groups ->
+            # HAILO_RESOURCE_EXHAUSTED(81) beim Qwen-Load.
+            # Abgeschaltet: 4 Worker mit offenen Bugs A1-A3 + Hand (SEGV-Race).
+            # Re-aktivieren: Block einkommentieren, Qwen-Koexistenz testen.
+            # Kandidat fuer spaeter: toggleable via settings.multi_person_tracking.
+            #
+            # self._hand_worker = HandWorker()
+            # self._result_collector.register_worker(self._hand_worker)
+            # self._roi_dispatcher.register_worker(self._hand_worker, every_n_frames=4)
+            #
+            # self._person_attr_worker = PersonAttrWorker()
+            # self._result_collector.register_worker(self._person_attr_worker)
+            # self._roi_dispatcher.register_worker(self._person_attr_worker, every_n_frames=6)
+            #
+            # self._activity_worker = ActivityWorker()
+            # self._result_collector.register_worker(self._activity_worker)
+            #
+            # self._yolo_world_worker = YOLOWorldWorker()
+            # self._result_collector.register_worker(self._yolo_world_worker)
+            # self._roi_dispatcher.register_worker(self._yolo_world_worker, every_n_frames=60)
 
             # DepthWorker: Monokulare Tiefenschaetzung (alle 10 Frames, Vollbild)
             self._depth_worker = DepthWorker()
@@ -401,7 +404,7 @@ class TappasPipeline:
             # Modul-Level Registry setzen — fuer keyword_handler Zugriff
             from core.perception.vision_workers import set_worker_registry
             set_worker_registry(self._result_collector)
-            logger.info("[WORKERS] 8 Worker gestartet: Face(2), Pose(3), Hand(4), ReID(5), PersonAttr(6), Activity(30), YOLOWorld(60), Depth(10)")
+            logger.info("[WORKERS] 4 Worker aktiv: Face(2), Pose(3), ReID(5), Depth(10) — 4 deaktiviert fuer Qwen-Slot")
         except Exception as e:
             logger.error("[WORKERS] Worker-Start fehlgeschlagen: %s", e)
             self._face_worker = None
