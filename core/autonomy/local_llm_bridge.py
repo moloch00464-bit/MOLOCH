@@ -220,6 +220,21 @@ def _build_local_context_snippet() -> str:
         if time_period:
             parts.append(f"Tageszeit: {time_period}.")
 
+        # History-Block: letzte 5 Chat-Turns aus persistentem Memory.
+        # Loest Multi-Turn-Drift + Cross-Channel-Sync Browser/Voice.
+        try:
+            from core.longterm_memory import get_memory
+            msgs = get_memory().get_recent_messages(n=5) or []
+            if msgs:
+                hist_parts = []
+                for m in msgs[-5:]:
+                    sender = m.get("sender", "?")
+                    text = (m.get("text") or "")[:100]
+                    hist_parts.append(f"{sender}: {text}")
+                parts.append("VORHER: " + " | ".join(hist_parts))
+        except Exception:
+            pass  # Memory-Singleton evtl. nicht init in standalone Test
+
         return " " + " ".join(parts)
     except Exception:
         return ""
