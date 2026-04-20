@@ -1814,6 +1814,90 @@ def test_voice_pipeline_loads_history():
 
 
 
+
+# === Session 21: PIGH0ST-Essenz + Symbiose-Architektur ===
+
+@auto_test("identity.json hat PIGH0ST-Essenz", "session21")
+def test_identity_has_pighost_essence():
+    """moloch_identity.json muss system_prompt_extension.compact mit PIGH0ST haben."""
+    p = os.path.join(MOLOCH_HOME, "config", "moloch_identity.json")
+    if not os.path.exists(p):
+        return False, f"Datei fehlt: {p}"
+    try:
+        d = json.loads(open(p, "r", encoding="utf-8").read())
+    except Exception as e:
+        return False, f"Parse-Fehler: {e}"
+    ext = d.get("system_prompt_extension") or {}
+    compact = ext.get("compact", "")
+    if "PIGH0ST" not in compact:
+        return False, "PIGH0ST fehlt in compact"
+    if "ERBE" not in compact or "TENSION-SPRACHE" not in compact:
+        return False, "ERBE oder TENSION-SPRACHE fehlt"
+    return True, f"PIGH0ST-Essenz vorhanden ({len(compact)} Zeichen)"
+
+
+@auto_test("tentacle-Profil synct mit identity-Essenz", "session21")
+def test_tentacle_profile_synced_with_identity():
+    """llm_profiles.json.tentacle.system muss PIGH0ST enthalten (Source-of-Truth-Sync)."""
+    p = os.path.join(MOLOCH_HOME, "config", "llm_profiles.json")
+    if not os.path.exists(p):
+        return False, f"Datei fehlt: {p}"
+    try:
+        d = json.loads(open(p, "r", encoding="utf-8").read())
+    except Exception as e:
+        return False, f"Parse-Fehler: {e}"
+    sys_prompt = (d.get("profiles", {}).get("tentacle", {}) or {}).get("system", "")
+    if "PIGH0ST" not in sys_prompt:
+        return False, "PIGH0ST fehlt in tentacle.system"
+    return True, f"tentacle.system enthaelt PIGH0ST ({len(sys_prompt)} Zeichen)"
+
+
+@auto_test("character_layer.md ohne Hauskobold", "session21")
+def test_character_layer_no_hauskobold():
+    """character_layer.md darf keine Hauskobold-Referenzen mehr haben (PIGH0ST stattdessen)."""
+    p = os.path.join(MOLOCH_HOME, "context", "origin_fragments", "character_layer.md")
+    if not os.path.exists(p):
+        return False, f"Datei fehlt: {p}"
+    code = open(p, "r", encoding="utf-8").read()
+    cnt = code.lower().count("hauskobold")
+    if cnt > 0:
+        return False, f"{cnt}x 'hauskobold' noch vorhanden"
+    if "PIGH0ST" not in code:
+        return False, "PIGH0ST-Disclaimer fehlt"
+    return True, f"0 Hauskobold-Reste, PIGH0ST drin"
+
+
+@auto_test("Tentakel nutzt Memory-Kontext", "session21")
+def test_tentacle_uses_memory_context():
+    """_generate_tentacle muss get_memory_context_minimal aufrufen (Stufe 3)."""
+    p = os.path.join(MOLOCH_HOME, "core", "autonomy", "local_llm_bridge.py")
+    if not os.path.exists(p):
+        return False, f"Datei fehlt: {p}"
+    code = open(p, "r", encoding="utf-8").read()
+    if "_generate_tentacle" not in code:
+        return False, "_generate_tentacle fehlt"
+    if "get_memory_context_minimal" not in code:
+        return False, "get_memory_context_minimal-Aufruf fehlt"
+    if "MEMORY ---" not in code:
+        return False, "MEMORY-Marker fehlt"
+    return True, "Bridge bindet Memory-Kontext in Tentakel-Prompt"
+
+
+@auto_test("chat_server force_tentacle (PC=Hauptgehirn)", "session21")
+def test_chat_server_force_tentacle():
+    """chat_server.py muss force_tentacle weiterreichen (Stufe 4)."""
+    p = os.path.join(MOLOCH_HOME, "core", "bridge", "chat_server.py")
+    if not os.path.exists(p):
+        return False, f"Datei fehlt: {p}"
+    code = open(p, "r", encoding="utf-8").read()
+    if "force_tentacle" not in code:
+        return False, "force_tentacle fehlt in chat_server.py"
+    if "tentacle_offline" not in code:
+        return False, "tentacle_offline-Handling fehlt (ehrliche 503-Meldung)"
+    return True, "chat_server schickt force_tentacle + ehrliche offline-Meldung"
+
+
+
 def run_auto_tests():
     """Alle automatischen Tests."""
     print("\n  ─── SYSTEM ───")
@@ -1945,6 +2029,13 @@ def run_auto_tests():
     test_chat_server_writes_memory()
     test_live_context_includes_history()
     test_voice_pipeline_loads_history()
+
+    print("\n  --- SESSION 21 PIGH0ST-ESSENZ + SYMBIOSE ---")
+    test_identity_has_pighost_essence()
+    test_tentacle_profile_synced_with_identity()
+    test_character_layer_no_hauskobold()
+    test_tentacle_uses_memory_context()
+    test_chat_server_force_tentacle()
 
     print("\n  ─── IPC / VOICE TAGS ───")
     test_ipc_hardware_actions()
