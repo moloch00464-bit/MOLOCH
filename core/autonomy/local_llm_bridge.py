@@ -851,6 +851,17 @@ class LocalLLMBridge:
             # Letzter Fallback wenn weder Profile noch User-System gegeben
             system = TENTACLE_SYSTEM_COMPACT + _build_local_context_snippet()
 
+        # Memory-Kontext (Identity + Top-5 Fakten + letzte 3 Turns + Core State)
+        # an Mistral mitgeben. Mistral kann das fuer kontextreiche Antworten nutzen
+        # (z.B. Markus' Profil, Crew-Namen, Rebecca-Klingonisch, Genesis-Datum).
+        try:
+            from core.longterm_memory import get_memory
+            memory_ctx = get_memory().get_memory_context_minimal()
+            if memory_ctx:
+                system = (system or "") + "\n\n--- MEMORY ---\n" + memory_ctx
+        except Exception:
+            pass  # Memory-Singleton evtl. nicht init in standalone Test
+
         # JSON-sicher machen (wie bei hailo-ollama — Standard-Ollama hat
         # zwar robusteren Parser, aber Konsistenz zahlt sich aus)
         def _flatten(s: str) -> str:
