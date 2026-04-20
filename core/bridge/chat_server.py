@@ -81,12 +81,23 @@ def chat(req: ChatRequest):
 
     b = get_llm_bridge()
     t0 = time.monotonic()
+    # Browser-Chat-UI: PC=Hauptgehirn -> force_tentacle=True (KEIN qwen-Fallback fuers Reden).
+    # Markus' Direktive: NPU-qwen ist nur fuer Befehle, nicht fuer Konversation.
+    # Wenn force_local=True (User-Override aus UI): NPU wird genommen.
     if req.use_reason:
         out = b.reason_internal(req.text)
     else:
-        out = b.ask_external(req.text, force_local=req.force_local)
+        out = b.ask_external(req.text, force_local=req.force_local,
+                             force_tentacle=not req.force_local)
     dur_ms = int((time.monotonic() - t0) * 1000)
     if out is None:
+        # Tentakel-offline-Fall (force_tentacle ohne PC erreichbar): ehrliche Meldung
+        if b._last_provider == "tentacle_offline":
+            raise HTTPException(
+                503,
+                "Rechner aus oder Tentakel nicht erreichbar — Moloch kann gerade nicht reden. "
+                "Wenn der Rechner laeuft: Ollama-Service pruefen."
+            )
         raise HTTPException(503, "Bridge gibt None (Stille)")
 
     # Moloch-Antwort ins gemeinsame Memory + EventBus
