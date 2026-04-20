@@ -398,7 +398,8 @@ class LocalLLMBridge:
                      temperature: float = 0.8,
                      top_p: float = 0.95,
                      force_local: bool = False,
-                     use_reason_model: bool = False) -> Optional[str]:
+                     use_reason_model: bool = False,
+                     force_tentacle: bool = False) -> Optional[str]:
         """Konversation: lokal auf NPU → DeepSeek API → Stille.
 
         Fuer Echtzeit-Dialog mit Markus. Kurze Antworten, Deutsch.
@@ -435,8 +436,9 @@ class LocalLLMBridge:
             return None
 
         # Mode "local_first": Tentakel-Routing + Fallback-Kette
-        chosen = self._choose_provider(prompt, system, force_local, caller="ask")
-        logger.debug(f"[LLM-BRIDGE] mode={mode} chosen={chosen}")
+        chosen = self._choose_provider(prompt, system, force_local,
+                                       caller="ask", force_tentacle=force_tentacle)
+        logger.debug(f"[LLM-BRIDGE] mode={mode} chosen={chosen} force_tentacle={force_tentacle}")
 
         if chosen == "tentacle":
             # 1a. Tentakel zuerst (komplexer Prompt)
@@ -444,7 +446,12 @@ class LocalLLMBridge:
                                              temperature=temperature, top_p=top_p)
             if result:
                 return result
-            # 1b. Fallback auf NPU wenn Tentakel still
+            # PC=Hauptgehirn: bei force_tentacle KEIN qwen-Fallback (Markus-Direktive).
+            # Caller (z.B. chat_server) bekommt None und liefert ehrliche Meldung.
+            if force_tentacle:
+                self._last_provider = "tentacle_offline"
+                return None
+            # 1b. Fallback auf NPU wenn Tentakel still (nur bei caller="reason" o.ae.)
             result = self._generate_ollama(prompt, system, max_tokens,
                                            model=model,
                                            timeout=timeout,
@@ -481,7 +488,8 @@ class LocalLLMBridge:
         return None
 
     def _choose_provider(self, prompt: str, system: str,
-                         force_local: bool, caller: str = "ask") -> str:
+                         force_local: bool, caller: str = "ask",
+                         force_tentacle: bool = False) -> str:
         """Waehlt 'tentacle' oder 'ollama' basierend auf Komplexitaet + Caller.
 
         force_local -> immer 'ollama' (NPU). Tentakel ist LAN, nicht streng 'lokal'.
@@ -490,6 +498,9 @@ class LocalLLMBridge:
         """
         if force_local:
             return "ollama"
+        # force_tentacle (z.B. Browser-Chat-UI): PC=Hauptgehirn, Tentakel zwingen
+        if force_tentacle:
+            return "tentacle"
         cfg = _load_tentacle_cfg()
         if not cfg.get("enabled"):
             return "ollama"
