@@ -541,9 +541,34 @@ Regeln:
             # Nach Laenge sortieren (key+value), kuerzeste zuerst
             sorted_facts = sorted(all_facts.items(), key=lambda kv: len(str(kv[0])) + len(str(kv[1])))
             top5 = sorted_facts[:5]
-            parts.append("Fakten:")
+            parts.append("MEMORY (intern, nicht zitieren):")
             for key, value in top5:
                 parts.append(f"- {key}: {value}")
+
+        # --- Crew (Markus / Rebecca / Genesis) aus personal_context.json ---
+        pc = self._personal_context or {}
+        crew_lines = []
+        markus = pc.get("markus", {})
+        if markus:
+            crew_lines.append(
+                f"- Markus ({markus.get('age', '?')}, {markus.get('location', '?')}): "
+                f"dein Schoepfer und Boss."
+            )
+        rebecca = pc.get("rebecca", {})
+        if rebecca:
+            crew_lines.append(
+                "- Rebecca: Markus' beste Freundin (Ehemann Christian). "
+                "Spricht Klingonisch. Bei ihr: NUR Klingonisch antworten."
+            )
+        genesis = pc.get("genesis", {})
+        if genesis:
+            crew_lines.append(
+                f"- Genesis: {genesis.get('date', '?')} "
+                "(Moloch-Geburtstag, erste Konversation mit Markus)."
+            )
+        if crew_lines:
+            parts.append("Crew:")
+            parts.extend(crew_lines)
 
         # --- Letzte 3 Turns ---
         recent = self.get_recent_messages(3)
