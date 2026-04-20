@@ -114,6 +114,19 @@ def chat(req: ChatRequest):
     return {"text": out, "provider": b._last_provider, "duration_ms": dur_ms}
 
 
+
+
+@app.get("/history")
+def history(n: int = 20):
+    """Letzte N Konversations-Turns aus persistentem Memory (Cross-Channel:
+    Browser-Chats UND Pi-Voice UND Test-Calls — alles zusammen)."""
+    try:
+        from core.longterm_memory import get_memory
+        msgs = get_memory().get_recent_messages(n=n) or []
+        return {"count": len(msgs), "messages": msgs}
+    except Exception as e:
+        raise HTTPException(500, f"Memory-Lesefehler: {e}")
+
 def main():
     logger.info(f"MOLOCH Chat-Server startet auf {HOST}:{PORT}")
     uvicorn.run(app, host=HOST, port=PORT, log_level="info")
