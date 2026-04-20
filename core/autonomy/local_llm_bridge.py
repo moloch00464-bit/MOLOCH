@@ -875,7 +875,9 @@ class LocalLLMBridge:
 
         messages = []
         if system:
-            messages.append({"role": "system", "content": _flatten(system)})
+            # system MIT Newlines senden — _flatten wuerde PRONOMEN/Crew/MEMORY-Struktur killen.
+            # Ollama-Standard kann Newlines im JSON-content handlen.
+            messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": _flatten(prompt)})
 
         resp = None
