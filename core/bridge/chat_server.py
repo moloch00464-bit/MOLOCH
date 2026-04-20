@@ -21,6 +21,8 @@ from pydantic import BaseModel, Field
 
 sys.path.insert(0, os.path.expanduser("~/moloch"))
 from core.autonomy.local_llm_bridge import get_llm_bridge, _load_tentacle_cfg
+from core.longterm_memory import get_memory
+from core.moloch_event_bus import get_event_bus
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("chat-server")
@@ -66,6 +68,17 @@ def status():
 
 @app.post("/chat")
 def chat(req: ChatRequest):
+    # User-Input ins gemeinsame Memory + EventBus (Browser-Chat synchron mit Voice)
+    try:
+        get_memory().save_message("user", req.text, source="chat_server")
+        get_event_bus().publish(
+            "conversation.user_said",
+            {"text": req.text, "source": "chat_server"},
+            source="chat_server", priority=5,
+        )
+    except Exception as e:
+        logger.warning(f"Memory/Bus user-write Fehler: {e}")
+
     b = get_llm_bridge()
     t0 = time.monotonic()
     if req.use_reason:
@@ -75,6 +88,18 @@ def chat(req: ChatRequest):
     dur_ms = int((time.monotonic() - t0) * 1000)
     if out is None:
         raise HTTPException(503, "Bridge gibt None (Stille)")
+
+    # Moloch-Antwort ins gemeinsame Memory + EventBus
+    try:
+        get_memory().save_message("moloch", out, source="chat_server")
+        get_event_bus().publish(
+            "conversation.moloch_said",
+            {"text": out, "source": "chat_server", "provider": b._last_provider},
+            source="chat_server", priority=5,
+        )
+    except Exception as e:
+        logger.warning(f"Memory/Bus moloch-write Fehler: {e}")
+
     return {"text": out, "provider": b._last_provider, "duration_ms": dur_ms}
 
 
