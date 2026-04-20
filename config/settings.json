@@ -117,7 +117,7 @@
     "port": 11434,
     "model": "",
     "complexity_threshold": 120,
-    "timeout_sec": 30,
+    "timeout_sec": 90,
     "backoff_sec": 300
   },
   "tts_bridge": {
