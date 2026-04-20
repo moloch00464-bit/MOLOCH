@@ -195,7 +195,7 @@ def _build_local_context_snippet() -> str:
             return "gerade niemand im Bild"
 
         parts = [
-            f"JETZT: {_presence_phrase()}."
+            f"DU SIEHST GERADE: {_presence_phrase()}."
         ]
         # Distanz-Key auf deutsches Wort mappen (near/medium/far kommen aus Perception)
         _dist_map = {"near": "nah", "medium": "mittlere entfernung", "far": "weit weg"}
@@ -209,14 +209,9 @@ def _build_local_context_snippet() -> str:
         parts.append(
             f"Zone {zone}, Stimmung {_tension_word(tension)}, Haltung {_dom_word(dominance)}."
         )
-        body_parts = []
-        if fps:
-            body_parts.append(f"Bild {int(fps)} FPS")
-        if cpu_temp is not None:
-            body_parts.append(f"CPU {_cpu_word(cpu_temp)}")
-        body_parts.append(f"NPU {_npu_word(npu_load)}")
-        if body_parts:
-            parts.append("Koerper: " + ", ".join(body_parts) + ".")
+        # Technische Metriken (FPS/CPU/NPU) gehoeren nicht ins Sprachgehirn —
+        # Tentakel-Mistral kann damit nichts Natuerliches anfangen. Nur Tageszeit
+        # bleibt, weil sie sprachlich verwertbar ist (Gruss-Ton, Mood).
         if time_period:
             parts.append(f"Tageszeit: {time_period}.")
 
