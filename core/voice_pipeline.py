@@ -758,7 +758,21 @@ class VoicePipeline:
         self._deepseek_url = "https://api.deepseek.com/chat/completions"
         self._deepseek_model = "deepseek-chat"  # DeepSeek-V3 (671B MoE)
         self._claude_available = False  # Wiederverwendet fuer "API verfuegbar"
-        self._conversation: List[Dict[str, str]] = []
+        # Persistente History aus MolochMemory laden (statt RAM-only).
+        # Cross-Channel: Browser-Chat-Turns aus chat_server fliessen mit ein.
+        try:
+            from core.longterm_memory import get_memory
+            recent = get_memory().get_recent_messages(n=10) or []
+            self._conversation: List[Dict[str, str]] = [
+                {"role": "user" if m.get("sender") == "user" else "assistant",
+                 "content": m.get("text", "")}
+                for m in recent if m.get("text")
+            ]
+            if self._conversation:
+                logger.info(f"[VOICE] History aus Memory geladen: {len(self._conversation)} Turns")
+        except Exception as e:
+            logger.warning(f"[VOICE] History-Load aus Memory fehlgeschlagen: {e}")
+            self._conversation: List[Dict[str, str]] = []
         self._system_prompt = _build_system_prompt()
 
         # TTS
