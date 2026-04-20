@@ -1765,6 +1765,55 @@ def test_tentacle_host_tcp_reachable():
 
 
 
+
+# === Session 21: Memory-Sync Browser-Chat <-> Pi-Voice (Stufen A/B/C) ===
+
+@auto_test("chat_server loggt ins gemeinsame Memory", "session21")
+def test_chat_server_writes_memory():
+    """core/bridge/chat_server.py muss save_message-Aufruf enthalten (Stufe A)."""
+    p = os.path.join(MOLOCH_HOME, "core", "bridge", "chat_server.py")
+    if not os.path.exists(p):
+        return False, f"Datei fehlt: {p}"
+    code = open(p, "r", encoding="utf-8").read()
+    if "save_message(" not in code:
+        return False, "save_message-Aufruf fehlt in chat_server.py"
+    if "source=\"chat_server\"" not in code and "source='chat_server'" not in code:
+        return False, "source=chat_server fehlt"
+    return True, "chat_server logged user+moloch ins MolochMemory"
+
+
+@auto_test("Live-Kontext enthaelt Chat-History", "session21")
+def test_live_context_includes_history():
+    """_build_local_context_snippet muss get_recent_messages aufrufen (Stufe B)."""
+    p = os.path.join(MOLOCH_HOME, "core", "autonomy", "local_llm_bridge.py")
+    if not os.path.exists(p):
+        return False, f"Datei fehlt: {p}"
+    code = open(p, "r", encoding="utf-8").read()
+    if "_build_local_context_snippet" not in code:
+        return False, "_build_local_context_snippet fehlt"
+    # Suche History-Block
+    if "get_recent_messages" not in code:
+        return False, "get_recent_messages-Aufruf fehlt im Bridge-Code"
+    if "VORHER" not in code:
+        return False, "VORHER-Marker fehlt im History-Block"
+    return True, "Bridge-Snippet bindet History ein (VORHER-Block)"
+
+
+@auto_test("voice_pipeline erbt History aus Memory", "session21")
+def test_voice_pipeline_loads_history():
+    """voice_pipeline.py muss bei Init get_recent_messages laden (Stufe C)."""
+    p = os.path.join(MOLOCH_HOME, "core", "voice_pipeline.py")
+    if not os.path.exists(p):
+        return False, f"Datei fehlt: {p}"
+    code = open(p, "r", encoding="utf-8").read()
+    if "get_recent_messages" not in code:
+        return False, "get_recent_messages-Aufruf fehlt in voice_pipeline.py"
+    if "History aus Memory" not in code:
+        return False, "Log-Marker 'History aus Memory' fehlt"
+    return True, "voice_pipeline laedt History aus MolochMemory bei Init"
+
+
+
 def run_auto_tests():
     """Alle automatischen Tests."""
     print("\n  ─── SYSTEM ───")
@@ -1891,6 +1940,11 @@ def run_auto_tests():
     test_tentacle_routing_logic()
     test_tentacle_circuit_breaker_attrs()
     test_tentacle_host_tcp_reachable()
+
+    print("\n  --- SESSION 21 MEMORY-SYNC (Browser/Voice) ---")
+    test_chat_server_writes_memory()
+    test_live_context_includes_history()
+    test_voice_pipeline_loads_history()
 
     print("\n  ─── IPC / VOICE TAGS ───")
     test_ipc_hardware_actions()
