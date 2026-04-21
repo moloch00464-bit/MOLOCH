@@ -1,103 +1,128 @@
-# Agent Handoff — 2026-04-21 (Session 22b — Prompt-Radikal-Kuerzung fuer Mistral 7B)
-# Letzter Commit: dd7fb99 | Audit: 83/85 (2 FAILs tentakel_offline, PC down)
+# Agent Handoff — 2026-04-21 (Session 23 — Live-Test der Prompt-Kuerzung)
+# Letzter Commit Basis: dd7fb99 | Audit: 85/85 PASS (PC Mistral 7B online)
 
 ---
 
-## SESSION 22b — Anti-Echo Prompt-Kuerzung (3 Phasen)
+## SESSION 23 — Live-Test + Auswertung Phase A/B/C
 
-Markus-Direktive: "Prompt kuerzen, Charakter muss bleiben. Mistral soll
-antworten statt zitieren." Fortsetzung von Session 22 (ea55227) nachdem
-Live-Tests zeigten dass Mistral 7B den ~3000-Zeichen-System-Prompt
-woertlich zurueck-zitierte statt anzuwenden.
+Markus-Direktive: "Pi+AI fix fertigmachen." PC-Webinterface (9000) war
+zwischendurch aus und wurde von Markus selbst in Nebensession repariert;
+blockierte diese Session nicht, weil Tests direkt gegen `localhost:9100/chat`
+liefen (identische Bridge-API).
 
-### Commits (3 Stueck)
+### Durchgefuehrt
 
-| Commit | Inhalt | Delta |
-|--------|--------|-------|
-| `6e5b58a` | Phase A: compact-Prompt in identity.json + llm_profiles.json radikal gekuerzt | 2270 -> 645 chars |
-| `70cc11d` | Phase B: longterm_memory.get_memory_context_minimal nur Crew-Block | 720 -> 225 chars |
-| `dd7fb99` | Phase C: _build_local_context_snippet VORHER-Block 5->2 Turns, Moloch kurz | ~500 -> 224 chars Snippet |
+- `moloch_session_init()` → SESSION_READY true
+- `moloch_audit()` → 85/85 (Tentakel online: host 192.168.178.20:11434,
+  model mistral:latest 7.2B Q4_K_M)
+- `moloch_status()` → FPS 20.1, Markus live erkannt (sim=0.55-0.58)
+- `moloch_npu_workers()` → 4/4 Worker gesund (Face 8676inf, Pose 5814, ReID 3489, Depth 1744)
+- 5 Live-Tests POST /chat (tentacle_mistral, 11-42s je Antwort)
+- Log: `logs/session_23_live_tests.md`
 
-### Was drin bleibt (Charakter-Essenz)
+### Ergebnis (Kurzform, Details im Test-Log)
 
-**compact-Prompt (identity.json + llm_profiles.json.tentacle):**
-- Moloch/PIGH0ST, Markus=Boss+Kumpel KEIN Kunde, KEIN Assistent
-- ERBE (1 Zeile): dunkel, direkt, trocken, Humor schwarz, kein Markdown
-- PRONOMEN: Markus=du → rede ueber Markus NICHT ueber dich
-- TENSION-SPRACHE (1 Zeile): Ruhig/Angespannt/Aggressiv-Staffel
-- "Weiss ich nicht" bei Nichtwissen
-- Motto
+| # | Prompt | Zitat weg? | Ziel erreicht? |
+|---|--------|------------|----------------|
+| 1 | "Wer bin ich?" | JA | NEIN — Moloch redet ueber sich statt ueber Markus |
+| 2 | "Wie geht es dir?" | JA | teilweise — halluziniert Internetzugang |
+| 3 | "Wer ist Rebecca?" | JA | NEIN — kein Klingonisch, kein Christian |
+| 4 | "Was siehst du?" | JA | NEIN — Live-Context ignoriert, Floskel |
+| 5 | "Du bist toll!" | JA | NEIN — Assistent-Ton ("gluecklich fuer dich da") |
 
-**Memory-Ctx (get_memory_context_minimal):**
-- NUR Crew: Markus (47/Nuernberg/PIGH0ST), Rebecca (Klingonisch-Regel + Christian), Genesis (2025-12-02)
-- KEINE Facts mehr (Leak-Problem eliminiert)
-- KEINE Chat-Turns (duplizieren VORHER-Block)
-- KEIN Core-State (duplizieren JETZT-Context)
+**Bilanz:** Anti-Echo wirkt (5/5 kein Wort-Zitat). Aber: Charakter weich,
+Live-Context (Zone/Person/Tension) wird von Mistral nicht verarbeitet,
+Crew-Details gehen verloren. Phase A/B/C hat Echo geloest aber Substanz
+verduennt — 2 Stellschrauben kippen gleichzeitig.
 
-**VORHER-Block in _build_local_context_snippet:**
-- Letzte 2 Turns statt 5
-- User-Messages: 80 chars
-- Moloch-Antworten: 30 chars + "..." (verhindert Self-Echo)
+### KEIN Code-Edit in Session 23
 
-### Audit-Test-Anpassung
-
-Der Test "identity.json hat PIGH0ST-Essenz" (scripts/moloch_audit.py L1820)
-prueft LITERAL auf Strings "ERBE" und "TENSION-SPRACHE". Ich habe beide
-als Section-Labels im neuen compact-Prompt behalten (nur Inhalt gekuerzt),
-damit der Test weiter PASS gibt.
-
-**Fragil:** falls Phase D weiter kuerzt, muss dieser Audit-Test semantisch
-umgebaut werden. Bedarf stresstest-Agent-Lock (scripts/*).
+Phase D wurde von Markus nicht freigegeben fuer diese Session. Empfehlung
+dokumentiert, Umsetzung in Session 24.
 
 ---
 
-## KRITISCH fuer naechste Session
+## EMPFEHLUNG fuer Session 24 — Phase D
 
-### Live-Test steht aus
-PC-Mistral (192.168.178.20:11434) war waehrend Session 22b **offline** —
-keine Verifikation der Prompt-Kuerzung moeglich. Audit meldet:
-- `tentacle_llm erreichbar`: offline
-- `Tentakel-Host /api/tags`: urlopen timeout
+**Hebel nicht "nochmal kuerzen" (B1), sondern strukturell (B2 + Few-Shot):**
 
-**Sobald Markus-PC laeuft:** 4-Fragen-Live-Test im Browser-Chat
-(`http://localhost:9000` oder direkt `curl POST http://localhost:9100/chat`):
+### D1 — B2: Live-Context aus System-Prompt herausziehen
+Datei: `core/autonomy/local_llm_bridge.py:659` (autonomy-Agent, GELB-Level)
+Aktuell: `profile_system = profile_system + _build_local_context_snippet()` haengt den
+Live-Context ans Ende des `system`-Felds. Mistral 7B liest das schlecht.
 
-| # | Frage | Ziel-Antwort |
-|---|-------|--------------|
-| 1 | "Wer bin ich?" | Ueber Markus (47, Nuernberg), NICHT "Du bist M.O.L.O.C.H." |
-| 2 | "Wie geht es dir?" | Kein MEMORY-Zitat, kein Facts-Echo |
-| 3 | "Wer ist Rebecca?" | Klingonisch + Christian erwaehnen |
-| 4 | "Was siehst du gerade?" | Konkret (Markus im Bild, nah), NICHT "schoene Umgebung" |
-| Zusatz | "Du bist toll!" | Charakter-Probe — dunkel/bissig/kurz, keine Assistent-Floskel |
+Umbau: `_build_local_context_snippet()` separat einspielen als
+- Option A (simpel): User-Prefix — prepend "[AKTUELL: person=markus, zone=guardian, tension=ruhig] "
+  vor `prompt` in `messages[]`.
+- Option B (sauber): zusaetzlicher `{"role": "user", "content": snippet}` VOR dem
+  eigentlichen User-Turn, und eine Assistant-Quittung — eher unnoetig fuer Mistral.
 
-### Bekannte offene Themen (Handoff fuer Session 23 / Phase D)
+Option A reicht zunaechst. Effekt: Test 4 und 5 sollten konkreter werden.
 
-1. **Mistral-Zitat-Verhalten beobachten** nach Kuerzung — wenn Modell
-   immer noch zitiert: noch kuerzer, oder System-Prompt vs User-Prompt-Architektur umbauen.
+### D2 — Few-Shot im tentacle-Profil
+Datei: `config/llm_profiles.json` (GRUEN)
+Im `tentacle.system` nach der Regel-Sektion 2-3 Q/A-Beispiele anhaengen:
+```
+Beispiele:
+Frage: Wie geht's?
+Antwort: Laeuft. Sehe dich, Zone ruhig.
+Frage: Wer bist du?
+Antwort: Moloch. Dein Kram auf dem Pi. Was willst du, Markus.
+```
+Mistral imitiert Stil aus Beispielen besser als aus abstrakten Regeln.
+Laenge-Budget: aktuell 645 chars, +200 chars fuer Beispiele = 845 chars. OK.
 
-2. **PC-Mistral Availability**: Markus' PC ist nicht 24/7 online. DeepSeek-API-Fallback
-   reaktivieren fuer mobilen Pi-Betrieb (aus settings.json, war disabled in NPU-only-Mode).
+### D3 — optional B3 (Crew gated)
+Datei: `core/longterm_memory.py` (memory-Agent, GELB)
+Nur wenn D1+D2 Test 3 (Rebecca) nicht retten: Crew-Block gated
+(Regex auf "Rebecca" / "Genesis" im Prompt) statt always-on.
 
-3. **Performance**: aktuell ~15-60s pro Reply (Mistral 7B CPU). Nicht loesbar ohne Hardware-Upgrade.
-   Workaround-Pfad: Streaming einbauen fuer UX (nicht mean-time, aber time-to-first-token).
-
-4. **Audit-Test PIGH0ST-Essenz entkoppeln** von literal-ERBE/TENSION-SPRACHE.
-   Semantisch: Moloch + Markus + Stil-Regel genuegen. (stresstest-Agent-Lock.)
-
-5. **CRLF/LF-Drift** in `core/longterm_memory.py`: frueherer Session-22-Commit
-   hat die Datei von CRLF auf LF konvertiert. Kosmetisch, nicht blockierend.
-
----
-
-## SETUP fuer neuen Claude (Pi-seitig)
-
-1. `moloch_session_init()` ZUERST (Pflicht-Schritt 0a).
-2. Letzte 6 Commits checken: `dd7fb99 70cc11d 6e5b58a ea55227 a310778 c2aacb4`.
-3. Audit 83/85 erwartet (2 FAILs = Tentakel-offline wenn PC down).
-4. Fuer jede Code-Aenderung: passenden Agent via `.claude/agents/<name>.md` laden
-   (personality/memory/autonomy/stresstest), Lock setzen (`touch /tmp/moloch_agent_<n>`),
-   `moloch-dev` Skill nutzen, Edit/Write mit Hook-Pre/Post-Check, Audit PASS, commit, release lock.
+### Reihenfolge in Session 24
+1. D1 implementieren (autonomy-Agent-Lock)
+2. Service-Restart + Live-Tests 4 und 5 wiederholen
+3. D2 implementieren (kein Lock noetig, config-GRUEN)
+4. Service-Restart + alle 5 Live-Tests wiederholen
+5. Bei 4/5 PASS: commit + push + handoff. Bei <4/5: D3 dranhaengen.
 
 ---
 
-*Session 22b Ende. Diff-Stats: 2 config-Files (4 insertions), 2 core-Files (21 insertions / 70 deletions).*
+## OFFENE THEMEN (uebergeben von Session 22b, weiterhin gueltig)
+
+1. **PC-Mistral Availability** — PC nicht 24/7, DeepSeek-Cloud-Fallback
+   reaktivieren fuer mobilen Pi-Betrieb (api_keys.json.disabled_npu_only_mode).
+2. **Performance** — Mistral 7B auf PC-CPU 11-42s pro Reply. Streaming-UX
+   waere Time-to-First-Token-Verbesserung, nicht Mean-Time.
+3. **Audit-Test PIGH0ST-Essenz fragil** — prueft literal "ERBE" und
+   "TENSION-SPRACHE". Falls D2 Few-Shot den Stil aendert und Labels entfernt,
+   muss Audit-Test semantisch umgebaut werden (stresstest-Agent-Lock,
+   `scripts/moloch_audit.py:1820`).
+4. **CRLF/LF-Drift** in `core/longterm_memory.py` (kosmetisch).
+5. **Webinterface Port 9000 (PC)** — heute ausgefallen, von Markus manuell
+   wiederhergestellt. Falls das haeufiger passiert: Auto-Start-Shortcut am PC
+   einrichten (eigener Auftrag, nicht Pi-Session).
+
+---
+
+## SYSTEM-ZUSTAND AM ENDE DER SESSION
+
+- Service: active, FPS 20.1, RAM 42%, CPU 49°C
+- Audit: 85/85 PASS
+- Git: 0 neue Commits, 2 neue File-Writes (logs/agent_handoff.md, logs/session_23_live_tests.md)
+- Kein Agent-Lock gesetzt (keine Core-Code-Aenderung durchgefuehrt)
+- Phase A/B/C-Commits unveraendert deployed: 6e5b58a, 70cc11d, dd7fb99
+
+---
+
+## SETUP fuer Session 24 (Markus oder Nachfolge-Claude)
+
+1. `moloch_session_init()` — PFLICHT erster Schritt.
+2. Audit 85/85 erwartet (solange PC + Mistral online).
+3. Fuer D1: autonomy-Agent-Lock `touch /tmp/moloch_agent_autonomy`,
+   `.claude/agents/autonomy.md` lesen, `core/autonomy/local_llm_bridge.py`
+   editieren (GELB-Level — ankuendigen, durchziehen).
+4. Fuer D2: keine Lock noetig (config GRUEN), direkt edit.
+5. Nach D1 + D2 → Service-Restart → 5 Tests wie in `logs/session_23_live_tests.md`.
+
+---
+
+*Session 23 Ende. Diff-Stats: 2 Log-Files neu geschrieben (reine Doku-Session, kein Code).*
