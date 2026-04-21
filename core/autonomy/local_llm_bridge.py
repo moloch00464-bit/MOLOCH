@@ -215,16 +215,22 @@ def _build_local_context_snippet() -> str:
         if time_period:
             parts.append(f"Tageszeit: {time_period}.")
 
-        # History-Block: letzte 5 Chat-Turns aus persistentem Memory.
-        # Loest Multi-Turn-Drift + Cross-Channel-Sync Browser/Voice.
+        # History-Block: letzte 2 Chat-Turns (User-Frage + Moloch-Antwort).
+        # Mistral 7B zitierte den alten 5-Turn-Block woertlich zurueck — Echo-Problem.
+        # Fix: nur letzte 2 Turns, Moloch-Antworten auf 30 chars gekuerzt
+        # (User-Messages bleiben 80 chars fuer Kontext).
         try:
             from core.longterm_memory import get_memory
-            msgs = get_memory().get_recent_messages(n=5) or []
+            msgs = get_memory().get_recent_messages(n=2) or []
             if msgs:
                 hist_parts = []
-                for m in msgs[-5:]:
+                for m in msgs[-2:]:
                     sender = m.get("sender", "?")
-                    text = (m.get("text") or "")[:100]
+                    text = (m.get("text") or "")
+                    # Moloch-Antworten kurz — verhindert Mistral-Echo
+                    max_len = 80 if sender == "user" else 30
+                    if len(text) > max_len:
+                        text = text[:max_len - 3] + "..."
                     hist_parts.append(f"{sender}: {text}")
                 parts.append("VORHER: " + " | ".join(hist_parts))
         except Exception:
