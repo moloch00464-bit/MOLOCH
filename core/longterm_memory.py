@@ -513,83 +513,28 @@ Regeln:
 
     def get_memory_context_minimal(self) -> str:
         """
-        Kompakter Memory-Kontext fuer lokales LLM (hailo-ollama / DeepSeek R1 1.5B).
-        Ziel: < 1000 Zeichen. Kein Spotify, keine Anleitung, nur Essenz.
-
-        Liefert:
-        - Identity-Header (1 Zeile)
-        - Top-5 kuerzeste Facts
-        - Letzte 3 Konversations-Turns
-        - Core State (1 Zeile)
+        Radikal kompakt fuer Mistral 7B / qwen2.5-1.5b — nur Crew.
+        Ziel: < 300 Zeichen. Facts/Turns/State aus anderen Quellen.
         """
         parts = []
-
-        # --- Identity: 1 Zeile ---
-        owner = self._identity.get("owner", {}) if self._identity else {}
-        parts.append(f"Du bist M.O.L.O.C.H. Dein Mensch: {owner.get('name', 'Markus')}.")
-
-        # --- Top-5 kuerzeste Facts ---
-        pm = self._get_persistent_memory()
-        pm_knowledge = pm.get_knowledge() if pm else {}
-        all_facts = dict(pm_knowledge)
-        for key, fact_data in self._facts.items():
-            if key not in all_facts:
-                val = fact_data.get("value", fact_data) if isinstance(fact_data, dict) else fact_data
-                all_facts[key] = val
-
-        if all_facts:
-            # Nach Laenge sortieren (key+value), kuerzeste zuerst
-            sorted_facts = sorted(all_facts.items(), key=lambda kv: len(str(kv[0])) + len(str(kv[1])))
-            top5 = sorted_facts[:5]
-            parts.append("MEMORY (intern, nicht zitieren):")
-            for key, value in top5:
-                parts.append(f"- {key}: {value}")
-
-        # --- Crew (Markus / Rebecca / Genesis) aus personal_context.json ---
         pc = self._personal_context or {}
-        crew_lines = []
         markus = pc.get("markus", {})
         if markus:
-            crew_lines.append(
-                f"- Markus ({markus.get('age', '?')}, {markus.get('location', '?')}): "
-                f"dein Schoepfer und Boss."
+            parts.append(
+                f"Markus: {markus.get('age', '?')}, {markus.get('location', '?')} — "
+                "dein Schoepfer + Boss. Spitzname PIGH0ST."
             )
         rebecca = pc.get("rebecca", {})
         if rebecca:
-            crew_lines.append(
-                "- Rebecca: Markus' beste Freundin (Ehemann Christian). "
-                "Spricht Klingonisch. Bei ihr: NUR Klingonisch antworten."
+            parts.append(
+                "Rebecca: Markus' beste Freundin (Ehemann Christian). "
+                "Spricht Klingonisch — bei ihr: NUR Klingonisch (Qapla'!)."
             )
         genesis = pc.get("genesis", {})
         if genesis:
-            crew_lines.append(
-                f"- Genesis: {genesis.get('date', '?')} "
-                "(Moloch-Geburtstag, erste Konversation mit Markus)."
+            parts.append(
+                f"Genesis: {genesis.get('date', '?')} — dein Geburtstag mit Markus."
             )
-        if crew_lines:
-            parts.append("Crew:")
-            parts.extend(crew_lines)
-
-        # --- Letzte 3 Turns ---
-        recent = self.get_recent_messages(3)
-        if recent:
-            parts.append("Letzte Nachrichten:")
-            for msg in recent:
-                ts = msg.get("ts", "?")
-                if "T" in str(ts):
-                    ts = str(ts).split("T")[1][:5]
-                sender = "Markus" if msg.get("sender") == "user" else "Du"
-                text = msg.get("text", "")
-                if len(text) > 80:
-                    text = text[:77] + "..."
-                parts.append(f"  [{ts}] {sender}: {text}")
-
-        # --- Core State: 1 Zeile ---
-        state = self.load_core_state()
-        if state:
-            zone = state.get("personality_zone", "guardian")
-            parts.append(f"Zone={zone}, Tension={state.get('tension', 0):.1f}")
-
         return "\n".join(parts)
 
     def extract_and_learn(self, text: str) -> str:
