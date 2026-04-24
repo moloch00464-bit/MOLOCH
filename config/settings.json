@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "llm_mode": "local_first",
+  "llm_mode": "cloud_only",
   "vision_enabled": true,
   "thresholds": {
     "scrfd_conf": 0.75,
@@ -115,7 +115,7 @@
     "enabled": true,
     "host": "192.168.178.20",
     "port": 11434,
-    "model": "",
+    "model": "dolphin-llama3:8b",
     "complexity_threshold": 120,
     "timeout_sec": 90,
     "backoff_sec": 300

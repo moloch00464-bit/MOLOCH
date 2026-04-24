@@ -926,10 +926,38 @@ class LocalLLMBridge:
 
     def _generate_deepseek(self, prompt: str, system: str,
                            max_tokens: int) -> Optional[str]:
-        """DeepSeek API (Cloud, guenstig)."""
+        """DeepSeek API (Cloud, guenstig).
+
+        Wenn DeepSeek als Primary laeuft (llm_mode=cloud_only), braucht sie
+        die Tentakel-Persona genauso wie der Tentakel-Pfad — sonst antwortet
+        sie ohne Charakter. Also: wenn kein system uebergeben, laden wir das
+        tentacle-Profil + Live-Kontext + Memory analog zu _generate_tentacle.
+        """
         api_key = self._load_api_key("deepseek")
         if not api_key:
             return None
+
+        # Persona-Injection wenn chat_server stateless anruft (system leer)
+        if not system:
+            profiles_data = _load_profiles()
+            if profiles_data:
+                tentacle_profile = (profiles_data.get("profiles", {}) or {}).get("tentacle")
+                profile = tentacle_profile or _get_active_profile()
+                if profile is not None:
+                    system = profile.get("system") or ""
+                    if profile.get("include_live_context", True):
+                        system = system + _build_local_context_snippet()
+                    pmt = profile.get("max_tokens")
+                    if isinstance(pmt, int) and pmt > 0:
+                        max_tokens = pmt
+            try:
+                from core.longterm_memory import get_memory
+                memory_ctx = get_memory().get_memory_context_minimal()
+                if memory_ctx:
+                    system = (system or "") + "\n\n--- MEMORY ---\n" + memory_ctx
+            except Exception:
+                pass
+
         resp = None
         try:
             messages = []
