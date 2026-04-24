@@ -650,12 +650,17 @@ class HardwarePopup:
             }
 
             # Modelle + FPS + RAM tabellarisch
+            # Phase 0.3 (Session 24): Aliases because active_models uses short names
+            # ("yolo") while fps_dict uses canonical model names ("yolov8m").
+            # Without this map, yolo showed "geladen" even though it ran at 20 FPS.
+            _FPS_KEY_ALIAS = {"yolo": "yolov8m"}
             model_lines = []
             npu_ram = 0.0
             if isinstance(active, list) and active:
                 for m in active:
                     m_str = str(m)
-                    fps_val = fps_dict.get(m_str, 0)
+                    fps_key = _FPS_KEY_ALIAS.get(m_str, m_str)
+                    fps_val = fps_dict.get(fps_key, fps_dict.get(m_str, 0))
                     ram = self._get_hef_size_mb(m_str)
                     npu_ram += ram
                     if fps_val:
@@ -664,7 +669,8 @@ class HardwarePopup:
                     else:
                         wname = _MODEL_TO_WORKER.get(m_str)
                         n_inf = worker_health.get(wname, {}).get("inferences", 0) if wname else 0
-                        status_str = f"standby ({n_inf})" if n_inf > 0 else "geladen"
+                        # Fallback "inaktiv" statt "geladen" — klarer fuer Markus.
+                        status_str = f"standby ({n_inf})" if n_inf > 0 else "inaktiv"
                         model_lines.append(
                             f"{m_str:<12} {ram:5.1f} MB  {status_str}")
 
