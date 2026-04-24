@@ -211,6 +211,33 @@ class TappasPipeline:
         self.person_min_height_val = 0.10  # Min. BBox-Hoehe relativ zum Bild
         self.person_min_area_val = 0.08    # Min. BBox-Flaeche relativ zum Bild
 
+        # Phase 0.2 (Session 24): Override defaults with settings.json/thresholds.
+        # Bug: YOLO ran at conf=0.30 because settings.json was never read here,
+        # which let chairs/workbenches slip through as persons.
+        try:
+            import json as _json
+            _settings_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                "config", "settings.json")
+            with open(_settings_path, "r", encoding="utf-8") as _f:
+                _thr = _json.load(_f).get("thresholds", {}) or {}
+            self.scrfd_conf_val = float(_thr.get("scrfd_conf", self.scrfd_conf_val))
+            self.scrfd_nms_val = float(_thr.get("scrfd_nms", self.scrfd_nms_val))
+            self.arcface_thresh_val = float(_thr.get("arcface_thresh", self.arcface_thresh_val))
+            self.yolo_conf_val = float(_thr.get("yolo_conf", self.yolo_conf_val))
+            self.pose_conf_val = float(_thr.get("pose_conf", self.pose_conf_val))
+            self.hand_conf_val = float(_thr.get("hand_conf", self.hand_conf_val))
+            self.person_min_height_val = float(_thr.get("person_min_height", self.person_min_height_val))
+            self.person_min_area_val = float(_thr.get("person_min_area", self.person_min_area_val))
+            logger.info(
+                f"[TAPPAS] Thresholds aus settings.json: "
+                f"yolo_conf={self.yolo_conf_val} "
+                f"person_min_height={self.person_min_height_val} "
+                f"person_min_area={self.person_min_area_val}"
+            )
+        except Exception as _e:
+            logger.warning(f"[TAPPAS] Thresholds aus settings.json nicht ladbar: {_e} - nutze Defaults")
+
         # --- Feature-Flags (Panel/Settings lesen/schreiben diese) ---
         self._learner_flash = False
         self._hand_occlusion_enabled = False
