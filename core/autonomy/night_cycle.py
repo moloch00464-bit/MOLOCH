@@ -164,6 +164,27 @@ class NightCycle:
             result["steps"]["llm_reflection"] = {"error": str(e)}
             logger.error(f"[NIGHT] LLM-Reflexion: {e}")
 
+        # Schritt 5: Character Distiller (Phase 4 Gate 1.5)
+        # Liest character_journal/{date}.jsonl, bewertet Events mit LLM,
+        # aktualisiert character_drift.json, feuert 'character_drift_updated'.
+        try:
+            from core.autonomy.character_distiller import get_distiller
+            distill = get_distiller().run(date)
+            result["steps"]["character_distill"] = {
+                "event_count": distill.get("event_count", 0),
+                "summary": (distill.get("summary") or "")[:200],
+                "drift": distill.get("drift", {}),
+                "duration_s": distill.get("duration_s", 0),
+                "llm_provider": distill.get("llm_provider"),
+            }
+            logger.info(
+                f"[NIGHT] Character Distill: {distill.get('event_count', 0)} Events, "
+                f"drift={distill.get('drift', {})}"
+            )
+        except Exception as e:
+            result["steps"]["character_distill"] = {"error": str(e)}
+            logger.error(f"[NIGHT] Character Distill: {e}")
+
         # Ergebnis speichern
         result["end_time"] = time.time()
         result["duration_s"] = round(result["end_time"] - result["start_time"], 1)
