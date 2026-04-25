@@ -49,6 +49,12 @@ class MoodEngine:
         self._face_id: Optional[str] = None
         self._music_energy: float = 0.0
 
+        # Gate 1.5 Phase 4: Charakter-Drift-Baseline vom Distiller
+        # mood_baseline > 0 = positiv gedriftet (effective_t SINKT, mehr calm)
+        # energy_baseline > 0 = energischer (effective_e steigt)
+        self._drift_mood: float = 0.0
+        self._drift_energy: float = 0.0
+
     def update_signals(self, tension: float = 0.0, dominance: float = 0.5,
                        personality_zone: str = "guardian",
                        music_mood: Optional[str] = None,
@@ -122,13 +128,35 @@ class MoodEngine:
 
         return candidate
 
+    def set_drift_baseline(self, mood: float = 0.0, energy: float = 0.0) -> None:
+        """Charakter-Drift-Baseline anwenden (vom Distiller, Phase 4 Gate 1.5).
+
+        Args:
+            mood:   Long-term Mood-Shift (-1.0..+1.0). Positiv = besser gelaunt.
+                    Wird als negative Bias auf Tension angewendet (effective_t = t - mood).
+            energy: Long-term Energy-Shift (-1.0..+1.0). Positiv = mehr Energie.
+                    Wird additiv auf music_energy angewendet.
+        """
+        with self._lock:
+            self._drift_mood = max(-1.0, min(1.0, float(mood)))
+            self._drift_energy = max(-1.0, min(1.0, float(energy)))
+        logger.info(
+            f"[MOOD] Drift-Baseline gesetzt: mood={self._drift_mood:+.3f} "
+            f"energy={self._drift_energy:+.3f}"
+        )
+
     def _classify(self) -> str:
-        """Mood aus Signalen klassifizieren (unter Lock aufrufen)."""
-        t = self._tension
+        """Mood aus Signalen klassifizieren (unter Lock aufrufen).
+
+        Drift-Baseline wird hier additiv eingerechnet:
+          - effective_t = tension - drift_mood (positive Drift = beruhigend)
+          - effective_e = music_energy + drift_energy (positive Drift = energischer)
+        """
+        t = max(0.0, min(1.0, self._tension - self._drift_mood))
         zone = self._personality_zone
         music = self._music_mood
         activity = self._activity
-        energy = self._music_energy
+        energy = max(0.0, min(1.0, self._music_energy + self._drift_energy))
 
         # Dark: Shadow-Zone + hohe Tension + dunkle Musik
         if zone == "shadow" and t > 0.6 and music in ("dark", "aggressive"):
@@ -169,6 +197,8 @@ class MoodEngine:
                 "music_mood": self._music_mood,
                 "activity": self._activity,
                 "music_energy": round(self._music_energy, 2),
+                "drift_mood": round(self._drift_mood, 3),
+                "drift_energy": round(self._drift_energy, 3),
             }
 
 
