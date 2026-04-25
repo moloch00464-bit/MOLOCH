@@ -675,6 +675,42 @@ class MolochService:
                             # Niemand da — Tension-Inputs resetten, natürlicher Decay wirkt
                             self._core_integrator.feed_event("unknown_person", 0.0)
                             self._core_integrator.feed_event("person_detected", 0.0)
+
+                        # Character Journal: Edge-Detection auf Face-ID Wechsel
+                        if face_id and face_id != "unknown":
+                            _journal_curr = face_id
+                        elif face_detected:
+                            _journal_curr = "Unbekannt"
+                        else:
+                            _journal_curr = None
+                        _journal_prev = getattr(self, '_journal_face_id', None)
+                        if _journal_curr != _journal_prev:
+                            self._journal_face_id = _journal_curr
+                            try:
+                                from core.memory.character_journal import get_journal
+                                if _journal_curr is None and _journal_prev is not None:
+                                    _interp = (f"{_journal_prev} verlaesst Bild"
+                                               if _journal_prev != "Unbekannt"
+                                               else "Bild leer (Person weg)")
+                                    _tags = ["exit"]
+                                elif _journal_curr == "Unbekannt":
+                                    _interp, _tags = "Unbekannte Person erkannt", ["unknown"]
+                                elif _journal_curr and _journal_curr.lower() == "markus":
+                                    _interp, _tags = "Markus betritt Bild", ["entry", "owner"]
+                                elif _journal_curr:
+                                    _interp = f"Person erkannt: {_journal_curr}"
+                                    _tags = ["entry", "recognized"]
+                                else:
+                                    _interp = None
+                                if _interp:
+                                    get_journal().write_event(
+                                        type="camera",
+                                        interpretation=_interp,
+                                        context=f"prev={_journal_prev}",
+                                        tags=_tags,
+                                    )
+                            except Exception as je:
+                                logger.debug(f"Journal camera-hook: {je}")
                     except Exception as e:
                         logger.debug(f"[TAPPAS-PERC] CoreIntegrator feed: {e}")
 
