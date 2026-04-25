@@ -260,6 +260,21 @@ class PersonalityEngine:
 
         logger.info(f"PersonalityEngine initialized. Mode: {self.mode.value}")
 
+        # === Gate 1.5 Phase 4: Character Drift via EventBus ===
+        # Distiller schreibt naechtlich character_drift.json + feuert Event.
+        # Wir subscriben + laden initial damit Mood-Baseline beim Boot stimmt.
+        try:
+            from core.moloch_event_bus import get_event_bus
+            get_event_bus().subscribe(
+                "character_drift_updated",
+                self._on_character_drift,
+                priority=5,
+            )
+            self._load_character_drift()  # Initial-Load
+            logger.info("[PERSONALITY] Character-Drift Subscribe aktiv")
+        except Exception as e:
+            logger.warning(f"[PERSONALITY] Drift-Subscribe fehlgeschlagen: {e}")
+
     @staticmethod
     def _load_identity() -> Dict:
         """Load moloch_identity.json config."""
@@ -962,6 +977,38 @@ class PersonalityEngine:
             f"PersonalityEngine(mode={self.mode.value}, "
             f"auto={self.auto_mode}, muted={self.muted})"
         )
+
+    # ============================================================
+    # Gate 1.5 Phase 4 — Character Drift Handler
+    # ============================================================
+
+    def _on_character_drift(self, event: Dict[str, Any]):
+        """Handler fuer character_drift_updated Event vom Distiller.
+
+        Lediglich neu laden — Distiller hat character_drift.json schon geschrieben.
+        """
+        self._load_character_drift()
+
+    def _load_character_drift(self):
+        """character_drift.json lesen, Mood-Baseline an MoodEngine pushen."""
+        try:
+            from core.autonomy.character_distiller import get_distiller
+            from core.personality.mood_engine import get_mood_engine
+            drift = get_distiller().get_drift()
+            rolling = drift.get("rolling_drift", {}) if drift else {}
+            mood_baseline = float(rolling.get("mood_baseline", 0.0) or 0.0)
+            energy_baseline = float(rolling.get("energy_baseline", 0.0) or 0.0)
+            mood = get_mood_engine()
+            if hasattr(mood, "set_drift_baseline"):
+                mood.set_drift_baseline(mood=mood_baseline, energy=energy_baseline)
+                logger.info(
+                    f"[PERSONALITY] Drift-Baseline angewendet: "
+                    f"mood={mood_baseline:+.3f} energy={energy_baseline:+.3f}"
+                )
+            else:
+                logger.debug("[PERSONALITY] MoodEngine ohne set_drift_baseline (Phase 4 nicht voll)")
+        except Exception as e:
+            logger.debug(f"[PERSONALITY] Drift-Load: {e}")
 
 
 # ============================================================
