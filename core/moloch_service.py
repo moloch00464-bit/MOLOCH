@@ -676,41 +676,48 @@ class MolochService:
                             self._core_integrator.feed_event("unknown_person", 0.0)
                             self._core_integrator.feed_event("person_detected", 0.0)
 
-                        # Character Journal: Edge-Detection auf Face-ID Wechsel
-                        if face_id and face_id != "unknown":
-                            _journal_curr = face_id
+                        # Character Journal: Edge-Detection auf Face-ID Wechsel (mit Cooldown gegen Flicker)
+                        _NO_MATCH = {"", "unknown", "unbekannt"}
+                        if face_id and face_id.lower() not in _NO_MATCH:
+                            _journal_curr = face_id.lower()  # canonical "markus", "rebecca", ...
                         elif face_detected:
-                            _journal_curr = "Unbekannt"
+                            _journal_curr = "unbekannt"
                         else:
                             _journal_curr = None
                         _journal_prev = getattr(self, '_journal_face_id', None)
                         if _journal_curr != _journal_prev:
                             self._journal_face_id = _journal_curr
-                            try:
-                                from core.memory.character_journal import get_journal
-                                if _journal_curr is None and _journal_prev is not None:
-                                    _interp = (f"{_journal_prev} verlaesst Bild"
-                                               if _journal_prev != "Unbekannt"
-                                               else "Bild leer (Person weg)")
-                                    _tags = ["exit"]
-                                elif _journal_curr == "Unbekannt":
-                                    _interp, _tags = "Unbekannte Person erkannt", ["unknown"]
-                                elif _journal_curr and _journal_curr.lower() == "markus":
-                                    _interp, _tags = "Markus betritt Bild", ["entry", "owner"]
-                                elif _journal_curr:
-                                    _interp = f"Person erkannt: {_journal_curr}"
-                                    _tags = ["entry", "recognized"]
-                                else:
-                                    _interp = None
-                                if _interp:
-                                    get_journal().write_event(
-                                        type="camera",
-                                        interpretation=_interp,
-                                        context=f"prev={_journal_prev}",
-                                        tags=_tags,
-                                    )
-                            except Exception as je:
-                                logger.debug(f"Journal camera-hook: {je}")
+                            # Cooldown: max 1 Camera-Event pro 5s — dampft Flicker
+                            _now_mono = time.monotonic()
+                            _last_ts = getattr(self, '_journal_face_last_ts', 0.0)
+                            if _now_mono - _last_ts > 5.0:
+                                self._journal_face_last_ts = _now_mono
+                                try:
+                                    from core.memory.character_journal import get_journal
+                                    if _journal_curr is None and _journal_prev is not None:
+                                        _name = "Markus" if _journal_prev == "markus" else _journal_prev.capitalize()
+                                        _interp = (f"{_name} verlaesst Bild"
+                                                   if _journal_prev != "unbekannt"
+                                                   else "Bild leer (Person weg)")
+                                        _tags = ["exit"]
+                                    elif _journal_curr == "unbekannt":
+                                        _interp, _tags = "Unbekannte Person erkannt", ["unknown"]
+                                    elif _journal_curr == "markus":
+                                        _interp, _tags = "Markus betritt Bild", ["entry", "owner"]
+                                    elif _journal_curr:
+                                        _interp = f"Person erkannt: {_journal_curr.capitalize()}"
+                                        _tags = ["entry", "recognized"]
+                                    else:
+                                        _interp = None
+                                    if _interp:
+                                        get_journal().write_event(
+                                            type="camera",
+                                            interpretation=_interp,
+                                            context=f"prev={_journal_prev}",
+                                            tags=_tags,
+                                        )
+                                except Exception as je:
+                                    logger.debug(f"Journal camera-hook: {je}")
                     except Exception as e:
                         logger.debug(f"[TAPPAS-PERC] CoreIntegrator feed: {e}")
 
