@@ -240,6 +240,70 @@ def _build_local_context_snippet() -> str:
     except Exception:
         return ""
 
+def _build_threebrain_state_snippet(max_chars: int = 800) -> str:
+    """ThreeBrain Welle 1.3: Drift + Patch + letzte Journal-Events fuer Cloud-Chat.
+
+    Wird in _generate_deepseek angehaengt damit das Cloud-Mundstueck den
+    aktuellen Charakter-State + die approved Verhaltensregeln kennt.
+
+    Komplett best-effort: jeder Block leer falls Komponente fehlt/crasht.
+    """
+    parts: list = []
+
+    # 1) Drift (rolling) — kompakt
+    try:
+        from core.autonomy.character_distiller import get_distiller
+        drift = get_distiller().get_drift() or {}
+        rolling = drift.get("rolling_drift") or {}
+        if rolling:
+            parts.append(
+                f"Drift 30d: mood={rolling.get('mood_baseline', 0):+.2f} "
+                f"energy={rolling.get('energy_baseline', 0):+.2f} "
+                f"dominance={rolling.get('dominance_baseline', 0):+.2f}"
+            )
+        # Top-Erlebnis (recency-weighted)
+        top = drift.get("recency_weighted_top") or []
+        if top:
+            t0 = top[0]
+            parts.append(
+                f"Top-Erlebnis: '{(t0.get('citation') or '')[:60]}' (gewicht {t0.get('weight', 0):.2f})"
+            )
+    except Exception:
+        pass
+
+    # 2) Aktive Verhaltens-Regeln (character_patch)
+    try:
+        from core.memory.character_patch import get_patch
+        patch_snip = get_patch().prompt_snippet(max_chars=300)
+        if patch_snip:
+            parts.append(patch_snip)
+    except Exception:
+        pass
+
+    # 3) Letzte Journal-Events (kompakte 1-Zeiler)
+    try:
+        from core.memory.character_journal import get_journal
+        recent = get_journal().read_recent(8) or []
+        if recent:
+            ev_lines = ["Letzte Ereignisse:"]
+            for e in recent[-8:]:
+                ts_short = (e.get("ts") or "")[11:16]  # HH:MM
+                t = e.get("type", "?")
+                interp = (e.get("interpretation") or "")[:50]
+                ev_lines.append(f"  [{ts_short}] {t}: {interp}")
+            parts.append("\n".join(ev_lines))
+    except Exception:
+        pass
+
+    if not parts:
+        return ""
+
+    block = "\n\n=== AKTUELLER CHARAKTER (ThreeBrain) ===\n" + "\n".join(parts)
+    if len(block) > max_chars:
+        block = block[:max_chars - 3] + "..."
+    return block
+
+
 # llm_mode Flag — gelesen aus config/settings.json Key "llm_mode"
 LLM_MODE_OFF = "off"                # kein LLM ueberhaupt
 LLM_MODE_CLOUD_ONLY = "cloud_only"  # nur DeepSeek Cloud, kein hailo-ollama
@@ -957,6 +1021,11 @@ class LocalLLMBridge:
                     system = (system or "") + "\n\n--- MEMORY ---\n" + memory_ctx
             except Exception:
                 pass
+
+            # ThreeBrain Welle 1.3: Drift + Patch + Journal-Events injizieren
+            tb_state = _build_threebrain_state_snippet()
+            if tb_state:
+                system = (system or "") + tb_state
 
         resp = None
         try:
