@@ -1319,6 +1319,17 @@ class VoicePipeline:
         except Exception as e:
             logger.error(f"[VOICE] Memory save_message(user) fehlgeschlagen: {e}")
 
+        # Character Journal: Whisper-Transkript als charakter-formenden Audio-Event
+        try:
+            from core.memory.character_journal import get_journal
+            get_journal().write_event(
+                type="audio",
+                interpretation=f"Sprache erkannt ({len(text)} Zeichen)",
+                context=f"dur={whisper_duration_ms:.0f}ms text='{text[:60]}'",
+            )
+        except Exception as e:
+            logger.debug(f"Journal audio-hook: {e}")
+
         # 1.4b Preference Learner: Implizites Feedback aus Sprache
         try:
             from core.autonomy.preference_learner import get_preference_learner
