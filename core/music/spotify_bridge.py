@@ -137,6 +137,17 @@ class SpotifyBridge:
             )
             logger.info(f"[SPOTIFY-BRIDGE] Track: {track.get('artist')} - {track.get('track')}")
 
+            # Character Journal: Track-Wechsel als charakter-formenden Event protokollieren
+            try:
+                from core.memory.character_journal import get_journal
+                get_journal().write_event(
+                    type="spotify",
+                    interpretation=f"Spielt: {track.get('artist', '?')} - {track.get('track', '?')}",
+                    context=f"album={track.get('album', '?')}",
+                )
+            except Exception as e:
+                logger.debug(f"[SPOTIFY-BRIDGE] Journal-Hook: {e}")
+
         # Track zu Ende? (progress nahe duration und vorher weiter weg)
         if (is_playing and duration_ms > 0
                 and progress_ms >= duration_ms - 2000
