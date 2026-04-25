@@ -28,7 +28,7 @@ import asyncio
 import threading
 from datetime import datetime
 from dataclasses import dataclass, field
-from typing import Optional, Callable, List, Dict
+from typing import Optional, Callable, List, Dict, Any
 
 # Add moloch to path
 sys.path.insert(0, os.path.expanduser("~/moloch"))
