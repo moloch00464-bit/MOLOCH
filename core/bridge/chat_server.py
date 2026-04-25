@@ -79,6 +79,17 @@ def chat(req: ChatRequest):
     except Exception as e:
         logger.warning(f"Memory/Bus user-write Fehler: {e}")
 
+    # Character Journal: Konversation als charakter-formenden Event protokollieren
+    try:
+        from core.memory.character_journal import get_journal
+        get_journal().write_event(
+            type="chat",
+            interpretation=f"Markus: {req.text[:80]}",
+            context="src=chat_server",
+        )
+    except Exception as e:
+        logger.debug(f"Journal user-hook Fehler: {e}")
+
     b = get_llm_bridge()
     t0 = time.monotonic()
     # Browser-Chat-UI: PC=Hauptgehirn -> force_tentacle=True (KEIN qwen-Fallback fuers Reden).
@@ -110,6 +121,17 @@ def chat(req: ChatRequest):
         )
     except Exception as e:
         logger.warning(f"Memory/Bus moloch-write Fehler: {e}")
+
+    # Character Journal: Eigene Antwort als charakter-formenden Event protokollieren
+    try:
+        from core.memory.character_journal import get_journal
+        get_journal().write_event(
+            type="chat",
+            interpretation=f"Moloch: {out[:80]}",
+            context=f"provider={b._last_provider}",
+        )
+    except Exception as e:
+        logger.debug(f"Journal moloch-hook Fehler: {e}")
 
     return {"text": out, "provider": b._last_provider, "duration_ms": dur_ms}
 
