@@ -1,128 +1,150 @@
-# Agent Handoff — 2026-04-21 (Session 23 — Live-Test der Prompt-Kuerzung)
-# Letzter Commit Basis: dd7fb99 | Audit: 85/85 PASS (PC Mistral 7B online)
+# Agent Handoff — 2026-04-25 (Session 24 — Gate 1.5 Phase 2: Character Journal)
+# Letzter Commit Basis: dc8d3a6 | Audit: 85/85 PASS | FPS 19.9-21.2
 
 ---
 
-## SESSION 23 — Live-Test + Auswertung Phase A/B/C
+## SESSION 24 — Character Journal Core (Gate 1.5 Phase 2)
 
-Markus-Direktive: "Pi+AI fix fertigmachen." PC-Webinterface (9000) war
-zwischendurch aus und wurde von Markus selbst in Nebensession repariert;
-blockierte diese Session nicht, weil Tests direkt gegen `localhost:9100/chat`
-liefen (identische Bridge-API).
+Markus-Direktive: Phase 2 von Gate 1.5 (Character Evolution Loop). Ziel:
+Single Source of Truth fuer charakter-formende Events. Wird nachts vom
+Distiller (Phase 4, kommt spaeter) gelesen.
 
-### Durchgefuehrt
+User-Antworten in Plan-Phase:
+- Scope: Schreiber + alle 7 Quellen-Hooks (camera, audio, tension, mode_switch, spotify, chat, protective)
+- Pfad: tagesweise rotiert `/mnt/moloch-data/memory/journal/YYYY-MM-DD.jsonl`
+- Distiller-Felder (relevance/importance/citation): optional vom Caller setzbar
 
-- `moloch_session_init()` → SESSION_READY true
-- `moloch_audit()` → 85/85 (Tentakel online: host 192.168.178.20:11434,
-  model mistral:latest 7.2B Q4_K_M)
-- `moloch_status()` → FPS 20.1, Markus live erkannt (sim=0.55-0.58)
-- `moloch_npu_workers()` → 4/4 Worker gesund (Face 8676inf, Pose 5814, ReID 3489, Depth 1744)
-- 5 Live-Tests POST /chat (tentacle_mistral, 11-42s je Antwort)
-- Log: `logs/session_23_live_tests.md`
+### Geliefert
 
-### Ergebnis (Kurzform, Details im Test-Log)
+**8 Commits, 7 Dateien:**
+| Commit | Datei | Was |
+|--------|-------|-----|
+| 00af480 | core/memory/character_journal.py (NEW) | Singleton + write_event + read_recent + Self-Test |
+| b035544 | core/music/spotify_bridge.py | Spotify Track-Wechsel -> Journal |
+| 4a7c072 | core/bridge/chat_server.py | Chat user+moloch -> Journal |
+| e6b6571 | core/personality/tension_integrator.py | Rudeness + Appeasement -> Journal |
+| 6158940 | core/personality/personality_engine.py | Mode-Switch -> Journal |
+| ddf4c12 | core/moloch_service.py | Camera Edge-Detection (TAPPAS-Path) |
+| ce10d9a | core/voice_pipeline.py | Whisper -> Journal (Audio) |
+| 2d1566f | core/core_integrator.py | Protective: Owner-Override + Alarm-Edge |
+| dc8d3a6 | core/moloch_service.py | Camera-Flicker-Fix (5s cooldown + lowercase) |
 
-| # | Prompt | Zitat weg? | Ziel erreicht? |
-|---|--------|------------|----------------|
-| 1 | "Wer bin ich?" | JA | NEIN — Moloch redet ueber sich statt ueber Markus |
-| 2 | "Wie geht es dir?" | JA | teilweise — halluziniert Internetzugang |
-| 3 | "Wer ist Rebecca?" | JA | NEIN — kein Klingonisch, kein Christian |
-| 4 | "Was siehst du?" | JA | NEIN — Live-Context ignoriert, Floskel |
-| 5 | "Du bist toll!" | JA | NEIN — Assistent-Ton ("gluecklich fuer dich da") |
+**Commits liefen mit Audit 85/85 nach jedem Restart durch.**
 
-**Bilanz:** Anti-Echo wirkt (5/5 kein Wort-Zitat). Aber: Charakter weich,
-Live-Context (Zone/Person/Tension) wird von Mistral nicht verarbeitet,
-Crew-Details gehen verloren. Phase A/B/C hat Echo geloest aber Substanz
-verduennt — 2 Stellschrauben kippen gleichzeitig.
+### Live-Verifikation
 
-### KEIN Code-Edit in Session 23
+`/mnt/moloch-data/memory/journal/2026-04-25.jsonl` — 209 Eintraege geschrieben.
+`_state.json.last_id = 209` (Counter ueberlebt Restarts).
 
-Phase D wurde von Markus nicht freigegeben fuer diese Session. Empfehlung
-dokumentiert, Umsetzung in Session 24.
+Alle 7 Typen live gesehen:
+- `evt_00000007`: spotify ("Spielt: New Frames - Art Safari")
+- `evt_00000008`: tension ("Besaenftigung erkannt")
+- `evt_00000043`: camera ("Markus betritt Bild")
+- `evt_00000194`: protective ("Owner zurueck, Schutz aktiv", tension_delta=-0.3)
+- chat + audio + mode_switch: Hooks aktiv (kein Trigger-Event in Test-Fenster)
 
----
+### Architektur-Entscheidungen
 
-## EMPFEHLUNG fuer Session 24 — Phase D
-
-**Hebel nicht "nochmal kuerzen" (B1), sondern strukturell (B2 + Few-Shot):**
-
-### D1 — B2: Live-Context aus System-Prompt herausziehen
-Datei: `core/autonomy/local_llm_bridge.py:659` (autonomy-Agent, GELB-Level)
-Aktuell: `profile_system = profile_system + _build_local_context_snippet()` haengt den
-Live-Context ans Ende des `system`-Felds. Mistral 7B liest das schlecht.
-
-Umbau: `_build_local_context_snippet()` separat einspielen als
-- Option A (simpel): User-Prefix — prepend "[AKTUELL: person=markus, zone=guardian, tension=ruhig] "
-  vor `prompt` in `messages[]`.
-- Option B (sauber): zusaetzlicher `{"role": "user", "content": snippet}` VOR dem
-  eigentlichen User-Turn, und eine Assistant-Quittung — eher unnoetig fuer Mistral.
-
-Option A reicht zunaechst. Effekt: Test 4 und 5 sollten konkreter werden.
-
-### D2 — Few-Shot im tentacle-Profil
-Datei: `config/llm_profiles.json` (GRUEN)
-Im `tentacle.system` nach der Regel-Sektion 2-3 Q/A-Beispiele anhaengen:
-```
-Beispiele:
-Frage: Wie geht's?
-Antwort: Laeuft. Sehe dich, Zone ruhig.
-Frage: Wer bist du?
-Antwort: Moloch. Dein Kram auf dem Pi. Was willst du, Markus.
-```
-Mistral imitiert Stil aus Beispielen besser als aus abstrakten Regeln.
-Laenge-Budget: aktuell 645 chars, +200 chars fuer Beispiele = 845 chars. OK.
-
-### D3 — optional B3 (Crew gated)
-Datei: `core/longterm_memory.py` (memory-Agent, GELB)
-Nur wenn D1+D2 Test 3 (Rebecca) nicht retten: Crew-Block gated
-(Regex auf "Rebecca" / "Genesis" im Prompt) statt always-on.
-
-### Reihenfolge in Session 24
-1. D1 implementieren (autonomy-Agent-Lock)
-2. Service-Restart + Live-Tests 4 und 5 wiederholen
-3. D2 implementieren (kein Lock noetig, config-GRUEN)
-4. Service-Restart + alle 5 Live-Tests wiederholen
-5. Bei 4/5 PASS: commit + push + handoff. Bei <4/5: D3 dranhaengen.
+1. **Schema 1:1 wie Briefing-Spec** — keine Erweiterung.
+   Felder: `ts, event_id, type, interpretation, tension_delta, context, recency, relevance, importance, citation, tags`.
+2. **event_id**: monoton steigend, persistiert in `_state.json`. Format `evt_00000042`.
+3. **recency=1.0** beim Write (Distiller decay-t in Phase 4).
+4. **Distiller-Felder null** wenn Caller nichts uebergibt.
+5. **Hooks am Callsite, nicht via EventBus-Subscription**: Interpretation lebt dort, wo die Bedeutung frisch ist (z.B. tension_integrator weiss "Rudeness", core_integrator weiss "Owner zurueck").
+6. **Lazy Import + try/except** in jedem Hook: Journal-Fehler kann KEIN Source-Modul crashen.
+7. **inference_engine.py NICHT gehookt** — TAPPAS-Path (moloch_service) ist die echte Quelle. Hook in inference_engine waere Dead-Code.
+8. **Edge-Detection** fuer camera + protective via `getattr(self, '_journal_face_id', None)` — kein Init-Aenderung in moloch_service noetig (minimaler ROT-Footprint).
 
 ---
 
-## OFFENE THEMEN (uebergeben von Session 22b, weiterhin gueltig)
+## OFFENE PUNKTE / EMPFEHLUNGEN FUER PHASE 3
 
-1. **PC-Mistral Availability** — PC nicht 24/7, DeepSeek-Cloud-Fallback
-   reaktivieren fuer mobilen Pi-Betrieb (api_keys.json.disabled_npu_only_mode).
-2. **Performance** — Mistral 7B auf PC-CPU 11-42s pro Reply. Streaming-UX
-   waere Time-to-First-Token-Verbesserung, nicht Mean-Time.
-3. **Audit-Test PIGH0ST-Essenz fragil** — prueft literal "ERBE" und
-   "TENSION-SPRACHE". Falls D2 Few-Shot den Stil aendert und Labels entfernt,
-   muss Audit-Test semantisch umgebaut werden (stresstest-Agent-Lock,
-   `scripts/moloch_audit.py:1820`).
-4. **CRLF/LF-Drift** in `core/longterm_memory.py` (kosmetisch).
-5. **Webinterface Port 9000 (PC)** — heute ausgefallen, von Markus manuell
-   wiederhergestellt. Falls das haeufiger passiert: Auto-Start-Shortcut am PC
-   einrichten (eigener Auftrag, nicht Pi-Session).
+### 1. Camera-Hook: Flicker-Daempfung weiter verfeinern
+**Symptom**: 5s Cooldown reicht nicht — "Markus verlaesst Bild" wiederholt sich
+alle 5s wenn Markus am Rand des Frames pendelt.
+**Vorschlag**: Hysterese mit "stable for N frames" (3-5s Persistence) bevor
+Edge gefeuert wird. State `_journal_face_pending` + `_journal_face_pending_since`.
+**Datei**: `core/moloch_service.py` (ROT) — service-Agent-Lock.
+
+### 2. Phantom-Identity "Nicht"
+**Symptom**: `evt_00000200`: "Person erkannt: Nicht" — face_db hat irgendwo
+einen Eintrag mit Name "nicht" (vermutlich abgebrochenes Teaching).
+**Datei**: face_db Pfad pruefen (`/mnt/moloch-data/memory/faces/`?).
+**Aktion**: face_db cleanup (memory-Agent).
+
+### 3. Distiller (Phase 4) Vorbereitung
+Journal hat alle Daten — Distiller kann jetzt entstehen:
+- `core/memory/character_distiller.py` (NEU, memory-Agent, GRUEN)
+- Nightly batch: liest `journal/*.jsonl`, computiert `recency_decay`,
+  setzt `relevance/importance/citation`, schreibt Mood-Drift-File.
+- Trigger: `night_cycle.py` cronjob 03:00 Uhr.
+
+### 4. Audit-Test fuer Journal (Phase 3 Polish)
+**Datei**: `scripts/moloch_audit.py` — neuer Test "CharacterJournal aktiv":
+- `JOURNAL_DIR` exists
+- Heutige `.jsonl` parsebar
+- `_state.json.last_id > 0`
+**Agent**: stresstest oder service.
+
+### 5. Camera-Hook missing: Person ohne Face
+**Symptom**: Wenn YOLO eine Person sieht aber kein Gesicht erfasst (z.B.
+Rueckenansicht), feuert kein camera-Event. Nur face-basierte Edges werden
+gehookt.
+**Vorschlag**: Body-only-Detection als zusaetzlicher Trigger ueber `pframe.person_detected`.
+**Datei**: `core/moloch_service.py` — gleicher Block.
+
+### 6. Doku/Spec
+Schema und API in `docs/` festhalten — z.B. `docs/character_journal.md` mit:
+- Schema-Beschreibung
+- Hook-Stellen-Tabelle (datei:zeile)
+- Distiller-Vertrag (welche Felder erwarten welchen Inhalt)
+
+---
+
+## OFFENE THEMEN AUS SESSION 23 (weiterhin gueltig)
+
+1. **PC-Mistral Availability** — DeepSeek-Cloud-Fallback fuer mobilen Pi-Betrieb
+2. **Performance** — Mistral 7B Streaming-UX
+3. **Audit-Test PIGH0ST-Essenz fragil**
+4. **CRLF/LF-Drift** in `core/longterm_memory.py`
+5. **Webinterface Port 9000** Auto-Start am PC
 
 ---
 
 ## SYSTEM-ZUSTAND AM ENDE DER SESSION
 
-- Service: active, FPS 20.1, RAM 42%, CPU 49°C
-- Audit: 85/85 PASS
-- Git: 0 neue Commits, 2 neue File-Writes (logs/agent_handoff.md, logs/session_23_live_tests.md)
-- Kein Agent-Lock gesetzt (keine Core-Code-Aenderung durchgefuehrt)
-- Phase A/B/C-Commits unveraendert deployed: 6e5b58a, 70cc11d, dd7fb99
+- Service: active, FPS 19.9-21, RAM 45-46%, CPU 47-49°C
+- Audit: 85/85 PASS (4x re-run nach Restarts, alle PASS)
+- Git: 8 neue Commits + Backup-Tag `pre_gate15_phase2`
+- Agent-Locks: alle entfernt
+- Journal: 209 Eintraege, alle 7 Typen live verifiziert
+- Plan-Datei: `~/.claude/plans/briefing-fuer-pi-opus-hazy-giraffe.md`
 
 ---
 
-## SETUP fuer Session 24 (Markus oder Nachfolge-Claude)
+## SETUP fuer Session 25 (Markus oder Nachfolge-Claude)
 
-1. `moloch_session_init()` — PFLICHT erster Schritt.
-2. Audit 85/85 erwartet (solange PC + Mistral online).
-3. Fuer D1: autonomy-Agent-Lock `touch /tmp/moloch_agent_autonomy`,
-   `.claude/agents/autonomy.md` lesen, `core/autonomy/local_llm_bridge.py`
-   editieren (GELB-Level — ankuendigen, durchziehen).
-4. Fuer D2: keine Lock noetig (config GRUEN), direkt edit.
-5. Nach D1 + D2 → Service-Restart → 5 Tests wie in `logs/session_23_live_tests.md`.
+1. `moloch_session_init()` — PFLICHT.
+2. Pruefen Audit 85/85, FPS > 15.
+3. Wenn Phase 3 (Polish): siehe "Offene Punkte" — empfehle Reihenfolge 2 → 1 → 4.
+4. Wenn Phase 4 (Distiller): siehe Punkt 3 oben — neue Datei `core/memory/character_distiller.py`.
+5. Backup-Anker: `git tag pre_gate15_phase2` falls Rollback noetig.
 
 ---
 
-*Session 23 Ende. Diff-Stats: 2 Log-Files neu geschrieben (reine Doku-Session, kein Code).*
+## DEPLOY-CHECKLIST (fuer Session 25 falls Code-Aenderung)
+
+- [ ] `moloch_session_init()` PASS
+- [ ] Plan/Briefing fuer naechsten Schritt
+- [ ] Agent-Lock setzen
+- [ ] Pre-Flight (`git status`, `python3 -c "import core.X"`)
+- [ ] Edit / Test
+- [ ] `__pycache__` loeschen
+- [ ] `sudo systemctl restart moloch` + warten bis FPS > 5
+- [ ] `moloch_audit` PASS
+- [ ] Commit + Push pro Datei
+- [ ] Handoff updaten
+
+---
+
+*Session 24 Ende. Diff-Stats: 9 Commits (1 NEW, 7 Hook-Edits, 1 Fixup), Audit 85/85 PASS.*
