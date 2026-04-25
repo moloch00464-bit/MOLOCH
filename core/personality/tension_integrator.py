@@ -207,6 +207,19 @@ class TensionIntegrator:
         self._core_integrator.update_input("voice", "conflict_input", boost)
         logger.info(f"[TENSION] Rudeness erkannt! Boost={boost:.2f} Text='{text[:50]}'")
 
+        # Character Journal: Beleidigung als charakter-formenden Event protokollieren
+        try:
+            from core.memory.character_journal import get_journal
+            get_journal().write_event(
+                type="tension",
+                interpretation="Beleidigung erkannt",
+                tension_delta=boost,
+                context=f"text='{text[:60]}'",
+                tags=["rudeness"],
+            )
+        except Exception as e:
+            logger.debug(f"[TENSION] Journal rudeness-hook: {e}")
+
         # Anger-Floor starten — Tension darf nicht sofort wieder sinken
         with self._lock:
             self._anger_floor_until = now + _ANGER_FLOOR_DURATION_S
@@ -262,6 +275,19 @@ class TensionIntegrator:
         # Negativer Wert → respect_score erhoeht → Tension sinkt
         self._core_integrator.update_input("voice", "respect_score", abs(boost))
         logger.info(f"[TENSION] Besaenftigung erkannt: boost={boost:.2f} Text='{text[:50]}'")
+
+        # Character Journal: Besaenftigung als charakter-formenden Event protokollieren
+        try:
+            from core.memory.character_journal import get_journal
+            get_journal().write_event(
+                type="tension",
+                interpretation="Besaenftigung erkannt",
+                tension_delta=boost,
+                context=f"text='{text[:60]}'",
+                tags=["appeasement"],
+            )
+        except Exception as e:
+            logger.debug(f"[TENSION] Journal appeasement-hook: {e}")
 
     def _detect_appeasement(self, text: str) -> float:
         """Gibt negativen Boost zurueck (-0.2 bis -0.3) bei Besaenftigung, sonst 0.0."""
