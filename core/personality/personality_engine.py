@@ -391,6 +391,18 @@ class PersonalityEngine:
             f"(reason: {reason})"
         )
 
+        # Character Journal: Mode-Switch als charakter-formenden Event protokollieren
+        try:
+            from core.memory.character_journal import get_journal
+            get_journal().write_event(
+                type="mode_switch",
+                interpretation=f"Zone {old_mode.value} -> {new_mode.value}",
+                context=f"reason={reason}",
+                tags=[new_mode.value],
+            )
+        except Exception as e:
+            logger.debug(f"Journal mode_switch-hook: {e}")
+
         # Update LED pattern
         self._restart_led()
 
