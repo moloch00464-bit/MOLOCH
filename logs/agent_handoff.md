@@ -1,191 +1,155 @@
-# Agent Handoff — 2026-04-25 (Session 25 — Gate 1.5 Phase 4: Character Distiller)
-# Letzter Commit Basis: feedc0c | Audit: 85/85 PASS | FPS 19.6
+# Agent Handoff — 2026-04-25 (Session 26 — ThreeBrain Welle 1: Foundation)
+# Letzter Commit Basis: ce8a088 | Audit: 85/85 PASS | FPS 20.0
 
 ---
 
-## SESSION 25 — Character Distiller (Gate 1.5 Phase 4)
+## SESSION 26 — ThreeBrain FineTune Loop, Welle 1
 
-Markus-Direktive: "Wir [wollen] die nächste Phase einleiten." Nach Phase 2
-(Schreiber + 7 Hooks) jetzt der Verarbeiter. Naechtlich liest der Distiller
-das Character Journal, bewertet jeden Eintrag mit LLM, berechnet
-Recency-Decay (Half-Life 7 Tage), schreibt ein kumulatives Drift-Profil
-und feuert ein Live-Event an die PersonalityEngine.
+Markus-Direktive nach Phase-4-Distiller: "die naechste Phase einleiten" → ThreeBrain
+ist als unabhaengiger neuer Architektur-Plan akzeptiert. Welle 1 (Foundation)
+sofort umgesetzt: character_patch + behavior_mutation_ledger + Cloud-State-Injection
++ Markus-Review-CLI.
 
-User-Antworten in Plan-Phase:
-- Recency-Decay: Half-Life 7 Tage (`0.5 ** (days/7)`)
-- LLM komplett: Tentakel (Mistral 7B) -> Qwen2.5 lokal -> Heuristik-Fallback
-- Feedback: Live via EventBus `character_drift_updated`
-- Storage: tagesweise `distill/{date}.json` + kumulativ `character_drift.json`
+User-Entscheidungen (von Plan-Phase):
+- Pi-LLM bleibt Qwen2.5-1.5B (Llama2-7B HEF zu aufwendig)
+- LoRA-Hybrid: Adapter remote auf Ryzen + nightly HEF-Recompile
+- character_drift (Daten) + character_patch (Regeln) BEIDES
+- Cloud bleibt DeepSeek
 
-### Geliefert
+Pragmatische Defaults (von mir gewaehlt):
+- CPU-Limit Ryzen-Trainer: 40%
+- Critic-Style: hart, sachlich
+- Sample-Review: woechentlich
 
-**6 Commits, 4 Dateien:**
+### Geliefert (Welle 1 komplett)
+
+**4 Commits, 4 Dateien:**
 | Commit | Datei | Was |
 |--------|-------|-----|
-| 5601fe3 | core/autonomy/character_distiller.py (NEW) | Singleton + run + force_distill_today + get_drift |
-| 77224c5 | core/autonomy/night_cycle.py | 5. Step character_distill |
-| 344300f | core/personality/personality_engine.py | Subscribe + initial Load |
-| 3ea282b | core/personality/mood_engine.py | set_drift_baseline + Classify-Bias |
-| feedc0c | core/personality/personality_engine.py | HOTFIX Any-Import (Live-Crash) |
+| 47cc4df | core/memory/character_patch.py (NEW) | Verhaltens-Regeln Singleton mit Approval-Workflow |
+| d03c030 | core/memory/behavior_mutation_ledger.py (NEW) | Append-only Audit-Log alle Charakter-Aenderungen |
+| c15ca0e | scripts/review_pending_rules.py (NEW) | CLI: --status / --list / interactive review |
+| ce8a088 | core/autonomy/local_llm_bridge.py | _build_threebrain_state_snippet + Inject in DeepSeek |
 
-### Live-Verifikation (boot logs)
+### Live-Verifikation
+
+- Self-Test character_patch PASS: 3 pending → 2 approved + 1 rejected + 1 deactivated, Snippet 220 chars
+- Self-Test ledger PASS: 7 Eintraege, Sequenz, Truncation, Filter
+- CLI --status: zeigt 1 active rule + 7 ledger entries
+- ThreeBrain-Snippet im Service: 665 chars (unter Budget 800), alle 3 Bloecke (drift + patch + 8 events)
+- Audit 85/85 PASS, FPS 20.0, kein Crash
+
+### Architektur-Entscheidungen Welle 1
+
+1. **Singleton-Pattern 1:1 wie character_journal.py** — gleiche atomic-write + NTFS-fallback Helpers, gleiche Self-Test-Struktur.
+2. **character_patch & ledger zirkulaer-tolerant**: Patch loggt in Ledger via lazy import + try/except. Ledger weiss nichts von Patch.
+3. **Cloud-Injection bewusst NICHT chat_server.py**: Helper liegt in local_llm_bridge.py, wird in `_generate_deepseek` aufgerufen — kein chat_server-Edit, alle DeepSeek-Pfade profitieren automatisch (chat, voice, future).
+4. **Snippet-Budget 800 Zeichen**: Drift (kompakt) + Top-1-Erlebnis + max 8 Patch-Regeln + 8 Journal-Events. Bleibt unter Token-Budget der DeepSeek-Calls.
+5. **Best-Effort-Failure-Mode in jedem Block**: Wenn Distiller / Patch / Journal fehlt oder crasht → leerer String, kein Bridge-Crash.
+
+### Validation des Cloud-Snippets (manuell ausgefuehrt)
 
 ```
-INFO:Personality:PersonalityEngine initialized. Mode: guardian
-INFO:MolochMoodEngine:[MOOD] Drift-Baseline gesetzt: mood=+0.005 energy=+0.000
-INFO:Personality:[PERSONALITY] Drift-Baseline angewendet: mood=+0.005 energy=+0.000
-INFO:Personality:[PERSONALITY] Character-Drift Subscribe aktiv
+=== AKTUELLER CHARAKTER (ThreeBrain) ===
+Drift 30d: mood=+0.01 energy=+0.00 dominance=+0.00
+Top-Erlebnis: 'tension: Beleidigung erkannt' (gewicht 0.57)
+=== AKTIVE VERHALTENSREGELN (gelernt aus Erfahrung) ===
+- Wenn Beleidigung detektiert: ein trockener Satz, kein Kommentar danach
+Letzte Ereignisse:
+  [14:07] spotify: Spielt: Nine Inch Nails - As Alive As You Need Me
+  [14:08] camera: Markus betritt Bild
+  ...
 ```
 
-Self-Test des Distillers:
-- 347 Events geladen, 120 fuer LLM-Prompt gesampled
-- Heuristik-Fallback (LLM-Bridge in standalone-Test im cloud_only Mode -> kein
-  Output. Im Service-Context wird LLM funktionieren — wird sich heute Nacht
-  zeigen.)
-- Drift berechnet, character_drift.json geschrieben, EventBus-Event published
-- Recency-Mathematik korrekt: heute=0.94, 7d=0.47, 14d=0.23, 30d=0.05
-
-### Artefakte (auf SSD2)
-
-- `/mnt/moloch-data/memory/distill/2026-04-25.json` — heutiger Distillat
-- `/mnt/moloch-data/memory/character_drift.json` — kumulativ rolling 30d
-- Top-Events korrekt: Tension-Beleidigung + Owner-Override ranken am hoechsten
-
-### Architektur-Entscheidungen
-
-1. **LLM-Routing im Distiller**: try Tentakel (Mistral 7B besser fuer JSON)
-   → fallback Qwen2.5-1.5B lokal → fallback Heuristik. Drei-Stufen-Sicherheit.
-2. **Robust JSON-Parser**: Regex-Extract von `{...}` + cleanup trailing
-   commas. LLM darf Prosa drumherum schreiben, parser zieht JSON raus.
-3. **Sampling**: Bei > 120 Events erst alle mit `|tension_delta| > 0`,
-   dann stride-Sample des Rests. Token-Budget bleibt im Griff.
-4. **Recency-Decay nicht in-place**: Distiller berechnet bei jedem Lauf
-   neu aus existierenden distill/{date}.json. Kein Race mit Schreiber,
-   Journal-Files bleiben unveraendert.
-5. **Drift-Aggregation**: rolling_drift = recency-gewichtetes Mittel der
-   letzten 30 Tages-Drifts. Top-Events: recency * importance Sortierung.
-6. **MoodEngine-Bias**: `effective_t = tension - drift_mood`. Positiver
-   Drift senkt effektive Tension (mehr calm), negativer hebt sie (mehr alert).
-
-### HOTFIX-Lesson
-
-Type-Hint mit `Any` ohne Import → NameError zur Class-Body-Zeit.
-`py_compile` erkennt das nicht, weil es keine Type-Annotations zur
-Compile-Zeit prueft. Live-Restart deckte es auf (Service crashloop 20+ mal).
-**Lehre**: Nach `py_compile` IMMER auch Live-Restart probieren bevor commit.
+DeepSeek bekommt das jetzt vor JEDER Antwort.
 
 ---
 
-## OFFENE PUNKTE / EMPFEHLUNGEN FUER PHASE 5
+## OFFENE PUNKTE FUER WELLE 2
 
-### 1. LLM-Profil 'distill' in llm_profiles.json
-Aktuell hard-coded `max_tokens=2048` im Distiller. Sauberer:
-neues Profil `distill` mit eigener Persona + `max_tokens=2048` +
-`temperature=0.3` (deterministischer fuer JSON).
+### Welle 2: PC-Side Critic Infrastructure
 
-### 2. Live-LLM-Verifikation
-Heute Nacht 23:00 wird der Night-Cycle den Distiller mit LIVE LLM laufen.
-Naechste Session sollte pruefen:
-- `mcp.moloch_read("/mnt/moloch-data/memory/night_cycle/night_2026-04-25.json")`
-- Step `character_distill.llm_provider` — sollte `tentacle` oder `qwen_local` sein, nicht `heuristic`
-- Falls `heuristic`: LLM-Output unparsbar — Prompt verfeinern oder Tentakel-Verfuegbarkeit
+Nach Plan im `~/.claude/plans/briefing-fuer-pi-opus-hazy-giraffe.md`:
 
-### 3. Mood-Klassifikations-Drift visualisieren
-Aktuell: Drift wirkt unsichtbar auf MoodEngine (effective_t shift).
-Vorschlag: get_state() schon erweitert (drift_mood, drift_energy felder).
-Im GUI Panel-Mood neue Anzeige "Drift: +0.05 mood / -0.02 energy".
+1. **`pc/critic_service.py`** — auf Markus-PC deployen (FastAPI Port 11500)
+   - Endpoints: /critic/evaluate, /critic/generate_situation, /health
+   - Nutzt lokales Gemma3-12B via Ollama
+   - System-Prompt: "Hart, sachlich, kein speichelleckend"
+2. **`core/bridge/critic_client.py`** — auf Pi
+   - Pattern wie Tentakel-Routing in local_llm_bridge.py
+   - Health-Probe alle 5min, Circuit-Breaker
+3. **Settings**: neuer Block `critic_service` in settings.json
+4. **PC-Setup-Doku**: wie wird Ollama-Gemma auf PC installiert + service gestartet
 
-### 4. Distill-Test in moloch_audit.py
-Neuer Test:
-- character_drift.json existiert + parsebar
-- rolling_drift hat alle 3 Felder
-- daily_distillates Liste nicht leer (nach erstem Night-Cycle-Lauf)
+### Wichtig vor Welle 2
 
-### 5. Wochen-/Monats-Distillate
-Phase 5+: aggregiere 7d zu Wochen-Distillat (`distill_week/{YYYY-Www}.json`).
-Hilfreich fuer langfristige Mood-Trends.
-
-### 6. Drift-Reset-Funktion
-Wenn Markus krank ist und 1 Woche Distillate "fehlerhaft" sind (z.B.
-Husten = ungewollte Audio-Events), braucht es eine Reset-Funktion
-"distillate von 2026-04-25 bis 2026-05-01 ignorieren".
-
-### 7. Distiller via MCP
-Neuer MCP-Tool `moloch_distill(date)` fuer manuellen Trigger ausserhalb
-Night-Cycle. Hilft beim Debuggen.
+- Pruefen ob auf PC schon Ollama mit Gemma3-12B installiert ist
+- Falls nicht: `ollama pull gemma2:12b` (oder gemma3 sobald verfuegbar)
+- Firewall-Test 11500 von Pi aus erreichbar
 
 ---
 
-## OFFENE THEMEN AUS SESSION 23/24 (weiterhin gueltig)
+## OFFENE THEMEN AUS FRUEHEREN SESSIONS (weiterhin gueltig)
 
 1. **Camera-Hook Phantom-Identity 'Nicht'** — face_db cleanup
 2. **Body-only Camera-Trigger** — YOLO ohne Face
-3. **Audit-Test fuer Character Journal**
-4. **PC-Mistral Availability** — Cloud-Fallback fuer mobilen Pi-Betrieb
-5. **CRLF/LF-Drift** in `core/longterm_memory.py`
+3. **Audit-Test fuer Character Journal + Patch + Ledger**
+4. **Phase 4 LLM-Pfad in standalone**: heute Nacht echter Live-LLM-Lauf — morgen pruefen
 
 ---
 
 ## SYSTEM-ZUSTAND AM ENDE DER SESSION
 
-- Service: active, FPS 19.6, RAM 44%, CPU 46.9°C
+- Service: active, FPS 20.0, RAM 45%, CPU 46.3°C
 - Audit: 85/85 PASS
-- Git: 6 neue Commits + Backup-Tag `pre_gate15_phase4`
+- Git: 4 neue Commits + Backup-Tag `pre_threebrain_w1`
 - Agent-Locks: alle entfernt
-- Journal: 347 Eintraege, Distillation aktiv
-- character_drift.json: rolling_drift mood=+0.005 (heuristic baseline)
-- PersonalityEngine: subscribed + initial-load erfolgreich
-- MoodEngine: Drift-Baseline angewendet
-- Plan-Datei: `~/.claude/plans/briefing-fuer-pi-opus-hazy-giraffe.md`
+- Patch: 1 active rule (aus Self-Test) + 7 ledger-eintraege
+- Plan-Datei: `~/.claude/plans/briefing-fuer-pi-opus-hazy-giraffe.md` (ThreeBrain 4-Wellen-Plan)
 
 ---
 
-## SETUP fuer Session 26 (Markus oder Nachfolge-Claude)
+## SETUP fuer Session 27 (Markus oder Nachfolge-Claude)
 
-1. `moloch_session_init()` — PFLICHT.
-2. **Heute Nacht 23:00** wird Night-Cycle automatisch Distiller mit LIVE LLM
-   laufen. Morgen pruefen:
-   - `mcp.moloch_read("/mnt/moloch-data/memory/night_cycle/night_2026-04-25.json")`
-   - `mcp.moloch_read("/mnt/moloch-data/memory/distill/2026-04-25.json")`
-3. Falls LLM weiterhin Heuristik ueber `tentacle`/`qwen_local`: Phase 5 Punkt 1
-   (eigenes 'distill'-Profil) angehen.
-4. Wenn Phase 5 (Polish): siehe "Offene Punkte" oben — empfehle Reihenfolge 1 → 4 → 3.
-5. Backup-Anker: `git tag pre_gate15_phase4` falls Rollback noetig.
+1. `moloch_session_init()` PFLICHT.
+2. Pruefen Phase-4 Distiller-Lauf von letzter Nacht (Welle 1 hat keine Trigger fuer das gehabt).
+3. Bei Welle 2 Start: Markus-PC (markus-pc.local 192.168.178.20) muss Ollama+Gemma2/3-12B haben.
+4. Fuer manuellen Patch-Review: `python3 scripts/review_pending_rules.py`
+5. Backup-Anker: `git tag pre_threebrain_w1` falls Rollback noetig.
 
 ---
 
-## CHARAKTER-EVOLUTION-LOOP — VOLLSTAENDIG
+## CHARAKTER-EVOLUTION + THREEBRAIN STAND HEUTE
 
 ```
-            [Markus-Erlebnis]
-                  ↓
-       7 Hooks (Phase 2)
-                  ↓
-   character_journal/{date}.jsonl
-                  ↓
-        Night-Cycle 23:00
-                  ↓
-     CharacterDistiller (Phase 4)
-              ↓        ↓
-   distill/{date}     character_drift.json
-              ↓
-    EventBus 'character_drift_updated'
-              ↓
-       PersonalityEngine
-              ↓
-       MoodEngine.set_drift_baseline
-              ↓
-    [veraenderte Mood-Klassifikation]
-              ↓
-        [Markus erlebt anders]
-              ↓
-              (Loop)
+[Markus-Erlebnis]
+       ↓
+   7 Hooks (Gate 1.5 Phase 2)
+       ↓
+character_journal/{date}.jsonl
+       ↓
+Night-Cycle 23:00 → CharacterDistiller (Gate 1.5 Phase 4)
+       ↓                       ↓
+distill/{date}.json   character_drift.json
+       ↓                       ↓
+EventBus 'character_drift_updated' → PersonalityEngine + MoodEngine
+       ↓
+[Welle 1 NEU:]
+character_patch.json (manuelle/distiller-vorgeschlagene Regeln)
+       ↓
+behavior_mutation_ledger.jsonl (Audit aller Aenderungen)
+       ↓
+DeepSeek-Cloud-Call: System-Prompt enthaelt jetzt
+  base_fix + semi_fix + memory + drift + patch + letzte 8 events
+       ↓
+[Markus erlebt Cloud-Antwort mit echtem aktuellem Charakter]
+       ↓
+       (Loop)
 ```
 
-Der Loop ist geschlossen. Charakter altert jetzt biologisch plausibel
-(Half-Life 7d). Was Markus heute tut, wirkt heute stark, naechste Woche
-halb so stark, in einem Monat fast vergessen.
+Welle 1 schliesst die Cloud-Mundstueck-Schleife. Die Critic-Trainer-Schleife
+(Welle 2-4) wird darauf aufbauen.
 
 ---
 
-*Session 25 Ende. Diff-Stats: 6 Commits (1 NEW Distiller, 4 Hooks/Edits, 1 Hotfix), Audit 85/85 PASS.*
+*Session 26 Ende. Diff-Stats: 4 Commits, 4 Dateien, ~860 LOC, Audit 85/85 PASS.*
