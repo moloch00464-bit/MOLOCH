@@ -195,7 +195,31 @@ class CoreIntegrator:
         with self._lock:
             if source not in self._inputs:
                 self._inputs[source] = {}
+            prev = self._inputs[source].get(key)
             self._inputs[source][key] = _clamp(value)
+
+        # Character Journal: Alarm-Edge ('protective'-Event)
+        if key == "alarm_active":
+            try:
+                curr_alarm = _clamp(value) > 0.5
+                prev_alarm = (prev or 0.0) > 0.5
+                if curr_alarm != prev_alarm:
+                    from core.memory.character_journal import get_journal
+                    if curr_alarm:
+                        _interp = "Alarm aktiviert — Eindringling moeglich"
+                        _td, _tags = +0.9, ["alarm", "alert"]
+                    else:
+                        _interp = "Alarm aufgehoben"
+                        _td, _tags = -0.4, ["alarm", "cleared"]
+                    get_journal().write_event(
+                        type="protective",
+                        interpretation=_interp,
+                        tension_delta=_td,
+                        context=f"source={source}",
+                        tags=_tags,
+                    )
+            except Exception as e:
+                _logger.debug(f"Journal protective-hook (alarm): {e}")
 
     def update_inputs(self, source: str, data: Dict[str, float]):
         """Mehrere Inputs auf einmal (Batch)."""
@@ -228,6 +252,7 @@ class CoreIntegrator:
         Gilt fuer 10 Minuten oder bis naechste positive Face-ID (clear_owner_override).
         """
         with self._lock:
+            was_confirmed = self._owner_confirmed
             if self._owner_confirmed:
                 _logger.info("[CORE] Owner-Override bereits aktiv, erneuert")
             self._owner_confirmed = True
@@ -241,6 +266,20 @@ class CoreIntegrator:
                 f"[CORE] Owner-Override AKTIV: T={self._tension:.3f} "
                 f"D={self._dominance:+.3f} (gilt {self.OWNER_OVERRIDE_DURATION:.0f}s)"
             )
+
+        # Character Journal: Owner-Confirmation als 'protective'-Event (nur Edge)
+        if not was_confirmed:
+            try:
+                from core.memory.character_journal import get_journal
+                get_journal().write_event(
+                    type="protective",
+                    interpretation="Owner zurueck, Schutz aktiv",
+                    tension_delta=-self.OWNER_OVERRIDE_TENSION_DROP,
+                    context="owner_override",
+                    tags=["guardian", "owner"],
+                )
+            except Exception as e:
+                _logger.debug(f"Journal protective-hook (owner): {e}")
 
     def clear_owner_override(self):
         """Override loeschen (z.B. nach positiver Face-ID durch Vision)."""
