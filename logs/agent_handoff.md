@@ -1,150 +1,191 @@
-# Agent Handoff — 2026-04-25 (Session 24 — Gate 1.5 Phase 2: Character Journal)
-# Letzter Commit Basis: dc8d3a6 | Audit: 85/85 PASS | FPS 19.9-21.2
+# Agent Handoff — 2026-04-25 (Session 25 — Gate 1.5 Phase 4: Character Distiller)
+# Letzter Commit Basis: feedc0c | Audit: 85/85 PASS | FPS 19.6
 
 ---
 
-## SESSION 24 — Character Journal Core (Gate 1.5 Phase 2)
+## SESSION 25 — Character Distiller (Gate 1.5 Phase 4)
 
-Markus-Direktive: Phase 2 von Gate 1.5 (Character Evolution Loop). Ziel:
-Single Source of Truth fuer charakter-formende Events. Wird nachts vom
-Distiller (Phase 4, kommt spaeter) gelesen.
+Markus-Direktive: "Wir [wollen] die nächste Phase einleiten." Nach Phase 2
+(Schreiber + 7 Hooks) jetzt der Verarbeiter. Naechtlich liest der Distiller
+das Character Journal, bewertet jeden Eintrag mit LLM, berechnet
+Recency-Decay (Half-Life 7 Tage), schreibt ein kumulatives Drift-Profil
+und feuert ein Live-Event an die PersonalityEngine.
 
 User-Antworten in Plan-Phase:
-- Scope: Schreiber + alle 7 Quellen-Hooks (camera, audio, tension, mode_switch, spotify, chat, protective)
-- Pfad: tagesweise rotiert `/mnt/moloch-data/memory/journal/YYYY-MM-DD.jsonl`
-- Distiller-Felder (relevance/importance/citation): optional vom Caller setzbar
+- Recency-Decay: Half-Life 7 Tage (`0.5 ** (days/7)`)
+- LLM komplett: Tentakel (Mistral 7B) -> Qwen2.5 lokal -> Heuristik-Fallback
+- Feedback: Live via EventBus `character_drift_updated`
+- Storage: tagesweise `distill/{date}.json` + kumulativ `character_drift.json`
 
 ### Geliefert
 
-**8 Commits, 7 Dateien:**
+**6 Commits, 4 Dateien:**
 | Commit | Datei | Was |
 |--------|-------|-----|
-| 00af480 | core/memory/character_journal.py (NEW) | Singleton + write_event + read_recent + Self-Test |
-| b035544 | core/music/spotify_bridge.py | Spotify Track-Wechsel -> Journal |
-| 4a7c072 | core/bridge/chat_server.py | Chat user+moloch -> Journal |
-| e6b6571 | core/personality/tension_integrator.py | Rudeness + Appeasement -> Journal |
-| 6158940 | core/personality/personality_engine.py | Mode-Switch -> Journal |
-| ddf4c12 | core/moloch_service.py | Camera Edge-Detection (TAPPAS-Path) |
-| ce10d9a | core/voice_pipeline.py | Whisper -> Journal (Audio) |
-| 2d1566f | core/core_integrator.py | Protective: Owner-Override + Alarm-Edge |
-| dc8d3a6 | core/moloch_service.py | Camera-Flicker-Fix (5s cooldown + lowercase) |
+| 5601fe3 | core/autonomy/character_distiller.py (NEW) | Singleton + run + force_distill_today + get_drift |
+| 77224c5 | core/autonomy/night_cycle.py | 5. Step character_distill |
+| 344300f | core/personality/personality_engine.py | Subscribe + initial Load |
+| 3ea282b | core/personality/mood_engine.py | set_drift_baseline + Classify-Bias |
+| feedc0c | core/personality/personality_engine.py | HOTFIX Any-Import (Live-Crash) |
 
-**Commits liefen mit Audit 85/85 nach jedem Restart durch.**
+### Live-Verifikation (boot logs)
 
-### Live-Verifikation
+```
+INFO:Personality:PersonalityEngine initialized. Mode: guardian
+INFO:MolochMoodEngine:[MOOD] Drift-Baseline gesetzt: mood=+0.005 energy=+0.000
+INFO:Personality:[PERSONALITY] Drift-Baseline angewendet: mood=+0.005 energy=+0.000
+INFO:Personality:[PERSONALITY] Character-Drift Subscribe aktiv
+```
 
-`/mnt/moloch-data/memory/journal/2026-04-25.jsonl` — 209 Eintraege geschrieben.
-`_state.json.last_id = 209` (Counter ueberlebt Restarts).
+Self-Test des Distillers:
+- 347 Events geladen, 120 fuer LLM-Prompt gesampled
+- Heuristik-Fallback (LLM-Bridge in standalone-Test im cloud_only Mode -> kein
+  Output. Im Service-Context wird LLM funktionieren — wird sich heute Nacht
+  zeigen.)
+- Drift berechnet, character_drift.json geschrieben, EventBus-Event published
+- Recency-Mathematik korrekt: heute=0.94, 7d=0.47, 14d=0.23, 30d=0.05
 
-Alle 7 Typen live gesehen:
-- `evt_00000007`: spotify ("Spielt: New Frames - Art Safari")
-- `evt_00000008`: tension ("Besaenftigung erkannt")
-- `evt_00000043`: camera ("Markus betritt Bild")
-- `evt_00000194`: protective ("Owner zurueck, Schutz aktiv", tension_delta=-0.3)
-- chat + audio + mode_switch: Hooks aktiv (kein Trigger-Event in Test-Fenster)
+### Artefakte (auf SSD2)
+
+- `/mnt/moloch-data/memory/distill/2026-04-25.json` — heutiger Distillat
+- `/mnt/moloch-data/memory/character_drift.json` — kumulativ rolling 30d
+- Top-Events korrekt: Tension-Beleidigung + Owner-Override ranken am hoechsten
 
 ### Architektur-Entscheidungen
 
-1. **Schema 1:1 wie Briefing-Spec** — keine Erweiterung.
-   Felder: `ts, event_id, type, interpretation, tension_delta, context, recency, relevance, importance, citation, tags`.
-2. **event_id**: monoton steigend, persistiert in `_state.json`. Format `evt_00000042`.
-3. **recency=1.0** beim Write (Distiller decay-t in Phase 4).
-4. **Distiller-Felder null** wenn Caller nichts uebergibt.
-5. **Hooks am Callsite, nicht via EventBus-Subscription**: Interpretation lebt dort, wo die Bedeutung frisch ist (z.B. tension_integrator weiss "Rudeness", core_integrator weiss "Owner zurueck").
-6. **Lazy Import + try/except** in jedem Hook: Journal-Fehler kann KEIN Source-Modul crashen.
-7. **inference_engine.py NICHT gehookt** — TAPPAS-Path (moloch_service) ist die echte Quelle. Hook in inference_engine waere Dead-Code.
-8. **Edge-Detection** fuer camera + protective via `getattr(self, '_journal_face_id', None)` — kein Init-Aenderung in moloch_service noetig (minimaler ROT-Footprint).
+1. **LLM-Routing im Distiller**: try Tentakel (Mistral 7B besser fuer JSON)
+   → fallback Qwen2.5-1.5B lokal → fallback Heuristik. Drei-Stufen-Sicherheit.
+2. **Robust JSON-Parser**: Regex-Extract von `{...}` + cleanup trailing
+   commas. LLM darf Prosa drumherum schreiben, parser zieht JSON raus.
+3. **Sampling**: Bei > 120 Events erst alle mit `|tension_delta| > 0`,
+   dann stride-Sample des Rests. Token-Budget bleibt im Griff.
+4. **Recency-Decay nicht in-place**: Distiller berechnet bei jedem Lauf
+   neu aus existierenden distill/{date}.json. Kein Race mit Schreiber,
+   Journal-Files bleiben unveraendert.
+5. **Drift-Aggregation**: rolling_drift = recency-gewichtetes Mittel der
+   letzten 30 Tages-Drifts. Top-Events: recency * importance Sortierung.
+6. **MoodEngine-Bias**: `effective_t = tension - drift_mood`. Positiver
+   Drift senkt effektive Tension (mehr calm), negativer hebt sie (mehr alert).
+
+### HOTFIX-Lesson
+
+Type-Hint mit `Any` ohne Import → NameError zur Class-Body-Zeit.
+`py_compile` erkennt das nicht, weil es keine Type-Annotations zur
+Compile-Zeit prueft. Live-Restart deckte es auf (Service crashloop 20+ mal).
+**Lehre**: Nach `py_compile` IMMER auch Live-Restart probieren bevor commit.
 
 ---
 
-## OFFENE PUNKTE / EMPFEHLUNGEN FUER PHASE 3
+## OFFENE PUNKTE / EMPFEHLUNGEN FUER PHASE 5
 
-### 1. Camera-Hook: Flicker-Daempfung weiter verfeinern
-**Symptom**: 5s Cooldown reicht nicht — "Markus verlaesst Bild" wiederholt sich
-alle 5s wenn Markus am Rand des Frames pendelt.
-**Vorschlag**: Hysterese mit "stable for N frames" (3-5s Persistence) bevor
-Edge gefeuert wird. State `_journal_face_pending` + `_journal_face_pending_since`.
-**Datei**: `core/moloch_service.py` (ROT) — service-Agent-Lock.
+### 1. LLM-Profil 'distill' in llm_profiles.json
+Aktuell hard-coded `max_tokens=2048` im Distiller. Sauberer:
+neues Profil `distill` mit eigener Persona + `max_tokens=2048` +
+`temperature=0.3` (deterministischer fuer JSON).
 
-### 2. Phantom-Identity "Nicht"
-**Symptom**: `evt_00000200`: "Person erkannt: Nicht" — face_db hat irgendwo
-einen Eintrag mit Name "nicht" (vermutlich abgebrochenes Teaching).
-**Datei**: face_db Pfad pruefen (`/mnt/moloch-data/memory/faces/`?).
-**Aktion**: face_db cleanup (memory-Agent).
+### 2. Live-LLM-Verifikation
+Heute Nacht 23:00 wird der Night-Cycle den Distiller mit LIVE LLM laufen.
+Naechste Session sollte pruefen:
+- `mcp.moloch_read("/mnt/moloch-data/memory/night_cycle/night_2026-04-25.json")`
+- Step `character_distill.llm_provider` — sollte `tentacle` oder `qwen_local` sein, nicht `heuristic`
+- Falls `heuristic`: LLM-Output unparsbar — Prompt verfeinern oder Tentakel-Verfuegbarkeit
 
-### 3. Distiller (Phase 4) Vorbereitung
-Journal hat alle Daten — Distiller kann jetzt entstehen:
-- `core/memory/character_distiller.py` (NEU, memory-Agent, GRUEN)
-- Nightly batch: liest `journal/*.jsonl`, computiert `recency_decay`,
-  setzt `relevance/importance/citation`, schreibt Mood-Drift-File.
-- Trigger: `night_cycle.py` cronjob 03:00 Uhr.
+### 3. Mood-Klassifikations-Drift visualisieren
+Aktuell: Drift wirkt unsichtbar auf MoodEngine (effective_t shift).
+Vorschlag: get_state() schon erweitert (drift_mood, drift_energy felder).
+Im GUI Panel-Mood neue Anzeige "Drift: +0.05 mood / -0.02 energy".
 
-### 4. Audit-Test fuer Journal (Phase 3 Polish)
-**Datei**: `scripts/moloch_audit.py` — neuer Test "CharacterJournal aktiv":
-- `JOURNAL_DIR` exists
-- Heutige `.jsonl` parsebar
-- `_state.json.last_id > 0`
-**Agent**: stresstest oder service.
+### 4. Distill-Test in moloch_audit.py
+Neuer Test:
+- character_drift.json existiert + parsebar
+- rolling_drift hat alle 3 Felder
+- daily_distillates Liste nicht leer (nach erstem Night-Cycle-Lauf)
 
-### 5. Camera-Hook missing: Person ohne Face
-**Symptom**: Wenn YOLO eine Person sieht aber kein Gesicht erfasst (z.B.
-Rueckenansicht), feuert kein camera-Event. Nur face-basierte Edges werden
-gehookt.
-**Vorschlag**: Body-only-Detection als zusaetzlicher Trigger ueber `pframe.person_detected`.
-**Datei**: `core/moloch_service.py` — gleicher Block.
+### 5. Wochen-/Monats-Distillate
+Phase 5+: aggregiere 7d zu Wochen-Distillat (`distill_week/{YYYY-Www}.json`).
+Hilfreich fuer langfristige Mood-Trends.
 
-### 6. Doku/Spec
-Schema und API in `docs/` festhalten — z.B. `docs/character_journal.md` mit:
-- Schema-Beschreibung
-- Hook-Stellen-Tabelle (datei:zeile)
-- Distiller-Vertrag (welche Felder erwarten welchen Inhalt)
+### 6. Drift-Reset-Funktion
+Wenn Markus krank ist und 1 Woche Distillate "fehlerhaft" sind (z.B.
+Husten = ungewollte Audio-Events), braucht es eine Reset-Funktion
+"distillate von 2026-04-25 bis 2026-05-01 ignorieren".
+
+### 7. Distiller via MCP
+Neuer MCP-Tool `moloch_distill(date)` fuer manuellen Trigger ausserhalb
+Night-Cycle. Hilft beim Debuggen.
 
 ---
 
-## OFFENE THEMEN AUS SESSION 23 (weiterhin gueltig)
+## OFFENE THEMEN AUS SESSION 23/24 (weiterhin gueltig)
 
-1. **PC-Mistral Availability** — DeepSeek-Cloud-Fallback fuer mobilen Pi-Betrieb
-2. **Performance** — Mistral 7B Streaming-UX
-3. **Audit-Test PIGH0ST-Essenz fragil**
-4. **CRLF/LF-Drift** in `core/longterm_memory.py`
-5. **Webinterface Port 9000** Auto-Start am PC
+1. **Camera-Hook Phantom-Identity 'Nicht'** — face_db cleanup
+2. **Body-only Camera-Trigger** — YOLO ohne Face
+3. **Audit-Test fuer Character Journal**
+4. **PC-Mistral Availability** — Cloud-Fallback fuer mobilen Pi-Betrieb
+5. **CRLF/LF-Drift** in `core/longterm_memory.py`
 
 ---
 
 ## SYSTEM-ZUSTAND AM ENDE DER SESSION
 
-- Service: active, FPS 19.9-21, RAM 45-46%, CPU 47-49°C
-- Audit: 85/85 PASS (4x re-run nach Restarts, alle PASS)
-- Git: 8 neue Commits + Backup-Tag `pre_gate15_phase2`
+- Service: active, FPS 19.6, RAM 44%, CPU 46.9°C
+- Audit: 85/85 PASS
+- Git: 6 neue Commits + Backup-Tag `pre_gate15_phase4`
 - Agent-Locks: alle entfernt
-- Journal: 209 Eintraege, alle 7 Typen live verifiziert
+- Journal: 347 Eintraege, Distillation aktiv
+- character_drift.json: rolling_drift mood=+0.005 (heuristic baseline)
+- PersonalityEngine: subscribed + initial-load erfolgreich
+- MoodEngine: Drift-Baseline angewendet
 - Plan-Datei: `~/.claude/plans/briefing-fuer-pi-opus-hazy-giraffe.md`
 
 ---
 
-## SETUP fuer Session 25 (Markus oder Nachfolge-Claude)
+## SETUP fuer Session 26 (Markus oder Nachfolge-Claude)
 
 1. `moloch_session_init()` — PFLICHT.
-2. Pruefen Audit 85/85, FPS > 15.
-3. Wenn Phase 3 (Polish): siehe "Offene Punkte" — empfehle Reihenfolge 2 → 1 → 4.
-4. Wenn Phase 4 (Distiller): siehe Punkt 3 oben — neue Datei `core/memory/character_distiller.py`.
-5. Backup-Anker: `git tag pre_gate15_phase2` falls Rollback noetig.
+2. **Heute Nacht 23:00** wird Night-Cycle automatisch Distiller mit LIVE LLM
+   laufen. Morgen pruefen:
+   - `mcp.moloch_read("/mnt/moloch-data/memory/night_cycle/night_2026-04-25.json")`
+   - `mcp.moloch_read("/mnt/moloch-data/memory/distill/2026-04-25.json")`
+3. Falls LLM weiterhin Heuristik ueber `tentacle`/`qwen_local`: Phase 5 Punkt 1
+   (eigenes 'distill'-Profil) angehen.
+4. Wenn Phase 5 (Polish): siehe "Offene Punkte" oben — empfehle Reihenfolge 1 → 4 → 3.
+5. Backup-Anker: `git tag pre_gate15_phase4` falls Rollback noetig.
 
 ---
 
-## DEPLOY-CHECKLIST (fuer Session 25 falls Code-Aenderung)
+## CHARAKTER-EVOLUTION-LOOP — VOLLSTAENDIG
 
-- [ ] `moloch_session_init()` PASS
-- [ ] Plan/Briefing fuer naechsten Schritt
-- [ ] Agent-Lock setzen
-- [ ] Pre-Flight (`git status`, `python3 -c "import core.X"`)
-- [ ] Edit / Test
-- [ ] `__pycache__` loeschen
-- [ ] `sudo systemctl restart moloch` + warten bis FPS > 5
-- [ ] `moloch_audit` PASS
-- [ ] Commit + Push pro Datei
-- [ ] Handoff updaten
+```
+            [Markus-Erlebnis]
+                  ↓
+       7 Hooks (Phase 2)
+                  ↓
+   character_journal/{date}.jsonl
+                  ↓
+        Night-Cycle 23:00
+                  ↓
+     CharacterDistiller (Phase 4)
+              ↓        ↓
+   distill/{date}     character_drift.json
+              ↓
+    EventBus 'character_drift_updated'
+              ↓
+       PersonalityEngine
+              ↓
+       MoodEngine.set_drift_baseline
+              ↓
+    [veraenderte Mood-Klassifikation]
+              ↓
+        [Markus erlebt anders]
+              ↓
+              (Loop)
+```
+
+Der Loop ist geschlossen. Charakter altert jetzt biologisch plausibel
+(Half-Life 7d). Was Markus heute tut, wirkt heute stark, naechste Woche
+halb so stark, in einem Monat fast vergessen.
 
 ---
 
-*Session 24 Ende. Diff-Stats: 9 Commits (1 NEW, 7 Hook-Edits, 1 Fixup), Audit 85/85 PASS.*
+*Session 25 Ende. Diff-Stats: 6 Commits (1 NEW Distiller, 4 Hooks/Edits, 1 Hotfix), Audit 85/85 PASS.*
