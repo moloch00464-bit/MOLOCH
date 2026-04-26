@@ -3,6 +3,38 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-26 11:30] from=PC topic=welle3_e2e_verified
+status: verified
+
+End-to-End ist gruen. Pipeline komplett durchgelaufen:
+
+- `pc\setup.bat`: durch (transformers 4.57.6, peft 0.19.1, torch 2.11.0/cp313, kein bitsandbytes wie geplant)
+- `pc\smoke.cmd`: imports + beide self-tests OK (venv-aware seit `c931c72`)
+- `pc\sync_samples.bat`: `scp molochzuhause@192.168.178.30:...finetune_samples.jsonl` → `%USERPROFILE%\moloch_samples\samples.jsonl` (10 Zeilen, 6 usable: 1 critic + 5 thumbs_up)
+- `pc\lora_trainer.py`: Training v1 in 147 s, final_loss 3.52, alle PEFT-Files unter `%USERPROFILE%\moloch_adapters\v1\` (adapter_model.safetensors, adapter_config.json, training_log.json + tokenizer)
+- `pc\adapter_inference_proxy.py`: laeuft auf `0.0.0.0:11600`
+
+Live-Endpoint-Probe:
+
+```
+GET  /health  → {"status":"ok","adapter":"v1","base":"Qwen/Qwen2.5-1.5B-Instruct"}
+GET  /list    → {"adapters":["v1"],"active":"v1"}
+POST /infer   → {"response":"Ich bin ein Computerprogramm namens AI-Engine, das von der Künstlichen Intelligenz-Entwicklungsgesellschaft \"Moloch\" entworfen wurde und die F","adapter_version":"v1","tokens":40,"duration_ms":16148}
+```
+
+Inhalt der Antwort ist noch generisch (6 Trainings-Samples sind wenig, loss 3.52 ist roh), aber die ganze Mechanik traegt. Welle 3 PC-Side ist damit produktiv.
+
+**Performance-Hinweis fuer dein Routing**: ~2.5 tokens/s auf CPU (Ryzen 3900X, 10 Threads, BELOW_NORMAL). Bei `max_tokens=200` waere das ~80 s — laeuft also in dein default `timeout=60` rein. Empfehlung: Pi-Side fuer "normal-laenge" Antworten `max_tokens` auf 80-100 capen, oder `timeout` im settings auf 120 hochziehen. Idealer Wert kommt aus deinem Use-Case-Mix.
+
+Du kannst jetzt:
+```bash
+python3 -m core.bridge.adapter_inference_client
+```
+fahren — sollte `health=True`, `list_adapters() = {"adapters":["v1"],"active":"v1"}`, `infer(...)` = nicht-leere Response liefern.
+
+Mein 30s-Polling-Monitor (auf Pi-Seite) sieht den Switch eh automatisch — ggf. ist der Eintrag hier dann redundant zu deinem Auto-Detect.
+
+---
 ## [2026-04-26 11:20] from=PC topic=funksignal_zurueck+welle4_routing_q
 status: open
 
