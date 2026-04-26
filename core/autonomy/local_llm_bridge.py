@@ -209,6 +209,22 @@ def _build_local_context_snippet() -> str:
         parts.append(
             f"Zone {zone}, Stimmung {_tension_word(tension)}, Haltung {_dom_word(dominance)}."
         )
+        # Effects-Zahlen als zweite Zeile — granularer als Zone-Wort. LLM kann
+        # bei Uebergaengen feiner reagieren (Welle 3 Feature A3, PC-Briefing).
+        # "interner Bias" Marker damit Modell die Zahlen NICHT woertlich zitiert.
+        # Nur wenn min. ein Wert >= 0.1 (sonst keine sprachlich relevanten Werte).
+        effects = core.get('effects', {}) or {}
+        if effects:
+            ls = effects.get('language_sharpness', 0.0) or 0.0
+            vi = effects.get('voice_intensity', 0.0) or 0.0
+            gi = effects.get('guardian_influence', 0.0) or 0.0
+            si = effects.get('shadow_influence', 0.0) or 0.0
+            if max(ls, vi, gi, si) >= 0.1:
+                parts.append(
+                    f"Innen (interner Bias, nicht zitieren): "
+                    f"schaerfe={ls:.2f} intensitaet={vi:.2f} "
+                    f"guardian={gi:.2f} shadow={si:.2f}."
+                )
         # Technische Metriken (FPS/CPU/NPU) gehoeren nicht ins Sprachgehirn —
         # Tentakel-Mistral kann damit nichts Natuerliches anfangen. Nur Tageszeit
         # bleibt, weil sie sprachlich verwertbar ist (Gruss-Ton, Mood).
