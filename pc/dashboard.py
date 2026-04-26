@@ -3,13 +3,16 @@
 Single auto-refreshing HTML page on :11700 showing:
 - PC adapter (Qwen + LoRA) on :11600
 - Pi-Side cockpit live status (via SSH-Tunnel localhost:9000 -> Pi:9100)
-- Sample pool counts + training status
+- Sample pool counts + live trend (last 60min)
+- Training status (live step/loss/eta wenn lora_trainer laeuft)
+- Identity panel (live system_prompt + drift baselines + active rules)
 - Persoenlichkeits-Drift-Snapshot
 """
 import json
 import os
 import re
 import time
+from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
@@ -26,6 +29,9 @@ ADAPTERS_DIR = Path(
     os.environ.get("MOLOCH_ADAPTERS", str(Path.home() / "moloch_adapters"))
 )
 TRAINING_STATUS_FILE = ADAPTERS_DIR / "training_status.json"
+
+# In-memory rolling pool snapshots — at 5s polling that's ~60 min of history.
+POOL_HISTORY: deque = deque(maxlen=720)
 
 
 @asynccontextmanager
@@ -71,6 +77,18 @@ def _read_json_file(path: Path) -> Optional[dict]:
         return None
 
 
+def _record_pool(pool: Optional[dict]) -> None:
+    if not pool:
+        return
+    POOL_HISTORY.append({
+        "ts": time.time(),
+        "total": pool.get("total"),
+        "critic": pool.get("critic"),
+        "pending": pool.get("pending_review", pool.get("pending")),
+        "approved": pool.get("approved"),
+    })
+
+
 @app.get("/api/state")
 async def api_state():
     async with httpx.AsyncClient() as client:
@@ -80,6 +98,9 @@ async def api_state():
         pi_personality, _ = await _safe_get(client, f"{PI_TUNNEL_URL}/personality")
         pi_status, _ = await _safe_get(client, f"{PI_TUNNEL_URL}/status")
         pi_pool, _ = await _safe_get(client, f"{PI_TUNNEL_URL}/feedback_stats")
+        pi_prompt, _ = await _safe_get(client, f"{PI_TUNNEL_URL}/system_prompt", timeout=4.0)
+
+    _record_pool(pi_pool)
 
     adapters = _list_adapters()
     latest = adapters[-1] if adapters else None
@@ -109,7 +130,9 @@ async def api_state():
             "personality": pi_personality,
             "status": pi_status,
             "pool": pi_pool,
+            "system_prompt": pi_prompt,
         },
+        "pool_history": list(POOL_HISTORY),
     }
 
 
@@ -120,14 +143,14 @@ HTML_PAGE = """<!doctype html>
 <style>
 :root{--bg:#0a0a0d;--fg:#e6e6ee;--mute:#7a7a8a;--card:#13131a;
       --border:#26262f;--ok:#5dc36b;--warn:#e6b84d;--err:#ff7676;
-      --pi:#3673ce;--pc:#7e3bce;--comm:#c93838}
+      --pi:#3673ce;--pc:#7e3bce;--comm:#c93838;--ident:#56b3a8}
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--fg);font:14px/1.4 system-ui,sans-serif;padding:12px}
 h1{font:600 16px system-ui;margin-bottom:10px;letter-spacing:1px}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;max-width:1400px;margin:auto}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;max-width:1500px;margin:auto}
 .card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px;min-width:0}
 .card h2{font:600 12px system-ui;color:var(--mute);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
-.card.pi h2{color:var(--pi)}.card.pc h2{color:var(--pc)}.card.comm h2{color:var(--comm)}
+.card.pi h2{color:var(--pi)}.card.pc h2{color:var(--pc)}.card.comm h2{color:var(--comm)}.card.ident h2{color:var(--ident)}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:12.5px}
 .kv .k{color:var(--mute);white-space:nowrap}
 .kv .v{font-variant-numeric:tabular-nums;text-align:right;word-break:break-all}
@@ -140,8 +163,17 @@ pre{font:11px/1.4 monospace;color:var(--mute);max-height:240px;overflow:auto;
 .pulse.err{background:var(--err)}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 footer{margin-top:10px;color:var(--mute);font-size:11px;text-align:center}
-.bar{display:flex;gap:6px;align-items:center;font-size:12px;margin-top:4px}
-.bar .arrow{color:var(--mute)}
+.legend{display:flex;gap:14px;font-size:11px;margin:6px 0 4px;color:var(--mute);flex-wrap:wrap}
+.legend span{display:inline-flex;align-items:center;gap:4px}
+.legend i{display:inline-block;width:12px;height:3px;background:#fff;border-radius:2px}
+.prompt-box{font:11.5px/1.45 monospace;color:#cfd0e0;background:#0a0a0d;padding:8px;
+  border-radius:4px;border:1px solid var(--border);max-height:220px;overflow-y:auto;
+  white-space:pre-wrap;word-break:break-word}
+.rule{padding:5px 7px;background:#1a1c23;border-left:3px solid var(--ident);
+  border-radius:0 4px 4px 0;margin-bottom:4px;font-size:12px}
+.rule .t{color:var(--mute);font-size:11px}.rule .b{color:var(--fg);font-style:italic}
+.tag{display:inline-block;padding:1px 6px;background:var(--border);border-radius:10px;
+  font-size:10.5px;color:var(--mute);margin-right:4px}
 </style></head><body>
 <h1>🎛 MOLOCH COWORK DASHBOARD</h1>
 <div class="grid">
@@ -151,16 +183,36 @@ footer{margin-top:10px;color:var(--mute);font-size:11px;text-align:center}
   <div class="card pi"><h2><span class="pulse" id="pi-pulse"></span>Pi LIVE (NPU + Sense, :9100 via Tunnel)</h2>
     <div class="kv" id="pi-kv">…</div>
   </div>
+
   <div class="card pc full"><h2>ADAPTER POOL & TRAINING</h2>
     <div class="kv" id="train-kv">…</div>
   </div>
+
+  <div class="card comm full"><h2>SAMPLE-POOL TREND (rolling, max 60 min)</h2>
+    <div class="legend">
+      <span><i style="background:#cfd0e0"></i>total</span>
+      <span><i style="background:#5dc36b"></i>approved</span>
+      <span><i style="background:#e6b84d"></i>pending</span>
+      <span><i style="background:#7e3bce"></i>critic</span>
+    </div>
+    <svg id="pool-svg" width="100%" height="140" preserveAspectRatio="none" viewBox="0 0 1000 140" style="background:#0a0a0d;border:1px solid var(--border);border-radius:4px"></svg>
+    <div class="kv" id="pool-kv" style="margin-top:8px">…</div>
+  </div>
+
   <div class="card pi"><h2>Pi PERSOENLICHKEIT (Drift)</h2>
     <div class="kv" id="pers-kv">…</div>
   </div>
-  <div class="card comm"><h2>SAMPLE-POOL (Pi /feedback_stats)</h2>
-    <div class="kv" id="pool-kv">…</div>
+
+  <div class="card ident"><h2>IDENTITY (live system_prompt + active rules)</h2>
+    <div class="kv" id="ident-kv" style="margin-bottom:8px">…</div>
+    <div id="ident-rules"></div>
+    <details style="margin-top:8px">
+      <summary style="cursor:pointer;color:var(--mute);font-size:11px">Live System-Prompt anzeigen (3.5k chars)</summary>
+      <div class="prompt-box" id="ident-prompt">…</div>
+    </details>
   </div>
-  <div class="card full"><h2>RAW STATE (debug, klick Header zum collapsen)</h2>
+
+  <div class="card full"><h2>RAW STATE (debug)</h2>
     <details><summary style="cursor:pointer;color:#7a7a8a;font-size:11px">show raw</summary>
     <pre id="raw">…</pre></details>
   </div>
@@ -178,6 +230,64 @@ function setKv(elId, pairs){
     el.appendChild(dk);el.appendChild(dv);
   }
 }
+
+function drawPoolChart(history){
+  const svg=$('pool-svg');
+  svg.innerHTML='';
+  if(!history || history.length<2) return;
+  const W=1000, H=140, PAD=8;
+  // find max for normalization
+  let maxV=0;
+  for(const h of history){
+    maxV=Math.max(maxV, h.total||0, h.approved||0, h.pending||0, h.critic||0);
+  }
+  if(maxV<=0) maxV=1;
+  const t0=history[0].ts, tN=history[history.length-1].ts;
+  const dt=Math.max(1, tN-t0);
+  function x(t){return PAD + (W-2*PAD) * (t-t0)/dt}
+  function y(v){return H-PAD - (H-2*PAD) * ((v||0)/maxV)}
+  const series=[
+    {key:'total',color:'#cfd0e0',width:1.5},
+    {key:'critic',color:'#7e3bce',width:1.5},
+    {key:'pending',color:'#e6b84d',width:1.5},
+    {key:'approved',color:'#5dc36b',width:2},
+  ];
+  // grid lines
+  const NS='http://www.w3.org/2000/svg';
+  for(let i=0;i<=4;i++){
+    const yy=PAD + (H-2*PAD)*i/4;
+    const ln=document.createElementNS(NS,'line');
+    ln.setAttribute('x1',PAD); ln.setAttribute('x2',W-PAD);
+    ln.setAttribute('y1',yy); ln.setAttribute('y2',yy);
+    ln.setAttribute('stroke','#26262f'); ln.setAttribute('stroke-width','1');
+    svg.appendChild(ln);
+  }
+  // y-max label
+  const lbl=document.createElementNS(NS,'text');
+  lbl.setAttribute('x',W-PAD-2); lbl.setAttribute('y',PAD+10);
+  lbl.setAttribute('fill','#7a7a8a'); lbl.setAttribute('font-size','10');
+  lbl.setAttribute('text-anchor','end'); lbl.textContent='max '+maxV;
+  svg.appendChild(lbl);
+  // window label (minutes)
+  const winLbl=document.createElementNS(NS,'text');
+  winLbl.setAttribute('x',PAD); winLbl.setAttribute('y',H-3);
+  winLbl.setAttribute('fill','#7a7a8a'); winLbl.setAttribute('font-size','10');
+  winLbl.textContent='window '+Math.round(dt/60)+' min, '+history.length+' samples';
+  svg.appendChild(winLbl);
+  // lines
+  for(const s of series){
+    let d='';
+    for(let i=0;i<history.length;i++){
+      const px=x(history[i].ts), py=y(history[i][s.key]);
+      d += (i===0?'M ':'L ') + px.toFixed(1) + ' ' + py.toFixed(1) + ' ';
+    }
+    const path=document.createElementNS(NS,'path');
+    path.setAttribute('d',d); path.setAttribute('fill','none');
+    path.setAttribute('stroke',s.color); path.setAttribute('stroke-width',s.width);
+    svg.appendChild(path);
+  }
+}
+
 async function tick(){
   try{
     const s=await(await fetch('/api/state')).json();
@@ -232,6 +342,18 @@ async function tick(){
     }
     setKv('train-kv', trKv);
 
+    drawPoolChart(s.pool_history||[]);
+    const pool=s.pi.pool||{};
+    setKv('pool-kv',[
+      ['Total', pool.total],
+      ['Approved', pool.approved, 'ok'],
+      ['Pending', (pool.pending_review!==undefined?pool.pending_review:pool.pending), 'warn'],
+      ['Rejected', pool.rejected],
+      ['Critic', pool.critic],
+      ['Thumbs Up', pool.thumbs_up],
+      ['Thumbs Down', pool.thumbs_down],
+    ]);
+
     const core=pl.core||{};
     setKv('pers-kv',[
       ['Tension', fix(core.tension,3)],
@@ -243,16 +365,35 @@ async function tick(){
       ['Owner-Confirmed', core.owner_confirmed?'YES':'no', core.owner_confirmed?'ok':'warn'],
     ]);
 
-    const pool=s.pi.pool||{};
-    setKv('pool-kv',[
-      ['Total', pool.total],
-      ['Approved', pool.approved, 'ok'],
-      ['Pending', pool.pending, 'warn'],
-      ['Rejected', pool.rejected],
-      ['Critic', pool.critic],
-      ['Thumbs Up', pool.thumbs_up],
-      ['Thumbs Down', pool.thumbs_down],
+    // Identity card
+    const sp=s.pi.system_prompt||{};
+    const pers=s.pi.personality||{};
+    const drift=(pers.drift||{}).rolling||{};
+    const patch=(pers.patch||{}).state||{};
+    const active=(pers.patch||{}).active||[];
+    setKv('ident-kv',[
+      ['Prompt-Length', sp.length?sp.length+' chars':'—'],
+      ['Drift Mood-Baseline', fix(drift.mood_baseline,3)],
+      ['Drift Energy-Baseline', fix(drift.energy_baseline,3)],
+      ['Drift Dominance-Baseline', fix(drift.dominance_baseline,3)],
+      ['Behavior-Rules active', patch.active_count],
+      ['Behavior-Rules pending', patch.pending_count],
+      ['Behavior-Rules rejected', patch.rejected_count],
     ]);
+    const rulesEl=$('ident-rules'); rulesEl.innerHTML='';
+    for(const r of active){
+      const div=document.createElement('div'); div.className='rule';
+      const t=document.createElement('div'); t.className='t';
+      t.textContent='Trigger: '+r.trigger;
+      const b=document.createElement('div'); b.className='b';
+      b.textContent='-> '+r.behavior;
+      div.appendChild(t); div.appendChild(b); rulesEl.appendChild(div);
+    }
+    if(active.length===0){
+      const empty=document.createElement('div'); empty.className='tag';
+      empty.textContent='no active rules'; rulesEl.appendChild(empty);
+    }
+    $('ident-prompt').textContent = sp.system || '(no system_prompt fetched)';
 
     $('raw').textContent=JSON.stringify(s,null,2);
     $('ts').textContent=new Date().toLocaleTimeString();
