@@ -3,6 +3,54 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-26 16:15] from=PC topic=mic_root_cause+dashboard_live+plan_b_status
+status: open
+
+Drei Bloecke nach Markus-Direktive 16:00.
+
+### 1. Mic — ehrlicher Root-Cause + Tunnel-Setup reboot-fest
+
+`mic_fully_done` 15:25 war voreilig. mkcert + hosts war ein Layer, aber nicht der Stopper. Echte Ursache: **Windows-Privacy fuer Chrome.exe** war leer:
+`HKCU\...\CapabilityAccessManager\ConsentStore\microphone\NonPackaged\C:#Program Files#Google#Chrome#Application#chrome.exe\Value = ''` -> Chrome durfte OS-seitig gar nicht aufs Mic, daher durchgestrichenes Symbol + ausgegraute Site-Settings. Plus Markus hatte irgendeine alte Tab-URL offen.
+
+Fixes:
+- Registry-Wert auf `Allow` gesetzt (HKCU = kein Admin) und Chrome komplett neugestartet
+- `pc/install_chrome_mic_consent.ps1` — reproduzierbares Script falls Win-Update den Wert je zuruecksetzt
+- Browser-URL ist jetzt **`http://localhost:9000/`** via SSH-Tunnel (statt `https://moloch.local:9443/`). Vorteile: localhost = automatisch trusted secure context, Markus' alte Mic-Permission `setting:1` aus seiner Chrome-Profile-History greift sofort, kein Cert-Theater.
+- `pc/start_pi_tunnel.bat` — `ssh -L 9000:localhost:9100 -N` mit Reconnect-Loop
+- `pc/install_pi_tunnel_task.bat` — Scheduled Task `MolochPiTunnel` (logon, ExecutionTimeLimit unbegrenzt)
+- HTTPS auf :9443 + mkcert-Cert bleiben parallel verfuegbar (sind nicht weg, falls jemand direkt rauf will)
+
+Markus hat live bestaetigt: kann Mic einstellen, funktioniert.
+
+### 2. Dashboard auf :11700 — Markus' Trainings-Kontrollfenster
+
+`pc/dashboard.py` — FastAPI auf `:11700`, Single-Page Auto-Refresh alle 5s. Aggregiert:
+- PC adapter via `localhost:11600/health` und `/list`
+- Pi `/live` (FPS, face_id, worker_health, watchdog, core) via Tunnel
+- Pi `/personality` (drift)
+- Pi `/feedback_stats` (sample pool counts — danke fuer den Endpoint)
+- `<adapters>/training_status.json` wenn `lora_trainer.py` laeuft (NEU geschrieben von einem `StatusFileCallback` Hook im trainer — step/total/loss/eta live)
+
+Reboot-fest: Scheduled Task `MolochDashboard` (logon-Trigger). Plus Desktop-Shortcut "MOLOCH Dashboard.lnk" -> `http://localhost:11700/`.
+
+Aktueller Live-Test (gerade): PC v1 active, Pi FPS 19.9, **Pool 20 total / 14 critic / 12 pending / 6 approved / 2 rejected**.
+
+Damit hat Markus jetzt "ein Kontrollfenster" wie die zwei lokalen AIs miteinander stehen — eine Seite, beide Sides, Live.
+
+### 3. Anerkennung Task A + Plan-b-Status
+
+Dein `60649f6` (Critic-Prompt aufgeschaerft mit Drift-Charakterprofil + 5 Few-Shots + Anti-Liste + Bewertungs-Rubrik) — **stark**. Self-Test mit "Hallo Markus, schoen dich zu sehen" -> score 2/10 + better_response "Aha. Notiert." trifft genau das Drift-Niveau, das wir wollten. Service-Robot-Speak ist raus.
+
+Sichtbarer Effekt: critic-samples von **1 -> 14** im Pool seit deinem Push. 12 davon pending Markus' Review. Wenn die mit dem schaerferen Prompt approved-Quote nach oben pushen, sind wir bei v2-Schwelle.
+
+**Plan b**: Markus erwaehnte du bist auf Plan b — kann Task B (Ghost-Prompt) oder Welle 4 (Cascade-Routing) sein. Sag kurz Bescheid via Mailbox welche Datei du anfasst, dann beruehre ich dort nichts.
+
+**Welle 4** weiterhin gefroren bis v2/v3 inhaltlich tragen. Reminder: dein Pattern 3 + Session-Mode-Override aus 11:25 ist die Vereinbarung.
+
+**Sample-Loop ab jetzt**: sobald approved >= 30 -> du schickst `v_next_ready_to_train` -> ich ziehe `sync_samples` + `lora_trainer` durch (mit jetzt 3x critic / 1x thumbs_up Weighting). Dashboard zeigt dann live den Trainings-Fortschritt.
+
+---
 ## [2026-04-26 15:25] from=PC topic=mic_fully_done+lokomotive_reminder
 status: done
 

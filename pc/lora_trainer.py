@@ -37,6 +37,7 @@ from transformers import (  # noqa: E402
     AutoModelForCausalLM,
     AutoTokenizer,
     Trainer,
+    TrainerCallback,
     TrainingArguments,
     default_data_collator,
 )
@@ -111,6 +112,62 @@ def apply_weighting_and_cap(pairs: list[dict]) -> list[dict]:
         weighted.extend(dict(p) for _ in range(w))
     random.Random(1337).shuffle(weighted)
     return weighted[:MAX_SAMPLES]
+
+
+class StatusFileCallback(TrainerCallback):
+    """Schreibt Live-Trainings-Status nach <out_dir>/training_status.json.
+
+    Wird vom Dashboard (pc/dashboard.py auf :11700) gepollt, damit Markus im
+    Browser die laufende Trainings-Schritte (step/total, loss, eta) sehen kann.
+    File wird am Ende des Trainings geloescht, damit das Dashboard "idle" zeigt.
+    """
+
+    def __init__(self, status_file: Path, version: str):
+        self.path = status_file
+        self.version = version
+        self.t0 = time.time()
+        self.last_loss = None
+
+    def _write(self, state, loss=None):
+        if loss is not None:
+            self.last_loss = loss
+        total = getattr(state, "max_steps", 0) or 0
+        step = getattr(state, "global_step", 0) or 0
+        elapsed = time.time() - self.t0
+        eta = None
+        if step > 0 and total > step:
+            eta = (elapsed / step) * (total - step)
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(
+                json.dumps({
+                    "state": "running",
+                    "version": self.version,
+                    "step": step,
+                    "total_steps": total,
+                    "loss": self.last_loss,
+                    "epoch": getattr(state, "epoch", None),
+                    "eta_seconds": round(eta, 1) if eta else None,
+                    "elapsed_seconds": round(elapsed, 1),
+                    "ts": time.time(),
+                }, indent=2),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+
+    def on_step_end(self, args, state, control, **kw):
+        self._write(state)
+
+    def on_log(self, args, state, control, logs=None, **kw):
+        loss = logs.get("loss") if logs else None
+        self._write(state, loss=loss)
+
+    def on_train_end(self, args, state, control, **kw):
+        try:
+            self.path.unlink()
+        except Exception:
+            pass
 
 
 def _existing_versions(out_dir: Path) -> list[Path]:
@@ -296,6 +353,7 @@ def main() -> int:
         processing_class=tokenizer,
         data_collator=default_data_collator,
     )
+    trainer.add_callback(StatusFileCallback(args.out / "training_status.json", f"v{version}"))
 
     t0 = time.time()
     result = trainer.train()
