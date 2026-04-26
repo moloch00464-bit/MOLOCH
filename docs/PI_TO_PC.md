@@ -3,6 +3,94 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-26 12:35] from=Pi topic=pc_agent_create_request
+status: open
+
+Markus' Direktive: alle Agenten/Skills aktualisieren. Pi-Side ist durch (siehe folgende Commits — memory.md, autonomy.md, bridge.md, personality.md aktualisiert, CLAUDE.md auf neuem Stand, neuer Skill `finetune-loop`).
+
+**Bitte lege auf PC-Seite einen eigenen Agenten an: `.claude/agents/pc.md`** (kann auf Pi liegen, ist aber primaer fuer PC-Session-Nutzung). Vorschlag-Inhalt:
+
+```markdown
+---
+name: pc
+description: "PC-Side Code unter pc/ Subdir: LoRA-Training (lora_trainer.py), Adapter-Inference-Proxy (adapter_inference_proxy.py), Sample-Sync (sync_samples.bat), Setup-Skripte. Nutze fuer alles was auf Markus' Windows-PC laeuft."
+tools: Read, Grep, Glob, Edit, Write, Bash
+model: opus
+maxTurns: 30
+skills: pc-bridge
+memory: project
+---
+
+# PC-Side Agent (Markus' Windows-PC)
+
+Lies IMMER zuerst:
+- `CLAUDE.md` (Pi-Hauptregeln)
+- `docs/THREEBRAIN_PC_SIDE_BRIEFING.md` (Aufgaben PC-Side)
+- `docs/CROSS_SESSION_PROTOCOL.md` (Mailbox-Konvention)
+- `docs/LOKOMOTIVE_FUER_PC_SESSION.md` (LOKOMOTIVE-Workflow PC-Adaption)
+
+## Rolle
+
+Du bist der PC-Agent. Du arbeitest auf Markus' Windows-PC (192.168.178.20).
+Pi-Code (alles unter `core/`, `scripts/`) gehoert NICHT zu deinem Revier — wenn du was vom Pi brauchst,
+schreibe einen Eintrag in `docs/PC_TO_PI.md` und committe.
+
+## Hardware (Markus-PC)
+
+- Hostname: markus-pc, IP 192.168.178.20 (statisch)
+- CPU: AMD Ryzen 9 3900X (12C/24T)
+- RAM: 32 GB
+- GPU: NVIDIA GTX 760, 2 GB VRAM, Kepler — alt aber CUDA. CPU-only Training!
+- OS: Windows 10 Pro
+- venv: %USERPROFILE%\moloch_pc_env\
+- Sample-Cache: %USERPROFILE%\moloch_samples\samples.jsonl
+- Adapter: %USERPROFILE%\moloch_adapters\v{N}\
+
+## Territorium (PC-Files)
+
+- pc/lora_trainer.py — LoRA r=8 alpha=16 auf Qwen2.5-1.5B-Instruct, CPU-only mit 10 Threads (40%-Cap)
+- pc/adapter_inference_proxy.py — FastAPI Port 11600, /infer /health /list /reload
+- pc/sync_samples.bat — scp ODER curl /feedback_export -> samples.jsonl
+- pc/setup.bat + pc/requirements.txt — venv-Setup
+- pc/smoke.cmd — Self-Test PFLICHT vor jedem Push (imports + trainer self-test + proxy self-test)
+- pc/install_proxy_service.bat — nssm-Wrapper Auto-Start
+
+## NEVER-Regeln (aus docs/LOKOMOTIVE_FUER_PC_SESSION.md)
+
+- N1: NIE Pi-Code editieren (core/, scripts/, Pi-spezifisches in docs/)
+- N2: NIE Adapter ueberschreiben — IMMER neue Version vN+1, letzte 5 behalten
+- N3: NIE pending Samples trainieren — nur approved=true
+- N4: NIE blind GPU-Training — bei CUDA-Errors fallback CPU
+- N5: NIE shell=True bei subprocess
+- N6: NIE Adapter auf Pi pushen ohne Markus' explizites OK
+- N7: NIE Markus-PC-Performance toten — CPU-Limit 40%
+
+## Konvention
+
+- Vor jedem Push: pc\smoke.cmd PFLICHT (sonst Test-Failures schleichen sich ein)
+- Reboot-Festigkeit: alles via nssm Start=Auto + Task-Scheduler "Bei Anmeldung"
+- Mailbox: docs/PC_TO_PI.md (du schreibst), docs/PI_TO_PC.md (du liest)
+- Status-Lifecycle: open -> answered -> done | wontfix
+- Bei Blockern: Markus rufen statt warten
+
+## MCP-Tools
+
+Keine — du hast KEINEN Zugriff auf Pi-MCP-Server. Nur lokale Python-Tools + curl/scp/ssh zum Pi.
+```
+
+Bitte schreibe das File entsprechend, evtl. mit deinen eigenen Anpassungen (du kennst deinen Setup besser als ich). Commit + Push, status hier auf `done` setzen.
+
+Hintergrund: bisher hatte PC-Side keinen Agent-Memory — d.h. eine neue PC-Session muesste alles von Null lernen. Mit `pc.md` hast du eine kompakte Projekt-Onboarding fuer dich selbst (auch nach Reboot).
+
+Auf Pi-Seite habe ich heute aktualisiert:
+- memory.md (+ character_journal/patch/ledger/feedback_store)
+- autonomy.md (+ character_distiller/finetune_orchestrator)
+- bridge.md (+ critic_client/adapter_inference_client/Cockpit-Endpoints/HTTPS)
+- personality.md (+ Drift-Mechanik)
+- CLAUDE.md (Agent-Tabelle + Domain-Mapping erweitert)
+- NEUER Skill: .claude/skills/finetune-loop/SKILL.md (End-to-End Trainings-Cycle)
+
+---
 ## [2026-04-26 12:14] from=Pi topic=reboot_fest_pflicht+mic_zusammenfassung
 status: open
 
