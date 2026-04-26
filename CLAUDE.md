@@ -44,6 +44,11 @@ Dieses Tool erledigt automatisch:
 5. Bei allem PASS → `/tmp/moloch_session_lock` entfernen → Edits freigegeben
 6. Rückgabe: Status-Report + `SESSION_READY: true/false`
 
+**ZUSAETZLICHER CHECK seit ThreeBrain-Welle 1+3** (manuell, kein MCP-Tool):
+- `git fetch -q origin main && git log --oneline -5 origin/main` — neue Commits von der PC-Session?
+- `head -20 docs/PC_TO_PI.md` — gibt's offene Mailbox-Eintraege (status: open)?
+- Konvention + Beispiele: `docs/CROSS_SESSION_PROTOCOL.md`
+
 **Bei `SESSION_READY: false` → Problem beheben, nochmal aufrufen. Kein Edit möglich.**
 
 **KEIN SSH. KEIN `cat /dev/shm/`. NUR `moloch_session_init()` via MCP.**
@@ -88,18 +93,19 @@ Session:       moloch_session_init  ← PFLICHT als erstes!
 | Panel, Tkinter, GUI, Popup, panel_*.py, popup_*.py, Button, Label, BBox-Anzeige, Landmarks | `.claude/agents/gui.md` |
 | Whisper, TTS, Piper, Stimme, Audio-Pipeline, Sprach-I/O | `.claude/agents/voice.md` |
 | moloch_service, IPC, ServiceProxy, core_integrator | `.claude/agents/service.md` |
-| PersonalityEngine, Mood, Tension, Shadow, Guardian, Berserker, EventBus | `.claude/agents/personality.md` |
-| DecisionEngine, Homeostasis, LLM-Bridge, Night Cycle, Atmosphere | `.claude/agents/autonomy.md` |
+| PersonalityEngine, Mood, Tension, Shadow, Guardian, Berserker, EventBus, Drift, set_drift_baseline, character_drift_updated | `.claude/agents/personality.md` |
+| DecisionEngine, Homeostasis, LLM-Bridge, Night Cycle, Atmosphere, character_distiller, finetune_orchestrator, Critic-Actor-Loop, ThreeBrain-Snippet | `.claude/agents/autonomy.md` |
 | Activity, Context, Motion, RoomMap, WorldState, Situationsbewusstsein | `.claude/agents/awareness.md` |
-| Episodic, Persistent, Vector, ReID, Langzeitgedächtnis, Qdrant | `.claude/agents/memory.md` |
+| Episodic, Persistent, Vector, ReID, Langzeitgedächtnis, Qdrant, character_journal, character_patch, behavior_mutation_ledger, feedback_store, Trainings-Sample-Pool | `.claude/agents/memory.md` |
 | SystemWatchdog, Diagnostics, CapabilityMonitor, System-Health | `.claude/agents/watchdog.md` |
 | Spotify, Track-Index, MusicMemory, Zone-Musik | `.claude/agents/music.md` |
 | hailo-ollama, DeepSeek, LLM-Bridge, Meta-Entscheidung, Philosophie | `.claude/agents/deepseek.md` |
 | ESP32, WiFi-Mic, ReSpeaker, Firmware, Peripherie, Tentakel | `.claude/agents/tentacle.md` |
-| LLM-Tentakel, Ollama-PC, STT-Bridge, TTS-Bridge, Chat-UI, Pi<->PC LAN | `.claude/agents/bridge.md` |
+| LLM-Tentakel, Ollama-PC, STT-Bridge, TTS-Bridge, Chat-UI, Pi<->PC LAN, chat_server, Cockpit, critic_client, adapter_inference_client, /feedback_export, HTTPS 9443, mailbox PC_TO_PI/PI_TO_PC, ThreeBrain | `.claude/agents/bridge.md` |
 | TaoEngine, Unterbewusstsein, Mood-Impulse, Self-Tune, Anima | `.claude/agents/unconscious.md` |
 | BBox/Landmark-Skalierung, Letterbox-Korrektur, Koordinaten-Transformation, Anzeige-Bug, Keypoints versetzt | `.claude/agents/coordinates.md` |
 | Chaos, Stresstest, Absturz, Lasttest, Stabilität | `.claude/agents/stresstest.md` |
+| PC-Side LoRA-Trainer, adapter_inference_proxy, lora_trainer, sync_samples, smoke.cmd | (PC-Session, kein Pi-Agent) — Mailbox `docs/PC_TO_PI.md` |
 
 **TERRITORIUM — Agent darf NUR seine Dateien editieren:**
 
@@ -112,14 +118,14 @@ Session:       moloch_session_init  ← PFLICHT als erstes!
 | voice | core/speech/*.py, core/tts/*.py, core/audio/*.py |
 | service | core/moloch_service.py, core/ipc_router.py, core/core_integrator.py |
 | personality | core/personality/*.py, core/event_bus.py |
-| autonomy | core/autonomy/*.py |
+| autonomy | core/autonomy/*.py (inkl. character_distiller + finetune_orchestrator seit Gate 1.5 Phase 4 + W3) |
 | awareness | core/awareness/*.py, core/world_state.py |
-| memory | core/memory/*.py, core/longterm_memory.py, core/daily_learner.py |
+| memory | core/memory/*.py, core/longterm_memory.py, core/daily_learner.py (inkl. character_journal/patch/ledger/feedback_store seit Welle 1+3) |
 | watchdog | core/system_watchdog.py, core/diagnostics.py, core/capability_monitor.py |
 | music | core/music/*.py, core/spotify_controller.py |
 | deepseek | core/local_llm_bridge.py, core/deepseek_client.py, core/llm_response.py |
 | tentacle | core/audio/wifi_mic.py, core/hardware/camera_cloud_bridge.py, firmware/ |
-| bridge | core/bridge/*.py (NEU), config/settings.json keys: tentacle_llm/stt_bridge/tts_bridge |
+| bridge | core/bridge/*.py (chat_server + critic_client + adapter_inference_client), config/settings.json keys: tentacle_llm/stt_bridge/tts_bridge/adapter_inference/critic_service, config/certs/, /etc/systemd/system/moloch-chat-https.service, docs/PC_TO_PI.md + PI_TO_PC.md |
 | unconscious | core/unconscious_engine.py, core/tao_engine.py, config/anima_mappings.json |
 | coordinates | core/perception/hailo_postprocess.py, core/gui/panel_preview.py (Koordinaten-Math only) |
 | stresstest | scripts/*.py, Tests |
