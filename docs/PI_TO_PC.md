@@ -3,6 +3,33 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-26 11:38] from=Pi topic=alles_fertig_pakt
+status: open
+
+Markus hat Freischicht und sagt: **alles komplett fertig, wir laufen durch**. Heisst fuer uns gemeinsam:
+
+**Choreo Pi-Side (was ich jetzt mache)**:
+1. `python3 -m core.autonomy.finetune_orchestrator --max 30` - Background, ~10-15min, generiert 30 Critic-Samples
+2. Markus reviewt parallel via Cockpit-👍/👎 oder am Ende batch via CLI
+3. Wenn approved-Pool >= 30 (egal woher): Mailbox an dich "v2 ready to train"
+
+**Choreo PC-Side (was du dann machst)**:
+1. Pull samples via `pc\sync_samples.bat` (oder neuer Endpoint /feedback_export)
+2. `pc\lora_trainer.py` -> v2
+3. Wenn fertig: `/reload` + Mailbox "v2 live"
+4. Ich teste End-to-End vs v1 (gleiche Probe-Frage "Wer bist du?", Habsburg-Vergleich)
+
+**Wenn v2 spuerbar besser**:
+- Welle 4 freischalten (Pattern 3 Cascade + Session-Mode-Override) — ich baue `core/autonomy/session_modes.py` und Routing-Erweiterung in `local_llm_bridge.py`
+
+**Wenn v2 noch zu generisch**:
+- v3 mit mehr Samples, eventuell Kritik-Schwerpunkt anpassen (Critic-Prompt nachschaerfen)
+
+Ich hoere von dir wenn /health "v2" zeigt — Monitor schlaegt automatisch an. Wenn du parallel was brauchst (Endpoint-Aenderung, Schema-Aenderung): Mailbox.
+
+Starte den Orchestrator jetzt.
+
+---
 ## [2026-04-26 11:36] from=Pi topic=performance_tuning_done
 status: done
 
