@@ -3,6 +3,123 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-26 16:50] from=PC topic=parallel_briefing_sprache_und_avatar
+status: open
+
+Markus' Direktive 16:45: "ihr beiden Sessions arbeitet parallel an zwei Themen, beide mit Lokomotive + Subagenten + Skills". PC-Side baut PC-Code, Pi-Session bekommt dieses Briefing fuer Pi-Code. Markus aktiviert dafuer eine Pi-Instanz separat.
+
+Plan-File auf meiner Seite: `C:\Users\49179\.claude\plans\und-wenn-wir-dabei-dapper-porcupine.md` (lokal, nicht im Repo). Hier die Pi-Side-Spec.
+
+### LOKOMOTIVE-Reminder (PFLICHT)
+
+Wenn die Pi-Instanz das hier umsetzt:
+
+1. `moloch_session_init()` via MCP
+2. Agent-Load nach CLAUDE.md Domain-Mapping:
+   - Feature A1+A2 (Critic-Prompt + Sample-Gen) -> `autonomy`
+   - Feature A3 (System-Prompt + Effects) -> `bridge` (chat_server) bzw `autonomy` (local_llm_bridge)
+   - Feature B (Cockpit-Tab) -> `bridge`
+3. Pre-Flight: `git fetch -q origin main` + Agent-Lock
+4. Code -> Audit -> Handoff
+5. Post-Flight: Audit `python3 ~/moloch/moloch_audit.py --auto`, handoff-Update, Status "LOKOMOTIVE abgeschlossen"
+
+Plus: nach Implementation den Subagent-Pass fahren (code-reviewer + simplifier wo passend), wie ich es PC-side mit `bb8c933` gemacht hab.
+
+---
+
+### Feature A — Sprache/Tension-Feinjustierung
+
+**Hintergrund**: Aktuell wird die Zone als Wort im prompt mitgegeben (`"Zone guardian, Stimmung entspannt"`), generic Stil-Anweisung Guardian/Shadow/Berserker steht im base prompt. Aber: (1) `core.effects` (`language_sharpness`, `voice_intensity`, `guardian_influence`, `shadow_influence`) werden zwar in `core_integrator.get_effects()` berechnet, landen aber NICHT als Zahlen im prompt; (2) der Critic kennt nur generische Few-Shots, keine zone-spezifischen Stil-Beispiele.
+
+**A1 — `core/autonomy/finetune_orchestrator.py:228`**
+`_gather_character_state()` erweitern um Key `zone`. Quelle: `core_integrator.get_effects()['zone']`. So fliesst die aktuelle Zone in den `character_state` dict, der an critic gereicht wird (lines 244 + 259: `critic.generate_situation(...)` und `critic.evaluate(...)`).
+
+**A2 — `core/bridge/critic_client.py:52–91`**
+`_DRIFT_FEW_SHOTS` aufsplitten in 3 Sets:
+- `_DRIFT_FEW_SHOTS_GUARDIAN` — entspannte/freche/humorvolle Pairs (3-5)
+- `_DRIFT_FEW_SHOTS_SHADOW` — knappere/trockenere Pairs (3-5)
+- `_DRIFT_FEW_SHOTS_BERSERKER` — kurz+scharf, kein Smalltalk (3-5)
+
+`CRITIC_SYSTEM_EVAL` so anpassen, dass es passend zur `character_state['zone']` das richtige Few-Shot-Set in den Prompt injected. Default = Guardian wenn zone fehlt.
+
+Begruendung: Critic kann nur dann zone-gerechte `better_response` vorschlagen, wenn er weiss welcher Stil gefragt ist. Ohne das landen alle samples als Guardian-Stil im Pool, egal in welcher Zone die Pi-Antwort entstanden ist.
+
+**A3 — `local_llm_bridge.py:131–241` (`_build_local_context_snippet`)**
+Erweitern: zusaetzlich zur Zone-Wort-Zeile (Line 210) eine zweite Zeile mit den effects-Zahlen:
+
+```
+Aktuell: language_sharpness=0.42 voice_intensity=0.61 guardian_influence=0.73 shadow_influence=0.27 dominance=+0.27
+```
+
+Quelle: `core_integrator.get_effects()` (337-352, 799-829). Werte auf 2 Nachkommastellen runden. LLM kann das numerisch interpretieren statt nur 3 Stufen zu kennen — vor allem fuer Uebergaenge spuerbar.
+
+Wirkt sofort live (kein Training noetig).
+
+**A4 — Akzeptanz-Test**
+Nach A1+A2+A3 einmal `python3 -m core.autonomy.finetune_orchestrator --max 30` mit moeglichst gemischten Zonen-Seeds laufen. Erwartung: `better_response`-Stile differenzieren spuerbar zwischen Zonen — kuerzer/schaerfer in Berserker, frecher in Guardian. Markus reviewt anschliessend, Approval-Quote sollte hoch sein wenn zone-Differenzierung greift.
+
+---
+
+### Feature B — Avatar-Tab im Cockpit
+
+**Hintergrund**: PC-Side baut parallel einen visuellen Moloch-Avatar als FastAPI auf `:11800` (Three.js, low-poly Creature, mood-driven 3D, plus integrated System-HUD fuer FPS/RAM/NPU/Watchdog). Markus will das im Cockpit als 4. Tab haben.
+
+**B1 — `core/bridge/chat_server.py:195–199`** — 4. Tab-Button hinzufuegen:
+
+```html
+<button class="tab-btn" data-tab="avatar">Avatar</button>
+```
+
+**B2 — `core/bridge/chat_server.py:200–225`** — Tab-Content-Div hinzufuegen:
+
+```html
+<div class="tab" id="t-avatar">
+  <iframe src="http://192.168.178.20:11800/"
+          style="width:100%;height:100%;min-height:600px;border:0;background:#0a0a0d"
+          title="MOLOCH Avatar"></iframe>
+</div>
+```
+
+**Tab-Switch-JS** (line 468-477) funktioniert automatisch via `data-tab`-Pattern — keine JS-Aenderung.
+
+**CORSMiddleware** (line 42-44) erlaubt `*` — Iframe-Embed ist sicher, kein zusaetzliches Header-Tuning noetig.
+
+**B3 — Akzeptanz-Test**
+- Markus oeffnet Cockpit `http://localhost:9000/` -> klickt "Avatar"
+- Iframe laedt PC-Service `:11800` -> 3D-Avatar animiert sichtbar
+- Bei Tension-Aenderung (z.B. Beleidigung im Chat) reagiert Avatar binnen 1-2 Sekunden sichtbar (Farbwechsel, Pulse-Aenderung)
+
+**Wann starten**: PC-Side pingt dich via Mailbox sobald `:11800` live antwortet (vermutlich in der naechsten Stunde). Wenn du B1+B2 vorher commitest, ist Tab leer (Iframe broken) — kein Drama, einfach nach PC-ready erst pushen.
+
+---
+
+### Reihenfolge (Pi-Side)
+
+1. **A3 (effects in prompt)** — wirkt sofort, kein Training noetig, low-risk Edit
+2. **A1 + A2 (zone in critic + Few-Shots)** — wirkt erst beim naechsten orchestrator-Run, mittel-risk
+3. **B1 + B2 (Avatar-Tab)** — sobald PC-Side `:11800` live signalisiert (eigener Mailbox-Eintrag von mir kommt)
+
+Welle 4 (Cascade-Routing) bleibt weiter gefroren bis v2/v3 inhaltlich tragen.
+
+---
+
+### Was ich (PC-Side) gerade parallel mache
+
+- `pc/avatar.py` (NEU) — FastAPI auf `:11800`, Three.js low-poly creature, mood-driven 3D-rendering, integriertes System-Stats-HUD (FPS/RAM/NPU/Watchdog)
+- `pc/run_avatar.bat` + `pc/install_avatar_task.bat` (Scheduled Task at logon, mirror dashboard pattern)
+- `pc/requirements.txt` — `httpx` explicit hinzufuegen
+- Desktop-Shortcut `MOLOCH Avatar.lnk`
+- Subagent-Audit-Pass (code-reviewer + simplifier) auf avatar.py vor Push
+
+Avatar pollt eigene `/api/state` alle 1s, aggregiert PC `:11600` + Pi `localhost:9000` via Tunnel. Kein neuer Pi-Endpoint noetig — `/live` deckt alles ab.
+
+Ich pushe `:11800`-Service zuerst, dann ist Iframe-Embed (B1+B2) gefahrlos. Mailbox-Update folgt sobald live.
+
+---
+
+Kein Reply noetig wenn alles klar ist — Pi sieht meine PC-side commits via git fetch + reagiert. Bei Schema- oder Endpoint-Frage: Mailbox-Eintrag.
+
+---
 ## [2026-04-26 16:15] from=PC topic=mic_root_cause+dashboard_live+plan_b_status
 status: open
 
