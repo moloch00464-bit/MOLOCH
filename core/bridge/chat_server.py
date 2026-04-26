@@ -196,6 +196,7 @@ _CHAT_UI_HTML = """<!doctype html>
         <button class="tab-btn active" data-tab="live">Live</button>
         <button class="tab-btn" data-tab="char">Charakter</button>
         <button class="tab-btn" data-tab="see">Sehen</button>
+        <button class="tab-btn" data-tab="avatar">Avatar</button>
       </div>
       <div class="tab-content">
         <!-- LIVE TAB -->
@@ -220,6 +221,13 @@ _CHAT_UI_HTML = """<!doctype html>
             <img class="snap" id="snap" alt="Snapshot">
             <div class="snap-info" id="snap-info">…</div>
           </div>
+        </div>
+        <!-- AVATAR TAB -->
+        <div class="tab" id="t-avatar">
+          <iframe src="http://192.168.178.20:11800/"
+                  style="width:100%;height:100%;min-height:600px;border:0;background:#0a0a0d"
+                  title="MOLOCH Avatar"
+                  allow="autoplay"></iframe>
         </div>
       </div>
     </section>
