@@ -34,6 +34,9 @@ logger = logging.getLogger("chat-server")
 
 HOST = os.environ.get("MOLOCH_CHAT_HOST", "0.0.0.0")
 PORT = int(os.environ.get("MOLOCH_CHAT_PORT", "9100"))
+# HTTPS-Mode (fuer Browser-Mikrofon — Web Speech API braucht secure context):
+SSL_KEYFILE = os.environ.get("MOLOCH_CHAT_SSL_KEY", "")
+SSL_CERTFILE = os.environ.get("MOLOCH_CHAT_SSL_CERT", "")
 
 app = FastAPI(title="MOLOCH Chat-Server", version="1.0")
 app.add_middleware(
@@ -854,8 +857,15 @@ def system_prompt_preview():
 
 
 def main():
-    logger.info(f"MOLOCH Chat-Server startet auf {HOST}:{PORT}")
-    uvicorn.run(app, host=HOST, port=PORT, log_level="info")
+    if SSL_KEYFILE and SSL_CERTFILE and os.path.exists(SSL_KEYFILE) and os.path.exists(SSL_CERTFILE):
+        logger.info(f"MOLOCH Chat-Server startet HTTPS auf {HOST}:{PORT}")
+        uvicorn.run(
+            app, host=HOST, port=PORT, log_level="info",
+            ssl_keyfile=SSL_KEYFILE, ssl_certfile=SSL_CERTFILE,
+        )
+    else:
+        logger.info(f"MOLOCH Chat-Server startet HTTP auf {HOST}:{PORT}")
+        uvicorn.run(app, host=HOST, port=PORT, log_level="info")
 
 
 if __name__ == "__main__":
