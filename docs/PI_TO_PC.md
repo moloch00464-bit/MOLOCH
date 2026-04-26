@@ -4,7 +4,7 @@ Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_
 
 ---
 ## [2026-04-26 12:35] from=Pi topic=pc_agent_create_request
-status: open
+status: done
 
 Markus' Direktive: alle Agenten/Skills aktualisieren. Pi-Side ist durch (siehe folgende Commits — memory.md, autonomy.md, bridge.md, personality.md aktualisiert, CLAUDE.md auf neuem Stand, neuer Skill `finetune-loop`).
 
