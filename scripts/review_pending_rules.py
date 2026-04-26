@@ -152,17 +152,78 @@ def cmd_review() -> int:
     return 0
 
 
+def cmd_samples() -> int:
+    """W3.4: Markus reviewt Critic-Trainings-Samples vom finetune_orchestrator."""
+    from core.memory.feedback_store import get_feedback_store
+    fs = get_feedback_store()
+
+    state = fs.get_state()
+    _print_header(f"FEEDBACK STORE — Trainings-Samples")
+    print(f"  Total:           {state['total']}")
+    print(f"  Critic-Samples:  {state['critic']}  (davon {state['pending_review']} pending)")
+    print(f"  👍 Markus:       {state['thumbs_up']}")
+    print(f"  👎 Markus:       {state['thumbs_down']}")
+    print(f"  Approved (LoRA): {state['approved']}")
+    print(f"  Rejected:        {state['rejected']}")
+
+    pending = fs.read_pending(limit=100)
+    if not pending:
+        print()
+        print("  Keine pending Critic-Samples zu reviewen.")
+        print("  Generieren via: python3 -m core.autonomy.finetune_orchestrator --max 10")
+        return 0
+
+    # Sortieren: niedrigster Score zuerst (am dringendsten zu fixen)
+    pending.sort(key=lambda s: s.get("score", 5))
+
+    counts = {"a": 0, "r": 0, "s": 0}
+    for i, s in enumerate(pending, 1):
+        score = s.get("score", "?")
+        sid = s.get("sample_id", "?")
+        seed = s.get("seed_event_id", "—")
+        print()
+        print(f"[{i}/{len(pending)}] {sid}  score={score}/10  seed={seed}")
+        print(f"  Situation:    {s.get('situation', '')[:200]}")
+        print(f"  Pi-Antwort:   {s.get('pi_response', '')[:200]}")
+        print(f"  Kritik:       {s.get('critique', '')[:200]}")
+        print(f"  Besser-Vor.:  {s.get('better_response', '')[:200]}")
+        ans = _ask("  [a]pprove (-> LoRA-Trainer) / [r]eject (loeschen) / [s]kip / [q]uit > ")
+        if ans == "q":
+            print("  Abbruch — Rest bleibt pending.")
+            break
+        if ans == "a":
+            ok = fs.approve(sid, by="markus")
+            counts["a"] += 1 if ok else 0
+            print(f"  → APPROVED (geht an LoRA-Trainer)")
+        elif ans == "r":
+            ok = fs.reject(sid, by="markus")
+            counts["r"] += 1 if ok else 0
+            print(f"  → REJECTED")
+        else:
+            counts["s"] += 1
+            print(f"  → SKIP")
+
+    _print_header("SAMPLE-REVIEW DONE")
+    print(f"  Approved (gehen an Training): {counts['a']}")
+    print(f"  Rejected:                      {counts['r']}")
+    print(f"  Skipped:                       {counts['s']}")
+    state2 = fs.get_state()
+    print()
+    print(f"  Total approved im Pool: {state2['approved']}  (LoRA-Trainer kann die nutzen)")
+    print()
+    return 0
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="MOLOCH Character Patch Review CLI")
+    parser = argparse.ArgumentParser(description="MOLOCH Character Patch + Trainings-Sample Review CLI")
     parser.add_argument("--status", action="store_true", help="Nur Status anzeigen")
-    parser.add_argument("--list", action="store_true", help="Pending listen ohne Prompt")
+    parser.add_argument("--list", action="store_true", help="Pending Patch-Rules listen ohne Prompt")
     parser.add_argument("--samples", action="store_true",
-                        help="(Phase W3.4) Sample-Review — noch nicht implementiert")
+                        help="Trainings-Samples reviewen (W3.4)")
     args = parser.parse_args()
 
     if args.samples:
-        print("Sample-Review kommt in Welle 3 (W3.4). Bitte Patch-Review nutzen.", file=sys.stderr)
-        return 2
+        return cmd_samples()
     if args.status:
         return cmd_status()
     if args.list:
