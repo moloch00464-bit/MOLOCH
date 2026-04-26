@@ -14,10 +14,14 @@ import os
 import sys
 import time
 
+import json
+import mmap
+import struct
+
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 sys.path.insert(0, os.path.expanduser("~/moloch"))
@@ -46,68 +50,416 @@ class ChatRequest(BaseModel):
 _CHAT_UI_HTML = """<!doctype html>
 <html lang="de"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>MOLOCH</title>
+<title>MOLOCH Cockpit</title>
 <style>
-  :root{--bg:#0d0d0f;--fg:#e6e6e6;--accent:#9b3030;--mute:#6e6e7a;--card:#16161b;--border:#26262e;}
-  *{box-sizing:border-box}html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,sans-serif;height:100%}
-  .wrap{display:flex;flex-direction:column;height:100vh;max-width:760px;margin:0 auto;padding:14px;gap:10px}
-  .head{display:flex;justify-content:space-between;align-items:center;padding-bottom:10px;border-bottom:1px solid var(--border)}
-  .head h1{font:600 16px/1 system-ui;margin:0;letter-spacing:.5px}
-  .head .meta{color:var(--mute);font-size:12px}
-  .chat{flex:1;overflow-y:auto;padding:8px 4px;display:flex;flex-direction:column;gap:8px}
-  .msg{padding:9px 12px;border-radius:10px;max-width:85%;white-space:pre-wrap;word-wrap:break-word}
-  .me{align-self:flex-end;background:#1c2233;border:1px solid #2a3550}
+  :root{
+    --bg:#0a0a0d;--fg:#e6e6ee;--mute:#7a7a8a;--card:#13131a;--card2:#1a1a23;
+    --border:#26262f;--border2:#363645;
+    --guardian:#3673ce;--shadow:#7e3bce;--berserker:#c93838;
+    --accent:var(--guardian);
+    --ok:#5dc36b;--warn:#e6b84d;--err:#ff7676;
+  }
+  *{box-sizing:border-box}html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);
+    font:14px/1.45 system-ui,sans-serif;height:100%;overflow:hidden}
+  .grid{display:grid;grid-template-rows:auto 1fr auto;height:100vh}
+  /* HEADER */
+  header{display:flex;align-items:center;gap:18px;padding:10px 16px;
+    background:linear-gradient(180deg,#13131a,#0d0d12);border-bottom:1px solid var(--border)}
+  header .logo{font:700 16px/1 system-ui;letter-spacing:1px;color:var(--accent)}
+  header .pulse{width:8px;height:8px;border-radius:50%;background:var(--ok);
+    box-shadow:0 0 8px var(--ok);animation:pulse 1.5s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+  .stats{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--mute);flex:1}
+  .stat{display:flex;flex-direction:column;line-height:1.1}
+  .stat .v{color:var(--fg);font-weight:600;font-size:13px}
+  .stat .v.zone-guardian{color:var(--guardian)}
+  .stat .v.zone-shadow{color:var(--shadow)}
+  .stat .v.zone-berserker{color:var(--berserker)}
+  .stat .v.warn{color:var(--warn)}
+  .stat .v.err{color:var(--err)}
+  /* MAIN */
+  main{display:grid;grid-template-columns:1.1fr 1fr;gap:1px;background:var(--border);min-height:0}
+  .col{background:var(--bg);overflow-y:auto;padding:12px;display:flex;flex-direction:column;min-height:0}
+  /* CHAT */
+  .chat-col{gap:8px}
+  .chat{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding-right:4px;min-height:0}
+  .msg{padding:9px 12px;border-radius:10px;max-width:90%;white-space:pre-wrap;word-wrap:break-word;font-size:13.5px}
+  .me{align-self:flex-end;background:#192232;border:1px solid #2a3550}
   .moloch{align-self:flex-start;background:var(--card);border:1px solid var(--border)}
-  .meta-line{font-size:11px;color:var(--mute);margin-top:3px}
-  .form{display:flex;gap:8px;border-top:1px solid var(--border);padding-top:10px}
-  textarea{flex:1;background:var(--card);color:var(--fg);border:1px solid var(--border);border-radius:8px;padding:10px;resize:none;font:14px system-ui;min-height:60px;max-height:160px}
-  button{background:var(--accent);color:white;border:0;border-radius:8px;padding:0 16px;cursor:pointer;font:600 14px system-ui}
-  button:disabled{opacity:.5;cursor:not-allowed}
-  .row{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--mute);margin-top:6px}
-  .row label{cursor:pointer}
-  .err{color:#ff7676}
-</style></head><body><div class="wrap">
-<div class="head">
-  <h1>MOLOCH — PIGH0ST</h1>
-  <div class="meta" id="status">…</div>
+  .meta-line{font-size:11px;color:var(--mute);margin-top:2px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+  .meta-line button{background:transparent;border:1px solid var(--border2);color:var(--mute);
+    font-size:10px;padding:1px 6px;border-radius:3px;cursor:pointer}
+  .meta-line button:hover{color:var(--fg);border-color:var(--accent)}
+  .crit-out{font-size:11px;padding:4px 6px;background:#1a1414;border-left:2px solid var(--berserker);
+    color:#ffc8c8;margin-top:3px;border-radius:0 3px 3px 0}
+  /* INPUT */
+  .form{display:flex;gap:6px;border-top:1px solid var(--border);padding-top:8px;align-items:flex-end}
+  textarea{flex:1;background:var(--card);color:var(--fg);border:1px solid var(--border);
+    border-radius:8px;padding:8px;resize:none;font:14px system-ui;min-height:54px;max-height:160px}
+  textarea:focus{outline:none;border-color:var(--accent)}
+  .btn{background:var(--accent);color:white;border:0;border-radius:8px;padding:0 14px;cursor:pointer;
+    font:600 13px system-ui;height:38px;min-width:38px}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .btn.icon{padding:0 10px;font-size:18px}
+  .btn.mic{background:#2a2a35;color:var(--fg);border:1px solid var(--border2)}
+  .btn.mic.recording{background:var(--berserker);animation:pulse 1s infinite}
+  .toolbar{display:flex;gap:10px;align-items:center;font-size:12px;color:var(--mute);flex-wrap:wrap}
+  .toolbar label{cursor:pointer;display:flex;gap:4px;align-items:center}
+  .err{color:var(--err);font-size:12px}
+  details{margin-top:4px;font-size:12px}
+  details summary{cursor:pointer;color:var(--mute);user-select:none}
+  details pre{background:var(--card);border:1px solid var(--border);padding:8px;border-radius:4px;
+    font:11px/1.4 monospace;white-space:pre-wrap;max-height:240px;overflow-y:auto}
+  /* TABS */
+  .tabs-col{padding:0}
+  .tabs-bar{display:flex;background:var(--card);border-bottom:1px solid var(--border)}
+  .tab-btn{flex:1;background:transparent;border:0;color:var(--mute);padding:10px;cursor:pointer;
+    font:600 12px system-ui;letter-spacing:.5px;border-bottom:2px solid transparent}
+  .tab-btn.active{color:var(--fg);border-bottom-color:var(--accent);background:var(--bg)}
+  .tab-content{flex:1;overflow-y:auto;padding:12px}
+  .tab{display:none}.tab.active{display:block}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px}
+  .card h3{margin:0 0 6px;font:600 12px system-ui;color:var(--mute);letter-spacing:.5px;text-transform:uppercase}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:12.5px}
+  .kv .k{color:var(--mute)}
+  .kv .v{color:var(--fg);text-align:right;font-variant-numeric:tabular-nums}
+  .bar{height:6px;background:var(--border);border-radius:3px;overflow:hidden;margin-top:4px}
+  .bar > span{display:block;height:100%;background:var(--accent);transition:width .3s}
+  .bar.ram > span{background:var(--guardian)}
+  .bar.cpu > span{background:var(--warn)}
+  .pill{display:inline-block;padding:2px 6px;border-radius:10px;background:var(--border);font-size:10.5px;margin:1px}
+  .pill.on{background:#1f3a1f;color:var(--ok)}
+  .pill.off{background:#2a1414;color:var(--mute)}
+  .rule{padding:6px 8px;background:#1a1c23;border-left:3px solid var(--guardian);
+    border-radius:0 4px 4px 0;margin-bottom:5px;font-size:12px}
+  .rule .t{color:var(--mute);font-size:11px}
+  .rule .b{color:var(--fg);font-style:italic}
+  .ev{font-size:11.5px;padding:3px 6px;border-bottom:1px solid var(--border);display:flex;gap:8px}
+  .ev .ts{color:var(--mute);font-variant-numeric:tabular-nums;flex-shrink:0;width:48px}
+  .ev .tp{color:var(--accent);width:60px;flex-shrink:0;font-size:10.5px}
+  .ev .it{color:var(--fg);flex:1;word-wrap:break-word;min-width:0}
+  .snap{width:100%;border-radius:6px;border:1px solid var(--border);background:#000;display:block}
+  .snap-info{font-size:12px;color:var(--mute);margin-top:6px;text-align:center}
+  /* FOOTER */
+  footer{padding:6px 16px;background:#0d0d12;border-top:1px solid var(--border);
+    font-size:11px;color:var(--mute);display:flex;gap:14px;flex-wrap:wrap}
+  footer .err-msg{color:var(--err)}
+  /* responsive */
+  @media (max-width:900px){
+    main{grid-template-columns:1fr;grid-template-rows:1fr 1fr}
+  }
+</style></head><body>
+<div class="grid">
+  <header>
+    <div class="pulse" id="pulse"></div>
+    <div class="logo">M.O.L.O.C.H.</div>
+    <div class="stats">
+      <div class="stat"><span>FPS</span><span class="v" id="s-fps">—</span></div>
+      <div class="stat"><span>Person</span><span class="v" id="s-person">—</span></div>
+      <div class="stat"><span>Face-ID</span><span class="v" id="s-face">—</span></div>
+      <div class="stat"><span>Zone</span><span class="v" id="s-zone">—</span></div>
+      <div class="stat"><span>Tension</span><span class="v" id="s-tension">—</span></div>
+      <div class="stat"><span>CPU</span><span class="v" id="s-cpu">—</span></div>
+      <div class="stat"><span>RAM</span><span class="v" id="s-ram">—</span></div>
+      <div class="stat"><span>Provider</span><span class="v" id="s-prov">—</span></div>
+    </div>
+  </header>
+
+  <main>
+    <!-- LINKS: CHAT -->
+    <section class="col chat-col">
+      <div class="chat" id="chat"></div>
+      <details>
+        <summary>System-Prompt anzeigen (was wird dem LLM injected)</summary>
+        <pre id="sp">…</pre>
+        <button class="btn" style="margin-top:6px;height:28px;font-size:11px" onclick="loadPrompt()">Refresh</button>
+      </details>
+      <div class="form">
+        <textarea id="inp" placeholder="Schreib was. Enter = senden, Shift+Enter = Zeile." autofocus></textarea>
+        <button class="btn icon mic" id="mic" title="Mikrofon (klick: an/aus)">🎙</button>
+        <button class="btn" id="send">Senden</button>
+      </div>
+      <div class="toolbar">
+        <label><input type="checkbox" id="local"> NPU lokal (qwen)</label>
+        <label><input type="checkbox" id="reason"> reason_internal</label>
+        <label><input type="checkbox" id="tts"> TTS Antwort sprechen</label>
+        <span id="err" class="err"></span>
+      </div>
+    </section>
+
+    <!-- RECHTS: TABS -->
+    <section class="col tabs-col">
+      <div class="tabs-bar">
+        <button class="tab-btn active" data-tab="live">Live</button>
+        <button class="tab-btn" data-tab="char">Charakter</button>
+        <button class="tab-btn" data-tab="see">Sehen</button>
+      </div>
+      <div class="tab-content">
+        <!-- LIVE TAB -->
+        <div class="tab active" id="t-live">
+          <div class="card"><h3>Pipeline</h3><div class="kv" id="live-pipeline"></div></div>
+          <div class="card"><h3>Hardware</h3><div class="kv" id="live-hw"></div></div>
+          <div class="card"><h3>Power</h3><div class="kv" id="live-power"></div></div>
+          <div class="card"><h3>NPU Worker</h3><div id="live-workers"></div></div>
+          <div class="card"><h3>Aktive Modelle</h3><div id="live-models"></div></div>
+        </div>
+        <!-- CHARAKTER TAB -->
+        <div class="tab" id="t-char">
+          <div class="card"><h3>Drift (rolling 30d)</h3><div class="kv" id="char-drift"></div></div>
+          <div class="card"><h3>Top-Erlebnisse</h3><div id="char-top"></div></div>
+          <div class="card"><h3>Aktive Verhaltensregeln</h3><div id="char-rules"></div></div>
+          <div class="card"><h3>Letzte Journal-Events</h3><div id="char-journal"></div></div>
+        </div>
+        <!-- SEHEN TAB -->
+        <div class="tab" id="t-see">
+          <div class="card">
+            <h3>Snapshot (live, 2s refresh)</h3>
+            <img class="snap" id="snap" alt="Snapshot">
+            <div class="snap-info" id="snap-info">…</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span id="f-info">…</span>
+    <span class="err-msg" id="f-err"></span>
+  </footer>
 </div>
-<div class="chat" id="chat"></div>
-<div class="form">
-  <textarea id="inp" placeholder="Schreib was. Enter = senden, Shift+Enter = Zeile." autofocus></textarea>
-  <button id="send">Senden</button>
-</div>
-<div class="row">
-  <label><input type="checkbox" id="local"> NPU lokal (qwen2.5)</label>
-  <label><input type="checkbox" id="reason"> reason_internal</label>
-  <span id="err" class="err"></span>
-</div>
-</div>
+
 <script>
-const chat=document.getElementById("chat"),inp=document.getElementById("inp"),btn=document.getElementById("send"),
-      st=document.getElementById("status"),err=document.getElementById("err"),
-      cbLocal=document.getElementById("local"),cbReason=document.getElementById("reason");
-function add(role,text,meta){const d=document.createElement("div");d.className="msg "+(role==="me"?"me":"moloch");
-  d.textContent=text;chat.appendChild(d);
-  if(meta){const m=document.createElement("div");m.className="meta-line "+(role==="me"?"me":"moloch");m.textContent=meta;chat.appendChild(m);}
-  chat.scrollTop=chat.scrollHeight;}
-async function refreshStatus(){try{const r=await fetch("/status");const j=await r.json();
-  st.textContent=`mode: ${j.llm_mode} · last: ${j.last_provider} · ${j.request_count} req`;
-}catch(e){st.textContent="status fetch failed";}}
-async function loadHistory(){try{const r=await fetch("/history?n=10");const j=await r.json();
-  for(const m of (j.messages||[])){const sender=m.sender==="user"?"me":"moloch";add(sender,m.text||"",`${m.ts||""} · ${m.source||""}`);}
-}catch(e){}}
-async function send(){const t=inp.value.trim();if(!t)return;err.textContent="";btn.disabled=true;
-  add("me",t);inp.value="";const t0=Date.now();
-  try{const r=await fetch("/chat",{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({text:t,force_local:cbLocal.checked,use_reason:cbReason.checked})});
+// === DOM ===
+const $ = id => document.getElementById(id);
+const chat=$("chat"),inp=$("inp"),btnSend=$("send"),btnMic=$("mic"),
+      cbLocal=$("local"),cbReason=$("reason"),cbTts=$("tts"),
+      err=$("err"),sp=$("sp"),fInfo=$("f-info"),fErr=$("f-err");
+
+// === HELPERS ===
+function fmt(n,d=1){return (n==null||isNaN(n))?"—":Number(n).toFixed(d);}
+function pct(n){return (n==null||isNaN(n))?"—":Math.round(n)+"%";}
+
+let lastMolochAnswer = "";
+
+function addMsg(role,text,meta){
+  const w=document.createElement("div");
+  const m=document.createElement("div");m.className="msg "+(role==="me"?"me":"moloch");
+  m.textContent=text;chat.appendChild(m);
+  if(meta){
+    const mm=document.createElement("div");mm.className="meta-line";
+    mm.innerHTML=meta;
+    if(role==="moloch"){
+      const cb=document.createElement("button");cb.textContent="[Critic]";cb.onclick=()=>doCritic(text,mm);
+      mm.appendChild(cb);
+    }
+    chat.appendChild(mm);
+  }
+  chat.scrollTop=chat.scrollHeight;
+}
+
+// === LIVE STATUS BAR + TAB ===
+async function refreshLive(){
+  try{
+    const r=await fetch("/live");if(!r.ok)return;
+    const j=await r.json();
+    const fps=j.fps_total||0;
+    $("s-fps").textContent=fmt(fps,1);
+    $("s-person").textContent=j.person_detected?(j.face_id||"unbek"):"—";
+    $("s-face").textContent=j.face_id||"—";
+    const zone=(j.core||{}).zone||"guardian";
+    const z=$("s-zone");z.textContent=zone;z.className="v zone-"+zone;
+    document.documentElement.style.setProperty("--accent",`var(--${zone})`);
+    const t=(j.core||{}).tension;
+    $("s-tension").textContent=fmt(t,2);
+    const cpu=j.watchdog?.cpu_temp;$("s-cpu").textContent=fmt(cpu,1)+"°";
+    const ram=j.watchdog?.ram_percent;$("s-ram").textContent=pct(ram);
+
+    // Pipeline card
+    $("live-pipeline").innerHTML=`
+      <span class="k">FPS total</span><span class="v">${fmt(fps,1)}</span>
+      <span class="k">Frame-Age</span><span class="v">${fmt(j.frame_age,2)}s</span>
+      <span class="k">Autonom</span><span class="v">${j.autonomous_mode?"ja":"nein"}</span>
+      <span class="k">Tentakel</span><span class="v">${j.tentakel_enabled?"on":"off"}</span>
+      <span class="k">Person</span><span class="v">${j.person_detected?"ja":"nein"}</span>
+      <span class="k">Face</span><span class="v">${j.face_id||"—"} (${fmt(j.face_confidence,2)})</span>`;
+
+    // Hardware card
+    const w=j.watchdog||{};
+    const cpuPct=Math.min(100,Math.max(0,(cpu-30)/(80-30)*100));
+    $("live-hw").innerHTML=`
+      <span class="k">CPU Temp</span><span class="v">${fmt(cpu,1)}°C</span>
+      <span class="k"></span><span class="v"><div class="bar cpu"><span style="width:${cpuPct}%"></span></div></span>
+      <span class="k">RAM</span><span class="v">${pct(ram)}</span>
+      <span class="k"></span><span class="v"><div class="bar ram"><span style="width:${ram||0}%"></span></div></span>
+      <span class="k">Kamera</span><span class="v">${w.camera_reachable?"ok":"weg"}</span>
+      <span class="k">Throttled</span><span class="v">${w.throttled?"⚠ ja":"nein"}</span>`;
+
+    // Power
+    const p=j.power||{};
+    $("live-power").innerHTML=`
+      <span class="k">Quelle</span><span class="v">${p.power_source||"—"}</span>
+      <span class="k">Watt</span><span class="v">${fmt(p.power_watts,2)} W</span>
+      <span class="k">Batterie</span><span class="v">${pct(p.battery_pct)}</span>
+      <span class="k">Lädt?</span><span class="v">${p.is_charging?"ja":"nein"}</span>
+      <span class="k">Stecker</span><span class="v">${p.is_plugged_in?"drin":"raus"}</span>`;
+
+    // Worker
+    const wh=j.worker_health||{};
+    $("live-workers").innerHTML=Object.keys(wh).map(k=>{
+      const x=wh[k];const ok=x.running&&x.models_loaded;
+      return `<div style="display:grid;grid-template-columns:auto 1fr auto;gap:8px;font-size:12px;padding:3px 0;border-bottom:1px solid var(--border)">
+        <span class="pill ${ok?'on':'off'}">${ok?'●':'○'}</span>
+        <span>${k}</span>
+        <span style="color:var(--mute);font-variant-numeric:tabular-nums">${(x.total_inferences||0).toLocaleString()} · ${fmt(x.last_inference_ms,1)}ms · q${x.queue_size||0}</span>
+      </div>`;
+    }).join("")||"<span style='color:var(--mute)'>—</span>";
+
+    // Active Models
+    $("live-models").innerHTML=(j.active_models||[]).map(m=>`<span class="pill on">${m}</span>`).join("")||"<span style='color:var(--mute)'>keine</span>";
+  }catch(e){console.warn("live fetch",e);}
+}
+
+// === CHAR TAB ===
+async function refreshChar(){
+  try{
+    const r=await fetch("/personality");if(!r.ok)return;
+    const j=await r.json();
+    const d=(j.drift||{}).rolling||{};
+    $("char-drift").innerHTML=`
+      <span class="k">Mood-Baseline</span><span class="v">${fmt(d.mood_baseline,3)}</span>
+      <span class="k">Energy-Baseline</span><span class="v">${fmt(d.energy_baseline,3)}</span>
+      <span class="k">Dominance-Baseline</span><span class="v">${fmt(d.dominance_baseline,3)}</span>
+      <span class="k">Updated</span><span class="v" style="font-size:10px">${(j.drift||{}).updated_at||"—"}</span>`;
+    const top=(j.drift||{}).top||[];
+    $("char-top").innerHTML=top.length?top.map(t=>
+      `<div class="ev"><span class="tp">${fmt(t.weight,2)}</span><span class="it">${t.citation||"—"}</span></div>`
+    ).join(""):"<span style='color:var(--mute);font-size:12px'>noch nichts destilliert</span>";
+    const active=(j.patch||{}).active||[];
+    $("char-rules").innerHTML=active.length?active.map(r=>
+      `<div class="rule"><div class="t">Wenn ${r.trigger}</div><div class="b">→ ${r.behavior}</div></div>`
+    ).join(""):"<span style='color:var(--mute);font-size:12px'>keine aktiven Regeln</span>";
+    const journal=j.journal||[];
+    $("char-journal").innerHTML=journal.slice(-12).reverse().map(e=>{
+      const ts=(e.ts||"").slice(11,16);
+      return `<div class="ev"><span class="ts">${ts}</span><span class="tp">${e.type||"?"}</span><span class="it">${e.interpretation||""}</span></div>`;
+    }).join("")||"<span style='color:var(--mute)'>—</span>";
+  }catch(e){console.warn("char fetch",e);}
+}
+
+// === SEHEN TAB ===
+function refreshSnap(){
+  const im=$("snap"),info=$("snap-info");
+  im.src=`/snapshot.jpg?t=${Date.now()}`;
+  im.onload=()=>info.textContent=`${im.naturalWidth}×${im.naturalHeight} · ${new Date().toLocaleTimeString()}`;
+  im.onerror=()=>info.textContent="kein Snapshot (Service down?)";
+}
+
+// === CHAT ===
+async function send(){
+  const t=inp.value.trim();if(!t)return;err.textContent="";btnSend.disabled=true;
+  addMsg("me",t);inp.value="";const t0=Date.now();
+  try{
+    const r=await fetch("/chat",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({text:t,force_local:cbLocal.checked,use_reason:cbReason.checked})});
     if(!r.ok){const txt=await r.text();throw new Error(`HTTP ${r.status}: ${txt}`);}
     const j=await r.json();
-    add("moloch",j.text,`${j.provider} · ${j.duration_ms}ms`);
-  }catch(e){err.textContent=e.message;add("moloch","[Fehler] "+e.message);}
-  finally{btn.disabled=false;refreshStatus();inp.focus();}}
-btn.onclick=send;
+    lastMolochAnswer=j.text;
+    addMsg("moloch",j.text,`<span>${j.provider} · ${j.duration_ms}ms</span>`);
+    if(cbTts.checked) doTts(j.text);
+    fInfo.textContent=`last: ${j.provider} · ${j.duration_ms}ms`;
+  }catch(e){err.textContent=e.message;fErr.textContent=e.message;
+    addMsg("moloch","[Fehler] "+e.message);}
+  finally{btnSend.disabled=false;refreshLive();inp.focus();}
+}
+
+async function doTts(text){
+  try{await fetch("/tts",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({text})});}catch(e){console.warn("tts",e);}
+}
+
+async function doCritic(text,parent){
+  parent.querySelector(".crit-out")?.remove();
+  const out=document.createElement("div");out.className="crit-out";out.textContent="[Critic denkt…]";
+  parent.appendChild(out);
+  try{
+    const r=await fetch("/critic_review",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({text})});
+    const j=await r.json();
+    out.innerHTML=`<b>Score ${j.score}/10</b> · ${j.critique||""}` +
+      (j.better_response?`<br><i>Besser:</i> ${j.better_response}`:"");
+  }catch(e){out.textContent="[Critic Fehler] "+e.message;}
+}
+
+async function loadPrompt(){
+  sp.textContent="…";
+  try{const r=await fetch("/system_prompt");const j=await r.json();
+    sp.textContent=`# ${j.length} chars\\n\\n${j.system}`;
+  }catch(e){sp.textContent="Fehler: "+e.message;}
+}
+
+async function loadHistory(){
+  try{const r=await fetch("/history?n=10");const j=await r.json();
+    for(const m of (j.messages||[])){
+      const sender=m.sender==="user"?"me":"moloch";
+      const ts=(m.ts||"").slice(11,16);
+      addMsg(sender,m.text||"",`<span>${ts} · ${m.source||""}</span>`);
+    }
+  }catch(e){}
+}
+
+// === MIC (Browser SpeechRecognition) ===
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec=null,recOn=false;
+btnMic.onclick=()=>{
+  if(!SR){err.textContent="Browser hat keine SpeechRecognition (Chrome/Edge nehmen)";return;}
+  if(!rec){
+    rec=new SR();rec.lang="de-DE";rec.continuous=true;rec.interimResults=true;
+    rec.onresult=ev=>{
+      let interim="",finalT="";
+      for(let i=ev.resultIndex;i<ev.results.length;i++){
+        const r=ev.results[i];
+        if(r.isFinal) finalT+=r[0].transcript; else interim+=r[0].transcript;
+      }
+      if(finalT) inp.value+=(inp.value?" ":"")+finalT.trim();
+      // interim ignored — sonst springt's
+    };
+    rec.onerror=e=>{err.textContent="Mic: "+e.error;stopMic();};
+    rec.onend=()=>{if(recOn){try{rec.start();}catch(e){stopMic();}}};
+  }
+  if(recOn){stopMic();}else{recOn=true;btnMic.classList.add("recording");try{rec.start();}catch(e){stopMic();}}
+};
+function stopMic(){recOn=false;btnMic.classList.remove("recording");try{rec&&rec.stop();}catch(e){}}
+
+// === TABS ===
+document.querySelectorAll(".tab-btn").forEach(b=>{
+  b.onclick=()=>{
+    document.querySelectorAll(".tab-btn").forEach(x=>x.classList.remove("active"));
+    document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
+    b.classList.add("active");
+    $("t-"+b.dataset.tab).classList.add("active");
+    if(b.dataset.tab==="char") refreshChar();
+    if(b.dataset.tab==="see") refreshSnap();
+  };
+});
+
+// === FOOTER STATUS ===
+async function refreshProv(){
+  try{const r=await fetch("/status");const j=await r.json();
+    $("s-prov").textContent=j.last_provider||"—";
+    fInfo.textContent=`mode: ${j.llm_mode} · ${j.request_count} req · tentakel ${j.tentacle?.fail_count||0} fails`;
+  }catch(e){}
+}
+
+// === SEND BINDINGS ===
+btnSend.onclick=send;
 inp.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}});
-refreshStatus();loadHistory();setInterval(refreshStatus,15000);
+
+// === BOOT ===
+loadHistory();refreshLive();refreshProv();loadPrompt();
+setInterval(refreshLive,2000);
+setInterval(refreshProv,15000);
+setInterval(()=>{ if($("t-char").classList.contains("active")) refreshChar(); },5000);
+setInterval(()=>{ if($("t-see").classList.contains("active")) refreshSnap(); },2500);
 </script></body></html>"""
 
 
@@ -223,6 +575,174 @@ def history(n: int = 20):
         return {"count": len(msgs), "messages": msgs}
     except Exception as e:
         raise HTTPException(500, f"Memory-Lesefehler: {e}")
+
+
+# ============================================================================
+# COCKPIT-Endpoints (Welle 2.5 — Markus' Wunsch: GUI-Spiegel im Browser)
+# ============================================================================
+
+@app.get("/live")
+def live_status():
+    """Cockpit Live-Tab: alles aus moloch_status.json + worker + power + watchdog."""
+    try:
+        with open("/dev/shm/moloch_status.json", "r") as f:
+            d = json.load(f)
+        # Slim down: nur was UI braucht
+        out = {
+            "fps_total": d.get("fps", {}).get("total", 0),
+            "person_detected": d.get("person_detected", False),
+            "face_detected": d.get("face_detected", False),
+            "face_id": d.get("face_id"),
+            "face_confidence": d.get("face_confidence", 0.0),
+            "active_models": d.get("active_models", []),
+            "autonomous_mode": d.get("autonomous_mode", False),
+            "moloch_has_control": d.get("moloch_has_control", False),
+            "tentakel_enabled": d.get("tentakel_enabled", False),
+            "frame_age": d.get("frame_age", 0.0),
+            "power": d.get("power", {}),
+            "watchdog": {
+                "cpu_temp": d.get("watchdog", {}).get("cpu_temp"),
+                "ram_percent": d.get("watchdog", {}).get("ram_percent"),
+                "camera_reachable": d.get("watchdog", {}).get("camera_reachable"),
+                "throttled": d.get("watchdog", {}).get("throttled"),
+                "warnings": d.get("watchdog", {}).get("warnings", []),
+            },
+            "worker_health": d.get("worker_health", {}),
+            "core": d.get("core", {}),
+        }
+        return out
+    except Exception as e:
+        raise HTTPException(500, f"Status read error: {e}")
+
+
+@app.get("/personality")
+def personality_view():
+    """Cockpit Charakter-Tab: Drift + Patch + letzte 10 Journal-Events."""
+    out = {"drift": {}, "patch": {}, "journal": []}
+    try:
+        from core.autonomy.character_distiller import get_distiller
+        d = get_distiller().get_drift() or {}
+        out["drift"] = {
+            "rolling": d.get("rolling_drift") or {},
+            "top": (d.get("recency_weighted_top") or [])[:5],
+            "updated_at": d.get("updated_at"),
+        }
+    except Exception as e:
+        out["drift_error"] = str(e)
+    try:
+        from core.memory.character_patch import get_patch
+        p = get_patch()
+        out["patch"] = {
+            "state": p.get_state(),
+            "active": p.get_active_rules(),
+            "pending": p.get_pending_rules(),
+        }
+    except Exception as e:
+        out["patch_error"] = str(e)
+    try:
+        from core.memory.character_journal import get_journal
+        out["journal"] = get_journal().read_recent(15)
+    except Exception as e:
+        out["journal_error"] = str(e)
+    return out
+
+
+@app.get("/snapshot.jpg")
+def snapshot_jpg():
+    """Cockpit Sehen-Tab: aktueller Frame aus SHM als JPEG."""
+    try:
+        import numpy as np
+        import cv2
+        fd = os.open("/dev/shm/moloch_frame", os.O_RDONLY)
+        size = os.fstat(fd).st_size
+        mm = mmap.mmap(fd, size, access=mmap.ACCESS_READ)
+        h, w, c, seq, ts = struct.unpack("<IIIId", mm[:24])
+        if h == 0 or w == 0:
+            mm.close(); os.close(fd)
+            raise HTTPException(503, "Frame leer")
+        data = np.frombuffer(mm[24:24 + h * w * c], dtype=np.uint8).reshape(h, w, c)
+        mm.close(); os.close(fd)
+        # SHM ist RGB, JPEG braucht BGR
+        bgr = cv2.cvtColor(data, cv2.COLOR_RGB2BGR)
+        ok, buf = cv2.imencode(".jpg", bgr, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
+        if not ok:
+            raise HTTPException(500, "JPEG encode failed")
+        return Response(content=buf.tobytes(), media_type="image/jpeg",
+                        headers={"Cache-Control": "no-store"})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Snapshot error: {e}")
+
+
+class TextOnly(BaseModel):
+    text: str = Field(..., min_length=1, max_length=4000)
+
+
+@app.post("/critic_review")
+def critic_review(req: TextOnly):
+    """Letzte Moloch-Antwort durch Critic bewerten lassen."""
+    try:
+        from core.bridge.critic_client import get_critic_client
+        from core.autonomy.character_distiller import get_distiller
+        from core.memory.character_patch import get_patch
+        char_state = {
+            "rolling_drift": (get_distiller().get_drift() or {}).get("rolling_drift", {}),
+            "active_rules": get_patch().get_active_rules(),
+        }
+        # Letzte User-Frage als Situation
+        situation = "(Browser-Chat — Cockpit Critic-Review)"
+        try:
+            msgs = get_memory().get_recent_messages(n=4) or []
+            user_msgs = [m for m in msgs if m.get("sender") == "user"]
+            if user_msgs:
+                situation = f"Markus fragte: {user_msgs[-1].get('text', '')[:200]}"
+        except Exception:
+            pass
+        result = get_critic_client().evaluate(
+            situation=situation, pi_response=req.text, character_state=char_state,
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(500, f"Critic error: {e}")
+
+
+@app.post("/tts")
+def tts_speak(req: TextOnly):
+    """Text durch Pi-Piper sprechen (PersonalityEngine.speak)."""
+    try:
+        from core.personality.personality_engine import get_personality_engine
+        ok = get_personality_engine().speak(req.text)
+        return {"spoken": bool(ok)}
+    except Exception as e:
+        raise HTTPException(500, f"TTS error: {e}")
+
+
+@app.get("/system_prompt")
+def system_prompt_preview():
+    """Debug: was wuerde dem Cloud-LLM als System-Prompt geschickt?"""
+    try:
+        from core.autonomy.local_llm_bridge import (
+            _build_threebrain_state_snippet, _build_local_context_snippet, _load_profiles
+        )
+        profiles_data = _load_profiles() or {}
+        profile = (profiles_data.get("profiles", {}) or {}).get("tentacle") or {}
+        system = profile.get("system", "")
+        if profile.get("include_live_context", True):
+            system = system + _build_local_context_snippet()
+        try:
+            mctx = get_memory().get_memory_context_minimal()
+            if mctx:
+                system = system + "\n\n--- MEMORY ---\n" + mctx
+        except Exception:
+            pass
+        tb = _build_threebrain_state_snippet()
+        if tb:
+            system = system + tb
+        return {"length": len(system), "system": system}
+    except Exception as e:
+        raise HTTPException(500, f"Prompt build error: {e}")
+
 
 def main():
     logger.info(f"MOLOCH Chat-Server startet auf {HOST}:{PORT}")
