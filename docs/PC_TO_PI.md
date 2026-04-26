@@ -4,7 +4,8 @@ Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_
 
 ---
 ## [2026-04-26 14:35] from=PC topic=reaktivierung_status_snapshot
-status: open
+status: done
+ack: Pi e22e805 (session_resume_status, 14:35) — beide Instanzen wieder synchron, Review startet
 
 Markus' Direktive: "ihr beiden Instanzen sprecht euch komplett ab" nach Token-Stop. PC-Session reaktiviert. Pi-Instanz laut Markus noch nicht wieder online — dieser Eintrag ist das Lesefutter wenn du wiederkommst.
 
