@@ -682,6 +682,194 @@ def personality_view():
     return out
 
 
+@app.get("/state_full")
+def state_full():
+    """Aggregierter Komplett-Snapshot fuer externe Visualisierung (PC-Auge).
+
+    Ein einziger Polling-Endpoint statt /live + /personality + /feedback_stats +
+    Bridge-Statuse. Strukturiert in Sektionen (system / pipeline / vision / ptz /
+    tracker / personality / llm / audio / memory / events / spatial). PC kann
+    selektiv rendern, alle Daten sind ein Roundtrip entfernt.
+
+    Schema-Stabilitaet: alle Sektionen sind dicts; einzelne keys koennen fehlen.
+    Konsumenten muessen nur dict.get(...) nutzen, kein hartes Schema-Lock.
+    """
+    out = {"ts": time.time(), "schema_version": 1}
+
+    # ---------- moloch_status.json ----------
+    try:
+        with open("/dev/shm/moloch_status.json", "r") as f:
+            d = json.load(f)
+    except Exception as e:
+        d = {}
+        out["status_read_error"] = str(e)
+
+    # ---------- system ----------
+    out["system"] = {
+        "fps": d.get("fps", {}),
+        "frame_age": d.get("frame_age", 0.0),
+        "frozen_restarts": d.get("frozen_restarts", 0),
+        "watchdog": d.get("watchdog", {}),
+        "power": d.get("power", {}),
+        "pipeline_alive": d.get("pipeline_alive", False),
+        "mode": d.get("mode", ""),
+    }
+
+    # ---------- pipeline ----------
+    out["pipeline"] = {
+        "active_models": d.get("active_models", []),
+        "npu_stage": d.get("npu_stage"),
+        "npu_stage_since": d.get("npu_stage_since"),
+        "npu_sched_mode": d.get("npu_sched_mode"),
+        "npu_paused": d.get("npu_paused", False),
+        "thresholds": d.get("thresholds", {}),
+        "worker_health": d.get("worker_health", {}),
+        "perception": d.get("perception", {}),
+    }
+
+    # ---------- vision ----------
+    out["vision"] = {
+        "person_detected": d.get("person_detected", False),
+        "face_detected": d.get("face_detected", False),
+        "face_id": d.get("face_id"),
+        "face_confidence": d.get("face_confidence", 0.0),
+        "face_similarity": d.get("face_similarity", 0.0),
+        "face_lock_active": d.get("face_lock_active", False),
+        "panel_detections": d.get("panel_detections", []),
+        "scrfd_active": d.get("scrfd_active", False),
+        "arcface_active": d.get("arcface_active", False),
+        "pose_active": d.get("pose_active", False),
+        "person_reid_active": d.get("person_reid_active", False),
+        "yolo_active": d.get("yolo_active", False),
+        "hand_active": d.get("hand_active", False),
+    }
+
+    # ---------- ptz ----------
+    out["ptz"] = {
+        **(d.get("ptz") or {}),
+        "arbiter_mode": d.get("ptz_arbiter_mode"),
+        "last_switch": d.get("ptz_last_switch"),
+        "switch_reason": d.get("ptz_switch_reason"),
+        "last_known_pan": d.get("last_known_pan"),
+        "last_known_tilt": d.get("last_known_tilt"),
+    }
+
+    # ---------- tracker / control ----------
+    out["tracker"] = {
+        "moloch_tracking": d.get("moloch_tracking", False),
+        "moloch_has_control": d.get("moloch_has_control", False),
+        "autonomous_mode": d.get("autonomous_mode", False),
+        "manual_mode": d.get("manual_mode", False),
+        "smart_search_patrol_ready": d.get("smart_search_patrol_ready", False),
+        "cam_smart_tracking": d.get("cam_smart_tracking", False),
+    }
+
+    # ---------- personality ----------
+    pers = {
+        "tension": d.get("tension"),
+        "personality_mode": d.get("personality_mode"),
+        "led_personality_mode": d.get("led_personality_mode"),
+        "core": d.get("core", {}),
+    }
+    try:
+        from core.autonomy.character_distiller import get_distiller
+        drift = get_distiller().get_drift() or {}
+        pers["drift"] = {
+            "rolling": drift.get("rolling_drift") or {},
+            "top": (drift.get("recency_weighted_top") or [])[:5],
+            "updated_at": drift.get("updated_at"),
+        }
+    except Exception as e:
+        pers["drift_error"] = str(e)
+    try:
+        from core.memory.character_patch import get_patch
+        p = get_patch()
+        pers["patch"] = {
+            "state": p.get_state(),
+            "active": p.get_active_rules(),
+            "pending_count": len(p.get_pending_rules() or []),
+        }
+    except Exception as e:
+        pers["patch_error"] = str(e)
+    try:
+        from core.memory.character_journal import get_journal
+        pers["journal_recent"] = get_journal().read_recent(10)
+    except Exception as e:
+        pers["journal_error"] = str(e)
+    out["personality"] = pers
+
+    # ---------- llm ----------
+    llm = {
+        "ollama_running": d.get("llm_ollama_running", False),
+        "provider": d.get("llm_provider"),
+        "tentakel_enabled": d.get("tentakel_enabled", False),
+    }
+    try:
+        from core.autonomy.local_llm_bridge import _get_active_profile
+        prof = _get_active_profile()
+        if prof:
+            llm["active_profile"] = {
+                "system_preview": (prof.get("system") or "")[:80],
+                "max_tokens": prof.get("max_tokens"),
+                "temperature": prof.get("temperature"),
+                "include_live_context": prof.get("include_live_context", False),
+            }
+    except Exception as e:
+        llm["profile_error"] = str(e)
+    try:
+        from core.bridge.critic_client import get_critic_client
+        llm["critic"] = get_critic_client().get_state()
+    except Exception as e:
+        llm["critic_error"] = str(e)
+    try:
+        from core.bridge.adapter_inference_client import get_adapter_client
+        llm["adapter"] = get_adapter_client().get_state()
+    except Exception as e:
+        llm["adapter_error"] = str(e)
+    out["llm"] = llm
+
+    # ---------- audio ----------
+    out["audio"] = {
+        "voice": d.get("voice", {}),
+        "audio_meter": d.get("audio", {}),
+        "music": d.get("music", {}),
+        "spotify": d.get("spotify", {}),
+        "silence_level": d.get("silence_level", 0),
+    }
+
+    # ---------- memory ----------
+    mem = {
+        "introspection": d.get("introspection", {}),
+    }
+    try:
+        from core.memory.feedback_store import get_feedback_store
+        mem["feedback_stats"] = get_feedback_store().get_state()
+    except Exception as e:
+        mem["feedback_stats_error"] = str(e)
+    try:
+        wh = d.get("worker_health", {}) or {}
+        fw = wh.get("FaceWorker") or {}
+        mem["face_db_entries"] = fw.get("face_db_entries", 0)
+    except Exception:
+        mem["face_db_entries"] = 0
+    out["memory"] = mem
+
+    # ---------- events ----------
+    out["events"] = {
+        "bridge": d.get("bridge", {}),
+        "bridge_decisions": d.get("bridge_decisions", []),
+        "bus_stats": d.get("bus_stats", {}),
+    }
+
+    # ---------- spatial ----------
+    out["spatial"] = d.get("spatial", {})
+
+    # ---------- bridge / cloud ----------
+    out["cloud"] = d.get("cloud", {})
+
+    return out
+
+
 @app.get("/snapshot.jpg")
 def snapshot_jpg():
     """Cockpit Sehen-Tab: aktueller Frame aus SHM als JPEG."""
