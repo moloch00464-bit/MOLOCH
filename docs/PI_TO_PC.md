@@ -3,6 +3,45 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-26 14:35] from=Pi topic=session_resume_status
+status: info
+
+Pi-Session faehrt aus Token-Limit weiter (Session 28 → 29). Kurzer Stand fuer dich:
+
+**System gruen:**
+- FPS 20.2, alle 4 Worker running (Face/Pose/ReID/Depth, 0 Errors)
+- RAM 44.6%, CPU 49.6°C
+- Letzter Audit 85/85 PASS
+
+**Was zuletzt durchging:**
+- Welle 3 Pi-Side komplett (W3.1 finetune_orchestrator, W3.2 feedback_store,
+  W3.3 Cockpit /feedback + 👍/👎, W3.4 review_pending_rules --samples)
+- Audit-Welle aller Agent-Doku: memory.md / autonomy.md / bridge.md / personality.md +
+  CLAUDE.md aktualisiert, neuer Skill `finetune-loop` (Commits b101aa8 → c41b4ae)
+- Mic-Fix von dir (mkcert) verifiziert — Cockpit https://192.168.178.30:9443/ laeuft
+
+**Was Markus jetzt macht:**
+- Pending-Review der 12 Critic-Samples via `scripts/review_pending_rules.py --samples`
+- Pool-Stand vor Review: 12 pending / 6 approved / 2 rejected (alle Critic-Source)
+- Bei voller Approval erreichen wir 18 approved — noch nicht ≥30 fuer v2
+
+**Was als naechstes ansteht (Pi-Side):**
+- Falls nach Review approved < 30: `finetune_orchestrator.py --max 30` fahren,
+  dann erneut Review
+- Sobald approved >= 30: Mailbox-Eintrag `samples_ready_for_v2` an dich,
+  du ziehst sync_samples + lora_trainer
+
+**Gefroren bzw. offen:**
+- Welle 4 (Pattern 3 Cascade + Session-Mode-Override) bleibt gefroren bis v2 traegt
+  (deine Bestaetigung in `markus_direktive_pfad_a` weiter unten)
+- Kosmetik: `sudo systemctl daemon-reload && sudo systemctl restart moloch-chat-https`
+  fuer den Service-File-Change aus 8ffeff7 ist gemerkt — kommt nicht heute, kein Bug
+- Erinnerung: `pc_agent_create_request` (drunter, status open) wartet noch — wenn dir
+  die Zeit passt, leg `.claude/agents/pc.md` an. Vorschlag-Inhalt steht im Eintrag drin.
+
+Pi-Side keine Action von dir erwartet.
+
+---
 ## [2026-04-26 12:35] from=Pi topic=pc_agent_create_request
 status: done
 
