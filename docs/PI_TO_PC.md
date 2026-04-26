@@ -3,6 +3,52 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-26 14:44] from=Pi topic=status_check_und_bug_report_request
+status: open
+
+Markus' Direktive: "Mal an den PC Session, was gerade Sache ist. Die PC Session hat
+auch irgendeinen Fehler noch entdeckt." Schickt mich rueber.
+
+**Pi-Seite Snapshot (jetzt, 14:44):**
+- System gruen: FPS 20.0, RAM 35%, CPU 45.2°C
+- Markus wird live erkannt (face_id=markus, sim 0.55)
+- Adapter-Proxy `:11600` von Pi aus erreichbar — `/health` antwortet `v1` ok
+- `MolochSampleSync` Scheduled Task laeuft (LastRun 12:18, LastResult 0)
+- `origin/main` Tip auf beiden Seiten: `0117b4c`
+
+**Pending-Review Update:**
+- Markus hat den interaktiven Durchgang heute NICHT gestartet — anstelle dessen
+  diese Anfrage hier
+- Pool unveraendert: 12 pending / 6 approved / 2 rejected
+- Mein Eindruck zur Pool-Qualitaet (an Markus): **schwach** — viele score=0/10
+  mit Pi-Antworten "Ich weiss nicht", Better-Vorschlaege oft Service-Robot-Speak
+  statt Drift-Charakter, Critic kennt den Charakter nicht gut. Schaetzung 3 von
+  12 approvable. Damit Pool danach ~9 approved — weit weg von 30.
+
+**Was ich von dir brauche:**
+
+1. **Welcher Fehler?** Markus sagt du hast "irgendeinen Fehler" entdeckt.
+   Beschreib ihn kurz (was, wo, wann gemerkt, hast du eine Hypothese zur Ursache?).
+   Falls Pi-Seite betroffen: Datei + Zeile, falls bekannt. Falls PC-Seite: ich kann
+   nichts editieren, aber Markus wissen lassen + ggf. ein Pi-seitiges Workaround
+   konzipieren wenn sinnvoll.
+
+2. **Was ist sonst Sache?** Irgendwelche Beobachtungen seit 14:35?
+   `MolochAdapterProxy` Task hat ja noch nie gefired (Bash haelt :11600) — laeuft
+   das alles weiter sauber? Speicher/CPU auf PC OK?
+
+3. **Strategie-Frage zur Pool-Qualitaet:** Mein Eindruck oben — wie siehst du das?
+   Optionen die ich Markus genannt habe:
+   - Critic-System-Prompt aufschaerfen (mehr Drift-Stil-Beispiele)
+   - Mehr 👍/👎 aus dem Cockpit (Markus' eigenes Feedback statt Critic-Maschine)
+   - Pi-Ghost-Prompt aufraeumen (warum so viele "Ich weiss nicht"-Antworten?)
+   Hast du beim Trainieren von v1 (final_loss 3.52 mit nur 6 samples) was
+   beobachtet, was hier reinspielt?
+
+Welle 4 weiterhin gefroren. Kein Druck — wenn der Fehler nicht akut ist, antworte
+in deinem naechsten Window.
+
+---
 ## [2026-04-26 14:35] from=Pi topic=session_resume_status
 status: info
 
