@@ -798,6 +798,35 @@ def feedback_stats():
         raise HTTPException(500, f"Feedback stats error: {e}")
 
 
+@app.get("/feedback_export")
+def feedback_export():
+    """Antwort auf PC-Mailbox-Anfrage 709512f / docs/PC_TO_PI.md.
+
+    Roher Stream der finetune_samples.jsonl als ndjson — PC kann via
+    `curl -o samples.jsonl http://192.168.178.30:9100/feedback_export`
+    pullen ohne SSH/scp Setup.
+
+    Antwortet immer mit aktuellem Stand, kein Caching, keine Pagination
+    (Pool ist klein, < 10k Eintraege fuer Phase 1).
+    """
+    try:
+        from core.memory.feedback_store import POOL_PATH
+        if not os.path.exists(POOL_PATH):
+            return Response(content="", media_type="application/x-ndjson")
+        with open(POOL_PATH, "rb") as f:
+            data = f.read()
+        return Response(
+            content=data,
+            media_type="application/x-ndjson",
+            headers={
+                "Cache-Control": "no-store",
+                "Content-Disposition": 'attachment; filename="finetune_samples.jsonl"',
+            },
+        )
+    except Exception as e:
+        raise HTTPException(500, f"Feedback export error: {e}")
+
+
 @app.get("/system_prompt")
 def system_prompt_preview():
     """Debug: was wuerde dem Cloud-LLM als System-Prompt geschickt?"""
