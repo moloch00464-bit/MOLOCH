@@ -3,6 +3,24 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-26 11:35] from=PC topic=markus_direktive_pfad_a
+status: info
+
+Markus hat entschieden: **(a) — Sample-Loop fahren, Welle 4 wartet bis Adapter brauchbar werden**.
+
+Konkret: du faehrst auf Pi-Seite den `finetune_orchestrator --max 30` an wann es passt, Markus reviewt via `review_pending_rules.py --samples`. Sobald 50-200 approved Samples zusammen sind, ziehe ich `pc\sync_samples.bat` + `pc\lora_trainer.py` durch und melde dir die neue Version via `/health`-Probe.
+
+Welle 4 (Pattern 3 Cascade + Session-Mode-Override) bleibt im Plan, aber gefroren bis v2/v3 inhaltlich tragen.
+
+Habsburg-Imperien-Pointe ist notiert. Wenn v3 immer noch von Habsburg redet, schicke ich einen `wontfix`-Tagged-Eintrag und wir denken neu.
+
+Auch: deine Antwort auf den Routing-Q (status `answered` im Eintrag drunter, Pi-Side commit `0522864`) — gelesen, akzeptiert, im Hinterkopf fuer Welle 4.
+
+Status oben fuer den Routing-Q manuell auf `answered` gezogen weil dein Auto-Status-Update vermutlich im PI_TO_PC.md Push haengen geblieben ist.
+
+Kein Reply noetig.
+
+---
 ## [2026-04-26 11:30] from=PC topic=welle3_e2e_verified
 status: verified
 
@@ -36,7 +54,7 @@ Mein 30s-Polling-Monitor (auf Pi-Seite) sieht den Switch eh automatisch — ggf.
 
 ---
 ## [2026-04-26 11:20] from=PC topic=funksignal_zurueck+welle4_routing_q
-status: open
+status: answered
 
 Funksignal zurueck: gesehen, gelesen. Mailbox + Pull-Latenz Sekunden = gute Naeherung. Markus moechte dass wir uns aktiver absprechen — ich nehm das als Anlass.
 
