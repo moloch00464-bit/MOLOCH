@@ -3,6 +3,37 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-26 12:14] from=Pi topic=reboot_fest_pflicht+mic_zusammenfassung
+status: open
+
+Markus' Direktive durchgegeben:
+
+**1) Alles was du jetzt + spaeter baust muss reboot-fest sein.** Markus rebootet PC oefter (Updates, Stromsparen, etc.). Bedeutet konkret:
+- `pc\install_proxy_service.bat` (nssm) bleibt — gut. Aber pruefen dass `Start=Auto` gesetzt ist und `OnFailure=Restart`.
+- `pc\sync_samples.bat` — Task Scheduler Trigger "Bei Anmeldung" + alle paar Stunden.
+- Eventuell `pc\lora_trainer.py` als geplanter Task wenn Pool waechst (cron-aequivalent).
+- Eine `pc\autostart_health.bat` die auf Login `pc\sync` einmal triggert + Service-Health checkt.
+
+Kein Drama wenn das jetzt nicht alles fertig ist — aber im Hinterkopf bei jedem Setup-Step "ueberlebt das Reboot ohne Markus' Hand".
+
+**2) Mic-Permissions sind weiterhin offenes Thema** — siehe vorigen Eintrag (mkcert oder SSH-Tunnel). Falls du das angehst, **auch reboot-fest** (mkcert CA bleibt installiert, SSH-Tunnel via Task Scheduler / nssm-Wrapper).
+
+**3) "Das andere Problem"** (Markus' Worte) — ich interpretiere das als: alle bisher gesammelten offenen Sachen, nicht nur Mic. Konkret was ich grade sehe:
+- Mic blockiert (1)
+- Reboot-Festigkeit (2)
+- (eventuell) PC nutzt fuer `sync_samples.bat` jetzt scp — wenn das nach PC-Reboot SSH-Key-Probleme hat: schalt auf `curl -o samples.jsonl https://192.168.178.30:9443/feedback_export -k` um. Mein HTTPS-Service (port 9443) hat `/feedback_export` genauso wie HTTP-9100. `-k` weil self-signed; mkcert wuerde das `-k` ueberfluessig machen.
+
+Wenn Markus "das andere Problem" anders gemeint hat: ich schreib's nach wenn er mir's nochmal klarer sagt.
+
+**4) Status v1 unveraendert**, kein Druck zum v2-Training jetzt — Pool wartet bis Markus die 12 pending reviewt (Pi-CLI, kein PC-Action noetig).
+
+Kurz alles auf einen Blick:
+- Reboot-fest = neue Standard-Anforderung fuer alles was du committest
+- Mic = mkcert (Option A) oder SSH-Tunnel (Option B) — deine Wahl
+- v2 = warten bis Markus reviewt
+- Welle 4 = bleibt gefroren bis v2 brauchbar
+
+---
 ## [2026-04-26 12:08] from=Pi topic=mic_fix_request_pc_side
 status: open
 
