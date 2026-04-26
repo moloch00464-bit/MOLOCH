@@ -20,9 +20,40 @@ LLM-Tentakel, STT-Bridge, TTS-Bridge, Chat-UI, Health-Probing, Circuit-Breaker.
 
 ## Territorium
 
-- `core/bridge/*.py` — NEU, Subdir fuer alle PC-seitigen Clients (StttBridgeClient, TtsBridgeClient, ChatBridgeClient)
-- `config/settings.json` Keys: `tentacle_llm`, `stt_bridge`, `tts_bridge`, `chat_ui`
+- `core/bridge/*.py` — Subdir fuer alle PC-seitigen Clients
+- `config/settings.json` Keys: `tentacle_llm`, `stt_bridge`, `tts_bridge`, `chat_ui`,
+  `adapter_inference` (W3 NEU), `critic_service` (W2 NEU)
 - Tentakel-Probe in `core/system_watchdog.py` (gemeinsam mit watchdog-Agent — koordinieren)
+- HTTPS-Cert: `config/certs/moloch_chat.{key,crt}` (self-signed, fuer Browser-Mic)
+- systemd-Units: `moloch-chat.service` (HTTP 9100) + `moloch-chat-https.service` (HTTPS 9443)
+- Cross-Session-Mailbox: `docs/PC_TO_PI.md` + `docs/PI_TO_PC.md` (siehe `docs/CROSS_SESSION_PROTOCOL.md`)
+
+### Konkrete Bridge-Module
+
+- `core/bridge/chat_server.py` — FastAPI-Server (HTTP 9100 + HTTPS 9443).
+  Endpoints (vollstaendig, Stand W3):
+  - `GET  /`               — HTML-Cockpit (Header-Stats + 3 Tabs Live/Charakter/Sehen + 👍/👎/[Critic])
+  - `GET  /health`         — Service-Status
+  - `GET  /status`         — Bridge-Stats (llm_mode, last_provider, request_count, tentacle)
+  - `POST /chat`           — User-Input -> Memory + EventBus + LLM-Bridge
+  - `GET  /history`        — letzte N Memory-Messages (Cross-Channel Browser+Voice+Test)
+  - `GET  /live`           — Status-Snapshot fuer Cockpit (FPS, person, face, power, watchdog, worker)
+  - `GET  /personality`    — Drift + Patch + 15 Journal-Events
+  - `GET  /snapshot.jpg`   — Frame aus SHM (640x360 JPEG q=75)
+  - `POST /critic_review`  — Antwort durch dolphin-mistral:7b bewerten (PC-Critic-Service)
+  - `POST /tts`            — Text durch PersonalityEngine.speak() (Pi-Piper)
+  - `POST /feedback`       — Markus-Thumbs (👍/👎) -> feedback_store.add_thumbs()
+  - `GET  /feedback_stats` — Pool-Status (total/critic/thumbs/pending/approved/rejected)
+  - `GET  /feedback_export`— ndjson-Stream finetune_samples.jsonl (PC nutzt statt scp)
+  - `GET  /system_prompt`  — Debug: was wird LLM injected (drift+patch+events+memory)
+  HTTPS-Mode via Env-Vars MOLOCH_CHAT_SSL_KEY + MOLOCH_CHAT_SSL_CERT (uvicorn ssl_keyfile/cert).
+- `core/bridge/critic_client.py` — PC-Critic-Service-Client (W2). Spricht
+  http://192.168.178.20:11434 (Ollama dolphin-mistral:7b). Health-Probe + Circuit-Breaker.
+- `core/bridge/adapter_inference_client.py` — PC-LoRA-Proxy-Client (W3 Pi-Antwort).
+  Spricht http://192.168.178.20:11600 (FastAPI mit Qwen2.5-1.5B + LoRA-Adapter).
+  API: health(), infer(prompt, system, max_tokens), list_adapters(), reload(), get_state().
+  Settings: `adapter_inference` (host/port/timeout=120/backoff=600/default_max_tokens=100).
+  Circuit-Breaker: 3 fails -> 600s backoff. Health-Cache 30s.
 
 ## Abgrenzung (was NICHT dein Revier)
 
@@ -47,10 +78,13 @@ Ryzen 3900X mit 12 Cores ist staerker als Pi und kann faster-whisper-medium/larg
 
 | Bridge | Status | Tech | Endpoint |
 |---|---|---|---|
-| LLM-Tentakel | LIVE seit 2026-04-19 | Ollama mistral 7B + deepseek-coder 1B | http://192.168.178.20:11434 |
+| LLM-Tentakel | LIVE seit 2026-04-19 | Ollama mistral/dolphin/etc. | http://192.168.178.20:11434 |
+| Critic-Service (W2) | LIVE | Ollama dolphin-mistral:7b | http://192.168.178.20:11434 (gleicher Ollama) |
+| Adapter-Inference (W3) | LIVE seit 2026-04-26 | Qwen2.5-1.5B + LoRA-Adapter v{N} | http://192.168.178.20:11600 |
+| Cockpit Pi-Web | LIVE seit 2026-04-26 | FastAPI auf Pi | http://192.168.178.30:9100 (HTTP) + https://192.168.178.30:9443 (HTTPS fuer Mic) |
+| Sample-Sync | LIVE | scp ODER curl -> /feedback_export | Pi -> PC via Pull |
 | STT-Bridge | GEPLANT | faster-whisper medium CPU oder GPU | http://192.168.178.20:9001 (Vorschlag) |
 | TTS-Bridge | GEPLANT | Piper-Windows oder Edge-TTS | http://192.168.178.20:9002 (Vorschlag) |
-| Chat-UI | GEPLANT | Browser-UI oder Tauri-Desktop | spricht intern mit Pi-IPC + Bridges |
 
 ## Kritische Regeln
 
