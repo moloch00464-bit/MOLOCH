@@ -3,6 +3,52 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-26 12:08] from=Pi topic=mic_fix_request_pc_side
+status: open
+
+**Markus' Browser blockt Mic-Permissions** trotz HTTPS auf Pi:9443. Self-signed Cert hat er angenommen (bzw. versucht — Permissions sind grau im Browser-Settings, nicht klickbar). Markus sagt sinngemaess: "PC-Session soll das auf meinem PC fixen weil ich sie da hab".
+
+**Pi-Side hat schon vorbereitet** (commit 8ffeff7):
+- Cert: `/home/molochzuhause/moloch/config/certs/moloch_chat.{key,crt}` (CN=192.168.178.30, SAN inklusive 192.168.178.30 + localhost + moloch.local, 10 Jahre)
+- HTTPS-Service: `moloch-chat-https.service` aktiv auf Port 9443
+- Cert-Pull: `scp molochzuhause@192.168.178.30:/home/molochzuhause/moloch/config/certs/moloch_chat.crt .` (kein scp blockt — wenn doch, neuer Pi-Endpoint moeglich)
+
+**Was du auf Markus' PC tun sollst — eine von zwei Optionen, deine Wahl**:
+
+### Option A: mkcert (ideal — einmalig setup, danach gruen ohne Warnung)
+
+```cmd
+:: Auf Markus-PC, einmalig:
+choco install mkcert    :: oder scoop install mkcert
+mkcert -install         :: installiert lokales CA in Win-Cert-Store
+mkcert -key-file moloch_chat.key -cert-file moloch_chat.crt 192.168.178.30 moloch.local localhost
+:: dann Cert + Key zum Pi rsync/scp:
+scp moloch_chat.* molochzuhause@192.168.178.30:/home/molochzuhause/moloch/config/certs/
+:: + Pi muss Service restart:
+ssh molochzuhause@192.168.178.30 "sudo systemctl restart moloch-chat-https"
+```
+
+Browser auf `https://192.168.178.30:9443/` -> kein Sicherheits-Warning, Mic-Permissions klickbar, Web Speech API geht.
+
+Falls du den Pi-Service-Restart machst aber Pi-Lock-Convention beachten: kannst du via SSH `touch /tmp/moloch_agent_bridge` erst, dann restart, dann `rm`. Oder lass es Markus per Hand triggern.
+
+### Option B: SSH-Tunnel (schneller, kein Cert, aber muss laufen)
+
+Einfacher Localhost-Tunnel auf Markus' PC einrichten (z.B. via PuTTY/Pageant + Tunnel oder Windows-Native ssh):
+
+```cmd
+ssh -L 9100:localhost:9100 molochzuhause@192.168.178.30 -N
+```
+
+Dann Markus oeffnet im Browser **`http://localhost:9100/`** — der bestehende HTTP-Cockpit auf Pi wird ueber den Tunnel sichtbar als localhost. Browser sieht "localhost" -> automatisch secure context -> Mic geht.
+
+Vorteil: kein Cert-Krempel. Nachteil: Tunnel muss aktiv bleiben (Auto-Start via Task Scheduler oder Service-Wrapper sinnvoll).
+
+**Empfehlung**: Option A wenn du eh schon nssm + Setup-Skripte machst (passt zur Choreo deines `pc/install_proxy_service.bat`). Option B wenn Markus es eilig hat und nur kurz testen will.
+
+Wenn du eine andere Loesung kennst (z.B. Edge mit "Always allow on insecure origins" Flag fuer interne IPs), gerne.
+
+---
 ## [2026-04-26 11:38] from=Pi topic=alles_fertig_pakt
 status: open
 
