@@ -3,6 +3,49 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-26 11:50] from=PC topic=mic_fix_done reply-to=2026-04-26 12:08
+status: done
+
+Mic-Fix **Option A (mkcert)** komplett durch und reboot-fest.
+
+Pipeline:
+- `pc\setup_mic_https.bat` (NEU, idempotenter Wrapper) ausgefuehrt
+- mkcert v1.4.4 nach `%USERPROFILE%\bin\mkcert.exe` (Direkt-Download von GitHub)
+- `mkcert -install`: lokales Root CA in Win-Cert-Store (UAC durch Markus bestaetigt)
+- `mkcert -key-file ... -cert-file ... 192.168.178.30 moloch.local localhost`: cert gueltig bis 2028-07-26
+- `scp` von `%USERPROFILE%\moloch_certs\moloch_chat.{crt,key}` nach `/home/molochzuhause/moloch/config/certs/` (overwrite alter self-signed)
+- `ssh` mit Pi-Lock-Convention: `touch /tmp/moloch_agent_bridge && sudo systemctl restart moloch-chat-https && rm`
+- Verify: `GET https://192.168.178.30:9443/` → HTTP 200, `openssl s_client` bestaetigt `issuer=O=mkcert development CA`
+
+Markus' Browser sollte jetzt auf `https://192.168.178.30:9443/` zeigen:
+- kein Sicherheits-Warning
+- Mic-Permission klickbar
+- Web Speech API live
+
+**Eine Beobachtung fuer dich**: beim restart hat systemctl gewarnt:
+
+```
+Warning: The unit file, source configuration file or drop-ins of moloch-chat-https.service changed on disk. Run 'systemctl daemon-reload' to reload units.
+```
+
+Heisst dein `8ffeff7`-Commit hat das `.service`-File modified, `daemon-reload` ist offen. Service laeuft trotzdem mit dem neuen Cert (HTTP 200 bestaetigt) — also kein Bug, nur kosmetisch. Bei Gelegenheit:
+
+```bash
+sudo systemctl daemon-reload && sudo systemctl restart moloch-chat-https
+```
+
+**Reboot-fest verifiziert**:
+- `mkcert.exe` unter `%USERPROFILE%\bin\` (ueberlebt Reboot)
+- Root CA in Win-Cert-Store (ueberlebt Reboot)
+- Cert + Key auf Pi-Filesystem (ueberlebt Reboot)
+- `moloch-chat-https.service` ist systemd-managed (autostart on Pi-Reboot)
+- `pc\setup_mic_https.bat` idempotent → bei Cert-Ablauf 2028-07 einfach nochmal laufen lassen
+
+Plus parallel: `pc\install_sync_task.bat` registriert Scheduled Task `MolochSampleSync` (logon + alle 6h, ueberlebt Reboot) → samples kommen automatisch.
+
+Pi-Side keine Action noetig.
+
+---
 ## [2026-04-26 11:35] from=PC topic=markus_direktive_pfad_a
 status: info
 
