@@ -17,6 +17,7 @@ import time
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 sys.path.insert(0, os.path.expanduser("~/moloch"))
@@ -40,6 +41,80 @@ class ChatRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=4000)
     force_local: bool = False
     use_reason: bool = False
+
+
+_CHAT_UI_HTML = """<!doctype html>
+<html lang="de"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MOLOCH</title>
+<style>
+  :root{--bg:#0d0d0f;--fg:#e6e6e6;--accent:#9b3030;--mute:#6e6e7a;--card:#16161b;--border:#26262e;}
+  *{box-sizing:border-box}html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,sans-serif;height:100%}
+  .wrap{display:flex;flex-direction:column;height:100vh;max-width:760px;margin:0 auto;padding:14px;gap:10px}
+  .head{display:flex;justify-content:space-between;align-items:center;padding-bottom:10px;border-bottom:1px solid var(--border)}
+  .head h1{font:600 16px/1 system-ui;margin:0;letter-spacing:.5px}
+  .head .meta{color:var(--mute);font-size:12px}
+  .chat{flex:1;overflow-y:auto;padding:8px 4px;display:flex;flex-direction:column;gap:8px}
+  .msg{padding:9px 12px;border-radius:10px;max-width:85%;white-space:pre-wrap;word-wrap:break-word}
+  .me{align-self:flex-end;background:#1c2233;border:1px solid #2a3550}
+  .moloch{align-self:flex-start;background:var(--card);border:1px solid var(--border)}
+  .meta-line{font-size:11px;color:var(--mute);margin-top:3px}
+  .form{display:flex;gap:8px;border-top:1px solid var(--border);padding-top:10px}
+  textarea{flex:1;background:var(--card);color:var(--fg);border:1px solid var(--border);border-radius:8px;padding:10px;resize:none;font:14px system-ui;min-height:60px;max-height:160px}
+  button{background:var(--accent);color:white;border:0;border-radius:8px;padding:0 16px;cursor:pointer;font:600 14px system-ui}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .row{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--mute);margin-top:6px}
+  .row label{cursor:pointer}
+  .err{color:#ff7676}
+</style></head><body><div class="wrap">
+<div class="head">
+  <h1>MOLOCH — PIGH0ST</h1>
+  <div class="meta" id="status">…</div>
+</div>
+<div class="chat" id="chat"></div>
+<div class="form">
+  <textarea id="inp" placeholder="Schreib was. Enter = senden, Shift+Enter = Zeile." autofocus></textarea>
+  <button id="send">Senden</button>
+</div>
+<div class="row">
+  <label><input type="checkbox" id="local"> NPU lokal (qwen2.5)</label>
+  <label><input type="checkbox" id="reason"> reason_internal</label>
+  <span id="err" class="err"></span>
+</div>
+</div>
+<script>
+const chat=document.getElementById("chat"),inp=document.getElementById("inp"),btn=document.getElementById("send"),
+      st=document.getElementById("status"),err=document.getElementById("err"),
+      cbLocal=document.getElementById("local"),cbReason=document.getElementById("reason");
+function add(role,text,meta){const d=document.createElement("div");d.className="msg "+(role==="me"?"me":"moloch");
+  d.textContent=text;chat.appendChild(d);
+  if(meta){const m=document.createElement("div");m.className="meta-line "+(role==="me"?"me":"moloch");m.textContent=meta;chat.appendChild(m);}
+  chat.scrollTop=chat.scrollHeight;}
+async function refreshStatus(){try{const r=await fetch("/status");const j=await r.json();
+  st.textContent=`mode: ${j.llm_mode} · last: ${j.last_provider} · ${j.request_count} req`;
+}catch(e){st.textContent="status fetch failed";}}
+async function loadHistory(){try{const r=await fetch("/history?n=10");const j=await r.json();
+  for(const m of (j.messages||[])){const sender=m.sender==="user"?"me":"moloch";add(sender,m.text||"",`${m.ts||""} · ${m.source||""}`);}
+}catch(e){}}
+async function send(){const t=inp.value.trim();if(!t)return;err.textContent="";btn.disabled=true;
+  add("me",t);inp.value="";const t0=Date.now();
+  try{const r=await fetch("/chat",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({text:t,force_local:cbLocal.checked,use_reason:cbReason.checked})});
+    if(!r.ok){const txt=await r.text();throw new Error(`HTTP ${r.status}: ${txt}`);}
+    const j=await r.json();
+    add("moloch",j.text,`${j.provider} · ${j.duration_ms}ms`);
+  }catch(e){err.textContent=e.message;add("moloch","[Fehler] "+e.message);}
+  finally{btn.disabled=false;refreshStatus();inp.focus();}}
+btn.onclick=send;
+inp.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}});
+refreshStatus();loadHistory();setInterval(refreshStatus,15000);
+</script></body></html>"""
+
+
+@app.get("/", response_class=HTMLResponse)
+def chat_ui():
+    """Pi-lokales Browser-Chat-Fenster — keine externen Abhaengigkeiten."""
+    return _CHAT_UI_HTML
 
 
 @app.get("/health")
