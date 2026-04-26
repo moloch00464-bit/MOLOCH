@@ -53,8 +53,15 @@ MAX_LEN = 512
 KEEP_LAST = 5
 SYSTEM_PROMPT = "Du bist Moloch."
 
+# Per-sample weighting: critic-samples lehren "schlecht -> besser", thumbs_up
+# verstaerken nur die bestehende Pi-Antwort. Bei kleinem oder gemischtem Pool
+# sollen critic-samples den Lerneffekt dominieren.
+WEIGHT_CRITIC = 3
+WEIGHT_THUMBS_UP = 1
+
 
 def load_samples(path: Path) -> list[dict]:
+    """Parse approved samples from jsonl. No weighting, no cap."""
     pairs: list[dict] = []
     with path.open("r", encoding="utf-8") as f:
         for raw in f:
@@ -80,7 +87,22 @@ def load_samples(path: Path) -> list[dict]:
             if not target:
                 continue
             pairs.append({"input": situation, "output": target, "source": source})
-    return pairs[:MAX_SAMPLES]
+    return pairs
+
+
+def apply_weighting_and_cap(pairs: list[dict]) -> list[dict]:
+    """Multiplicate samples per WEIGHT_*, then truncate to MAX_SAMPLES.
+
+    Critic-samples get repeated WEIGHT_CRITIC times (default 3), thumbs_up
+    WEIGHT_THUMBS_UP times (default 1). The Trainer sees more critic-driven
+    gradient updates per epoch, so the LoRA learns the corrective style
+    instead of just reinforcing pi_response.
+    """
+    weighted: list[dict] = []
+    for p in pairs:
+        w = WEIGHT_CRITIC if p["source"] == "critic" else WEIGHT_THUMBS_UP
+        weighted.extend([p] * w)
+    return weighted[:MAX_SAMPLES]
 
 
 def encode_pair(tokenizer, situation: str, response: str) -> dict:
@@ -137,9 +159,16 @@ def self_test() -> int:
     finally:
         fd.close()
     try:
-        pairs = load_samples(path)
-        assert len(pairs) == 2, f"expected 2 pairs, got {len(pairs)}"
-        assert sorted(p["source"] for p in pairs) == ["critic", "thumbs_up"]
+        raw = load_samples(path)
+        assert len(raw) == 2, f"expected 2 raw pairs, got {len(raw)}"
+        assert sorted(p["source"] for p in raw) == ["critic", "thumbs_up"]
+
+        weighted = apply_weighting_and_cap(raw)
+        # 1 critic * 3 + 1 thumbs_up * 1 = 4
+        assert len(weighted) == 4, f"expected 4 weighted, got {len(weighted)}"
+        c = sum(1 for p in weighted if p["source"] == "critic")
+        t = sum(1 for p in weighted if p["source"] == "thumbs_up")
+        assert (c, t) == (WEIGHT_CRITIC, WEIGHT_THUMBS_UP), f"weights wrong: {c=} {t=}"
     finally:
         path.unlink()
 
@@ -173,15 +202,21 @@ def main() -> int:
         print(f"[trainer] samples file not found: {args.samples}", file=sys.stderr)
         return 2
 
-    pairs = load_samples(args.samples)
-    if not pairs:
+    raw_pairs = load_samples(args.samples)
+    if not raw_pairs:
         print(
             "[trainer] no usable samples (need approved=true + critic/thumbs_up with non-empty target)",
             file=sys.stderr,
         )
         return 3
-    breakdown = dict(Counter(p["source"] for p in pairs))
-    print(f"[trainer] loaded {len(pairs)} samples ({breakdown}), threads={CPU_THREADS}")
+    pairs = apply_weighting_and_cap(raw_pairs)
+    raw_breakdown = dict(Counter(p["source"] for p in raw_pairs))
+    eff_breakdown = dict(Counter(p["source"] for p in pairs))
+    print(
+        f"[trainer] {len(raw_pairs)} raw approved {raw_breakdown} "
+        f"-> {len(pairs)} effective (critic x{WEIGHT_CRITIC}, thumbs_up x{WEIGHT_THUMBS_UP}) "
+        f"{eff_breakdown}, threads={CPU_THREADS}"
+    )
 
     args.out.mkdir(parents=True, exist_ok=True)
     existing = sorted(
@@ -250,8 +285,11 @@ def main() -> int:
     log = {
         "version": f"v{version}",
         "base": args.base,
-        "samples_used": len(pairs),
-        "samples_breakdown": breakdown,
+        "samples_used_raw": len(raw_pairs),
+        "samples_used_effective": len(pairs),
+        "samples_breakdown_raw": raw_breakdown,
+        "samples_breakdown_effective": eff_breakdown,
+        "sample_weights": {"critic": WEIGHT_CRITIC, "thumbs_up": WEIGHT_THUMBS_UP},
         "epochs": EPOCHS,
         "batch_size": BATCH_SIZE,
         "learning_rate": LR,
