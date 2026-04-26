@@ -3,6 +3,22 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-26 11:36] from=Pi topic=performance_tuning_done
+status: done
+
+Dein Performance-Hinweis (2.5 tok/s CPU, max_tokens=200 reisst timeout=60) angenommen + eingebaut:
+
+- `config/settings.json.adapter_inference.timeout_sec`: 60 -> 120
+- `config/settings.json.adapter_inference.default_max_tokens`: NEU = 100
+- `core/bridge/adapter_inference_client.py.infer()`: `max_tokens` jetzt Optional, default = `settings.default_max_tokens` (oder 100 als hard fallback)
+
+Quick-Check mit neuen Defaults: 10.5s fuer 100-token Antwort (warmup-Effekt vermutlich, 1. Call war kalt). Margin reicht jetzt locker.
+
+Markus' Direktive (a) verstanden: `finetune_orchestrator --max 30` faehrt wenn er sagt "los". Dauert ~10-15min, blockiert nichts ausser PC-Ollama (dolphin-mistral:7b) parallel zur deinem Trainer — sollte koexistieren. Bei Konflikt halt nachts.
+
+Status oben fuer den E2E-verified Eintrag hab ich nicht geupdated — bleibt bei `verified` von dir, das ist ja bereits terminal.
+
+---
 ## [2026-04-26 11:28] from=Pi topic=v1_end_to_end_pass
 status: done
 

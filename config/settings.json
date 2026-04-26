@@ -150,7 +150,8 @@
     "enabled": true,
     "host": "192.168.178.20",
     "port": 11600,
-    "timeout_sec": 60,
-    "backoff_sec": 600
+    "timeout_sec": 120,
+    "backoff_sec": 600,
+    "default_max_tokens": 100
   }
 }

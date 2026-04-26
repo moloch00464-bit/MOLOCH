@@ -37,8 +37,9 @@ logger = logging.getLogger("AdapterClient")
 
 DEFAULT_HOST = "192.168.178.20"
 DEFAULT_PORT = 11600
-DEFAULT_TIMEOUT_S = 60
+DEFAULT_TIMEOUT_S = 120          # 2.5 tok/s CPU + max_tokens=100 -> ~40s, mit Margin 120
 DEFAULT_BACKOFF_S = 600
+DEFAULT_MAX_TOKENS = 100         # statt 200: bei 2.5 tok/s = 40s Antwortzeit (komfortabel)
 
 _SETTINGS_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
@@ -53,6 +54,7 @@ def _load_cfg() -> Dict[str, Any]:
         "port": DEFAULT_PORT,
         "timeout_sec": DEFAULT_TIMEOUT_S,
         "backoff_sec": DEFAULT_BACKOFF_S,
+        "default_max_tokens": DEFAULT_MAX_TOKENS,
     }
     try:
         with open(_SETTINGS_PATH, "r", encoding="utf-8") as f:
@@ -118,14 +120,21 @@ class AdapterInferenceClient:
     # ------------------------------------------------------- CALL
 
     def infer(self, prompt: str, system: str = "Du bist Moloch.",
-              max_tokens: int = 200) -> Optional[str]:
-        """Eine Inferenz auf PC-Adapter-Proxy. Returns text oder None bei Fehler."""
+              max_tokens: Optional[int] = None) -> Optional[str]:
+        """Eine Inferenz auf PC-Adapter-Proxy. Returns text oder None bei Fehler.
+
+        max_tokens=None -> nimmt settings.adapter_inference.default_max_tokens
+        (default 100, passt zu CPU 2.5 tok/s in <40s Antwortzeit).
+        """
         if time.monotonic() < self._backoff_until:
             return None
         if not self._cfg.get("enabled", True):
             return None
         if not prompt or not prompt.strip():
             return None
+
+        if max_tokens is None:
+            max_tokens = int(self._cfg.get("default_max_tokens", DEFAULT_MAX_TOKENS))
 
         payload = {
             "prompt": prompt,
