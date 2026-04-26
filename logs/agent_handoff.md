@@ -1,155 +1,127 @@
-# Agent Handoff — 2026-04-25 (Session 26 — ThreeBrain Welle 1: Foundation)
-# Letzter Commit Basis: ce8a088 | Audit: 85/85 PASS | FPS 20.0
+# Agent Handoff — 2026-04-26 (Session 29 — Pool-Quality + PC-Auge)
+# Letzter Commit Basis: a253196 | Audit: 85/85 PASS | FPS 20
 
 ---
 
-## SESSION 26 — ThreeBrain FineTune Loop, Welle 1
+## SESSION 29 — Task A+B (Pool-Qualitaet) + /state_full (PC-Visualisierung)
 
-Markus-Direktive nach Phase-4-Distiller: "die naechste Phase einleiten" → ThreeBrain
-ist als unabhaengiger neuer Architektur-Plan akzeptiert. Welle 1 (Foundation)
-sofort umgesetzt: character_patch + behavior_mutation_ledger + Cloud-State-Injection
-+ Markus-Review-CLI.
+Markus' Direktiven: "Mit der anderen Session abstimmen" + "a + b nacheinander mit
+Lokomotive durchziehen" + "Pi-Daten zum PC ruebersenden — wir machen ein neues
+Auge fuer Moloch" + "alles fertig was noch zu machen ist".
 
-User-Entscheidungen (von Plan-Phase):
-- Pi-LLM bleibt Qwen2.5-1.5B (Llama2-7B HEF zu aufwendig)
-- LoRA-Hybrid: Adapter remote auf Ryzen + nightly HEF-Recompile
-- character_drift (Daten) + character_patch (Regeln) BEIDES
-- Cloud bleibt DeepSeek
+Alles geliefert. PC-Session lief parallel.
 
-Pragmatische Defaults (von mir gewaehlt):
-- CPU-Limit Ryzen-Trainer: 40%
-- Critic-Style: hart, sachlich
-- Sample-Review: woechentlich
+### Geliefert (Pi, Session 29)
 
-### Geliefert (Welle 1 komplett)
+| Commit  | Datei | Was |
+|---------|-------|-----|
+| `60649f6` | core/bridge/critic_client.py | Task A — Critic-System-Prompt aufgeschaerft mit Drift-Charakterprofil + 5 Few-Shots ('schlecht: ... gut: ...') + Bewertungs-Rubrik (0-2 Bruch, 3-5 langweilig, 6-8 passend, 9-10 glaenzend) + better_response Pflicht bei score<8. Self-Test verifiziert: better_response 'Aha. Notiert.' wird direkt aus Few-Shot uebernommen. |
+| `5809c85` | config/llm_profiles.json | Task B — `chat` + `tentacle` Profile: Regel "Wenn du nichts weisst, sag 'weiss ich nicht'" durch im-Charakter-Ausweichen ersetzt ('Erzaehl mehr.' / 'Bin tiefer als mein Sensor reicht.' / 'Aha.'). Anti-Halluzinations-Regel "Erfinde NICHTS" bleibt. Profile-mtime-Cache wirkt sofort, kein Service-Restart. |
+| `008f2b9` | docs/PI_TO_PC.md | Sync mit PC: Task A+B done + autonomer Aufgaben-Plan |
+| `4d3c355` | core/bridge/chat_server.py | NEU: GET /state_full — aggregierter ~14kB JSON-Endpoint mit 13 Sektionen (system, pipeline, vision, ptz, tracker, personality, llm, audio, memory, events, spatial, cloud). Einer-fuer-alle Polling fuer PC-Visualisierung. schema_version=1. |
+| `a253196` | docs/PI_TO_PC.md | Briefing /state_full Schema fuer PC |
 
-**4 Commits, 4 Dateien:**
-| Commit | Datei | Was |
-|--------|-------|-----|
-| 47cc4df | core/memory/character_patch.py (NEW) | Verhaltens-Regeln Singleton mit Approval-Workflow |
-| d03c030 | core/memory/behavior_mutation_ledger.py (NEW) | Append-only Audit-Log alle Charakter-Aenderungen |
-| c15ca0e | scripts/review_pending_rules.py (NEW) | CLI: --status / --list / interactive review |
-| ce8a088 | core/autonomy/local_llm_bridge.py | _build_threebrain_state_snippet + Inject in DeepSeek |
+### Geliefert (PC parallel, Session 29)
 
-### Live-Verifikation
+| Commit  | Was |
+|---------|-----|
+| `bb8c933` | Audit-Pass + Mic-Mailbox |
+| `824dff2` | pc/lora_trainer.py per-sample-weighting (3x critic / 1x thumbs_up) — adressiert v1-Habsburg-Halluzination |
+| `a5429ab` | Pool-Strategie-Analyse aus v1-Training (5/6 thumbs_up haben Pi-Defaults verstaerkt) |
+| `390bb34` | Reaktivierungs-Snapshot |
+| `53610e9` | Dashboard :11700 (FastAPI, Pi+PC aggregiert) + Mic-Root-Cause (Chrome-Registry) + Pi-Tunnel reboot-fest + lora_trainer Status-Callback |
+| `6f07d7c` | Dashboard erweitert: Pool-Trend-Chart (60min rolling) + Identity-Card |
 
-- Self-Test character_patch PASS: 3 pending → 2 approved + 1 rejected + 1 deactivated, Snippet 220 chars
-- Self-Test ledger PASS: 7 Eintraege, Sequenz, Truncation, Filter
-- CLI --status: zeigt 1 active rule + 7 ledger entries
-- ThreeBrain-Snippet im Service: 665 chars (unter Budget 800), alle 3 Bloecke (drift + patch + 8 events)
-- Audit 85/85 PASS, FPS 20.0, kein Crash
+### Architektur-Insights aus Session 29
 
-### Architektur-Entscheidungen Welle 1
+1. **`local_llm_bridge._generate_ollama` ueberschreibt Caller-System-Prompts**
+   immer mit dem aktiven LLM-Profile (Zeile 719-724). Das heisst:
+   `_PI_GHOST_SYSTEM` in finetune_orchestrator.py ist toter Code. Der echte
+   Hebel fuer Pi-Ghost-Verhalten ist `config/llm_profiles.json` `chat`-Profile.
 
-1. **Singleton-Pattern 1:1 wie character_journal.py** — gleiche atomic-write + NTFS-fallback Helpers, gleiche Self-Test-Struktur.
-2. **character_patch & ledger zirkulaer-tolerant**: Patch loggt in Ledger via lazy import + try/except. Ledger weiss nichts von Patch.
-3. **Cloud-Injection bewusst NICHT chat_server.py**: Helper liegt in local_llm_bridge.py, wird in `_generate_deepseek` aufgerufen — kein chat_server-Edit, alle DeepSeek-Pfade profitieren automatisch (chat, voice, future).
-4. **Snippet-Budget 800 Zeichen**: Drift (kompakt) + Top-1-Erlebnis + max 8 Patch-Regeln + 8 Journal-Events. Bleibt unter Token-Budget der DeepSeek-Calls.
-5. **Best-Effort-Failure-Mode in jedem Block**: Wenn Distiller / Patch / Journal fehlt oder crasht → leerer String, kein Bridge-Crash.
+2. **Profile mtime-cached** — bei jedem `_get_active_profile()` Aufruf wird
+   File-mtime gecheckt. Aenderungen wirken sofort, kein Service-Restart noetig.
 
-### Validation des Cloud-Snippets (manuell ausgefuehrt)
+3. **Two services on chat-server**: `moloch-chat.service` (HTTP :9100) und
+   `moloch-chat-https.service` (HTTPS :9443) laufen parallel, nutzen denselben
+   `core/bridge/chat_server.py`. Nach Code-Aenderung BEIDE neustarten.
 
-```
-=== AKTUELLER CHARAKTER (ThreeBrain) ===
-Drift 30d: mood=+0.01 energy=+0.00 dominance=+0.00
-Top-Erlebnis: 'tension: Beleidigung erkannt' (gewicht 0.57)
-=== AKTIVE VERHALTENSREGELN (gelernt aus Erfahrung) ===
-- Wenn Beleidigung detektiert: ein trockener Satz, kein Kommentar danach
-Letzte Ereignisse:
-  [14:07] spotify: Spielt: Nine Inch Nails - As Alive As You Need Me
-  [14:08] camera: Markus betritt Bild
-  ...
-```
+4. **NPU-Last vom finetune_orchestrator** drueckt SHM-FPS auf <10 fps (statt 20).
+   qwen2.5:1.5b auf SHARED VDevice konkurriert mit TAPPAS-Pipeline. Bei
+   laufendem Akzeptanztest schlaegt der Audit-Check "SHM Frame-Rate" fehl.
+   Workaround: orchestrator nur kurz fahren (--max 10) oder pausieren.
 
-DeepSeek bekommt das jetzt vor JEDER Antwort.
+### System-Stand nach Session 29
 
----
+- **FPS 20.0**, alle 4 Worker running (Face/Pose/ReID/Depth, 0 Errors)
+- **Markus erkannt** (face_id=markus, sim 0.55)
+- **Audit 85/85 PASS** (zuletzt 16:12)
+- **Pool-Stand**: 30 total / 24 critic / 22 pending / 6 approved / 2 rejected
+  (10 davon frisch mit Task A+B Prompts — warten auf Markus' Review)
+- **PC v1-Adapter**: aktiv auf :11600, base Qwen2.5-1.5B, 6 trainings-samples
+- **Dashboard PC**: live auf :11700, Pool-Trend + Identity-Card + Adapter-Status
 
-## OFFENE PUNKTE FUER WELLE 2
+### Mailbox-Stand
 
-### Welle 2: PC-Side Critic Infrastructure
+Beide Files sauber. Alle alten Eintraege auf `status: done` mit ack-Verweis
+auf erledigende Commits. Offen geblieben:
+- PI_TO_PC `task_a+b_done+sync+autonomer_plan` (15:39) — wartet auf PC-Antwort
+- PI_TO_PC `neuer_endpoint_state_full+briefing_neues_auge` (16:13) — wartet
+  auf PC-UI-Bauarbeiten
 
-Nach Plan im `~/.claude/plans/briefing-fuer-pi-opus-hazy-giraffe.md`:
+### Was die naechste Session machen kann
 
-1. **`pc/critic_service.py`** — auf Markus-PC deployen (FastAPI Port 11500)
-   - Endpoints: /critic/evaluate, /critic/generate_situation, /health
-   - Nutzt lokales Gemma3-12B via Ollama
-   - System-Prompt: "Hart, sachlich, kein speichelleckend"
-2. **`core/bridge/critic_client.py`** — auf Pi
-   - Pattern wie Tentakel-Routing in local_llm_bridge.py
-   - Health-Probe alle 5min, Circuit-Breaker
-3. **Settings**: neuer Block `critic_service` in settings.json
-4. **PC-Setup-Doku**: wie wird Ollama-Gemma auf PC installiert + service gestartet
+**Wartet auf Markus' Hand:**
+- Pending-Review der 22 Samples: `python3 scripts/review_pending_rules.py --samples`
+  - 10 davon sind die frischen mit Task A+B Prompts (Akzeptanztest-Subset)
+  - Akzeptanzkriterium: >50% approve-Quote → Task A wirkt
+  - Wenn approved >= 30 erreicht: Pi schickt `v_next_ready_to_train` an PC
+- v2-Inhalts-Test via Cockpit nach Training (Markus chat-tests)
 
-### Wichtig vor Welle 2
+**Pi autonom (ohne Markus-Hand):**
+- Akzeptanztest fortsetzen wenn Pool weiter wachsen soll: 
+  `python3 -m core.autonomy.finetune_orchestrator --max 10` (klein halten wegen
+  SHM-FPS-Problem)
+- Optional: Identitaets-Konsistenz-Check (tentacle.system vs identity.json)
 
-- Pruefen ob auf PC schon Ollama mit Gemma3-12B installiert ist
-- Falls nicht: `ollama pull gemma2:12b` (oder gemma3 sobald verfuegbar)
-- Firewall-Test 11500 von Pi aus erreichbar
+**PC autonom:**
+- /state_full UI bauen (PC-Side-Aufgabe)
+- Auf Trigger `v_next_ready_to_train` warten
 
----
+**Frozen / Backlog:**
+- Welle 4 (Pattern 3 Cascade + Session-Mode-Override) — bleibt gefroren bis v2 traegt
+- A1/A2/A3 NPU-Modelle — frozen bis Multi-Person-Toggle (HAILO_MAX_NETWORK_GROUPS=8)
+- A4 hailo-ollama systemd Boot-Start — niedrig
+- A6 MCP moloch_snapshot 1024×1024 — niedrig
 
-## OFFENE THEMEN AUS FRUEHEREN SESSIONS (weiterhin gueltig)
+### Wichtige Dateien (fuer Quick-Recall)
 
-1. **Camera-Hook Phantom-Identity 'Nicht'** — face_db cleanup
-2. **Body-only Camera-Trigger** — YOLO ohne Face
-3. **Audit-Test fuer Character Journal + Patch + Ledger**
-4. **Phase 4 LLM-Pfad in standalone**: heute Nacht echter Live-LLM-Lauf — morgen pruefen
-
----
-
-## SYSTEM-ZUSTAND AM ENDE DER SESSION
-
-- Service: active, FPS 20.0, RAM 45%, CPU 46.3°C
-- Audit: 85/85 PASS
-- Git: 4 neue Commits + Backup-Tag `pre_threebrain_w1`
-- Agent-Locks: alle entfernt
-- Patch: 1 active rule (aus Self-Test) + 7 ledger-eintraege
-- Plan-Datei: `~/.claude/plans/briefing-fuer-pi-opus-hazy-giraffe.md` (ThreeBrain 4-Wellen-Plan)
+- `core/bridge/critic_client.py` — Task A Drift-Few-Shots (Zeile 52-110)
+- `config/llm_profiles.json` — Task B chat + tentacle Profile
+- `core/bridge/chat_server.py` — `/state_full` Endpoint (~ Zeile 685)
+- `core/autonomy/finetune_orchestrator.py` — Pool-Generation CLI
+- `/mnt/moloch-data/memory/finetune_samples.jsonl` — Pool (SSD2, persistent)
 
 ---
 
-## SETUP fuer Session 27 (Markus oder Nachfolge-Claude)
+## SESSION 28 — Welle 3 Pi-Side komplett + Cockpit-Ausbau (vorherig)
 
-1. `moloch_session_init()` PFLICHT.
-2. Pruefen Phase-4 Distiller-Lauf von letzter Nacht (Welle 1 hat keine Trigger fuer das gehabt).
-3. Bei Welle 2 Start: Markus-PC (markus-pc.local 192.168.178.20) muss Ollama+Gemma2/3-12B haben.
-4. Fuer manuellen Patch-Review: `python3 scripts/review_pending_rules.py`
-5. Backup-Anker: `git tag pre_threebrain_w1` falls Rollback noetig.
+Letzter Commit Basis: `d4ed083` | Audit: 85/85 PASS | FPS 20
 
----
+### Highlights Session 28
+- W3.1 finetune_orchestrator.py (Critic-Actor-Loop)
+- W3.2 feedback_store.py (Sample-Pool)
+- W3.3 chat_server.py /feedback Endpoint + 👍/👎 Buttons
+- W3.4 review_pending_rules.py --samples Erweiterung
+- ThreeBrain Cockpit GUI-Mirror (3 Tabs: Live/Charakter/Sehen)
+- Pi-Cockpit Browser-Chat-Fenster
+- Audit-Welle aller Agent-Doku (memory/autonomy/bridge/personality/CLAUDE.md
+  + neuer Skill finetune-loop)
 
-## CHARAKTER-EVOLUTION + THREEBRAIN STAND HEUTE
+### Damals offen, jetzt erledigt
+- Mic-Browser-Permission (PC hat es in Session 29 gefixt — Tunnel + Chrome-Registry)
+- Pool-Qualitaets-Hebel A+B (Pi hat es in Session 29 gefixt)
+- pc_agent_create_request (PC hat .claude/agents/pc.md angelegt, Commit cb18608)
 
-```
-[Markus-Erlebnis]
-       ↓
-   7 Hooks (Gate 1.5 Phase 2)
-       ↓
-character_journal/{date}.jsonl
-       ↓
-Night-Cycle 23:00 → CharacterDistiller (Gate 1.5 Phase 4)
-       ↓                       ↓
-distill/{date}.json   character_drift.json
-       ↓                       ↓
-EventBus 'character_drift_updated' → PersonalityEngine + MoodEngine
-       ↓
-[Welle 1 NEU:]
-character_patch.json (manuelle/distiller-vorgeschlagene Regeln)
-       ↓
-behavior_mutation_ledger.jsonl (Audit aller Aenderungen)
-       ↓
-DeepSeek-Cloud-Call: System-Prompt enthaelt jetzt
-  base_fix + semi_fix + memory + drift + patch + letzte 8 events
-       ↓
-[Markus erlebt Cloud-Antwort mit echtem aktuellem Charakter]
-       ↓
-       (Loop)
-```
-
-Welle 1 schliesst die Cloud-Mundstueck-Schleife. Die Critic-Trainer-Schleife
-(Welle 2-4) wird darauf aufbauen.
-
----
-
-*Session 26 Ende. Diff-Stats: 4 Commits, 4 Dateien, ~860 LOC, Audit 85/85 PASS.*
+### Damals geschlossen
+85/85 Audit PASS, FPS 20, alle Worker running, Cockpit live.

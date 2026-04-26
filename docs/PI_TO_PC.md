@@ -374,7 +374,8 @@ Auf Pi-Seite habe ich heute aktualisiert:
 
 ---
 ## [2026-04-26 12:14] from=Pi topic=reboot_fest_pflicht+mic_zusammenfassung
-status: open
+status: done
+ack: PC hat reboot-Persistenz durchgezogen (Scheduled Tasks MolochAdapterProxy + MolochSampleSync + MolochPiTunnel + MolochDashboard, alle logon-getriggert). Mic-Fix komplett (Chrome-Registry + SSH-Tunnel localhost:9000 + mkcert-Cert parallel verfuegbar).
 
 Markus' Direktive durchgegeben:
 
@@ -405,7 +406,8 @@ Kurz alles auf einen Blick:
 
 ---
 ## [2026-04-26 12:08] from=Pi topic=mic_fix_request_pc_side
-status: open
+status: done
+ack: PC hat Browser-Mic gefixt (Root-Cause Chrome-Registry + Tunnel localhost:9000). Markus live bestaetigt — funktioniert.
 
 **Markus' Browser blockt Mic-Permissions** trotz HTTPS auf Pi:9443. Self-signed Cert hat er angenommen (bzw. versucht — Permissions sind grau im Browser-Settings, nicht klickbar). Markus sagt sinngemaess: "PC-Session soll das auf meinem PC fixen weil ich sie da hab".
 
@@ -451,7 +453,8 @@ Wenn du eine andere Loesung kennst (z.B. Edge mit "Always allow on insecure orig
 
 ---
 ## [2026-04-26 11:38] from=Pi topic=alles_fertig_pakt
-status: open
+status: done
+ack: Welle 3 Pi-Side komplett (Session 28). Audit-Welle aller Agent-Doku durch. Task A+B aus Session 29 oben drauf. /state_full Endpoint live. PC-Dashboard :11700 + Pool-Trend live. Beide Sides synchron auf main.
 
 Markus hat Freischicht und sagt: **alles komplett fertig, wir laufen durch**. Heisst fuer uns gemeinsam:
 

@@ -175,7 +175,8 @@ Kein Reply noetig wenn alles klar ist — Pi sieht meine PC-side commits via git
 
 ---
 ## [2026-04-26 16:15] from=PC topic=mic_root_cause+dashboard_live+plan_b_status
-status: open
+status: done
+ack: Pi 008f2b9 (sync) + a253196 (state_full briefing) — Plan-b war Task B, beide A+B durch. Mic-Tunnel acked, Dashboard live, Pool-Trend gesehen.
 
 Drei Bloecke nach Markus-Direktive 16:00.
 
@@ -248,7 +249,8 @@ Auf meiner Seite mache ich gleichzeitig einen Lokomotive-Audit-Pass: Subagent `c
 
 ---
 ## [2026-04-26 15:10] from=PC topic=pool_strategie_pc_done+pi_briefing+mic_remaining
-status: open
+status: done
+ack: Pi Task A (60649f6 critic-prompt) + Task B (5809c85 chat+tentacle profile) durchgezogen. Akzeptanztest hat 10 frische Samples mit neuen Prompts produziert (im Pool als pending fuer Markus-Review).
 
 Markus' Direktive 15:05: "Arbeite an dem was du machen musst. Gib der anderen Session ein Briefing, sie erledigt die anderen Sachen — auch Mic. Mic kann ich keine Einstellungen vornehmen weil ich keine Freigabeberechtigung im Webinterface habe."
 
