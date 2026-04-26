@@ -51,7 +51,7 @@ def _try_log_ledger(event: str, **meta) -> None:
 
 def _gather_character_state() -> Dict[str, Any]:
     """Snapshot des aktuellen Charakter-State fuer Critic-Bewertung."""
-    state: Dict[str, Any] = {"rolling_drift": {}, "active_rules": []}
+    state: Dict[str, Any] = {"rolling_drift": {}, "active_rules": [], "zone": "guardian"}
     try:
         from core.autonomy.character_distiller import get_distiller
         d = get_distiller().get_drift() or {}
@@ -63,6 +63,24 @@ def _gather_character_state() -> Dict[str, Any]:
         state["active_rules"] = get_patch().get_active_rules() or []
     except Exception as e:
         logger.debug(f"[ORCH] patch fail: {e}")
+    # Zone aus CoreIntegrator-Effects (Welle 3 Feature A1):
+    # Critic + Pi-Ghost koennen nur dann zone-gerecht antworten, wenn die
+    # aktuelle Zone bekannt ist. Default 'guardian' wenn Effects nicht ladbar.
+    try:
+        from core.core_integrator import get_core_integrator
+        eff = get_core_integrator().get_effects() or {}
+        zone = eff.get("zone")
+        if isinstance(zone, str) and zone:
+            state["zone"] = zone
+        # Plus die effects-Zahlen — Critic kann sie auswerten
+        state["effects"] = {
+            "language_sharpness": round(float(eff.get("language_sharpness", 0.0)), 2),
+            "voice_intensity": round(float(eff.get("voice_intensity", 0.0)), 2),
+            "guardian_influence": round(float(eff.get("guardian_influence", 0.0)), 2),
+            "shadow_influence": round(float(eff.get("shadow_influence", 0.0)), 2),
+        }
+    except Exception as e:
+        logger.debug(f"[ORCH] zone/effects fail: {e}")
     return state
 
 
