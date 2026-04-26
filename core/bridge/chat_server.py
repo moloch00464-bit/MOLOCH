@@ -224,6 +224,7 @@ _CHAT_UI_HTML = """<!doctype html>
 
   <footer>
     <span id="f-info">…</span>
+    <span id="fb-stats" style="margin-left:auto"></span>
     <span class="err-msg" id="f-err"></span>
   </footer>
 </div>
@@ -242,19 +243,49 @@ function pct(n){return (n==null||isNaN(n))?"—":Math.round(n)+"%";}
 let lastMolochAnswer = "";
 
 function addMsg(role,text,meta){
-  const w=document.createElement("div");
   const m=document.createElement("div");m.className="msg "+(role==="me"?"me":"moloch");
   m.textContent=text;chat.appendChild(m);
   if(meta){
     const mm=document.createElement("div");mm.className="meta-line";
     mm.innerHTML=meta;
     if(role==="moloch"){
-      const cb=document.createElement("button");cb.textContent="[Critic]";cb.onclick=()=>doCritic(text,mm);
-      mm.appendChild(cb);
+      const up=document.createElement("button");up.textContent="👍";up.title="gut — als Trainings-Sample";
+        up.onclick=()=>doFeedback(text,"up",up,mm);
+      const dn=document.createElement("button");dn.textContent="👎";dn.title="schlecht — als Negativ-Sample";
+        dn.onclick=()=>doFeedback(text,"down",dn,mm);
+      const cb=document.createElement("button");cb.textContent="[Critic]";cb.title="Auto-Bewertung durch PC-LLM";
+        cb.onclick=()=>doCritic(text,mm);
+      mm.appendChild(up);mm.appendChild(dn);mm.appendChild(cb);
     }
     chat.appendChild(mm);
   }
   chat.scrollTop=chat.scrollHeight;
+}
+
+async function doFeedback(text,label,btn,parent){
+  btn.disabled=true;
+  // andere Buttons (alle in mm, nur fuer diese Antwort) deaktivieren
+  parent.querySelectorAll("button").forEach(b=>{ if(b!==btn) b.disabled=true; });
+  try{
+    const r=await fetch("/feedback",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({pi_response:text,label:label})});
+    const j=await r.json();
+    if(!r.ok) throw new Error(j.detail||r.statusText);
+    btn.textContent = label==="up"?"👍✓":"👎✓";
+    btn.style.background="var("+(label==="up"?"--ok":"--berserker")+")";btn.style.color="#000";
+    refreshFeedbackStats();
+  }catch(e){
+    btn.textContent="!"+label;btn.disabled=false;
+    parent.querySelectorAll("button").forEach(b=>b.disabled=false);
+  }
+}
+
+async function refreshFeedbackStats(){
+  try{const r=await fetch("/feedback_stats");if(!r.ok)return;
+    const j=await r.json();
+    const el=document.getElementById("fb-stats");
+    if(el) el.textContent=`Pool: ${j.total} · 👍${j.thumbs_up} 👎${j.thumbs_down} · Critic ${j.critic} (${j.pending_review} pending)`;
+  }catch(e){}
 }
 
 // === LIVE STATUS BAR + TAB ===
@@ -455,9 +486,10 @@ btnSend.onclick=send;
 inp.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}});
 
 // === BOOT ===
-loadHistory();refreshLive();refreshProv();loadPrompt();
+loadHistory();refreshLive();refreshProv();loadPrompt();refreshFeedbackStats();
 setInterval(refreshLive,2000);
 setInterval(refreshProv,15000);
+setInterval(refreshFeedbackStats,30000);
 setInterval(()=>{ if($("t-char").classList.contains("active")) refreshChar(); },5000);
 setInterval(()=>{ if($("t-see").classList.contains("active")) refreshSnap(); },2500);
 </script></body></html>"""
@@ -716,6 +748,54 @@ def tts_speak(req: TextOnly):
         return {"spoken": bool(ok)}
     except Exception as e:
         raise HTTPException(500, f"TTS error: {e}")
+
+
+class FeedbackRequest(BaseModel):
+    pi_response: str = Field(..., min_length=1, max_length=4000)
+    label: str = Field(..., pattern="^(up|down)$")
+    situation: str = Field("", max_length=500)
+
+
+@app.post("/feedback")
+def feedback_thumbs(req: FeedbackRequest):
+    """W3.3 Cockpit-Thumbs: 👍/👎 als sofort-entschiedenes Sample.
+
+    Schreibt in feedback_store als source='thumbs_up' (approved=True) oder
+    'thumbs_down' (approved=False). Wird vom LoRA-Trainer beruecksichtigt.
+    """
+    try:
+        from core.memory.feedback_store import get_feedback_store
+        # Falls keine Situation uebergeben: aus letzter User-History rausziehen
+        situation = req.situation
+        if not situation:
+            try:
+                msgs = get_memory().get_recent_messages(n=4) or []
+                user_msgs = [m for m in msgs if m.get("sender") == "user"]
+                if user_msgs:
+                    situation = f"Markus fragte: {user_msgs[-1].get('text', '')[:200]}"
+            except Exception:
+                situation = "(Cockpit-Feedback ohne Situation-Kontext)"
+        sid = get_feedback_store().add_thumbs(
+            situation=situation, pi_response=req.pi_response, label=req.label,
+            source_channel="cockpit",
+        )
+        if not sid:
+            raise HTTPException(400, "feedback_store rejected sample")
+        return {"sample_id": sid, "label": req.label, "stored": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Feedback error: {e}")
+
+
+@app.get("/feedback_stats")
+def feedback_stats():
+    """Pool-Status fuer Cockpit-Anzeige (sample-count + pending)."""
+    try:
+        from core.memory.feedback_store import get_feedback_store
+        return get_feedback_store().get_state()
+    except Exception as e:
+        raise HTTPException(500, f"Feedback stats error: {e}")
 
 
 @app.get("/system_prompt")
