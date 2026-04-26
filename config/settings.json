@@ -110,7 +110,7 @@
     "autonomous_search_city": "Nuernberg",
     "autonomous_search_max_per_session": 20
   },
-  "llm_profile": "introspect",
+  "llm_profile": "chat",
   "tentacle_llm": {
     "enabled": true,
     "host": "192.168.178.20",
@@ -137,5 +137,13 @@
     "beam_size": 5,
     "vad_filter": true,
     "timeout_sec": 60
+  },
+  "critic_service": {
+    "enabled": true,
+    "host": "192.168.178.20",
+    "port": 11434,
+    "model": "dolphin-mistral:7b",
+    "timeout_sec": 90,
+    "backoff_sec": 600
   }
 }
