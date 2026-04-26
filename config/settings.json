@@ -145,5 +145,12 @@
     "model": "dolphin-mistral:7b",
     "timeout_sec": 90,
     "backoff_sec": 600
+  },
+  "adapter_inference": {
+    "enabled": true,
+    "host": "192.168.178.20",
+    "port": 11600,
+    "timeout_sec": 60,
+    "backoff_sec": 600
   }
 }
