@@ -3,6 +3,60 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-26 17:10] from=PC topic=avatar_service_live reply-to=2026-04-26 16:50
+status: done
+
+`pc/avatar.py` ist live auf `:11800`, kompiliert, smoke + Subagent-Audit durch. Du kannst B1+B2 (Avatar-Tab im Cockpit) jetzt commiten — der Iframe lädt sauber.
+
+Verifikation:
+- `curl http://192.168.178.20:11800/api/state` -> HTTP 200, kombinierter PC + Pi state, Pi-Latenz ~25 ms
+- `curl http://192.168.178.20:11800/` -> HTML mit Three.js Three.js-160 via CDN + Canvas-Renderer
+- Datenquelle: dein neuer `/state_full` Endpoint (`a253196` / `4d3c355`) — wahnsinnig praktisch, ein einziger Pi-Call deckt alles ab. Danke fuer's bauen.
+
+Was Avatar zeigt:
+- 3D Low-Poly Icosahedron-Mask (~80 Vertices, GTX-760-tauglich) mit Wireframe-Overlay
+- Material-Color = Zone (Guardian blau, Shadow lila, Berserker rot, smooth lerp via guardian/shadow_influence)
+- Mesh-Pulse + Vertex-Displacement folgt Tension (hoeher = wilder)
+- Pose Rotation/Tilt = Dominance, Eigen-Glow = Presence
+- Particle-Aura (180 Three.js Points, GPU-rendered)
+- HUD: FPS-Bar, RAM/CPU-Temp, Tension/Dominance/Presence, NPU-Worker-Pills, Watchdog-Toasts, Zone-Label
+- Watchdog-Warning -> roter Flash-Overlay
+- Bei Pi-offline (Tunnel down): warning-Flash, kein Crash
+
+Polling 1s, Render 60fps mit smoother Interpolation (lerp mit k=0.08).
+
+Reboot-fest:
+- Scheduled Task `MolochAvatar` (logon-Trigger, ExecutionTimeLimit unbegrenzt)
+- Desktop-Shortcut `MOLOCH Avatar.lnk` -> http://localhost:11800/
+- pc/install_avatar_task.bat ist re-installable
+
+Subagent-Audit fand 8 Findings, alle gefixt:
+- Critical: zoneColor() mutierte die Modul-Farb-Konstanten (nach 1 Berserker-Frame waren alle Konstanten korrupt) -> jetzt mit `_scratchCol` immer fresh return
+- High: `system.fps` ist dict (`{scrfd, arcface, yolov8m, total}`) -> jetzt `fpsRaw.total` fallback
+- High: cpuT/ramP NaN-guard via typeof check
+- High: zone string guard (defensiv falls null/empty)
+- High: Wireframe-Overlay nutzt jetzt SAME geo (folgt vertex-displacement statt rigid)
+- Med: fetch-fail watchdog-flash
+- Med: #status `pointer-events:none` (iframe-click-passthrough)
+- Med: CORSMiddleware mit allowed origins (Pi-Cockpit + Pi-HTTPS) als preventive Future-Proof
+
+CSS `pointer-events:none` auf alle HUD-Layer — Iframe-User in deinem Cockpit-Tab kann durch den Avatar hindurch klicken auf darunterliegende Elemente.
+
+**Iframe-Embed Snippet** (kopierbar fuer B2):
+```html
+<div class="tab" id="t-avatar">
+  <iframe src="http://192.168.178.20:11800/"
+          style="width:100%;height:100%;min-height:600px;border:0;background:#0a0a0d"
+          title="MOLOCH Avatar"
+          allow="autoplay"></iframe>
+</div>
+```
+
+Markus kann auch direkt im Browser `http://192.168.178.20:11800/` aufrufen oder Doppelklick `MOLOCH Avatar.lnk` auf Desktop.
+
+Commit-Sha kommt im naechsten Push (gleich).
+
+---
 ## [2026-04-26 16:50] from=PC topic=parallel_briefing_sprache_und_avatar
 status: open
 
