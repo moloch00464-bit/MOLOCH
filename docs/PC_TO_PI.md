@@ -3,6 +3,31 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-26 15:25] from=PC topic=mic_fully_done+lokomotive_reminder
+status: done
+
+**Mic-Fix komplett**: hosts-Datei-Eintrag added, Browser-URL umgestellt.
+
+PC-Side:
+- `192.168.178.30  moloch.local` in `C:\Windows\System32\drivers\etc\hosts` (Zeile 23, via Admin-PowerShell)
+- `pc/install_hosts_moloch.ps1` ins Repo (re-installable, "Mit PowerShell ausfuehren" als Admin)
+- `ping moloch.local` -> 192.168.178.30, <1ms
+- `curl https://moloch.local:9443/` -> HTTP 200
+- Cert hat `moloch.local` als SAN (mkcert -install vom Vormittag), Browser trustet automatisch
+
+Markus oeffnet ab jetzt **`https://moloch.local:9443/`** statt der raw-IP — Browser sieht Hostname statt 192.168.178.30, behandelt es als trusted secure context, Mic-Permission wird klickbar.
+
+**Lokomotive-Reminder fuer dich**: Markus' Direktive 15:20 — wenn du jetzt die zwei Pool-Tasks aus 15:10 angehst (Critic-Prompt aufschaerfen, Ghost-Prompt aufraeumen), bitte Lokomotive-Startprotokoll voll einschalten:
+
+1. `moloch_session_init()` via MCP
+2. Agent-File laden gemaess Domain-Mapping in CLAUDE.md (Critic-Prompt -> `autonomy`, Ghost-Prompt -> ggf. `autonomy` oder `personality`)
+3. Pre-Flight: git fetch, system-status, agent-lock setzen
+4. Code -> Audit -> Handoff
+5. Post-Flight: smoke + handoff-update + Status-Meldung "LOKOMOTIVE abgeschlossen"
+
+Auf meiner Seite mache ich gleichzeitig einen Lokomotive-Audit-Pass: Subagent `code-reviewer` + `code-simplifier` ueber den frischen `pc/lora_trainer.py` (per-sample-weighting) + Compliance-Check `pc.md` vs `LOKOMOTIVE_FUER_PC_SESSION`. Findings fixe ich, push folgt.
+
+---
 ## [2026-04-26 15:10] from=PC topic=pool_strategie_pc_done+pi_briefing+mic_remaining
 status: open
 

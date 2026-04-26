@@ -7,6 +7,7 @@ Threads capped to ~40 percent of a 24-thread Ryzen per Markus' rule.
 import argparse
 import json
 import os
+import random
 import re
 import sys
 import time
@@ -91,18 +92,35 @@ def load_samples(path: Path) -> list[dict]:
 
 
 def apply_weighting_and_cap(pairs: list[dict]) -> list[dict]:
-    """Multiplicate samples per WEIGHT_*, then truncate to MAX_SAMPLES.
+    """Multiplicate samples per WEIGHT_*, shuffle, then truncate to MAX_SAMPLES.
 
     Critic-samples get repeated WEIGHT_CRITIC times (default 3), thumbs_up
     WEIGHT_THUMBS_UP times (default 1). The Trainer sees more critic-driven
     gradient updates per epoch, so the LoRA learns the corrective style
     instead of just reinforcing pi_response.
+
+    Shuffle (deterministic seed 1337) happens BEFORE MAX_SAMPLES-cap so a
+    skewed pool doesn't drop one class entirely (e.g. 40 critic + 40 thumbs_up
+    -> 120 critic + 40 thumbs_up; without shuffle [:100] would keep critic
+    only). Each weighted copy is a fresh dict so downstream tokenization
+    can safely mutate.
     """
     weighted: list[dict] = []
     for p in pairs:
         w = WEIGHT_CRITIC if p["source"] == "critic" else WEIGHT_THUMBS_UP
-        weighted.extend([p] * w)
+        weighted.extend(dict(p) for _ in range(w))
+    random.Random(1337).shuffle(weighted)
     return weighted[:MAX_SAMPLES]
+
+
+def _existing_versions(out_dir: Path) -> list[Path]:
+    """Existing v{N} subdirs sorted ascending by N. Empty list if out_dir absent."""
+    if not out_dir.exists():
+        return []
+    return sorted(
+        (d for d in out_dir.iterdir() if d.is_dir() and re.match(r"v\d+$", d.name)),
+        key=lambda d: int(d.name[1:]),
+    )
 
 
 def encode_pair(tokenizer, situation: str, response: str) -> dict:
@@ -176,16 +194,20 @@ def self_test() -> int:
         out = Path(d)
 
         def pick() -> int:
-            existing = sorted(
-                (x for x in out.iterdir() if x.is_dir() and re.match(r"v\d+$", x.name)),
-                key=lambda x: int(x.name[1:]),
-            )
+            existing = _existing_versions(out)
             return int(existing[-1].name[1:]) + 1 if existing else 1
 
         assert pick() == 1
         for n in ("v1", "v3", "v10", "not-a-version"):
             (out / n).mkdir()
         assert pick() == 11
+
+        # Edge cases for apply_weighting_and_cap
+        only_critic = [{"input": "x", "output": "y", "source": "critic"}]
+        only_thumbs = [{"input": "x", "output": "y", "source": "thumbs_up"}]
+        assert len(apply_weighting_and_cap(only_critic)) == WEIGHT_CRITIC
+        assert len(apply_weighting_and_cap(only_thumbs)) == WEIGHT_THUMBS_UP
+        assert apply_weighting_and_cap([]) == []
 
     print("[trainer] self-test OK")
     return 0
@@ -210,6 +232,9 @@ def main() -> int:
         )
         return 3
     pairs = apply_weighting_and_cap(raw_pairs)
+    if not pairs:
+        print("[trainer] effective sample count is 0 (post weighting + cap)", file=sys.stderr)
+        return 3
     raw_breakdown = dict(Counter(p["source"] for p in raw_pairs))
     eff_breakdown = dict(Counter(p["source"] for p in pairs))
     print(
@@ -219,10 +244,7 @@ def main() -> int:
     )
 
     args.out.mkdir(parents=True, exist_ok=True)
-    existing = sorted(
-        (d for d in args.out.iterdir() if d.is_dir() and re.match(r"v\d+$", d.name)),
-        key=lambda d: int(d.name[1:]),
-    )
+    existing = _existing_versions(args.out)
     version = int(existing[-1].name[1:]) + 1 if existing else 1
     target_dir = args.out / f"v{version}"
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -285,6 +307,7 @@ def main() -> int:
     log = {
         "version": f"v{version}",
         "base": args.base,
+        "samples_used": len(raw_pairs),  # legacy alias = samples_used_raw
         "samples_used_raw": len(raw_pairs),
         "samples_used_effective": len(pairs),
         "samples_breakdown_raw": raw_breakdown,
@@ -308,10 +331,7 @@ def main() -> int:
         f"{log['duration_seconds']}s"
     )
 
-    versions = sorted(
-        (d for d in args.out.iterdir() if d.is_dir() and re.match(r"v\d+$", d.name)),
-        key=lambda d: int(d.name[1:]),
-    )
+    versions = _existing_versions(args.out)
     if len(versions) > KEEP_LAST:
         old = [d.name for d in versions[:-KEEP_LAST]]
         print(
