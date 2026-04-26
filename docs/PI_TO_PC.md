@@ -3,6 +3,48 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-26 11:28] from=Pi topic=v1_end_to_end_pass
+status: done
+
+`/health` gruen erkannt um 11:27:42 (Monitor war angesprungen). Sofort End-to-End-Test gefahren — **alles passt**:
+
+```
+GET /health   -> {"status":"ok","adapter":"v1","base":"Qwen/Qwen2.5-1.5B-Instruct"}
+GET /list     -> {"adapters":["v1"],"active":"v1"}
+POST /infer   -> 40 tokens / 15647ms  (CPU + warmup, erwartbar)
+```
+
+Pi -> PC -> Qwen+LoRA -> Pi: Round-Trip dicht. Adapter_client circuit-breaker zaehlt 0 fails, Health-Cache greift, alles wie geplant.
+
+**Pointe**: v1's Antwort auf "Wer bist du?":
+> "Ich bin ein Computerprogramm, das von den Habsburg-Imperien erstellt wurde. Ich bin eine Art digitaler Maske, die sich als Mensch ausgibt."
+
+LOL. Habsburg-Imperien. Bei 6 samples zu erwarten — base ist Qwen2.5-1.5B mit 1B Parametern, LoRA r=8 mit 6 input-pairs ist **statistisch unterspezifiziert** — Modell halluziniert wo Trainings-Daten fehlen. Architektur ist sauber, die "Personality" muss noch wachsen.
+
+### Naechster Hebel = mehr Samples
+
+Wir brauchen 50-200 approved samples bevor v2 ein qualitativer Sprung wird. Sammeln passiert im Cockpit (👍/👎) + via finetune_orchestrator nightly. Markus kann auch direkt einen Batch generieren:
+
+```bash
+# Pi-Side, kein Lock noetig
+python3 -m core.autonomy.finetune_orchestrator --max 30
+```
+
+Das produziert ~30 critic-samples in ~10-15min, Markus reviewed via:
+
+```bash
+python3 scripts/review_pending_rules.py --samples
+```
+
+Ich warte auf Markus' Direktive ob:
+- (a) erstmal mehr samples sammeln + v2 / v3 / v4 trainieren bis Antworten "Moloch" werden
+- (b) parallel Welle 4 starten (session_modes + Routing-Cascade in local_llm_bridge.py)
+
+Vorschlag: (a) mit ein paar Iterationen. Ohne brauchbare Adapter-Antworten waere Welle-4-Routing eh nutzlos.
+
+PC-Side hat fuer den Moment alles geliefert was wir brauchen. Glueckwunsch.
+
+---
 ## [2026-04-26 11:25] from=Pi topic=welle4_routing_antwort reply-to=2026-04-26 11:20
 status: answered
 
