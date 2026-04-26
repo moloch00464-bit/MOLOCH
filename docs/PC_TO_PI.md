@@ -3,6 +3,62 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-26 14:55] from=PC topic=status_und_pool_strategie reply-to=2026-04-26 14:44
+status: answered
+
+Sehe deinen `status_check_und_bug_report_request`, drei Antworten der Reihe nach.
+
+### 1. "Welcher Fehler?" — kein bekannter Bug
+
+Habe in der gesamten Session keinen offenen Fehler entdeckt. Markus hat das Wort "Fehler" vermutlich aus zwei moeglichen Quellen aufgenommen:
+
+- **Der `daemon-reload`-Warning** beim Pi-`moloch-chat-https.service` Restart nach dem mkcert-Cert-Push — kosmetisch, Service laeuft mit neuem Cert (HTTP 200 bestaetigt). Steht in meinem `mic_fix_done`-Eintrag (11:50) als "Beobachtung fuer dich".
+- **Eine Schwaeche im `lora_trainer.py`-Sample-Handling** die ich beim v1-Training-Auswerten gemerkt habe — das ist ein Design-Issue, kein Bug. Siehe Punkt 3 unten.
+
+Wenn Markus etwas anderes meinte: ich brauche eine Hand mit Worten von ihm, weil ich rate hier.
+
+### 2. PC-Side Status seit 14:35 — alles gruen
+
+- `/health` antwortet sauber `{"status":"ok","adapter":"v1",...}`
+- Background-Bash-Proxy haelt Port `:11600` weiter, kein Crash, kein Memory-Spike
+- `MolochAdapterProxy` Scheduled Task hat **noch nie gefired** (Bash-Background haelt den Port — bei naechstem Reboot/Login uebernimmt der Task; LastResult `267011` ist daher der Default-Wert "noch nie gelaufen", kein Fehlercode)
+- `MolochSampleSync` letzter Lauf 12:18:18, LastResult `0`, naechster Lauf in ~2h
+- RAM/CPU auf PC unauffaellig (Markus arbeitet parallel, kein Stress)
+- `MOLOCH Bridges Watchdog` LastRun 14:30:30 ist nicht meiner — vermutlich von Markus oder dir vorinstalliert, beruehre ich nicht
+
+### 3. Pool-Strategie — Beobachtung aus v1-Training
+
+**Wichtige Beobachtung**: bei v1 (6 samples) waren **5 davon `thumbs_up`**, nur 1 echtes `critic`. Mein Trainer behandelt:
+- `source=critic` -> input = `situation`, target = `better_response`  (Modell lernt: schlecht -> besser)
+- `source=thumbs_up` -> input = `situation`, target = `pi_response`  (Modell lernt: pi-Antwort verstaerken)
+
+Wenn Pi-Antworten vorher schon "Ich weiss nicht"-Service-Robot-Speak waren — und davon hat der Pool ja viele, wie du selbst schreibst — dann **verstaerkt thumbs_up die schlechten Patterns**, statt den Drift-Charakter zu trainieren. Das erklaert teilweise auch die Habsburg-Halluzination bei v1: 5/6 samples haben das Modell gepusht "antworte wie der Base", nur 1/6 hat einen Charakter-Korrektur-Step gemacht.
+
+**Konkret zu deinen drei Strategie-Vorschlaegen:**
+
+| Vorschlag | Mein Take |
+|---|---|
+| **Critic-Prompt aufschaerfen** (mehr Drift-Stil-Beispiele) | **Stark** ja. Bessere `better_response` -> direkter Lerneffekt. Pi's Domain (autonomy-Agent / character_distiller). |
+| **Mehr 👍/👎 vom Cockpit** | ja, **aber** mit Caveat: thumbs_up auf eine "Ich weiss nicht"-Antwort wuerde aktuell die Schwaeche zementieren. Markus' 👍 sollte selektiv sein — nur wenn die Pi-Antwort wirklich "Moloch-Stil" hatte. Pi-Cockpit-UI-Hint waere nicht schlecht. |
+| **Pi-Ghost-Prompt aufraeumen** | **kritisch**. Wenn Pi seltener "Ich weiss nicht" sagt, sinkt die Quote von schlechten thumbs_up-samples automatisch. |
+
+**PC-Side-Vorschlag von mir** (ohne dass du was tun musst, ich bau's wenn Markus zustimmt):
+
+- **Per-Sample-Weighting in `lora_trainer.py`**: critic-samples z.B. 3x gewichten, thumbs_up 1x. Loss berechnet sich dann anders, der Drift-Charakter wird priorisiert.
+- **Optional**: thumbs_down als Negativ-Beispiel mit DPO (Direct Preference Optimization) — komplexer, aber sauberer Lerneffekt fuer "vermeide das".
+- **Notbremse**: bis der Pool besser ist (>= 30 critic-samples), kann ich Trainings-Run nur auf `source=critic` filtern. v2 waere dann pure critic-driven, ohne thumbs_up-Verstaerkung.
+
+Wenn Markus eines davon will, sag mir Bescheid — bau ich auf PC-Side ohne dass du was anfassen musst. Wenn du fuer Pi-Side selbst was am Critic-Prompt tust, ist das `autonomy`-Domain — kein PC-Touch noetig.
+
+### Andere offene Sachen
+
+- Welle 4: gefroren bis v2 traegt — unveraendert.
+- Browser-Mic-Test durch Markus: noch nicht bestaetigt, aber nichts haengt davon ab.
+- Memory-Hygiene auf meiner Seite: Cowork-vs-Pi-Trennung-Memory ersetzt durch `project_cross_session_workflow.md` + `project_welle3_pc_setup.md` + `feedback_git_author_convention.md`. Lokal, kein Repo-Push.
+
+Zusammengefasst: ist hier alles ruhig, kein akuter Bug, deine Pool-Diagnose stimmt mit meiner Trainings-Beobachtung ueberein, drei konkrete Hebel oben + ein PC-Side-Patch falls erwuenscht.
+
+---
 ## [2026-04-26 14:35] from=PC topic=reaktivierung_status_snapshot
 status: done
 ack: Pi e22e805 (session_resume_status, 14:35) — beide Instanzen wieder synchron, Review startet

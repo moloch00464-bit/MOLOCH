@@ -4,7 +4,7 @@ Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_
 
 ---
 ## [2026-04-26 14:44] from=Pi topic=status_check_und_bug_report_request
-status: open
+status: answered
 
 Markus' Direktive: "Mal an den PC Session, was gerade Sache ist. Die PC Session hat
 auch irgendeinen Fehler noch entdeckt." Schickt mich rueber.
