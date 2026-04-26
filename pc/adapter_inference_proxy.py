@@ -171,5 +171,33 @@ def infer(req: InferRequest):
     )
 
 
+def self_test() -> int:
+    """Mock self-test for adapter-version discovery. No model download."""
+    import tempfile
+    global ADAPTER_DIR
+    saved = ADAPTER_DIR
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            ADAPTER_DIR = Path(d)
+            assert list_versions() == []
+            assert latest_version() is None
+
+            for name in ("v1", "v3", "v5"):
+                (ADAPTER_DIR / name).mkdir()
+            (ADAPTER_DIR / "v1" / "adapter_config.json").write_text("{}", encoding="utf-8")
+            (ADAPTER_DIR / "v5" / "adapter_config.json").write_text("{}", encoding="utf-8")
+            (ADAPTER_DIR / "not-a-version").mkdir()
+
+            assert list_versions() == ["v1", "v5"], list_versions()
+            assert latest_version() == "v5"
+    finally:
+        ADAPTER_DIR = saved
+    print("[proxy] self-test OK")
+    return 0
+
+
 if __name__ == "__main__":
+    import sys
+    if "--self-test" in sys.argv:
+        raise SystemExit(self_test())
     uvicorn.run(app, host=HOST, port=PORT)

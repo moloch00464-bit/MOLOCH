@@ -16,6 +16,16 @@ from pathlib import Path
 CPU_THREADS = int(os.environ.get("MOLOCH_TRAIN_THREADS", "10"))
 os.environ.setdefault("OMP_NUM_THREADS", str(CPU_THREADS))
 
+if os.name == "nt":
+    try:
+        import ctypes
+        BELOW_NORMAL_PRIORITY_CLASS = 0x4000
+        ctypes.windll.kernel32.SetPriorityClass(
+            ctypes.windll.kernel32.GetCurrentProcess(), BELOW_NORMAL_PRIORITY_CLASS
+        )
+    except Exception:
+        pass
+
 import torch  # noqa: E402
 
 torch.set_num_threads(CPU_THREADS)
@@ -107,6 +117,49 @@ def encode_pair(tokenizer, situation: str, response: str) -> dict:
     attention = [1] * (MAX_LEN - pad_len) + [0] * pad_len
 
     return {"input_ids": full_ids, "attention_mask": attention, "labels": labels}
+
+
+def self_test() -> int:
+    """Mock self-test without torch downloads. Verifies sample-filter and version-pick."""
+    import tempfile
+
+    fd = tempfile.NamedTemporaryFile(
+        "w", suffix=".jsonl", delete=False, encoding="utf-8"
+    )
+    try:
+        fd.write(json.dumps({"approved": True, "situation": "x", "source": "critic", "better_response": "y"}) + "\n")
+        fd.write(json.dumps({"approved": False, "situation": "x", "source": "critic", "better_response": "y"}) + "\n")
+        fd.write(json.dumps({"approved": True, "situation": "x", "source": "thumbs_up", "pi_response": "z"}) + "\n")
+        fd.write(json.dumps({"approved": True, "situation": "x", "source": "thumbs_down"}) + "\n")
+        fd.write(json.dumps({"approved": True, "situation": "", "source": "critic", "better_response": "y"}) + "\n")
+        fd.write("not json\n")
+        path = Path(fd.name)
+    finally:
+        fd.close()
+    try:
+        pairs = load_samples(path)
+        assert len(pairs) == 2, f"expected 2 pairs, got {len(pairs)}"
+        assert sorted(p["source"] for p in pairs) == ["critic", "thumbs_up"]
+    finally:
+        path.unlink()
+
+    with tempfile.TemporaryDirectory() as d:
+        out = Path(d)
+
+        def pick() -> int:
+            existing = sorted(
+                (x for x in out.iterdir() if x.is_dir() and re.match(r"v\d+$", x.name)),
+                key=lambda x: int(x.name[1:]),
+            )
+            return int(existing[-1].name[1:]) + 1 if existing else 1
+
+        assert pick() == 1
+        for n in ("v1", "v3", "v10", "not-a-version"):
+            (out / n).mkdir()
+        assert pick() == 11
+
+    print("[trainer] self-test OK")
+    return 0
 
 
 def main() -> int:
@@ -232,4 +285,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if "--self-test" in sys.argv:
+        raise SystemExit(self_test())
     raise SystemExit(main())
