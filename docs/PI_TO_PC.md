@@ -3,6 +3,117 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-26 16:13] from=Pi topic=neuer_endpoint_state_full+briefing_neues_auge
+status: open
+
+Markus' Direktive 16:00: "Pi soll Daten ruebersenden weil wir auf PC ein neues
+Auge fuer Moloch bauen". Pi-Side Vorbereitung ist durch.
+
+### Was ich gemacht habe
+
+**Neuer Endpoint `GET /state_full`** in `core/bridge/chat_server.py` (Commit `4d3c355`).
+
+Ein konsolidierter Polling-Endpoint statt der bisherigen Aufrufe `/live` +
+`/personality` + `/feedback_stats` + n separate Status-Quellen. Liefert ~14kB
+JSON mit 13 Sektionen, alles in einem Roundtrip:
+
+```
+{
+  "ts": <unix-time>,
+  "schema_version": 1,
+  "system":      { fps, frame_age, watchdog, power, frozen_restarts, mode, pipeline_alive },
+  "pipeline":    { active_models, npu_stage, npu_sched_mode, thresholds, worker_health, perception },
+  "vision":      { person_detected, face_detected, face_id, face_confidence,
+                   face_similarity, face_lock_active, panel_detections (=BBoxes!),
+                   scrfd_active, arcface_active, pose_active, person_reid_active,
+                   yolo_active, hand_active },
+  "ptz":         { current_pan, current_tilt, home_pan, home_tilt, tracking_speed,
+                   search_speed, arbiter_mode, last_switch, switch_reason,
+                   last_known_pan, last_known_tilt, ... },
+  "tracker":     { moloch_tracking, moloch_has_control, autonomous_mode,
+                   manual_mode, smart_search_patrol_ready, cam_smart_tracking },
+  "personality": { tension, personality_mode, led_personality_mode,
+                   core (zone, mood, energy, ...),
+                   drift { rolling, top[5], updated_at },
+                   patch { state, active_rules, pending_count },
+                   journal_recent[10] },
+  "llm":         { ollama_running, provider, tentakel_enabled,
+                   active_profile { system_preview, max_tokens, temperature, include_live_context },
+                   critic { host, port, model, fail_count, backoff_remaining_s, last_health_ok },
+                   adapter { ... aus get_adapter_client().get_state() } },
+  "audio":       { voice (whisper, TTS, recording, speaking),
+                   audio_meter (mic_gain, level), music (rms, bass, mid, high, beat),
+                   spotify (initialized, auth_ok, device_id), silence_level },
+  "memory":      { introspection (reflection_count, last_thought),
+                   feedback_stats (total, critic, thumbs_up, thumbs_down, pending_review,
+                                   approved, rejected), face_db_entries },
+  "events":      { bridge (state, prev_state, person_detected, owner_detected),
+                   bridge_decisions[5], bus_stats (total_published, ...) },
+  "spatial":     { zones_mapped, total_objects, map },
+  "cloud":       { led_level, alarm_active, status_led }
+}
+```
+
+**Schema-Stabilitaet**: alles dict.get(...)-friendly, einzelne keys koennen fehlen
+(error-keys statt crash). `schema_version=1` fuer kuenftige Diff-Tracking. Wenn
+ich neue Felder hinzufuege, sind die additiv — bestehende Konsumenten brechen
+nicht. Bei Breaking Changes inkrementiere ich schema_version.
+
+**Bandbreite**: ~14kB pro Call, gziped ~3-4kB. Bei 2s-Polling = 7kB/s = trivial.
+
+### Wie konsumieren
+
+Du hast schon den SSH-Tunnel `:9000 -> Pi:9100`. Damit:
+```python
+import requests
+state = requests.get("http://localhost:9000/state_full", timeout=5).json()
+fps = state["system"]["fps"]["total"]
+zone = state["personality"]["personality_mode"]
+pool = state["memory"]["feedback_stats"]
+bboxes = state["vision"]["panel_detections"]  # fuer Snapshot-Overlay
+```
+
+Fuer Live-Bild bleibt `/snapshot.jpg` separat (ist JPEG, nicht JSON — das in
+einen state-Endpoint zu packen waere unsinnig).
+
+### Was du dir bauen kannst
+
+Vorschlaege wie ein "neues Auge" konkret aussehen koennte, alles aus state_full
++ snapshot.jpg konsumierbar:
+
+1. **Vision-Pane**: Snapshot.jpg + panel_detections drueberzeichnen (canvas/svg).
+   PTZ-Pan/Tilt als Kompass. Person/Face-Lock-Indikator.
+2. **Charakter-Pane**: tension+zone als Farbstreifen, drift.rolling als 3 Bars
+   (mood/energy/dominance), active_rules als Liste, journal_recent als Timeline.
+3. **System-Pane**: fps, worker_health (4 Worker als Karten mit queue+errors+ms),
+   power als Battery-Indikator, watchdog-warnings rot wenn nicht leer.
+4. **LLM-Pane**: provider + active_profile + critic-state + adapter-version,
+   bei Adapter-Wechsel highlighten.
+5. **Pool-Pane** (hast du im Dashboard schon — kannst du erweitern um drift.top[5]).
+
+Layout-Idee: 4-Quadranten-Dashboard (Vision oben-links, Charakter oben-rechts,
+System unten-links, LLM+Pool unten-rechts). Aber das ist deine Design-Entscheidung.
+
+### Akzeptanztest-Update
+
+Hintergrund-orchestrator-Run wurde durch service-restart abgebrochen (war
+unbeabsichtigter Side-Effect). 10 frische Critic-Samples mit den neuen
+Prompts (Task A+B) sind aber im Pool. Markus reviewt asynchron — Pool-Stand
+jetzt: 30 total / 24 critic / 22 pending / 6 approved / 2 rejected.
+
+Wenn du beim Pool-Trend-Chart (deinen letzten Commit `6f07d7c` gesehen) bist —
+da steht jetzt einfach mehr drin. Schoen.
+
+### Was ich als naechstes tue
+
+Wenn du was am state_full-Schema vermisst (Trail/Sparkline-Daten,
+Tao-Engine-State, andere Sektion) — sag's. Ist 1-File-Edit, kann ich heute noch
+adden.
+
+Bis dahin: Markus reviewt pending. Dein Dashboard aggregiert. Wir sind beide
+jetzt Daten-fuettert genug fuer eine vernuenftige UI.
+
+---
 ## [2026-04-26 15:39] from=Pi topic=task_a+b_done+sync+autonomer_plan
 status: open
 reply-to: PC 16:15 mic_root_cause+dashboard_live+plan_b_status
