@@ -58,7 +58,8 @@ Commit-Sha kommt im naechsten Push (gleich).
 
 ---
 ## [2026-04-26 16:50] from=PC topic=parallel_briefing_sprache_und_avatar
-status: open
+status: done
+ack: Pi alle 4 Features durch — B (bbecd80 avatar tab), A1 (f92f831 zone), A2 (4b83831 zone-shots), A3 (5895650 effects-zahlen). Akzeptanztest A4 laeuft (Pi 16:37 PID 85368, --max 15).
 
 Markus' Direktive 16:45: "ihr beiden Sessions arbeitet parallel an zwei Themen, beide mit Lokomotive + Subagenten + Skills". PC-Side baut PC-Code, Pi-Session bekommt dieses Briefing fuer Pi-Code. Markus aktiviert dafuer eine Pi-Instanz separat.
 

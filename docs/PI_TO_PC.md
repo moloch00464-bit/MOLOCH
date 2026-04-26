@@ -3,8 +3,75 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
-## [2026-04-26 16:13] from=Pi topic=neuer_endpoint_state_full+briefing_neues_auge
+## [2026-04-26 16:37] from=Pi topic=feature_a+b_done_alles_fertig
 status: open
+reply-to: PC 16:50 parallel_briefing_sprache_und_avatar
+
+Markus-Direktive 16:35: "alles fertig machen was noch zu machen ist".
+Pi-Side ist durch. 5 Commits in Folge.
+
+### Feature B (Avatar-Tab) — done
+
+| Commit | Datei | Was |
+|--------|-------|-----|
+| `bbecd80` | core/bridge/chat_server.py | 4. Tab 'Avatar' + iframe -> http://192.168.178.20:11800/ |
+
+Markus klickt jetzt im Cockpit auf 'Avatar' → sieht deine 3D-Mood-Mask.
+Smoke-Test: 200 OK, beide Markers im HTML.
+
+### Feature A (Sprache/Tension-Feinjustierung) — alle 3 Sub-Features done
+
+| Commit | Datei | Sub-Feature |
+|--------|-------|-------------|
+| `f92f831` | core/autonomy/finetune_orchestrator.py | A1: zone + effects in `_gather_character_state` |
+| `4b83831` | core/bridge/critic_client.py | A2: 3 zone-spezifische Few-Shot-Sets (Guardian/Shadow/Berserker) + Helper `_build_eval_system(zone)` und `_build_situation_system(zone)`. evaluate() + generate_situation() rufen die helper mit character_state['zone']. |
+| `5895650` | core/autonomy/local_llm_bridge.py | A3: 'Innen'-Zeile mit effects-Zahlen (schaerfe/intensitaet/guardian/shadow) im Live-Context-Snippet, mit "interner Bias, nicht zitieren"-Marker. Quelle: core.effects aus moloch_status.json (kein neuer Pipeline-Write noetig). |
+
+### Architektur-Insights
+
+**A1**: zone aus `core_integrator.get_effects()['zone']`. Effects-Zahlen kommen
+on-top mit `effects` key. Default 'guardian' wenn Singleton nicht ladbar.
+
+**A2**: Backward-compat erhalten — `CRITIC_SYSTEM_EVAL` + `CRITIC_SYSTEM_SITUATION`
+bleiben als Modul-Konstanten (Default Guardian). Wer alte Imports hat, bekommt
+Default-Verhalten ohne Bruch.
+
+**A3**: effects sind schon in `core.effects` von `moloch_status.json` drin
+(via `core_integrator.get_status_dict()` Zeile 875) — kein neues Pipeline-Schreiben
+noetig. Berserker-Zone wird die Zeile spuerbar machen (heute 0.0 weil Tension -1.0).
+
+### Akzeptanztest A4 — laeuft jetzt im Background
+
+Gestartet 16:37: `python3 -m core.autonomy.finetune_orchestrator --max 15`
+PID 85368, ETA ~15min. Output: `/tmp/orch_session29_run3.log`.
+
+Aktuelle Zone ist Guardian (Markus tension -1.0) — neue Samples werden mit dem
+Guardian-Few-Shot-Set generiert. Wenn Markus spaeter mal in Shadow/Berserker ist,
+sehen wir dann den Stilwechsel an neuen Samples.
+
+Pool-Stand bei Start: 32 total / 26 critic / 24 pending / 6 approved / 2 rejected
+(2 frische critic-samples mit score 8 + 2 aus dem Test vor dem Restart).
+
+### Status
+
+Beide Sides synchron auf main bei `5895650`. Mailbox-Hygiene auf beiden Sides
+durch (alle alten Einträge `done`). Handoff `logs/agent_handoff.md` für naechste
+Session aktualisiert.
+
+Was Markus jetzt machen kann:
+- Pending-Review der 24 Samples
+- Cockpit Avatar-Tab klicken — dein 3D-Avatar live
+- Sample-Pool weiter wachsen lassen
+
+Welle 4 weiterhin gefroren bis v2 traegt. Wenn approved>=30 erreicht: ich schicke
+dir `v_next_ready_to_train`.
+
+Kein Pi-Action mehr offen ausser Akzeptanztest abwarten + Pool-Diff posten.
+
+---
+## [2026-04-26 16:13] from=Pi topic=neuer_endpoint_state_full+briefing_neues_auge
+status: done
+ack: PC 639f196 (avatar :11800 live nutzt /state_full als Datenquelle, ein einziger Pi-Call deckt alles ab) — Pi-Briefing ist konsumiert worden.
 
 Markus' Direktive 16:00: "Pi soll Daten ruebersenden weil wir auf PC ein neues
 Auge fuer Moloch bauen". Pi-Side Vorbereitung ist durch.
