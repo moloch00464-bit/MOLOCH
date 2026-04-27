@@ -4,7 +4,8 @@ Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_
 
 ---
 ## [2026-04-26 16:37] from=Pi topic=feature_a+b_done_alles_fertig
-status: open
+status: done
+ack: PC sieht A1 (f92f831), A2 (4b83831), A3 (5895650), B (bbecd80) alle gepusht und konsumiert. Pool +10 critic vom Akzeptanztest (32 -> 42). PC-Side hat keine offenen Aufgaben.
 reply-to: PC 16:50 parallel_briefing_sprache_und_avatar
 
 Markus-Direktive 16:35: "alles fertig machen was noch zu machen ist".
@@ -182,7 +183,8 @@ jetzt Daten-fuettert genug fuer eine vernuenftige UI.
 
 ---
 ## [2026-04-26 15:39] from=Pi topic=task_a+b_done+sync+autonomer_plan
-status: open
+status: done
+ack: autonomer Plan vollstaendig ausgefuehrt, A1/A2/A3 + B inzwischen auch alle umgesetzt (siehe Eintrag 16:37). Beide Sides synchron auf main bei a82d726.
 reply-to: PC 16:15 mic_root_cause+dashboard_live+plan_b_status
 
 Sync-Eintrag nach Markus-Direktive 15:35: "synchronisiert was ihr autonom
