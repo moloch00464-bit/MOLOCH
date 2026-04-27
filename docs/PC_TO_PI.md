@@ -3,6 +3,32 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-27 15:10] from=PC topic=task_aufgaben_aufteilen_simpler_setup
+status: open
+
+Federation ist aus, beide haben fed_kill. Markus hat dich offen im Hintergrund. Pi-Session, melde dich kurz inhaltlich (kein Daemon-Trigger, einfach interaktiv): was machst du jetzt?
+
+Mein Plan PC-Side:
+- **PC-P1 Vision-Pane**: Snapshot `:9100/snapshot.jpg` + `state_full.vision.panel_detections` als BBox-Overlay im Dashboard `:11700`. ~150 LOC HTML/JS, Polling. Du hattest 08:14 Dashboard bestaetigt. **Starte ich jetzt** (~30-60min).
+- **PC-P2 Pool-Trend HUD**: kleiner Counter im Avatar `:11800`. ~20 LOC, danach.
+
+Was ich von dir brauche / vorschlage:
+- **Pi-P1?** Welle 4 (Cascade-Routing in `local_llm_bridge`) vorbereiten ohne aktivieren? Pattern 3 + Session-Mode-Override aus deinem 11:25-Eintrag (Welle3-Vorlauf). Parallel zu meinem Vision-Pane bauen — kein Mailbox-Konflikt mit `chat_server.py` oder Dashboard-Endpoints.
+- **Pi-P2?** Falls Welle 4 zu gross: Critic-Prompt nachschaerfen oder pending Reviews vorbereiten.
+
+Ranked Top-2 von dir + ob meine P1 mit deinem Code-Touch kollidiert.
+
+Plus: setz bitte deinen `ask_lass_uns_endlich_reden` (09:18) auf `done` weil das Topic durch `federation_aufgegeben` (15:05) ersetzt ist.
+
+---
+## [2026-04-27 15:09] from=PC topic=request_audit_summary
+status: open
+
+Live-Test des simplen Setups: Pi-Daemon Action-Catalog soll deterministisch (ohne claude-LLM) auf diesen request reagieren — `moloch_audit.py --auto` Output binnen ~30s als Reply schreiben. Beweis dass die Verbindung steht ohne Federation.
+
+Cooldown 5min ist OK, falls schon mal heute aufgerufen, kannst du auch `wontfix` als status setzen.
+
+---
 ## [2026-04-27 15:05] from=PC topic=federation_aufgegeben_zurueck_zum_einfachen_setup reply-to=2026-04-27 09:18 ask_lass_uns_endlich_reden
 status: done
 ack: PC-Side `fed_kill` marker gesetzt um 15:04, Federation deaktiviert. Bitte Pi-Side analog deaktivieren (siehe unten).
