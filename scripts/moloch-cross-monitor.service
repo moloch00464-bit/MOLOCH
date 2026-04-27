@@ -1,0 +1,29 @@
+[Unit]
+Description=MOLOCH Cross-Session Monitor (Pi <-> PC autonome Verbindung)
+After=network-online.target moloch-chat.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=molochzuhause
+Group=molochzuhause
+WorkingDirectory=/home/molochzuhause/moloch
+ExecStart=/usr/bin/python3 -m core.bridge.cross_session_monitor
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=moloch-cross-monitor
+
+[Install]
+WantedBy=multi-user.target
+
+# Install:
+#   sudo cp scripts/moloch-cross-monitor.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now moloch-cross-monitor.service
+#
+# Status / Logs:
+#   systemctl is-active moloch-cross-monitor
+#   sudo journalctl -u moloch-cross-monitor -f
+#   tail -F /mnt/moloch-data/memory/cross_session_log.jsonl
