@@ -198,8 +198,14 @@ def _parse_mailbox(file: str, n: int = 4) -> List[Dict]:
         text = path.read_text(encoding="utf-8")
         entries: List[Dict] = []
         cur: Optional[Dict] = None
+        in_code_fence = False  # ignore "## [" headers innerhalb ```...``` Bloecken
         for line in text.splitlines():
             stripped = line.strip()
+            if stripped.startswith("```"):
+                in_code_fence = not in_code_fence
+                continue
+            if in_code_fence:
+                continue
             if stripped.startswith("## ["):
                 if cur:
                     entries.append(cur)
@@ -579,6 +585,10 @@ def _trigger_claude_autoreply(topic_id: str, topic_ts: str,
 
         prompt = _fed_build_prompt(topic_id, topic_ts, mailbox_path)
         env = {**os.environ, **GIT_AUTHOR_FED_ENV}
+        # Verhindere "Claude Code cannot be launched inside another Claude Code
+        # session"-Block: env-vars muessen weg, sonst refused der Subprocess.
+        env.pop("CLAUDECODE", None)
+        env.pop("CLAUDE_CODE_ENTRYPOINT", None)
         logger.info(f"[fed] TRIGGER claude -p for {topic_id} (turns<={FED_MAX_TURNS})")
         t0 = time.monotonic()
         try:
@@ -658,7 +668,9 @@ def _maybe_trigger_claude_autoreply(pi_topics: List[Dict],
         if key in handled and now - handled[key] < FED_COOLDOWN_SECS:
             continue
         result = _trigger_claude_autoreply(topic, ts)
-        if result.get("ok"):
+        # Cooldown setzen UNABHAENGIG vom Erfolg - sonst retry-Spam alle 30s
+        # bei rc=1. Ausnahme: lock_held (kann sofort beim naechsten Tick gehen).
+        if result.get("skipped") != "lock_held":
             handled[key] = now
             _save_handled(handled)
 
