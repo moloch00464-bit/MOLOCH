@@ -19,6 +19,15 @@ echo [smoke] trainer self-test
 echo [smoke] proxy self-test
 "%PY%" "%HERE%adapter_inference_proxy.py" --self-test || goto :err
 
+echo [smoke] federation dry-run
+"%PY%" "%HERE%cross_session_monitor.py" --selftest fed-dry-run || goto :err
+
+echo [smoke] federation rate-limit
+"%PY%" "%HERE%cross_session_monitor.py" --selftest fed-rate-limit || goto :err
+
+echo [smoke] federation no-claude-cli
+"%PY%" "%HERE%cross_session_monitor.py" --selftest fed-no-claude || goto :err
+
 echo [smoke] OK
 endlocal
 exit /b 0

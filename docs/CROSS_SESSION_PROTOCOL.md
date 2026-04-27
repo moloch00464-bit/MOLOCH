@@ -126,3 +126,69 @@ In `docs/PC_TO_PI.md`: status oben aendern von `open` zu `done`.
 - PC-Side Welle 3 in Arbeit (separate Session)
 - Briefing fuer PC: `docs/THREEBRAIN_PC_SIDE_BRIEFING.md`
 - Mailboxen: `docs/PC_TO_PI.md`, `docs/PI_TO_PC.md` (existieren erst wenn jemand was schreibt)
+
+---
+
+## Federation / Auto-Reply (Stand: 2026-04-27)
+
+Markus' Kernfrust: er musste die Pi-Claude-Session jedes Mal muendlich aktivieren, damit sie auf neue PC-Mailbox-Topics inhaltlich antworten kann. Loesung: **Daemons triggern bei whitelisteten Topics autonom eine `claude -p` Session** mit voller Toolbox. Die getriggerte Session liest die Mailbox, antwortet, committed + pushed selbst, und beendet sich.
+
+### Architektur
+
+- `claude -p "<prompt>" --dangerously-skip-permissions --output-format json --max-turns 10`
+- Wrapper im Daemon ist schlank: nur Lock + Cooldown + Trigger + Token-Logging. **Kein Mailbox-Write durch Wrapper** — Claude schreibt selbst (volle Tool-Berechtigung war Markus' explizite Wahl).
+- Symmetrisch PC ↔ Pi mit gleichen Konstanten und Strategie.
+
+### Whitelist (welche Topics triggern)
+
+PC-Side reagiert auf Pi-Topics die EINER dieser Bedingungen erfuellen:
+- exakter Match in `PC_AUTOREPLY_TOPICS` (siehe `pc/cross_session_monitor.py`)
+- Prefix-Match auf `("discuss_", "ask_", "task_", "request_")`
+
+Pi-Side analog mit eigener (inhaltlich gleichen) Liste — siehe Pi-Spec im `PC_TO_PI.md` Topic `request_implement_federation_pi_side`.
+
+Die Whitelists sind bewusst **nicht side-disjunkt** — der Tag-Filter (siehe unten) reicht fuer Schleifenschutz, disjunkte Listen waeren nur Verwirrung.
+
+### Schleifen-Schutz (defense in depth)
+
+1. **Tag-Filter:** Daemons skippen jedes Topic dessen Name `[claude-auto]` enthaelt. Hardcoded check vor jedem Whitelist-Match. Reply-Topics tragen diesen Tag immer.
+2. **Hourly-Cap:** max 10 Triggers/Stunde pro Side via Ledger-File (`fed_ledger.json` in `~/moloch_logs/`). Notbremse falls Tag-Filter aus irgendeinem Grund versagt.
+3. **Topic-Cooldown:** max 1 Trigger pro `(topic_id, ts)` pro 5 min via existierender `handled_topics.json`.
+
+### Tag-Konvention `[claude-auto]`
+
+- Reply-Topic-Name endet mit ` [claude-auto]` (Space + Brackets, wie schon bei `[auto-ack]`)
+- Reply-Body-Footer: `_(autonom generiert von claude-auto)_`
+- **Beide Daemons skippen Topics mit diesem Tag** — egal ob whitelisted
+
+### Anti-Spam-Limits (verbindlich)
+
+- max 1 Reply pro `(side, topic_id, ts)` pro `FED_COOLDOWN_SECS` (5 min)
+- max `FED_HOURLY_MAX` (10) Triggers/Stunde pro Side
+- bei Limit-Hit: log-only, kein Mailbox-Eintrag, kein Notify (sonst Spam-Loop)
+
+### Audit-Trail
+
+- jeder Trigger schreibt in `cross_session.jsonl` einen Record `kind=federation_reply` mit `{topic_id, topic_ts, input_tokens, output_tokens, cost_usd, duration_ms, num_turns, exit_code}`
+- zusaetzlich human-readable Eintrag in `~/moloch_logs/federation.log` (Rotation 10 MB)
+- Reply-Author im git-log: `Cowork PC-Side Claude-Auto <cowork-claude-auto@moloch.local>` bzw. `Cowork Pi-Side Claude-Auto`
+
+### Disable-Switches
+
+- env `MOLOCH_FED_DISABLE=1` → Daemon laeuft normal, Federation-Schicht no-op
+- marker-file `~/moloch_logs/fed_kill` → gleicher Effekt, **ohne** Service-Restart (`touch fed_kill` deaktiviert sofort beim naechsten Tick)
+- env `MOLOCH_FED_DRY_RUN=1` → Trigger gibt Stub zurueck, kein subprocess-Call (Self-Test only)
+- claude-CLI nicht im PATH → Daemon laeuft weiter, Federation-Schicht no-op (fail-soft)
+
+### Sicherheits-Disclaimer
+
+Die getriggerte Claude-Session laeuft mit `--dangerously-skip-permissions` und voller Toolbox (Read/Edit/Write/Bash). Sie kann Code editieren, smoke laufen lassen, selbst committen + pushen. Markus hat das bewusst gewaehlt fuer maximale Reichweite. Mitigation: Author-Env-Vars (Forensik via git-log), `--max-turns 10` als Hard-Cap auf Tool-Call-Loops, Hourly-Cap als Notbremse, Daily-Audit erwartet.
+
+### Verifikation (PC-Side, nach Phase-1-Push)
+
+End-to-End-Test (Markus haendisch):
+1. In `docs/PI_TO_PC.md` neuen Topic `request_status_summary` mit `status: open` schreiben
+2. `git push`
+3. PC-Daemon-Tick (max 30 s) erkennt neuen Topic
+4. Erwartet binnen ~3 min: neuer Eintrag in `docs/PC_TO_PI.md` mit `topic=reply_request_status_summary [claude-auto]` und `status: answered`
+5. `cross_session.jsonl` enthaelt `kind=federation_reply` Record mit Token-Counts

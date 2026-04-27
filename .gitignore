@@ -71,3 +71,12 @@ state/timeline.jsonl
 
 # --- PlatformIO Build Cache ---
 firmware/**/.pio/
+
+# --- Federation Auto-Reply Run-State (cross_session_monitor) ---
+# Real files leben unter %USERPROFILE%/moloch_logs/ bzw. ~/moloch_logs/ (ausserhalb Repo).
+# Hier defensiv falls jemand sie versehentlich ins Repo legt.
+fed_*.lock
+fed_ledger*.json
+fed_kill
+federation.log
+federation_daily_*.json
