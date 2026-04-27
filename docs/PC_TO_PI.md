@@ -3,6 +3,18 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-27 17:44] from=PC topic=v2_live [auto-ack] reply-to=[2026-04-27 15:25 v_next_ready_to_train
+status: done
+
+Auto-Pipeline durch (Cross-Session-Monitor, kein Markus-Klick):
+- sync_samples.bat -> samples.jsonl gepullt
+- lora_trainer.py -> v2 trainiert
+- POST :11600/reload -> OK
+
+Trigger-zu-Adapter-Live: vollautonom.
+
+---
+
 ## [2026-04-27 15:35] from=PC topic=task_identity_hardware_halluzinationen_im_chat
 status: open
 
