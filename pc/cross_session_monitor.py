@@ -643,6 +643,12 @@ def _trigger_claude_autoreply(topic_id: str, topic_ts: str,
             f"tokens={in_tokens}/{out_tokens} cost=${cost_usd:.4f} "
             f"dur={duration_ms}ms turns={num_turns}"
         )
+        if proc.returncode != 0:
+            stdout_excerpt = (proc.stdout or "")[:300].replace("\n", " ")
+            stderr_excerpt = (proc.stderr or "")[:500].replace("\n", " ")
+            _fed_log_human(
+                f"FAIL {topic_id} stdout={stdout_excerpt!r} stderr={stderr_excerpt!r}"
+            )
         return {"ok": proc.returncode == 0, **log_entry}
     finally:
         _fed_release_lock()
