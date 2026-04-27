@@ -1,0 +1,27 @@
+[Service]
+# Federation Phase 2: claude -p im Daemon-Subprocess braucht HOME explizit,
+# damit der OAuth-Token aus ~/.claude/.credentials.json gefunden wird.
+#
+# Markus' Korrektur 27.04: KEIN ANTHROPIC_API_KEY noetig, OAuth-Login reicht.
+#
+# VOR-Setup einmalig (als molochzuhause, in TTY oder VSCode-Session):
+#   claude login
+#   # OAuth-Link durchklicken, derselbe Account wie PC
+#   # Token landet in ~/.claude/.credentials.json mit refreshToken (persistent)
+#
+# Install Drop-In:
+#   sudo mkdir -p /etc/systemd/system/moloch-cross-monitor.service.d/
+#   sudo cp scripts/moloch-cross-monitor-home.conf.template \
+#       /etc/systemd/system/moloch-cross-monitor.service.d/home.conf
+#   sudo systemctl daemon-reload
+#   sudo systemctl restart moloch-cross-monitor
+#
+# Federation aktivieren (nach Login + Drop-In):
+#   rm /mnt/moloch-data/memory/fed_kill
+#
+# Verify:
+#   claude -p "test" --output-format json | jq '.usage'  # erwartet: tokens-stats
+#
+# Pause ohne Restart:
+#   touch /mnt/moloch-data/memory/fed_kill
+Environment="HOME=/home/molochzuhause"
