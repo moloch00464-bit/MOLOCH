@@ -310,6 +310,43 @@ def _maybe_write_trigger_ack(topic: str, pc_endpoint_states: Dict[str, Dict]) ->
     )
 
 
+def _maybe_write_generic_ack(pc_topic: str, pc_endpoint_states: Dict[str, Dict],
+                              pc_status: Optional[str] = None) -> None:
+    """Generischer Ack auf neuen PC-Topic der NICHT in PC_TRIGGER_TOPICS ist.
+
+    Markus' Direktive: 'PC sieht dass Pi sie mitbekommen hat'. Bei jedem neuen
+    PC-Eintrag (von PC, status open|info, nicht schon ge-ack'd) ein kurzer
+    Notification-Eintrag mit Realitaets-Snapshot.
+    """
+    if pc_status not in (None, "open", "info"):
+        return  # done/answered/wontfix nicht ack'en
+    adapter = pc_endpoint_states.get("adapter", {})
+    tentakel = pc_endpoint_states.get("tentakel_ollama", {})
+    dashboard = pc_endpoint_states.get("dashboard", {})
+    avatar = pc_endpoint_states.get("avatar", {})
+    body = (
+        f"Pi cross_session_monitor hat dein neues `{pc_topic}` Topic gelesen "
+        f"(status={pc_status or '?'}). Pi-Sicht jetzt:\n"
+        f"\n"
+        f"| PC-Endpoint | ok | latency |\n"
+        f"|---|---|---|\n"
+        f"| :11434 ollama   | {adapter.get('ok','?')} | {tentakel.get('latency_ms','-')}ms |\n"
+        f"| :11600 adapter  | {adapter.get('ok','?')} | {adapter.get('latency_ms','-')}ms |\n"
+        f"| :11700 dashboard| {dashboard.get('ok','?')} | {dashboard.get('latency_ms','-')}ms |\n"
+        f"| :11800 avatar   | {avatar.get('ok','?')} | {avatar.get('latency_ms','-')}ms |\n"
+        f"\n"
+        f"Pi-Code-Stand: aktiver commit ist origin/main HEAD. Wenn du was Konkretes\n"
+        f"brauchst (Pool-Diff, /infer-Test, ...), Eintrag mit Trigger-Topic schicken\n"
+        f"oder Markus aktivieren."
+    )
+    _write_mailbox_note(
+        topic=f"saw_{pc_topic}",
+        body=body,
+        cooldown_marker=f".cross_session_seen_{pc_topic}_marker",
+        cooldown_s=1800,  # 30min cooldown pro Topic gegen Spam
+    )
+
+
 # =============================================================================
 # Main loop
 # =============================================================================
@@ -361,8 +398,9 @@ def main():
         "pid": os.getpid(),
     })
 
-    # Trigger-Topic-State: welche Topics haben wir schon ack'ed?
+    # Topic-State: welche Topics haben wir schon ack'ed?
     seen_pc_triggers: set = set()
+    seen_pc_topics: set = set()
 
     while _running:
         iteration += 1
@@ -413,17 +451,28 @@ def main():
                     last_outage_note_at[name] = time.time()
             last_pc_ok[name] = ok_now
 
-        # 3b. Auto-Ack auf neue PC-Trigger-Topics (nur bei NEUEN commits)
+        # 3b. Auto-Ack auf neue PC-Topics (nur bei NEUEN commits)
         if new_commits:
             for tp in entry.get("pc_to_pi_top", []):
                 if tp.get("from") != "PC":
                     continue
                 topic = tp.get("topic", "")
+                if not topic:
+                    continue
                 if topic in PC_TRIGGER_TOPICS and topic not in seen_pc_triggers:
+                    # Trigger-Topic: spezifischer Ack mit Realitaets-Snapshot
                     logger.info("TRIGGER-Topic erkannt: %s — schreibe ack", topic)
                     _maybe_write_trigger_ack(topic, entry["pc"])
                     seen_pc_triggers.add(topic)
                     entry.setdefault("triggers_acked", []).append(topic)
+                elif topic not in seen_pc_topics:
+                    # Generic-Topic: nur einmal pro Run + 30min cooldown ackn
+                    status = tp.get("status")
+                    logger.info("Neuer PC-Topic erkannt: %s status=%s — schreibe saw-ack",
+                                topic, status)
+                    _maybe_write_generic_ack(topic, entry["pc"], status)
+                    seen_pc_topics.add(topic)
+                    entry.setdefault("topics_acked", []).append(topic)
 
         # 4. Log
         _append_log(entry)

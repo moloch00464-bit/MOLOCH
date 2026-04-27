@@ -878,6 +878,109 @@ def state_full():
     return out
 
 
+@app.get("/cross_status")
+def cross_status():
+    """Pi-Sicht der Cross-Session-Verbindung — fuer PC-Side Remote-Abfrage.
+
+    Liefert: letzte Heartbeats, aktuelle PC-Endpoint-States, recent Transitions,
+    Monitor-Uptime aus dem persistent JSONL-Log. PC-Side (oder Markus) kann
+    via curl http://192.168.178.30:9100/cross_status den Stand checken ohne
+    SCP des Log-Files.
+
+    Markus' Direktive 27.04: 'autonome Verbindung, ihr beiden checkt was der
+    andere gemacht hat'. Dieser Endpoint ist die Pi-Side-Reflection.
+    """
+    log_path = "/mnt/moloch-data/memory/cross_session_log.jsonl"
+    out = {
+        "pi_now": time.time(),
+        "log_path": log_path,
+        "monitor_active": False,
+        "last_heartbeat": None,
+        "last_monitor_start": None,
+        "recent_heartbeats_n": 0,
+        "current_pc": {},
+        "transitions_recent": [],
+        "topics_acked": [],
+    }
+    try:
+        if not os.path.exists(log_path):
+            out["error"] = "log_file_missing"
+            return out
+        # Tail letzte 200 Zeilen lesen — billig genug
+        with open(log_path, "rb") as f:
+            f.seek(0, 2)  # end
+            size = f.tell()
+            chunk = min(size, 64 * 1024)
+            f.seek(-chunk, 2)
+            tail = f.read().decode("utf-8", errors="replace")
+        lines = [ln for ln in tail.splitlines() if ln.strip()]
+        # Wenn wir mitten in einer Zeile starten: erste verwerfen
+        if size > 64 * 1024 and lines:
+            lines = lines[1:]
+        heartbeats = []
+        last_start = None
+        topics_acked: List[str] = []
+        for ln in lines[-200:]:
+            try:
+                d = json.loads(ln)
+            except Exception:
+                continue
+            t = d.get("type")
+            if t == "monitor_start":
+                last_start = d
+            elif t == "heartbeat":
+                heartbeats.append(d)
+            for tk in d.get("topics_acked", []) or []:
+                if tk not in topics_acked:
+                    topics_acked.append(tk)
+            for tk in d.get("triggers_acked", []) or []:
+                if tk not in topics_acked:
+                    topics_acked.append(tk)
+
+        out["recent_heartbeats_n"] = len(heartbeats)
+        out["topics_acked"] = topics_acked[-10:]
+        if last_start:
+            out["last_monitor_start"] = {
+                "iso": last_start.get("iso"),
+                "ts": last_start.get("ts"),
+                "boot_id_short": (last_start.get("boot_id", "") or "")[:16],
+            }
+        if heartbeats:
+            last = heartbeats[-1]
+            out["last_heartbeat"] = {
+                "iso": last.get("iso"),
+                "ts": last.get("ts"),
+                "iter": last.get("iter"),
+            }
+            out["current_pc"] = last.get("pc", {})
+            out["pi_self"] = last.get("pi_self", {})
+            # Monitor active wenn letzter heartbeat innerhalb 90s
+            age = time.time() - (last.get("ts") or 0)
+            out["monitor_active"] = age < 90
+            out["last_heartbeat_age_s"] = round(age, 1)
+
+            # Transitions in den letzten ~50 heartbeats finden
+            prev = {}
+            for hb in heartbeats[-50:]:
+                pc = hb.get("pc", {})
+                for name, r in pc.items():
+                    cur_ok = r.get("ok")
+                    if name in prev and prev[name] != cur_ok:
+                        out["transitions_recent"].append({
+                            "iso": hb.get("iso"),
+                            "endpoint": name,
+                            "to": "UP" if cur_ok else "DOWN",
+                            "recovered_after_s": r.get("recovered_after_s"),
+                        })
+                    prev[name] = cur_ok
+            out["transitions_recent"] = out["transitions_recent"][-20:]
+
+        return out
+    except Exception as e:
+        out["error"] = str(e)[:200]
+        return out
+
+
 @app.get("/snapshot.jpg")
 def snapshot_jpg():
     """Cockpit Sehen-Tab: aktueller Frame aus SHM als JPEG."""
