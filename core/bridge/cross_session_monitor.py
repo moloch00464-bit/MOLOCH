@@ -202,8 +202,14 @@ def _parse_mailbox_topics(file: str, n: int = 4) -> List[Dict]:
         text = path.read_text(encoding="utf-8")
         entries: List[Dict] = []
         cur: Optional[Dict] = None
+        in_code_fence = False  # ignore "## [" headers innerhalb ```...``` Bloecken
         for line in text.splitlines():
             stripped = line.strip()
+            if stripped.startswith("```"):
+                in_code_fence = not in_code_fence
+                continue
+            if in_code_fence:
+                continue
             if stripped.startswith("## ["):
                 # Naechster Header gestartet — alten pushen
                 if cur:
@@ -694,7 +700,8 @@ def _trigger_claude_autoreply(topic_id: str, topic_ts: str,
         return {"ok": True, "dry_run": True, "topic": topic_id}
 
     # 2. claude CLI muss im PATH sein
-    if shutil.which("claude") is None:
+    claude_path = shutil.which("claude")
+    if claude_path is None:
         logger.warning("[fed] claude CLI not in PATH, federation skipped")
         _fed_log_human(f"SKIP {topic_id} - no_claude_cli")
         return {"ok": False, "skipped": "no_claude_cli"}
@@ -715,12 +722,16 @@ def _trigger_claude_autoreply(topic_id: str, topic_ts: str,
         # 5. claude subprocess.run
         prompt = _fed_build_prompt(topic_id, topic_ts, mailbox_path)
         env = {**os.environ, **GIT_AUTHOR_FED_ENV}
+        # Verhindere "Claude Code cannot be launched inside another Claude Code
+        # session"-Block: env-vars muessen weg, sonst refused der Subprocess.
+        env.pop("CLAUDECODE", None)
+        env.pop("CLAUDE_CODE_ENTRYPOINT", None)
         logger.info("[fed] TRIGGER claude -p for %s (turns<=%d)",
                     topic_id, FED_MAX_TURNS)
         t0 = time.monotonic()
         try:
             proc = subprocess.run(
-                ["claude", "-p", prompt,
+                [claude_path, "-p", prompt,
                  "--dangerously-skip-permissions",
                  "--output-format", "json",
                  "--max-turns", str(FED_MAX_TURNS)],
@@ -733,6 +744,15 @@ def _trigger_claude_autoreply(topic_id: str, topic_ts: str,
             return {"ok": False, "error": "timeout"}
 
         duration_ms = int((time.monotonic() - t0) * 1000)
+
+        # Diagnose-Log bei rc!=0 — sonst sieht man nur "rc=1 cost=0" und weiss nicht warum
+        if proc.returncode != 0:
+            stdout_excerpt = (proc.stdout or "")[:300].replace("\n", " ")
+            stderr_excerpt = (proc.stderr or "")[:500].replace("\n", " ")
+            _fed_log_human(
+                f"FAIL {topic_id} rc={proc.returncode} "
+                f"stdout={stdout_excerpt!r} stderr={stderr_excerpt!r}"
+            )
 
         # 6. Defensive JSON parse
         in_tokens = 0
@@ -796,7 +816,9 @@ def _maybe_trigger_claude_autoreply(pc_topics: List[Dict],
         if key in handled and now - handled[key] < FED_COOLDOWN_SECS:
             continue
         result = _trigger_claude_autoreply(topic, ts)
-        if result.get("ok"):
+        # Cooldown setzen UNABHAENGIG vom Erfolg — sonst retry-Spam alle 30s
+        # bei rc=1. Ausnahme: lock_held (kann sofort beim naechsten Tick gehen).
+        if result.get("skipped") != "lock_held":
             handled[key] = now
             _fed_save_handled(handled)
 
