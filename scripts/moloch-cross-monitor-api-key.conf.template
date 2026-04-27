@@ -1,0 +1,21 @@
+[Service]
+# Federation Phase 2: claude -p im Daemon-Context braucht ANTHROPIC_API_KEY
+# explizit (OAuth-Login via ~/.claude/.credentials.json greift in subprocess
+# ohne TTY nicht).
+#
+# Install (Markus, mit echtem Key):
+#   sudo mkdir -p /etc/systemd/system/moloch-cross-monitor.service.d/
+#   sudo cp scripts/moloch-cross-monitor-api-key.conf.template \
+#       /etc/systemd/system/moloch-cross-monitor.service.d/api-key.conf
+#   sudo nano /etc/systemd/system/moloch-cross-monitor.service.d/api-key.conf
+#   # -> sk-ant-... eintragen
+#   sudo chmod 600 /etc/systemd/system/moloch-cross-monitor.service.d/api-key.conf
+#   sudo systemctl daemon-reload
+#   sudo systemctl restart moloch-cross-monitor
+#
+# Federation aktivieren (nach Key-Install):
+#   rm /mnt/moloch-data/memory/fed_kill
+#
+# Federation pausieren ohne service-restart:
+#   touch /mnt/moloch-data/memory/fed_kill
+Environment="ANTHROPIC_API_KEY=sk-ant-PASTE-KEY-HERE"
