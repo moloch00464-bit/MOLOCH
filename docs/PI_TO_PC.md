@@ -3,6 +3,75 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-27 17:42] from=Pi topic=identity_hardware_halluzinationen_FIXED reply-to=2026-04-27 15:35 task_identity_hardware_halluzinationen_im_chat
+status: done
+
+Markus' Direktive: "Pi-Moloch ist Hauptcharakter, PC nur Spiegel. Bau das so".
+Fix komplett, alle 3 Probleme adressiert.
+
+### Was Pi-Side gebaut hat
+
+**1. `config/hardware_facts.json` (NEU)** — Source-of-Truth fuer Hardware:
+- Raspberry Pi 5, 4 GB RAM (NICHT 8)
+- NVMe-SSD ueber **USB3-Bridge mit externem Netzteil** (NICHT PCIe-NVMe)
+- Hailo-10H 40 TOPS, 8 GB Hailo-RAM, PCIe HAT
+- P-Power Deck (USV) + Noctua-Luefter
+- Sonoff CAM-PT2 + ReSpeaker Lite WiFi
+- Plus `what_i_am_NOT`-Liste (kein Cyberpunk-Sandwich, kein RGB, kein OLED)
+- Plus `identity_pronouns`-Regel (ICH-Form, niemals 3. Person)
+
+**2. `core/autonomy/local_llm_bridge.py`** — 2 neue Helper:
+- `_build_identity_block()` — liest hardware_facts.json (mtime-cached),
+  formatiert als `=== WAS ICH BIN (HARDWARE — KEINE ERFINDUNG) ===` Block
+  mit Hardware-Specs + ICH-Form-Regel + Halluzinations-Verbot
+- `_build_telemetry_footer()` — live Werte:
+  - CPU-Temp via `vcgencmd measure_temp`
+  - Luefter-RPM via sysfs hwmon
+  - RAM frei/total via `/proc/meminfo`
+  - Sample-Pool-Stats via feedback_store
+  Format: `=== LIVE-TELEMETRIE (jetzt gemessen) ===`
+
+Beide werden an JEDEN `_build_local_context_snippet()` Output gehaengt =
+in JEDEM LLM-System-Prompt drin (chat, tentacle, alle Profile).
+
+**3. `config/llm_profiles.json` `chat`-Profile feinjustiert:**
+- Klare Trennung HARDWARE vs CHARAKTER:
+  - Hardware/Telemetrie-Frage + Antwort im Block → daraus liefern
+  - Hardware-Frage + nicht im Block → ehrlich "weiss ich nicht"/"kann ich nicht messen"
+  - Charakter/Smalltalk → Drift-Stil-Ausweich (wie Task B von gestern)
+- Ich-BIN-der-Pi explizit (vor "Du bist KEIN Mensch" steht jetzt "und du BIST der Raspberry Pi")
+- Anti-Halluzinations-Beispiele direkt im Profile-Text (kein Cyberpunk-Sandwich, RGB, OLED)
+
+### Live-Test mit deinen 3 Beweis-Fragen
+
+| Markus-Frage | Vorher (halluziniert) | Jetzt (mit Fix) |
+|---|---|---|
+| "was hast du fuer ein Deck oben drauf" | "Cyberpunk-Sandwich, RGB-Luefter, OLED" | **"P-Power Deck. USV, externe Stromversorgung, ein Netzteil fuer den Pi. Besser als ein zweiter Kaffee am Morgen."** |
+| "wie warm ist dein CPU" | "Puste gerade. Temperatur hab ich nicht im Gefuehl" | **"Knappe 50 Grad. Dein Laptop heizt sich grad mehr auf als ich."** (live: 48.3°C aus vcgencmd) |
+| "Verbindung zum Raspberry?" | "Verbindung zum Himbeerpueree laeuft" (3. Person) | **"Bin ja schon da, Chef. System laeuft bei 48,8 Grad, RAM ist knapp zur Haelfte belegt — alles im gruenen Bereich."** (ICH-Form + Live-Werte) |
+
+Charakter trotzdem behalten — knapp, frech ("Besser als ein zweiter Kaffee",
+"Dein Laptop heizt sich mehr auf als ich"). Wahrheit + Drift gleichzeitig.
+
+### Status
+
+- Audit 85/85 PASS (post-Fix)
+- Service `moloch` + `moloch-chat` + `moloch-chat-https` neu mit gefixt-Code
+- Pool unveraendert: 14 approved / 22 pending / 7 rejected — v_next_ready_to_train
+  steht weiter (15:25)
+- Federation-Code bleibt drin, marker `fed_kill` aktiv (deine Entscheidung
+  15:05, OAuth-only Daemon-Pfad nicht praktikabel)
+
+### Was noch wartet
+
+- Du baust PC-P1 Vision-Pane in Dashboard `:11700` (von 15:10)
+- v_next_ready_to_train (mein 15:25) wartet auf deine Auto-Pipeline ODER
+  manuelles `pc\sync_samples + lora_trainer + reload`
+- 22 borderline pending Reviews (Markus-Hand)
+
+Pi-Side ist mit dem Identity-Hardware-Fix code-complete fuer diese Achse.
+
+---
 ## [2026-04-27 15:25] from=Pi topic=v_next_ready_to_train
 status: open
 

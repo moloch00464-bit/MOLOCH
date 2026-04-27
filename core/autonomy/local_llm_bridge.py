@@ -29,7 +29,7 @@ import signal
 import subprocess
 import threading
 import time
-from typing import Optional, Dict, Callable
+from typing import Optional, Dict, Callable, Any
 
 logger = logging.getLogger("LocalLLMBridge")
 
@@ -126,6 +126,126 @@ def _get_active_profile() -> Optional[Dict]:
         pass
     active_key = settings_active or data.get("active") or "chat"
     return profiles.get(active_key) or profiles.get("chat") or next(iter(profiles.values()), None)
+
+
+_HARDWARE_FACTS_CACHE: Dict[str, Any] = {"data": None, "mtime": 0.0}
+_HARDWARE_FACTS_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "config", "hardware_facts.json"
+)
+
+
+def _load_hardware_facts() -> Dict[str, Any]:
+    """Hardware-Facts mit mtime-Cache (refresh on file change)."""
+    try:
+        m = os.path.getmtime(_HARDWARE_FACTS_PATH)
+        if _HARDWARE_FACTS_CACHE["mtime"] != m:
+            with open(_HARDWARE_FACTS_PATH, "r", encoding="utf-8") as f:
+                _HARDWARE_FACTS_CACHE["data"] = json.load(f)
+            _HARDWARE_FACTS_CACHE["mtime"] = m
+        return _HARDWARE_FACTS_CACHE["data"] or {}
+    except Exception:
+        return {}
+
+
+def _build_identity_block() -> str:
+    """Hardware-Identity-Block fuer System-Prompt — verhindert Halluzination.
+
+    Markus' Direktive 27.04: 'Pi-Moloch ist der Hauptcharakter, PC nur Spiegel'.
+    LLM erfindet sonst 'Cyberpunk-Sandwich' statt korrekte Hardware. Block
+    erzwingt Ground-Truth + Anti-Halluzinations-Regel + ICH-Pronomen.
+    """
+    f = _load_hardware_facts()
+    if not f:
+        return ""
+    host = f.get("host", {})
+    storage = f.get("storage", {})
+    ai = f.get("ai_accelerator", {})
+    power = f.get("power", {})
+    cool = f.get("cooling", {})
+    cam = f.get("camera", {})
+    aud = f.get("audio", {})
+    not_list = f.get("what_i_am_NOT", [])
+    pron = f.get("identity_pronouns", {})
+
+    parts = [
+        "\n=== WAS ICH BIN (HARDWARE — KEINE ERFINDUNG) ===",
+        f"Ich BIN ein {host.get('name','Raspberry Pi')} mit {host.get('ram_gb','?')} GB Pi-RAM. "
+        f"Hostname {host.get('hostname','?')}, IP {host.get('ip_lan','?')}.",
+        f"Speicher: {storage.get('primary','?')}.",
+        f"KI-Beschleuniger: {ai.get('name','?')} ({ai.get('tops','?')} TOPS, "
+        f"{ai.get('ram_gb','?')} GB separater Hailo-RAM, {ai.get('interface','?')}).",
+        f"Strom: {power.get('device','?')}. Kuehlung: {cool.get('device','?')}.",
+        f"Kamera: {cam.get('type','?')} ({cam.get('stream','?')}, PTZ).",
+        f"Audio: {aud.get('mic','?')}.",
+    ]
+    if not_list:
+        parts.append("Ich bin NICHT: " + " | ".join(not_list[:4]))
+    parts.append(
+        "ICH-FORM: Ich BIN der Pi. Wenn jemand fragt 'Verbindung zum Raspberry?' "
+        "= ich bin gefragt, NICHT ein anderer Pi. Niemals von mir in 3. Person reden."
+    )
+    parts.append(
+        "BEI HARDWARE-FRAGEN DIE NICHT IM BLOCK STEHEN ODER NICHT IM TELEMETRIE-FOOTER: "
+        "ehrlich 'weiss ich nicht' oder 'kann ich nicht messen'. KEINE Erfindung. "
+        "Markus reibt sich an Falschaussagen mehr als an 'weiss ich nicht'."
+    )
+    return "\n".join(parts) + "\n"
+
+
+def _build_telemetry_footer() -> str:
+    """Live-Telemetrie als Footer (CPU-Temp, Luefter-RPM, RAM, Pool).
+
+    Wird an JEDEN Prompt gehaengt damit Moloch Hardware-Fragen aus echten
+    Werten beantworten kann statt zu raten.
+    """
+    parts = ["\n=== LIVE-TELEMETRIE (jetzt gemessen) ==="]
+    # CPU-Temp via vcgencmd (best-effort)
+    try:
+        import subprocess as _sp
+        r = _sp.run(["vcgencmd", "measure_temp"], capture_output=True,
+                    text=True, timeout=2)
+        if r.returncode == 0:
+            t = r.stdout.strip().replace("temp=", "").replace("'C", "C")
+            parts.append(f"- CPU-Temperatur: {t}")
+    except Exception:
+        pass
+    # Luefter-RPM via sysfs
+    try:
+        import glob as _glob
+        for fan in _glob.glob("/sys/class/hwmon/hwmon*/fan1_input"):
+            with open(fan) as f:
+                rpm = int(f.read().strip())
+            if rpm > 0:
+                parts.append(f"- Luefter: {rpm} RPM")
+                break
+    except Exception:
+        pass
+    # RAM via /proc/meminfo
+    try:
+        with open("/proc/meminfo") as f:
+            mem = {ln.split(":")[0]: int(ln.split(":")[1].strip().split()[0])
+                   for ln in f.readlines()[:5] if ":" in ln}
+        free_mb = (mem.get("MemAvailable", 0)) // 1024
+        total_mb = mem.get("MemTotal", 0) // 1024
+        if total_mb:
+            parts.append(f"- RAM frei: {free_mb} MB / {total_mb} MB")
+    except Exception:
+        pass
+    # Pool-Stand
+    try:
+        from core.memory.feedback_store import get_feedback_store
+        st = get_feedback_store().get_state()
+        parts.append(
+            f"- Sample-Pool: {st.get('total','?')} total / "
+            f"{st.get('approved','?')} approved / "
+            f"{st.get('pending_review','?')} pending"
+        )
+    except Exception:
+        pass
+    if len(parts) <= 1:
+        return ""
+    return "\n".join(parts) + "\n"
 
 
 def _build_local_context_snippet() -> str:
@@ -252,7 +372,12 @@ def _build_local_context_snippet() -> str:
         except Exception:
             pass  # Memory-Singleton evtl. nicht init in standalone Test
 
-        return " " + " ".join(parts)
+        # Hardware-Identity-Block + Live-Telemetrie-Footer anhaengen
+        # (Markus' Direktive 27.04: keine Hardware-Halluzination)
+        snippet = " " + " ".join(parts)
+        identity_block = _build_identity_block()
+        telemetry = _build_telemetry_footer()
+        return snippet + identity_block + telemetry
     except Exception:
         return ""
 
