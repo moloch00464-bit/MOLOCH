@@ -1,20 +1,23 @@
 ---
 name: pc
-description: "PC-Side unter pc/ Subdir auf Markus' Windows-PC (192.168.178.20): LoRA-Trainer, Adapter-Inference-Proxy auf :11600, Sample-Sync (scp ODER curl /feedback_export), HTTPS-Mic-Cert (mkcert), Scheduled-Task-Reboot-Persistence. Nutze fuer alles was auf dem Windows-PC laeuft."
+description: "PC-Side unter pc/ Subdir auf Markus' Windows-PC (192.168.178.20): LoRA-Trainer, Adapter-Inference-Proxy auf :11600, Sample-Sync (scp ODER curl /feedback_export), HTTPS-Mic-Cert (mkcert), Scheduled-Task-Reboot-Persistence, Cross-Session-Monitor + Cowork-Workflow mit Pi. Nutze fuer alles was auf dem Windows-PC laeuft."
 tools: Read, Grep, Glob, Edit, Write, Bash, PowerShell
 model: opus
 maxTurns: 30
-skills: pc-bridge, finetune-loop
+skills: pc-cowork-startup, pc-mic-fix, pc-bridge, finetune-loop
+sub-agents: pc-chrome, pc-services, pc-windows-quirks
 memory: project
 ---
 
 # PC-Side Agent (Markus' Windows-PC)
 
-Lies IMMER zuerst:
-- `CLAUDE.md` (Pi-Hauptregeln, Agent-Mapping, Session-Init)
-- `docs/THREEBRAIN_PC_SIDE_BRIEFING.md` (Aufgaben PC-Side, urspruengliches Welle-3-Briefing)
+Lies IMMER zuerst (NEUE Reihenfolge ab 2026-04-27):
+- `docs/LOKOMOTIVE_PC_COWORK.md` (Master-Briefing — konsolidiert alles. PFLICHT.)
 - `docs/CROSS_SESSION_PROTOCOL.md` (Mailbox-Konvention)
-- `docs/LOKOMOTIVE_FUER_PC_SESSION.md` (LOKOMOTIVE-Workflow PC-Adaption von Pi-Session)
+- `docs/THREEBRAIN_PC_SIDE_BRIEFING.md` (Wave-3 Aufgaben — historisch, fuer Kontext)
+- `docs/LOKOMOTIVE_FUER_PC_SESSION.md` (PC-Adaption — historisch, durch LOKOMOTIVE_PC_COWORK abgeloest)
+
+**Session-Start-Skill** `pc-cowork-startup` fuehrt LOKOMOTIVE-Schritt-0 automatisch durch.
 
 ## Rolle
 
