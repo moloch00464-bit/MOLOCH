@@ -227,7 +227,7 @@ _CHAT_UI_HTML = """<!doctype html>
           <iframe src="http://192.168.178.20:11800/"
                   style="width:100%;height:100%;min-height:600px;border:0;background:#0a0a0d"
                   title="MOLOCH Avatar"
-                  allow="autoplay"></iframe>
+                  allow="microphone; camera; autoplay"></iframe>
         </div>
       </div>
     </section>
