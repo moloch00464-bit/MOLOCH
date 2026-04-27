@@ -178,28 +178,87 @@ scene.add(new THREE.AmbientLight(0x404060, 0.7));
 const key = new THREE.DirectionalLight(0xffffff, 0.6); key.position.set(3, 4, 5); scene.add(key);
 const rim = new THREE.DirectionalLight(0xff5050, 0.3); rim.position.set(-4, -2, -3); scene.add(rim);
 
-// --- Avatar: low-poly icosahedron mask ---
-const geo = new THREE.IcosahedronGeometry(1.0, 1);  // ~80 vertices
-const basePositions = geo.attributes.position.array.slice(); // copy fuer Vertex-Displacement
-const mat = new THREE.MeshPhongMaterial({
-  color: 0x3673ce, emissive: 0x102040, emissiveIntensity: 0.6,
-  flatShading: true, shininess: 30, specular: 0x222244
+// --- Avatar: stylized low-poly Moloch face ---
+// Group hierarchy so we can tilt/scale the head as one unit.
+const head = new THREE.Group();
+scene.add(head);
+
+// Skull base — slightly elongated dodecahedron (12 faces, looks like a stylized head)
+const skullGeo = new THREE.DodecahedronGeometry(1.0, 0);
+skullGeo.scale(0.85, 1.15, 0.85);  // longer face, narrower sides
+const basePositions = skullGeo.attributes.position.array.slice(); // for subtle vertex-breathing
+const skullMat = new THREE.MeshPhongMaterial({
+  color: 0x3673ce, emissive: 0x102040, emissiveIntensity: 0.45,
+  flatShading: true, shininess: 25, specular: 0x222244
 });
-const mesh = new THREE.Mesh(geo, mat);
-scene.add(mesh);
+const skull = new THREE.Mesh(skullGeo, skullMat);
+head.add(skull);
 
-// Wireframe overlay sharing the SAME geo so vertex displacement applies to both
-const wireMat = new THREE.MeshBasicMaterial({color: 0xffffff, wireframe: true,
-                                              transparent: true, opacity: 0.18});
-const wireMesh = new THREE.Mesh(geo, wireMat);
-mesh.add(wireMesh);
+// Wireframe edges (shares skull geo - tracks vertex breathing)
+const skullWireMat = new THREE.MeshBasicMaterial({color: 0xffffff, wireframe: true,
+                                                   transparent: true, opacity: 0.16});
+const skullWire = new THREE.Mesh(skullGeo, skullWireMat);
+head.add(skullWire);
 
-// Inner core (Iris/Pupille)
-const irisGeo = new THREE.SphereGeometry(0.22, 16, 12);
-const irisMat = new THREE.MeshBasicMaterial({color: 0xff5050});
-const iris = new THREE.Mesh(irisGeo, irisMat);
-iris.position.z = 0.78;
-mesh.add(iris);
+// --- Eyes (sockets, iris, pupil) ---
+// Eye whites (dark recessed sphere as socket)
+const eyeWhiteGeo = new THREE.SphereGeometry(0.16, 14, 10);
+const eyeWhiteMat = new THREE.MeshPhongMaterial({color: 0x080810, emissive: 0x040408,
+                                                  emissiveIntensity: 0.2, shininess: 60});
+const leftEye = new THREE.Mesh(eyeWhiteGeo, eyeWhiteMat);
+leftEye.position.set(-0.30, 0.18, 0.78);
+head.add(leftEye);
+const rightEye = new THREE.Mesh(eyeWhiteGeo, eyeWhiteMat);
+rightEye.position.set(0.30, 0.18, 0.78);
+head.add(rightEye);
+
+// Iris (zone-colored, glows; one material per side so they could differ)
+const irisGeo = new THREE.SphereGeometry(0.10, 14, 10);
+const leftIrisMat = new THREE.MeshBasicMaterial({color: 0x3673ce});
+const rightIrisMat = new THREE.MeshBasicMaterial({color: 0x3673ce});
+const leftIris = new THREE.Mesh(irisGeo, leftIrisMat);
+leftIris.position.set(-0.30, 0.18, 0.86);
+head.add(leftIris);
+const rightIris = new THREE.Mesh(irisGeo, rightIrisMat);
+rightIris.position.set(0.30, 0.18, 0.86);
+head.add(rightIris);
+
+// Pupil (black, scales with tension - dilation)
+const pupilGeo = new THREE.SphereGeometry(0.05, 10, 8);
+const pupilMat = new THREE.MeshBasicMaterial({color: 0x000000});
+const leftPupil = new THREE.Mesh(pupilGeo, pupilMat);
+leftPupil.position.set(-0.30, 0.18, 0.92);
+head.add(leftPupil);
+const rightPupil = new THREE.Mesh(pupilGeo, pupilMat);
+rightPupil.position.set(0.30, 0.18, 0.92);
+head.add(rightPupil);
+
+// Brow ridge above eyes (gives it a brow line)
+const browGeo = new THREE.BoxGeometry(0.85, 0.06, 0.10);
+const browMat = new THREE.MeshPhongMaterial({color: 0x141420, shininess: 8});
+const brow = new THREE.Mesh(browGeo, browMat);
+brow.position.set(0, 0.36, 0.74);
+head.add(brow);
+
+// Mouth (thin angular line; rotates with dominance for smile/frown, scales with tension)
+const mouthGeo = new THREE.BoxGeometry(0.50, 0.05, 0.10);
+const mouthMat = new THREE.MeshPhongMaterial({color: 0x100808, emissive: 0x080404,
+                                               emissiveIntensity: 0.3, shininess: 20});
+const mouth = new THREE.Mesh(mouthGeo, mouthMat);
+mouth.position.set(0, -0.45, 0.68);
+head.add(mouth);
+
+// Cheekbones (angular planes for face definition)
+const cheekGeo = new THREE.BoxGeometry(0.12, 0.32, 0.10);
+const cheekMat = new THREE.MeshPhongMaterial({color: 0x1a1a28, shininess: 10});
+const leftCheek = new THREE.Mesh(cheekGeo, cheekMat);
+leftCheek.position.set(-0.55, -0.10, 0.42);
+leftCheek.rotation.z = 0.35;
+head.add(leftCheek);
+const rightCheek = new THREE.Mesh(cheekGeo, cheekMat);
+rightCheek.position.set(0.55, -0.10, 0.42);
+rightCheek.rotation.z = -0.35;
+head.add(rightCheek);
 
 // --- Particle Aura ---
 const PCOUNT = 180;
@@ -277,47 +336,65 @@ function tick() {
   const now = performance.now();
   const t = now * 0.001;
 
-  // Color
+  // Mood-Color (skull = darker variant, iris = saturated variant)
   const col = zoneColor(live.zone, live.guardian_influence, live.shadow_influence);
   if (live.berserker_active) col.lerp(COL_BERSERKER, 0.6);
-  mat.color.copy(col);
-  mat.emissive.copy(col).multiplyScalar(0.25 + 0.4 * live.presence);
-  pmat.color.copy(col);
-  iris.material.color.copy(col).offsetHSL(0, 0, 0.15);
 
-  // Pulse: voice_intensity drives speed
+  // Pulse: voice_intensity drives speed (visible in glow + breathing scale)
   const pulseSpeed = 0.6 + live.voice_intensity * 4.0;
   const pulse = 0.5 + 0.5 * Math.sin(t * pulseSpeed);
-  mat.emissiveIntensity = 0.3 + 0.6 * pulse * live.presence;
 
-  // Scale: tension drives base size + sharpness adds spike-pulse
-  const baseScale = 1.0 + 0.15 * Math.max(0, live.tension);
-  const spike = 1.0 + 0.04 * pulse * live.language_sharpness;
-  mesh.scale.setScalar(baseScale * spike);
+  // Skull material (slightly desaturated)
+  skullMat.color.copy(col).multiplyScalar(0.7);
+  skullMat.emissive.copy(col).multiplyScalar(0.15 + 0.35 * pulse * live.presence);
+  skullMat.emissiveIntensity = 0.3 + 0.5 * pulse * live.presence;
 
-  // Vertex displacement (tension makes geometry "wilder")
-  const pos = geo.attributes.position;
-  const wild = 0.05 + 0.18 * Math.max(0, live.tension);
+  // Iris colors (more saturated than skull, glowing)
+  leftIrisMat.color.copy(col);
+  rightIrisMat.color.copy(col);
+
+  // Pupil dilation: high abs(tension) -> bigger pupil (stress + extreme calm both dilate)
+  const pupilSize = 0.6 + 0.7 * Math.abs(live.tension);  // 0.6 to 1.3
+  leftPupil.scale.setScalar(pupilSize);
+  rightPupil.scale.setScalar(pupilSize);
+
+  // Particle aura color follows mood
+  pmat.color.copy(col);
+
+  // Mouth: tension makes it longer/sharper, dominance gives smile/frown curl
+  const mouthScaleY = 1.0 + 1.5 * Math.max(0, live.tension);
+  mouth.scale.set(1, mouthScaleY, 1);
+  mouth.rotation.z = -live.dominance * 0.18;  // pos dominance = corners up
+  mouth.position.y = -0.45 - 0.05 * Math.max(0, live.tension);  // drops a hair when tense
+
+  // Head: NO auto-rotation. Subtle dominance-tilt + soft tension breath, that's it.
+  head.rotation.x = live.dominance * -0.10;             // pos dominance = head up
+  head.rotation.z = -live.dominance * 0.05;
+  head.rotation.y = Math.sin(t * 0.3) * 0.04;           // micro left/right glance, no spin
+
+  // Breathing scale: subtle, follows pulse + tension
+  const breathing = 1.0 + 0.025 * Math.sin(t * 1.2);
+  const tensionScale = 1.0 + 0.06 * Math.max(0, live.tension);
+  head.scale.setScalar(breathing * tensionScale);
+
+  // Skull vertex breathing (subtle wobble — much gentler than before, only in tension)
+  const pos = skullGeo.attributes.position;
+  const wild = 0.02 + 0.05 * Math.max(0, live.tension);
   for (let i=0; i<pos.count; i++) {
     const ix = i*3;
     const nx = basePositions[ix], ny = basePositions[ix+1], nz = basePositions[ix+2];
-    const noise = Math.sin(t*1.5 + ix) * wild;
-    pos.array[ix]   = nx * (1 + noise * 0.04);
-    pos.array[ix+1] = ny * (1 + noise * 0.04);
-    pos.array[ix+2] = nz * (1 + noise * 0.04);
+    const noise = Math.sin(t * 1.5 + ix * 0.7) * wild;
+    pos.array[ix]   = nx * (1 + noise * 0.02);
+    pos.array[ix+1] = ny * (1 + noise * 0.02);
+    pos.array[ix+2] = nz * (1 + noise * 0.02);
   }
   pos.needsUpdate = true;
 
-  // Rotation: idle spin + dominance tilt + tension wobble
-  mesh.rotation.y += 0.004;
-  mesh.rotation.x = live.dominance * 0.4 + Math.sin(t*0.5) * 0.03;
-  mesh.rotation.z = -live.dominance * 0.15;
-
-  // Particles drift + slow rotation around mesh
-  particles.rotation.y -= 0.001 + 0.003 * live.shadow_influence;
-  particles.rotation.x = Math.sin(t*0.2) * 0.1;
-  pmat.size = 0.04 + 0.04 * pulse;
-  pmat.opacity = 0.4 + 0.4 * live.presence;
+  // Particle aura: slow orbit, no aggressive spin
+  particles.rotation.y += 0.001;
+  particles.rotation.x = Math.sin(t * 0.15) * 0.04;
+  pmat.size = 0.04 + 0.025 * pulse;
+  pmat.opacity = 0.30 + 0.35 * live.presence;
 
   // Watchdog flash
   document.getElementById('flash').classList.toggle('on', live.watchdog_warn);
