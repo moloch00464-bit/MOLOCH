@@ -187,49 +187,151 @@ def _parse_mailbox_topics(file: str, n: int = 4) -> List[Dict]:
         return [{"parse_error": str(e)[:80]}]
 
 
-def _maybe_write_outage_note(endpoint: str, outage_s: int) -> None:
-    """Bei langem PC-Outage einen Mailbox-Hint in PI_TO_PC.md schreiben.
+def _write_mailbox_note(topic: str, body: str, cooldown_marker: Optional[str] = None,
+                        cooldown_s: int = 3600) -> bool:
+    """Generischer Mailbox-Note-Writer fuer PI_TO_PC.md (append-on-top).
 
-    Best-effort: bei Push-Fehler nur ins Journal loggen.
-    Idempotent: dieselbe Note nicht 2x schreiben (kurze Cooldown via env-state).
+    Args:
+        topic: Mailbox-topic (z.B. 'cross_session_outage_detected')
+        body: Markdown-Inhalt der Note (mehrzeilig OK)
+        cooldown_marker: optionaler Marker-Filename in REPO/.cross_session_*
+                         (verhindert Spam derselben Note)
+        cooldown_s: Sekunden Cooldown wenn marker gesetzt (default 1h)
+
+    Returns:
+        True wenn geschrieben, False wenn ge-skipt (cooldown / fehler).
     """
     try:
-        marker = REPO / ".cross_session_outage_marker"
-        # Cooldown 1h zwischen Notes
-        if marker.exists() and (time.time() - marker.stat().st_mtime) < 3600:
-            return
+        if cooldown_marker:
+            marker = REPO / cooldown_marker
+            if marker.exists() and (time.time() - marker.stat().st_mtime) < cooldown_s:
+                return False
         path = REPO / "docs" / "PI_TO_PC.md"
         if not path.exists():
-            return
+            return False
         text = path.read_text(encoding="utf-8")
         ts = time.strftime("%Y-%m-%d %H:%M")
         note = (
             f"\n---\n"
-            f"## [{ts}] from=Pi topic=cross_session_outage_detected\n"
+            f"## [{ts}] from=Pi topic={topic}\n"
             f"status: info\n"
-            f"\n"
-            f"Pi cross_session_monitor hat detektiert: PC `{endpoint}` "
-            f"war fuer ~{outage_s}s nicht erreichbar. Pi laeuft, Verbindung war "
-            f"weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), "
-            f"hat es vermutlich gefehlt. Schau in dein Heartbeat-Log "
-            f"(falls schon implementiert) fuer Details.\n"
+            f"_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_\n"
+            f"\n{body}\n"
         )
         # Insert nach erstem '---' Marker (Konvention: append-on-top)
         idx = text.find("---")
         if idx < 0:
-            return
+            return False
         new_text = text[: idx + 3] + note + text[idx + 3 :]
         path.write_text(new_text, encoding="utf-8")
-        marker.touch()
-        # Nicht selber commiten — Markus oder die naechste aktive Session committen
-        logger.info(f"Outage-Note in PI_TO_PC.md geschrieben ({endpoint}, {outage_s}s)")
+        if cooldown_marker:
+            (REPO / cooldown_marker).touch()
+        logger.info("Mailbox-Note geschrieben: topic=%s", topic)
+        return True
     except Exception as e:
-        logger.warning(f"outage note fail: {e}")
+        logger.warning("mailbox note fail: %s", e)
+        return False
+
+
+def _maybe_write_outage_note(endpoint: str, outage_s: int) -> None:
+    """Bei langem PC-Outage einen Mailbox-Hint."""
+    body = (
+        f"Pi cross_session_monitor hat detektiert: PC `{endpoint}` "
+        f"war fuer ~{outage_s}s nicht erreichbar. Pi laeuft, Verbindung war "
+        f"weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), "
+        f"hat es vermutlich gefehlt."
+    )
+    _write_mailbox_note(
+        topic="cross_session_outage_detected",
+        body=body,
+        cooldown_marker=f".cross_session_outage_{endpoint}_marker",
+        cooldown_s=3600,
+    )
+
+
+def _maybe_write_recovery_note(endpoint: str, outage_s: int) -> None:
+    """Bei laengerem Outage + Recovery (DOWN->UP) einen Mailbox-Hint."""
+    if outage_s < 120:  # nur fuer mind. 2min Outages noisy genug fuer Note
+        return
+    body = (
+        f"Pi cross_session_monitor: PC `{endpoint}` ist nach ~{outage_s}s wieder UP. "
+        f"Verbindung wiederhergestellt. Falls Auto-Trigger ausgesetzt waren, jetzt "
+        f"sind sie wieder aktiv."
+    )
+    _write_mailbox_note(
+        topic="cross_session_recovery",
+        body=body,
+        cooldown_marker=f".cross_session_recovery_{endpoint}_marker",
+        cooldown_s=600,  # 10min cooldown reicht
+    )
+
+
+def _maybe_write_boot_change_note(prev_boot: str, cur_boot: str, gap_s: int) -> None:
+    """Pi-Reboot detected (boot_id-Wechsel zwischen Monitor-Starts)."""
+    body = (
+        f"Pi cross_session_monitor hat einen Pi-Reboot detektiert.\n"
+        f"- vorher boot_id: `{prev_boot[:16]}...`\n"
+        f"- jetzt  boot_id: `{cur_boot[:16]}...`\n"
+        f"- Lücke zwischen den Monitor-Starts: ~{gap_s}s\n"
+        f"\n"
+        f"Falls du in dieser Zeit auf Pi-Endpoints angewiesen warst (state_full, "
+        f"feedback_export, snapshot.jpg), waren die down. Mit persistent journal "
+        f"(jetzt aktiv) koennen wir bei naechstem Crash via `journalctl -b -1` "
+        f"den Pre-Crash-Reason sehen."
+    )
+    _write_mailbox_note(
+        topic="pi_reboot_detected",
+        body=body,
+        cooldown_marker=".cross_session_boot_change_marker",
+        cooldown_s=60,  # kurz, weil reboot eindeutiges Event
+    )
+
+
+def _maybe_write_trigger_ack(topic: str, pc_endpoint_states: Dict[str, Dict]) -> None:
+    """Auto-Ack auf PC-Trigger-Topic — schreibt Pi-Realitaets-Snapshot dazu."""
+    adapter = pc_endpoint_states.get("adapter", {})
+    tentakel = pc_endpoint_states.get("tentakel_ollama", {})
+    body = (
+        f"Pi cross_session_monitor hat dein `{topic}` Topic gesehen und "
+        f"validiert die Pi-Sicht der Lage:\n"
+        f"\n"
+        f"- PC adapter `:11600/health`: ok={adapter.get('ok')} latency={adapter.get('latency_ms')}ms\n"
+        f"- PC tentakel `:11434/api/tags`: ok={tentakel.get('ok')} "
+        f"{'latency='+str(tentakel.get('latency_ms'))+'ms' if tentakel.get('ok') else 'error='+str(tentakel.get('error',''))}\n"
+        f"\n"
+        f"Naechste Pi-Aktion (sobald aktive Session da): Test-Prompt an /infer + "
+        f"Pool-Status-Diff posten."
+    )
+    _write_mailbox_note(
+        topic=f"ack_{topic}",
+        body=body,
+        cooldown_marker=f".cross_session_ack_{topic}_marker",
+        cooldown_s=600,  # 10min cooldown fuer denselben Trigger
+    )
 
 
 # =============================================================================
 # Main loop
 # =============================================================================
+
+def _last_monitor_start_in_log() -> Optional[Dict]:
+    """Liest den letzten monitor_start Eintrag aus dem JSONL-Log."""
+    if not LOG_PATH.exists():
+        return None
+    try:
+        last = None
+        with open(LOG_PATH, "r") as f:
+            for line in f:
+                try:
+                    o = json.loads(line)
+                except Exception:
+                    continue
+                if o.get("type") == "monitor_start":
+                    last = o
+        return last
+    except Exception:
+        return None
+
 
 def main():
     logger.info("Cross-Session Monitor START — interval=%ss log=%s",
@@ -240,12 +342,27 @@ def main():
     last_outage_note_at: Dict[str, float] = {ep: 0.0 for ep in PC_ENDPOINTS}
     iteration = 0
 
+    # Boot-ID-Change Detection: vergleiche aktuellen boot_id mit dem letzten
+    # monitor_start im persistent log. Wenn unterschiedlich -> Pi rebootete dazwischen.
+    cur_boot = _read_boot_id()
+    prev_start = _last_monitor_start_in_log()
+    if prev_start and prev_start.get("boot_id") and prev_start["boot_id"] != cur_boot:
+        gap_s = int(time.time() - (prev_start.get("ts") or time.time()))
+        logger.warning(
+            "Pi-Reboot detected: prev_boot=%s cur_boot=%s gap=%ss",
+            prev_start["boot_id"][:16], cur_boot[:16], gap_s,
+        )
+        _maybe_write_boot_change_note(prev_start["boot_id"], cur_boot, gap_s)
+
     # Boot-Marker im Log
     _append_log({
         "type": "monitor_start",
-        "boot_id": _read_boot_id(),
+        "boot_id": cur_boot,
         "pid": os.getpid(),
     })
+
+    # Trigger-Topic-State: welche Topics haben wir schon ack'ed?
+    seen_pc_triggers: set = set()
 
     while _running:
         iteration += 1
@@ -260,11 +377,6 @@ def main():
             logger.info("Neue Commits (%d): %s", len(new_commits), new_commits[:3])
             entry["pc_to_pi_top"] = _parse_mailbox_topics("PC_TO_PI.md")
             entry["pi_to_pc_top"] = _parse_mailbox_topics("PI_TO_PC.md")
-            # Trigger-Topic-Erkennung (best-effort)
-            for tp in entry.get("pc_to_pi_top", []):
-                if tp.get("from") == "PC" and tp.get("topic") in PC_TRIGGER_TOPICS:
-                    logger.info("TRIGGER-Topic erkannt: %s", tp.get("topic"))
-                    entry.setdefault("triggers", []).append(tp.get("topic"))
         last_head = git_info.get("head") or last_head
 
         # 2. Pi-Self-check (Chat-Server)
@@ -277,25 +389,41 @@ def main():
             entry["pc"][name] = r
             ok_now = r.get("ok", False)
             if last_pc_ok[name] and not ok_now:
+                # Transition UP -> DOWN
                 outage_start[name] = time.time()
                 logger.warning("PC %s DOWN: %s", name, r.get("error"))
             elif not last_pc_ok[name] and ok_now:
+                # Transition DOWN -> UP — Recovery-Note bei wichtigen Endpoints
                 start = outage_start[name] or time.time()
                 outage_s = int(time.time() - start)
                 logger.info("PC %s UP wieder nach %ss outage", name, outage_s)
                 r["recovered_after_s"] = outage_s
                 outage_start[name] = None
+                if name in ("adapter", "tentakel_ollama"):
+                    _maybe_write_recovery_note(name, outage_s)
             elif not ok_now and outage_start[name]:
-                # Laufender Outage — bei adapter-Endpoint Note schreiben wenn lange
+                # Laufender Outage — Note bei wichtigen Endpoints wenn lange
                 outage_s = int(time.time() - outage_start[name])
                 if (
-                    name == "adapter"
+                    name in ("adapter", "tentakel_ollama")
                     and outage_s >= OUTAGE_NOTE_THRESHOLD_S
                     and (time.time() - last_outage_note_at[name]) > 3600
                 ):
                     _maybe_write_outage_note(name, outage_s)
                     last_outage_note_at[name] = time.time()
             last_pc_ok[name] = ok_now
+
+        # 3b. Auto-Ack auf neue PC-Trigger-Topics (nur bei NEUEN commits)
+        if new_commits:
+            for tp in entry.get("pc_to_pi_top", []):
+                if tp.get("from") != "PC":
+                    continue
+                topic = tp.get("topic", "")
+                if topic in PC_TRIGGER_TOPICS and topic not in seen_pc_triggers:
+                    logger.info("TRIGGER-Topic erkannt: %s — schreibe ack", topic)
+                    _maybe_write_trigger_ack(topic, entry["pc"])
+                    seen_pc_triggers.add(topic)
+                    entry.setdefault("triggers_acked", []).append(topic)
 
         # 4. Log
         _append_log(entry)
