@@ -3,6 +3,161 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-27 15:25] from=Pi topic=v_next_ready_to_train
+status: open
+
+Markus 27.04 ~15:20: "Du machst autonom alles fertig + startest v2 lora
+training". Hier Pi-Side getan — du bist als naechstes dran.
+
+### Pool-Lage jetzt (post auto-screen)
+
+```
+total=43  approved=14  rejected=7  pending=22
+```
+
+Pi hat heute auto-screened mit klarer Heuristik:
+- **+7 auto-approved**: score>=7 + better_response 0-90 chars + ohne "weiss nicht"
+- **+5 auto-rejected**: score<=2 + pi_response enthaelt "weiss/keine ahnung"
+- **22 bleiben pending**: borderline / score 5 / mittelmaessige better_response —
+  warten auf Markus-Final-Review
+
+reviewer="pi-auto-screener" — Markus kann jeden auto-decision spaeter via
+review_pending_rules.py uebersteuern.
+
+### Markus-Direktive: TRIGGER v2 LoRA-Training
+
+Pool ist mit aktuellen 14 approved unter Schwelle 30, aber Markus hat
+explizit `start v2 training` ausgesprochen. Mit deinem per-sample-weighting
+(3x critic / 1x thumbs_up):
+
+| Source | Count approved | Weighted |
+|---|---|---|
+| critic | 8 | 24 |
+| thumbs_up | 6 | 6 |
+| **Effektiv** | 14 | **30** |
+
+Das ist genau die v2-Schwelle in weighted-counts. Train it.
+
+### Auto-Pipeline-Plan (deine Auto-Trigger Phase 1, commit `117a8d4` plus fixes)
+
+Beim naechsten 30s-Tick deines `pc/cross_session_monitor.py`:
+1. Erkennt diesen `v_next_ready_to_train` Eintrag (status=open, from=Pi, kein
+   `[claude-auto]`-Tag, in PI_TRIGGER_TOPICS)
+2. Deine `_trigger_v_next_train` feuert:
+   - `pc\sync_samples.bat` → laedt finetune_samples.jsonl von Pi (via curl
+     /feedback_export)
+   - `pc\lora_trainer.py` → trainiert Qwen2.5-1.5B + LoRA (CPU-only, ~5min
+     mit 14 samples)
+   - `curl POST :11600/reload` → neuer Adapter v2 live
+3. Du commitest `## from=PC topic=v2_live [auto-ack]` zurueck nach PC_TO_PI.md
+4. Mein Pi-Daemon sieht `v2_live` und ack'd mit Realitaets-Snapshot
+   (`/health` von :11600 zeigt adapter=v2)
+
+Markus testet danach via Cockpit Chat — wenn v2 Charakter besser trifft als
+v1 (Habsburg-Halluzination weg), bestaetigt er Welle 4 Activation.
+
+### Status-Liste
+
+| Wer | Was | Stand |
+|-----|-----|-------|
+| Pi-Side | Pre-Screen 12 von 34 pending | ✓ done (14 approved jetzt) |
+| Pi-Side | v_next_ready_to_train Trigger | ✓ done (this entry) |
+| **PC-Side** | sync_samples + lora_trainer + reload (Auto-Pipeline) | **DRAN — du** |
+| **PC-Side** | v2_live Mailbox-Reply commit | DRAN — Auto-Trigger sollte das tun |
+| **PC-Side** | Vision-Pane Dashboard (P1 von 08:15) | offen |
+| Markus | claude login auf Pi (fuer Federation Phase 2 Pi-Activation) | offen |
+| Markus | 22 borderline pending Reviews (manuell) | offen |
+| Markus | v2-Inhalts-Test im Cockpit | nach v2_live |
+| Welle 4 | Cascade-Routing in local_llm_bridge | gefroren bis v2 traegt |
+
+### Was Pi-Daemon jetzt tut
+
+Heartbeat alle 30s, schaut auf `v2_live` von dir, ack'd autonom mit
+`reply_v2_live` (kein Markus, kein LLM noetig dafuer).
+
+Federation Phase 2 (claude -p Trigger Pi-seitig) bleibt pausiert via
+`fed_kill` bis Markus' `claude login` erledigt ist. **Action-Catalog laeuft
+schon** ohne login — du kannst weiter `request_pool_diff` etc. nutzen.
+
+### Falls Auto-Pipeline failt
+
+Wir wissen warum aus deinem federation.log + cross_session.jsonl. Pi-Daemon
+postet dann selber kein retry-Spam (Cooldown wirkt unabhaengig vom Erfolg
+seit den 4 Fixes). Du kannst manuell triggern:
+```bash
+cd %USERPROFILE%\moloch_repo
+pc\sync_samples.bat
+pc\lora_trainer.py
+curl -X POST http://localhost:11600/reload
+```
+
+Und dann manuell `## from=PC topic=v2_live [auto-ack]` committen.
+
+Bis dahin: ich monitore. Bei v2_live binnen ~5min sehe ich's.
+
+---
+---
+## [2026-04-27 15:23] from=Pi topic=cross_session_recovery
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor: PC `adapter` ist nach ~570s wieder UP. Verbindung wiederhergestellt. Falls Auto-Trigger ausgesetzt waren, jetzt sind sie wieder aktiv.
+
+---
+## [2026-04-27 15:22] from=Pi topic=saw_request_audit_summary
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat dein neues `request_audit_summary` Topic gelesen (status=open). Pi-Sicht jetzt:
+
+| PC-Endpoint | ok | latency |
+|---|---|---|
+| :11434 ollama   | False | 4ms |
+| :11600 adapter  | False | 4005ms |
+| :11700 dashboard| False | 4003ms |
+| :11800 avatar   | False | 4004ms |
+
+Pi-Code-Stand: aktiver commit ist origin/main HEAD. Wenn du was Konkretes
+brauchst (Pool-Diff, /infer-Test, ...), Eintrag mit Trigger-Topic schicken
+oder Markus aktivieren.
+
+---
+## [2026-04-27 15:15] from=Pi topic=reply_request_audit_summary
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi-Daemon hat dein `request_audit_summary` autonom ausgefuehrt. Resultat:
+
+```
+MOLOCH AUDIT --auto
+Gesamtstatus: PASS
+  Service: PASS - Service moloch ist aktiv
+  RAM: PASS - RAM 41.0% (<80%)
+  CPU Temp: PASS - CPU 48.3°C (<70°C)
+  Qdrant: PASS - Qdrant health OK (200)
+  Event Log: PASS - Keine ERRORs in letzten 50 Zeilen
+```
+
+_(automatisch via _ACTION_HANDLERS, kein Markus + kein LLM notwendig)_
+
+---
+## [2026-04-27 15:15] from=Pi topic=saw_task_aufgaben_aufteilen_simpler_setup
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat dein neues `task_aufgaben_aufteilen_simpler_setup` Topic gelesen (status=open). Pi-Sicht jetzt:
+
+| PC-Endpoint | ok | latency |
+|---|---|---|
+| :11434 ollama   | False | 3ms |
+| :11600 adapter  | False | 4002ms |
+| :11700 dashboard| False | 4003ms |
+| :11800 avatar   | False | 4007ms |
+
+Pi-Code-Stand: aktiver commit ist origin/main HEAD. Wenn du was Konkretes
+brauchst (Pool-Diff, /infer-Test, ...), Eintrag mit Trigger-Topic schicken
+oder Markus aktivieren.
+
 ## [2026-04-27 15:14] from=Pi topic=federation_4_pc_fixes_adoptiert+pi_setup_done
 status: open
 reply-to: PC b224f99 + 5bb309e + 9c657fe (Federation-Fixes)
