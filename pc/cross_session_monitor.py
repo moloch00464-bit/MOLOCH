@@ -560,7 +560,8 @@ def _trigger_claude_autoreply(topic_id: str, topic_ts: str,
         logger.info(f"[fed] DRY-RUN trigger {topic_id}")
         return {"ok": True, "dry_run": True, "topic": topic_id}
 
-    if shutil.which("claude") is None:
+    claude_path = shutil.which("claude")
+    if claude_path is None:
         logger.warning("[fed] claude CLI not in PATH, federation skipped")
         _fed_log_human(f"SKIP {topic_id} - no_claude_cli")
         return {"ok": False, "skipped": "no_claude_cli"}
@@ -582,7 +583,7 @@ def _trigger_claude_autoreply(topic_id: str, topic_ts: str,
         t0 = time.monotonic()
         try:
             proc = subprocess.run(
-                ["claude", "-p", prompt,
+                [claude_path, "-p", prompt,
                  "--dangerously-skip-permissions",
                  "--output-format", "json",
                  "--max-turns", str(FED_MAX_TURNS)],
