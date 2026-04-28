@@ -2400,6 +2400,23 @@ class MolochService:
             except Exception:
                 pass
 
+            # Phase-Gate Status (fuer Panel-Anzeige + Monitoring)
+            try:
+                import json as _json
+                _gates_path = os.path.join(
+                    os.path.dirname(__file__), '..', 'config', 'phase_gates.json'
+                )
+                with open(_gates_path) as _f:
+                    _gates = _json.load(_f)
+                status["phase_gates"] = {
+                    "phase4e_days": _gates.get("phase4e", {}).get("days_collected", 0),
+                    "phase4e_armed": _gates.get("phase4e", {}).get("armed", False),
+                    "phase6_days": _gates.get("phase6", {}).get("operation_days", 0),
+                    "phase6_armed": _gates.get("phase6", {}).get("armed", False),
+                }
+            except Exception:
+                pass
+
             # LLM-Provider Status (lokal_qwen / api_claude / stille / none)
             try:
                 from core.autonomy.local_llm_bridge import get_llm_bridge
