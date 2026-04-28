@@ -31,6 +31,17 @@ logger = logging.getLogger("MolochEventBus")
 # Disk-Write Pfad
 EVENT_LOG_DIR = os.path.expanduser("~/moloch/logs/events")
 
+# ============================================================
+# JSONL-PERSIST (Phase 5 Task 5c-V0)
+# RAM-Disk-Persist fuer Crash-Recovery + Cross-Session Diagnose
+# ============================================================
+import json as _json
+import os as _os
+
+_EVENT_BUS_JSONL = "/dev/shm/event_bus.jsonl"
+_seq_counter = 0           # monoton steigende Sequenz-Nr (Modul-Level)
+_seq_lock = threading.Lock()
+
 
 # ============================================================
 # EVENT SCHEMA
@@ -326,6 +337,36 @@ class MolochEventBus:
         # Disk-Write (async via Thread)
         self._disk_writer.enqueue(event_dict)
 
+        # --- JSONL-PERSIST (Phase 5 Task 5c-V0) ---
+        # Schreibt jeden publish() in /dev/shm/event_bus.jsonl mit Sequence-Nummer.
+        # Persist-Fehler darf Dispatch NICHT stoppen.
+        try:
+            global _seq_counter
+            with _seq_lock:
+                _seq_counter += 1
+                seq_now = _seq_counter
+            entry = {
+                "seq": seq_now,
+                "topic": event_type,
+                "payload": event_dict.get("payload", {}),
+                "ts": event_dict.get("timestamp", time.time()),
+            }
+            with open(_EVENT_BUS_JSONL, "a") as _f:
+                _f.write(_json.dumps(entry, ensure_ascii=False) + "\n")
+                _f.flush()
+            # File-Rotation: alle 100 Events pruefen, max 500 Zeilen
+            if seq_now % 100 == 0:
+                try:
+                    with open(_EVENT_BUS_JSONL, "r") as _f:
+                        _lines = _f.readlines()
+                    if len(_lines) > 500:
+                        with open(_EVENT_BUS_JSONL, "w") as _f:
+                            _f.writelines(_lines[-300:])
+                except Exception:
+                    pass
+        except Exception:
+            pass  # Persist-Fehler darf Dispatch NICHT stoppen
+
         # --- SYNC SUBSCRIBER ---
         with self._sub_lock:
             subs = list(self._subscribers.get(event_type, []))
@@ -439,3 +480,41 @@ class MolochEventBus:
 def get_event_bus() -> MolochEventBus:
     """Singleton-Zugriff auf den Event Bus."""
     return MolochEventBus()
+
+
+# ============================================================
+# JSONL-RECOVERY (Phase 5 Task 5c-V0)
+# ============================================================
+
+def get_last_events(n: int = 20, topic_filter: str = None) -> list:
+    """
+    Letzte N Events aus /dev/shm/event_bus.jsonl lesen.
+
+    Verwendung: Crash-Recovery (Subscriber kann nach Neustart Stand wiederherstellen)
+    und Cross-Session Diagnose ("was ist in der letzten Stunde passiert?").
+
+    Args:
+        n: Maximale Anzahl Events zurueckgeben.
+        topic_filter: Wenn gesetzt, nur Events mit passendem topic.
+
+    Returns:
+        Liste von dicts mit Keys: seq, topic, payload, ts.
+        Leere Liste falls Datei nicht existiert oder Fehler auftritt.
+    """
+    try:
+        with open(_EVENT_BUS_JSONL, "r") as f:
+            lines = f.readlines()
+        events = []
+        for ln in lines:
+            ln = ln.strip()
+            if not ln:
+                continue
+            try:
+                events.append(_json.loads(ln))
+            except Exception:
+                continue
+        if topic_filter:
+            events = [e for e in events if e.get("topic") == topic_filter]
+        return events[-n:]
+    except Exception:
+        return []
