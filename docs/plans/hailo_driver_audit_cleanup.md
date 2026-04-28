@@ -1,5 +1,14 @@
 # Plan: Hailo-Treiber-Audit + Postprocess-SO-Realignment
 
+## STATUS: DONE 2026-04-28 by Session 30 (Lokomotive)
+
+**Ergebnis:** Kein ABI-Mismatch gefunden. Phase B wontfix (5.3.0 nicht in apt).
+Phase C nicht noetig. Phase D durchgefuehrt (Orphan-Driver entfernt).
+Audit PASS. Details: /tmp/hailo_audit_20260428.md
+
+---
+
+
 **Anlass:** Markus' Verdacht (27.04 17:50): doppelte Treiber/SOs erzeugen
 verschiedene Landmarks. DeepSeek-Diagnose-Hinweis. Plus heutiger
 Halluzinations-Fix (`ef09a24`) hat Identity-Block fix gemacht, aber

@@ -1,5 +1,39 @@
-# Agent Handoff — 2026-04-26 (Session 29 — Pool-Quality + PC-Auge)
-# Letzter Commit Basis: a253196 | Audit: 85/85 PASS | FPS 20
+# Agent Handoff — 2026-04-28 (Session 30 — Hailo-Treiber-Audit)
+# Letzter Commit: hailo_audit_done | Audit: PASS | FPS 12-20
+
+---
+
+## SESSION 30 — Hailo-Treiber-Audit + Cleanup
+
+### Geliefert
+
+| Was | Ergebnis |
+|-----|---------|
+| Phase A Linkage-Audit | Kein ABI-Mismatch. custom-SOs nutzen header-basierte API. |
+| Phase B python-bindings 5.1→5.3 | WONTFIX — 5.3.0 nicht in apt (kein Hailo-Repo) |
+| Phase C SO-Rebuild | NICHT NOETIG — kein Mismatch → ueberfluessig |
+| Phase D Orphan-Driver | DONE — /usr/src/hailort-pcie-driver/ entfernt |
+| PI_TO_PC Mailbox | hailo_audit_done + identity_fix_closed geschrieben |
+
+### Befunde
+
+- custom postprocess SOs (Pose, SCRFD, ArcFace, ReID) linken NICHT gegen libhailort direkt
+- TAPPAS Metadata-API ist header-basiert → version-agnostisch
+- python3-hailo-tappas 5.1.0 Mismatch zu hailo-tappas-core 5.3.0 ist ein Packaging-Artefakt,
+  kein Laufzeit-Problem
+- Hailo-Offiziell-Repo nicht in apt konfiguriert
+
+### System-Status
+
+- Audit: PASS, FPS 12-20, Keine SEGV, DKMS hailo1x_pci/5.3.0 installed
+
+### Offene Punkte (aus Session 29 unverändert)
+
+A1  person_attr_resnet_v1_18.hef  — Kleidung/Alter/Rucksack        Mittel
+A2  r3d_18.hef                    — Aktivitätserkennung             Mittel
+A3  yolo_world_v2s.hef            — Zero-Shot Objektsuche           Mittel
+A4  hailo-ollama systemd-Service  — läuft nicht beim Boot           Niedrig
+A6  MCP moloch_snapshot()         — erst nach MCP-Neustart 1024x1024 Niedrig
 
 ---
 
