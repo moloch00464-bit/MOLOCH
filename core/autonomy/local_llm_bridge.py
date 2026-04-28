@@ -800,7 +800,8 @@ class LocalLLMBridge:
                      top_p: float = 0.95,
                      force_local: bool = False,
                      use_reason_model: bool = False,
-                     force_tentacle: bool = False) -> Optional[str]:
+                     force_tentacle: bool = False,
+                     prompt_type: Optional[str] = None) -> Optional[str]:
         """Konversation: lokal auf NPU → DeepSeek API → Stille.
 
         Fuer Echtzeit-Dialog mit Markus. Kurze Antworten, Deutsch.
@@ -838,8 +839,9 @@ class LocalLLMBridge:
 
         # Mode "local_first": Tentakel-Routing + Fallback-Kette
         chosen = self._choose_provider(prompt, system, force_local,
-                                       caller="ask", force_tentacle=force_tentacle)
-        logger.debug(f"[LLM-BRIDGE] mode={mode} chosen={chosen} force_tentacle={force_tentacle}")
+                                       caller="ask", force_tentacle=force_tentacle,
+                                       prompt_type=prompt_type)
+        logger.debug(f"[LLM-BRIDGE] mode={mode} chosen={chosen} force_tentacle={force_tentacle} type={prompt_type}")
 
         if chosen == "tentacle":
             # 1a. Tentakel zuerst (komplexer Prompt)
@@ -888,20 +890,66 @@ class LocalLLMBridge:
         self._last_provider = "stille"
         return None
 
+    def _route_by_type(self, prompt_type: Optional[str]) -> Optional[str]:
+        """Typ-basiertes Routing (Phase 5e).
+
+        Returns:
+            'ollama'   -> hailo-ollama lokal (NPU, schnell, kurz)
+            'tentacle' -> Tentakel-PC (Ollama LAN, mehr Substanz)
+            None       -> kein Typ-Match, falle auf Komplexitaets-Logik zurueck
+
+        Routing-Tabelle:
+            hardware_status   -> ollama   (Fakten, kurz, kein Reasoning noetig)
+            simple_smalltalk  -> ollama   (Kurzantworten, niedrige Latenz)
+            complex_smalltalk -> tentacle (mehr Kontext, Persoenlichkeit), Fallback ollama
+            system_question   -> tentacle (Reasoning), Fallback ollama
+
+        Health-Check: Wenn Tentakel im Backoff oder disabled, fallback auf ollama.
+        """
+        if not prompt_type:
+            return None
+
+        # Health: Tentakel verfuegbar?
+        cfg = _load_tentacle_cfg()
+        tentacle_healthy = (
+            cfg.get("enabled") and
+            time.monotonic() >= self._tentacle_backoff_until
+        )
+
+        if prompt_type in ("hardware_status", "simple_smalltalk"):
+            chosen = "ollama"
+        elif prompt_type in ("complex_smalltalk", "system_question"):
+            chosen = "tentacle" if tentacle_healthy else "ollama"
+        else:
+            return None  # unbekannter Typ -> Komplexitaets-Logik
+
+        provider_name = "tentacle" if chosen == "tentacle" else "qwen-local"
+        logger.info(f"[LLM-ROUTE] type={prompt_type} -> {provider_name}")
+        return chosen
+
     def _choose_provider(self, prompt: str, system: str,
                          force_local: bool, caller: str = "ask",
-                         force_tentacle: bool = False) -> str:
-        """Waehlt 'tentacle' oder 'ollama' basierend auf Komplexitaet + Caller.
+                         force_tentacle: bool = False,
+                         prompt_type: Optional[str] = None) -> str:
+        """Waehlt 'tentacle' oder 'ollama' basierend auf Typ/Komplexitaet/Caller.
 
-        force_local -> immer 'ollama' (NPU). Tentakel ist LAN, nicht streng 'lokal'.
-        caller='reason' -> Tentakel bevorzugt (internes Denken braucht Substanz).
-        sonst: prompt+system >= complexity_threshold -> 'tentacle', sonst 'ollama'.
+        Reihenfolge:
+        1. force_local -> 'ollama' (Hard-Override)
+        2. force_tentacle -> 'tentacle' (Hard-Override)
+        3. prompt_type vorhanden -> Typ-Routing (_route_by_type)
+        4. Tentakel disabled/Backoff -> 'ollama'
+        5. caller='reason' -> 'tentacle'
+        6. Komplexitaets-Schwelle -> 'tentacle' / 'ollama'
         """
         if force_local:
             return "ollama"
         # force_tentacle (z.B. Browser-Chat-UI): PC=Hauptgehirn, Tentakel zwingen
         if force_tentacle:
             return "tentacle"
+        # Phase 5e: Typ-Routing zuerst
+        typed = self._route_by_type(prompt_type)
+        if typed is not None:
+            return typed
         cfg = _load_tentacle_cfg()
         if not cfg.get("enabled"):
             return "ollama"
