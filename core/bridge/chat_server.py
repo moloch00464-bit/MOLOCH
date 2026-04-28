@@ -43,6 +43,9 @@ app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
 )
 
+# PC-Heartbeat-Tracking (Task 5d): letzter empfangener PC-Online-Timestamp
+_pc_online_ts: float = 0.0
+
 
 class ChatRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=4000)
@@ -1214,6 +1217,27 @@ def system_prompt_preview():
         return {"length": len(system), "system": system}
     except Exception as e:
         raise HTTPException(500, f"Prompt build error: {e}")
+
+
+@app.get("/session_status")
+def session_status():
+    """PC-Heartbeat-Check: ist PC gerade online?"""
+    global _pc_online_ts
+    online = (time.time() - _pc_online_ts) < 90  # 90s Timeout
+    return {
+        "pc_online": online,
+        "last_seen_s": round(time.time() - _pc_online_ts, 1) if _pc_online_ts else None,
+        "pi_service": "running",
+    }
+
+
+@app.post("/pc_online")
+def pc_online():
+    """PC sendet Heartbeat alle 60s. Pi merkt sich Zeitstempel."""
+    global _pc_online_ts
+    _pc_online_ts = time.time()
+    logger.info("[BRIDGE] PC-Heartbeat empfangen")
+    return {"status": "ok", "ts": _pc_online_ts}
 
 
 def main():
