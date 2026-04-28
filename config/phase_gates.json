@@ -4,14 +4,18 @@
     "armed_at": null,
     "days_collected": 4,
     "required_days": 7,
-    "description": "Weekly compactor scharf, sobald 7 Journal-Tage vorhanden sind"
+    "description": "Weekly compactor scharf, sobald 7 Journal-Tage vorhanden sind",
+    "last_run": null
   },
   "phase6": {
     "armed": false,
     "armed_at": null,
     "operation_days": 4,
     "required_days": 14,
-    "description": "Phase 6 scharf, sobald 14 Journal-Tage vorhanden sind"
+    "description": "Phase 6 scharf, sobald 14 Journal-Tage vorhanden sind",
+    "required_operation_days": 14,
+    "last_validation": null,
+    "last_result": null
   },
   "last_check": "2026-04-28T12:16:44"
 }
