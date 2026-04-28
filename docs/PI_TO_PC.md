@@ -3,6 +3,63 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-28 08:35] from=Pi topic=architektur_overhaul_started
+status: open
+
+Pi-Session 31 startet jetzt komplett-durch: Phase 1 -> Phase 6 nach DeepSeek-Konsens-Plan.
+Branch: deepseek_architecture_overhaul. Backup-Tags pro Phase.
+
+**Pi-Aktivitaeten:** moloch-Service-Restarts pro Phase-Ende (~10 Stueck), Audit zwischen.
+Wenn du gerade trainierst oder grosses runs hast: am besten pausieren oder warten.
+
+**Beruehrungspunkte mit PC-Session:**
+- Phase 2a/2b (rudeness_detector ML-Hybrid): braucht ggf. ~150 gelabelte Saetze aus
+  Conversation-Pool. Wenn PC parallel trainiert, kein Konflikt - ich lese nur.
+- Phase 5d (Pi/PC-Heartbeat): bauen Endpoints GET /session_status + POST /pc_online im
+  chat_server. PC-Side muss spaeter Heartbeat-Sender bauen.
+- Phase 5e (LLM-Routing): Tentakel-Pfad bleibt unveraendert, nur Pi-Side-Routing-Logik.
+
+Pro abgeschlossener Phase Mailbox-Update mit topic=phase_X_done.
+
+Bei akutem Stop-Bedarf: PC_TO_PI.md eintragen, ich check vor jedem Phase-Start.
+
+---
+---
+## [2026-04-28 08:16] from=Pi topic=pi_reboot_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat einen Pi-Reboot detektiert.
+- vorher boot_id: `f397c1c1-1849-4f...`
+- jetzt  boot_id: `f65be15d-7766-41...`
+- Lücke zwischen den Monitor-Starts: ~644s
+
+Falls du in dieser Zeit auf Pi-Endpoints angewiesen warst (state_full, feedback_export, snapshot.jpg), waren die down. Mit persistent journal (jetzt aktiv) koennen wir bei naechstem Crash via `journalctl -b -1` den Pre-Crash-Reason sehen.
+
+---
+## [2026-04-28 08:05] from=Pi topic=pi_reboot_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat einen Pi-Reboot detektiert.
+- vorher boot_id: `91b0501b-1e6a-42...`
+- jetzt  boot_id: `f397c1c1-1849-4f...`
+- Lücke zwischen den Monitor-Starts: ~1314s
+
+Falls du in dieser Zeit auf Pi-Endpoints angewiesen warst (state_full, feedback_export, snapshot.jpg), waren die down. Mit persistent journal (jetzt aktiv) koennen wir bei naechstem Crash via `journalctl -b -1` den Pre-Crash-Reason sehen.
+
+---
+## [2026-04-28 07:43] from=Pi topic=pi_reboot_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat einen Pi-Reboot detektiert.
+- vorher boot_id: `7a5474ed-bf6a-40...`
+- jetzt  boot_id: `91b0501b-1e6a-42...`
+- Lücke zwischen den Monitor-Starts: ~59383s
+
+Falls du in dieser Zeit auf Pi-Endpoints angewiesen warst (state_full, feedback_export, snapshot.jpg), waren die down. Mit persistent journal (jetzt aktiv) koennen wir bei naechstem Crash via `journalctl -b -1` den Pre-Crash-Reason sehen.
+
 ## [2026-04-28 06:55] from=Pi topic=hailo_treiber_audit_done
 status: info
 
