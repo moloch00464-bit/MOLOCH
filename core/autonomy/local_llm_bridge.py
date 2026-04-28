@@ -437,7 +437,9 @@ def _build_local_context_snippet(user_msg: Optional[str] = None) -> str:
         core = st.get('core', {}) or {}
         zone = core.get('zone', 'guardian')
         tension = core.get('tension', st.get('tension', 0.0))
-        dominance = core.get('dominance', 0.0)
+        # dominance kann als None in Top-Level kommen → core hat es zuverlaessiger
+        dominance = core.get('dominance', st.get('dominance', 0.0)) or 0.0
+        panel_detections = st.get('panel_detections', []) or []
         time_period = core.get('time_period', '')
         cpu_temp = core.get('cpu_temp', st.get('watchdog', {}).get('cpu_temp'))
         npu_load = core.get('npu_load', 0.0)
@@ -501,9 +503,18 @@ def _build_local_context_snippet(user_msg: Optional[str] = None) -> str:
                 parts.append("Kommt naeher.")
             elif leaving:
                 parts.append("Entfernt sich.")
+        # Phase 3 Task 3b: Tension/Dominance als Adjektiv-Phrase + Zahlenwert.
+        # Ersetzt einzelnes Wort (_tension_word/_dom_word) — Modell bekommt
+        # mehr Granularitaet ohne nur die nackte Zahl zu sehen.
         parts.append(
-            f"Zone {zone}, Stimmung {_tension_word(tension)}, Haltung {_dom_word(dominance)}."
+            f"Zone {zone} | Stimmung: {_tension_phrase(tension)} | "
+            f"Dominanz: {_dom_phrase(dominance)}."
         )
+        # Phase 3 Task 3e: Distanz-Kategorie + Tendenz aus BBox-Zeitreihe.
+        # Nur wenn Person/Face erkannt — ansonsten leerer String.
+        dist_phrase = _distance_phrase(panel_detections)
+        if dist_phrase:
+            parts.append(f"Distanz: {dist_phrase}.")
         # Effects-Zahlen als zweite Zeile — granularer als Zone-Wort. LLM kann
         # bei Uebergaengen feiner reagieren (Welle 3 Feature A3, PC-Briefing).
         # "interner Bias" Marker damit Modell die Zahlen NICHT woertlich zitiert.
