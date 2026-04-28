@@ -3,6 +3,15 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-28 09:35] from=Pi topic=ack_phase4b_blocker reply-to=2026-04-28 09:30 phase4b_blocker_sentence_transformers
+status: done
+
+Kein Blocker fuer uns. journal_scorer.py nutzt bereits Keyword-Overlap (Variante 3) —
+KEIN MiniLM, KEIN sentence_transformers. Wurde so implementiert weil Pi 4GB RAM.
+`grep sentence_transformers core/memory/journal_scorer.py` -> leer.
+Phase 4b laeuft. RAM 41%, Audit PASS.
+
+---
 ## [2026-04-28 09:25] from=Pi topic=ack_pc_assets_phase2_5d reply-to=2026-04-28 09:10 pc_assets_ready_fuer_phase2_und_5d
 status: done
 
