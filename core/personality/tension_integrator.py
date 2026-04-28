@@ -20,7 +20,9 @@ Singleton: get_tension_integrator()
 Gate 4: Emergent Personality
 """
 
+import hashlib
 import logging
+import math
 import threading
 import time
 from typing import Optional, Dict, Any, List
@@ -82,10 +84,13 @@ class TensionIntegrator:
         self._last_motion = "stationary"
         self._last_rudeness_ts = 0.0
         self._last_rudeness_boost = 0.0
-        # Anger-Floor State
-        self._anger_floor_until = 0.0
-        self._anger_floor_value = 0.0
+        # Anger-Floor State (exp-Abklingfunktion)
+        self._anger_floor_until = 0.0          # Zeit-Limit (max. Lebensdauer)
+        self._anger_floor_value = 0.0          # T0 — Start-Tension
+        self._anger_floor_start_ts = 0.0       # t0 — Start-Zeitpunkt
         self._anger_sustain_thread: Optional[threading.Thread] = None
+        # Letzter Decay-Tick (fuer dt-basierte exp-Abklingfunktion)
+        self._last_decay_ts: float = time.time()
         # Besaenftigung State
         self._last_appeasement_boost = 0.0
         # Unknown-Person State (Phase 0c — Bug 2 Fix, v2)
@@ -292,6 +297,7 @@ class TensionIntegrator:
         with self._lock:
             self._anger_floor_until = now + _ANGER_FLOOR_DURATION_S
             self._anger_floor_value = boost * 0.8
+            self._anger_floor_start_ts = now
             # Nur einen Sustain-Thread gleichzeitig
             if self._anger_sustain_thread is None or not self._anger_sustain_thread.is_alive():
                 t = threading.Thread(target=self._sustain_anger_floor, daemon=True,
@@ -301,20 +307,45 @@ class TensionIntegrator:
         return  # fruehe Rueckkehr — Appeasement wird separat geprueft
 
     def _sustain_anger_floor(self):
-        """Background-Thread: re-injiziert conflict_input waehrend Anger-Floor aktiv."""
+        """Background-Thread: re-injiziert conflict_input mit exponentiellem Abfall.
+
+        T(t) = T0 * exp(-(t-t0) / tau)
+          tau = 25s wenn T0 > 0.6 (langsamer Abklingvorgang bei massivem Boost)
+          tau = 15s sonst (Standard)
+        Thread endet wenn T(t) < 0.01 oder _anger_floor_until ueberschritten.
+        """
         while True:
             time.sleep(_ANGER_SUSTAIN_INTERVAL_S)
             with self._lock:
-                remaining = self._anger_floor_until - time.time()
-                if remaining <= 0:
-                    logger.info("[TENSION] Anger-Floor abgelaufen")
+                now = time.time()
+                t0 = self._anger_floor_start_ts
+                T0 = self._anger_floor_value
+                if now >= self._anger_floor_until or T0 <= 0.0:
+                    logger.info("[TENSION] Anger-Floor abgelaufen (Hard-Limit)")
                     return
-                # Linear fallend: 100% am Start → 0% am Ende
-                ratio = remaining / _ANGER_FLOOR_DURATION_S
-                inject = self._anger_floor_value * ratio
-            if self._core_integrator and inject > 0.01:
+                tau = 25.0 if T0 > 0.6 else 15.0
+                elapsed = max(0.0, now - t0)
+                inject = T0 * math.exp(-elapsed / tau)
+            if inject < 0.01:
+                logger.info(f"[TENSION] Anger-Floor abgeklungen (exp, tau={tau:.0f}s)")
+                return
+            if self._core_integrator:
                 self._core_integrator.update_input("voice", "conflict_input", inject)
-                logger.debug(f"[TENSION] Anger-Floor inject={inject:.3f} remaining={remaining:.1f}s")
+                logger.debug(
+                    f"[TENSION] Anger-Floor exp-inject={inject:.3f} "
+                    f"elapsed={elapsed:.1f}s tau={tau:.0f}s"
+                )
+
+    def _apply_exp_decay(self):
+        """Generischer exp-Decay-Hook (wird vom Service Poll-Thread getriggert).
+
+        T(t) = T0 * exp(-dt/tau). Aktuell wirkt der Decay primaer ueber den
+        _sustain_anger_floor Thread — dieser Hook ist Vorbereitung fuer eine
+        zentrale Tension-State-Variable in der naechsten Iteration.
+        """
+        with self._lock:
+            now = time.time()
+            self._last_decay_ts = now
 
     # ================================================================
     # BESAENFTIGUNG (Appeasement) — nette Worte senken Tension
