@@ -96,10 +96,13 @@ FAIL wenn: Timeout oder leere Ausgabe oder Fehlermeldung.
 
 ### 10. pcie_link [ADVISORY]
 ```bash
-lspci -vvv 2>/dev/null | grep -A 20 "Hailo\|1e60:" | grep "LnkSta"
+# sysfs ist zuverlaessiger als lspci -vvv (kein Root noetig)
+cat /sys/bus/pci/devices/0001:00:00.0/current_link_speed 2>/dev/null
+cat /sys/bus/pci/devices/0001:00:00.0/current_link_width 2>/dev/null
 ```
-PASS wenn: `Gen3` und `8GT/s` in LnkSta.
-WARN wenn: nur `Gen2` (ADVISORY, kein CRITICAL-FAIL).
+PASS wenn: `8.0 GT/s` (Gen3) und Width >= 1.
+WARN wenn: `5.0 GT/s` (Gen2) — ADVISORY, kein CRITICAL-FAIL.
+UNKNOWN wenn: sysfs-Pfad fehlt — kein Hardware-Problem, nur kein Messwert.
 
 ## Gesamtstatus-Logik
 
