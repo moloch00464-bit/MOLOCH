@@ -1401,6 +1401,14 @@ class MolochService:
         """
         logger.info("M.O.L.O.C.H. Service gestartet")
 
+        # StatusBroadcaster starten (UDS-Notify fuer Subscriber)
+        try:
+            from core.bridge.status_broadcaster import get_broadcaster
+            get_broadcaster().start()
+            logger.info("[SERVICE] StatusBroadcaster gestartet")
+        except Exception as e:
+            logger.warning(f"[SERVICE] StatusBroadcaster fehlgeschlagen: {e}")
+
         # Core Integrator Thread starten (1 Hz State-Berechnung)
         if self._core_integrator:
             self._core_integrator.start()
@@ -2441,6 +2449,13 @@ class MolochService:
                     pass
 
             self._ipc.write_status(status)
+
+            # StatusBroadcaster: Subscriber notifizieren (1-Byte-Signal)
+            try:
+                from core.bridge.status_broadcaster import get_broadcaster
+                get_broadcaster().notify()
+            except Exception:
+                pass
 
             # MolochSprache Retention-Tick (1x/Stunde Cleanup)
             if self._sprache:
