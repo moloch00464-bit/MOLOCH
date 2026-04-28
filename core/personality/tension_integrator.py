@@ -137,8 +137,71 @@ class TensionIntegrator:
             bus.subscribe("perception.face_confirmed", self.on_face_confirmed, priority=5)
             bus.subscribe("perception.owner_detected", self.on_owner_detected, priority=5)
             logger.info("[TENSION] perception.face_confirmed + owner_detected Subscriptions aktiv (Unknown-Person v2)")
+            # Phase 2 Task 2f: 5 neue Signale
+            bus.subscribe("awareness.silence_detected", self._on_silence_detected, priority=5)
+            bus.subscribe("speech.repeated_question", self._on_repeated_question, priority=5)
+            bus.subscribe("audio.level_spike", self._on_audio_spike, priority=5)
+            bus.subscribe("awareness.time_of_day", self._on_time_of_day, priority=5)
+            bus.subscribe("perception.motion_no_face", self._on_motion_no_face, priority=5)
+            logger.info("[TENSION] 5 neue Signale subscribed (Stille/WiederholFrage/Audio/Tageszeit/Bewegung)")
         except Exception as e:
             logger.warning(f"[TENSION] Subscription fehlgeschlagen: {e}")
+
+    # ================================================================
+    # PHASE 2 TASK 2f — 5 neue Signale via EventBus
+    # ================================================================
+
+    def _on_silence_detected(self, event: Dict[str, Any]):
+        """Stille > 5min → zonabhaengige Tension-Verschiebung."""
+        if not self._core_integrator:
+            return
+        zone = self._get_current_zone()
+        delta = {"guardian": 0.03, "shadow": -0.02, "berserker": 0.0}.get(zone or "guardian", 0.0)
+        if delta > 0:
+            self._core_integrator.update_input("awareness", "conflict_input", delta)
+        elif delta < 0:
+            self._core_integrator.update_input("awareness", "respect_score", abs(delta))
+        logger.debug(f"[TENSION] Stille-Signal: zone={zone} delta={delta:+.3f}")
+
+    def _on_repeated_question(self, event: Dict[str, Any]):
+        """Gleiche Frage wiederholt → leichte Ungedulds-Tension."""
+        if not self._core_integrator:
+            return
+        zone = self._get_current_zone()
+        delta = 0.05 * _zone_mult(zone, "rudeness")
+        delta = self._clamp(delta, 0.0, 1.0)
+        self._core_integrator.update_input("awareness", "conflict_input", delta)
+        logger.debug(f"[TENSION] WiederholFrage: zone={zone} delta={delta:+.3f}")
+
+    def _on_audio_spike(self, event: Dict[str, Any]):
+        """Lauter Audio-Peak (Schrei, Knall) → Tension-Spike, dann exp-decay."""
+        if not self._core_integrator:
+            return
+        spike_val = self._clamp(event.get("payload", {}).get("level", 0.5), 0.0, 1.0)
+        zone = self._get_current_zone()
+        delta = self._clamp(0.2 * spike_val * _zone_mult(zone, "rudeness"), 0.0, 1.0)
+        self._core_integrator.update_input("awareness", "conflict_input", delta)
+        logger.debug(f"[TENSION] Audio-Spike: level={spike_val:.2f} zone={zone} delta={delta:+.3f}")
+
+    def _on_time_of_day(self, event: Dict[str, Any]):
+        """Tageszeit-Wechsel (yang/yin) → Basis-Tension-Verschiebung."""
+        if not self._core_integrator:
+            return
+        period = event.get("payload", {}).get("period", "yang")
+        if period == "yang":
+            self._core_integrator.update_input("awareness", "conflict_input", 0.03)
+        else:  # yin (Nacht)
+            self._core_integrator.update_input("awareness", "respect_score", 0.05)
+        logger.debug(f"[TENSION] Tageszeit: period={period}")
+
+    def _on_motion_no_face(self, event: Dict[str, Any]):
+        """Bewegung ohne erkanntes Gesicht → leichte Wachsamkeits-Tension."""
+        if not self._core_integrator:
+            return
+        zone = self._get_current_zone()
+        delta = self._clamp(0.03 * _zone_mult(zone, "rudeness"), 0.0, 1.0)
+        self._core_integrator.update_input("awareness", "conflict_input", delta)
+        logger.debug(f"[TENSION] Bewegung ohne Gesicht: zone={zone} delta={delta:+.3f}")
 
     def on_context_update(self, event: Dict[str, Any]):
         """Event-Handler fuer context_update Events.
@@ -465,13 +528,34 @@ class TensionIntegrator:
     # ================================================================
 
     def _get_current_zone(self) -> Optional[str]:
-        """Aktuelle Personality-Zone aus CoreIntegrator (defensiv)."""
+        """Aktuelle Personality-Zone via EMA-Glaettung (Phase 2 Task 2g).
+
+        Liest raw Zone aus CoreIntegrator, mappt auf [0.0, 0.5, 1.0],
+        wendet EMA an und leitet geglaettete Zone ab.
+        Verhindert Flattern zwischen Zonen bei kurzen Tension-Spikes.
+        """
+        _zone_to_num = {"guardian": 0.0, "shadow": 0.5, "berserker": 1.0}
         try:
-            if self._core_integrator and hasattr(self._core_integrator, "get_personality_zone"):
-                return self._core_integrator.get_personality_zone()
+            if not self._core_integrator:
+                return None
+            raw_zone = self._core_integrator.get_personality_zone()
+            raw_val = _zone_to_num.get(raw_zone or "guardian", 0.0)
+            # EMA-Update
+            with self._lock:
+                self._tension_zone_ema = (
+                    self._ema_alpha * raw_val
+                    + (1.0 - self._ema_alpha) * self._tension_zone_ema
+                )
+                ema = self._tension_zone_ema
+            # Geglaettete Zone ableiten
+            if ema >= 0.75:
+                return "berserker"
+            elif ema >= 0.25:
+                return "shadow"
+            else:
+                return "guardian"
         except Exception:
             return None
-        return None
 
     @staticmethod
     def _clamp(v: float, lo: float, hi: float) -> float:
