@@ -50,9 +50,10 @@ PASS wenn: dkms installiert.
 
 ### 4. hailo_package [CRITICAL]
 ```bash
-dpkg -l hailo-all hailo-h10-all 2>/dev/null | grep -E "^ii"
+dpkg -l hailort hailo-all hailo-h10-all 2>/dev/null | grep -E "^ii"
 ```
-PASS wenn: `hailo-all` ODER `hailo-h10-all` installiert.
+PASS wenn: `hailort` ODER `hailo-all` ODER `hailo-h10-all` installiert.
+(Raspberry-Pi-Hailo-Installationen nutzen Einzel-Pakete statt Meta-Paket — `hailort` reicht.)
 
 ### 5. firmware_identify [CRITICAL]
 ```bash
