@@ -27,10 +27,12 @@ Schema pro Eintrag:
   recency, relevance, importance, citation, tags
 """
 
+import hashlib
 import json
 import logging
 import os
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -94,6 +96,9 @@ class CharacterJournal:
         self._lock = threading.Lock()
         os.makedirs(JOURNAL_DIR, exist_ok=True)
         self._last_id = self._load_last_id()
+        # Dedup: hash -> timestamp (innerhalb 5min-Fenster werden Duplikate verworfen)
+        self._dedup_cache: Dict[str, float] = {}
+        self._dedup_window_s: float = 300.0
         logger.info(f"[JOURNAL] Initialisiert: dir={JOURNAL_DIR}, last_id={self._last_id}")
 
     def _load_last_id(self) -> int:
@@ -126,6 +131,7 @@ class CharacterJournal:
         relevance: Optional[float] = None,
         importance: Optional[float] = None,
         citation: Optional[str] = None,
+        referenced_event_ids: Optional[List[str]] = None,
     ) -> Optional[str]:
         """Schreibt einen Charakter-Event in das Journal.
 
@@ -138,6 +144,9 @@ class CharacterJournal:
             tags: Liste von Tag-Strings. Default leer.
             relevance, importance, citation: Distiller-Felder (Phase 4).
                 Caller darf optional setzen, sonst null.
+            referenced_event_ids: Optional, Liste von event_id-Strings auf die
+                dieser Event verweist (z.B. Reflection-Events die andere Events
+                zusammenfassen). Wird nur ins Entry-Dict geschrieben wenn nicht leer.
 
         Returns:
             event_id (z.B. "evt_00000042") bei Erfolg, sonst None.
@@ -156,6 +165,26 @@ class CharacterJournal:
         tags = list(tags) if tags else []
 
         with self._lock:
+            # Dedup-Check: identische Events in 5min-Fenster verwerfen.
+            # Hash-Formel: MD5(type|interpretation|minute)[:8] -> Events gleicher Minute kollidieren.
+            _dedup_hash = hashlib.md5(
+                f"{type}|{interpretation}|{datetime.now().minute}".encode("utf-8")
+            ).hexdigest()[:8]
+            now_ts = time.time()
+            # GC: alte Eintraege rausschmeissen
+            self._dedup_cache = {
+                k: v for k, v in self._dedup_cache.items()
+                if now_ts - v < self._dedup_window_s
+            }
+            if _dedup_hash in self._dedup_cache:
+                age = now_ts - self._dedup_cache[_dedup_hash]
+                logger.debug(
+                    f"[JOURNAL] Dedup: {type}/{interpretation[:30]} "
+                    f"bereits vor {age:.0f}s geschrieben"
+                )
+                return None
+            self._dedup_cache[_dedup_hash] = now_ts
+
             new_id = self._last_id + 1
             event_id = f"evt_{new_id:08d}"
 
@@ -172,6 +201,9 @@ class CharacterJournal:
                 "citation": citation,
                 "tags": tags,
             }
+            # Reflection-Linking: nur eintragen wenn Caller eine Liste mitgibt.
+            if referenced_event_ids:
+                entry["referenced_event_ids"] = list(referenced_event_ids)
 
             path = self._today_path()
             try:
