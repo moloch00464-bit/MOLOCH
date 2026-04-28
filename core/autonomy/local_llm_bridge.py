@@ -148,6 +148,38 @@ def _load_hardware_facts() -> Dict[str, Any]:
         return {}
 
 
+# Phase 1d: Hardware-Keywords (incl. indirekte Synonyme) fuer conditional Identity-Block.
+# Variante A aus DeepSeek-Konsens. Plus /hw Slash-Command (siehe _is_hardware_query).
+_HARDWARE_KEYWORDS = (
+    "ram", "cpu", "temperatur", "npu", "speicher", "ssd", "nvme", "luefter",
+    "lüfter", "strom", "hailo", "warm", "kalt", "langsam", "schnell", "voll",
+    "leer", "muede", "müde", "fit", "schaffst", "schwach", "haengt", "hängt",
+    "traege", "träge", "grad", "celsius", "prozent", "last", "auslastung",
+    "hardware", "deck", "gehaeuse", "gehäuse", "platine", "raspi", "pi 5"
+)
+
+
+def _is_hardware_query(user_msg: Optional[str]) -> bool:
+    """Phase 1d: Prueft ob User-Frage Hardware-Block braucht.
+
+    Triggert bei direkten/indirekten Hardware-Keywords ODER /hw Slash-Command.
+    """
+    if not user_msg:
+        return False
+    msg = user_msg.lower().strip()
+    if msg.startswith("/hw"):
+        return True
+    return any(kw in msg for kw in _HARDWARE_KEYWORDS)
+
+
+# Phase 1a: Bridge-Satz nach Profil — ankert Moloch in ICH-Form fuer Live-Eindruecke.
+# DeepSeek-Konsens: ca. 30 Tokens, direkt nach System-Profil eingefuegt.
+_IDENTITY_BRIDGE = (
+    "Was jetzt kommt, ist das, was du in diesem Moment wahrnimmst und fuehlst. "
+    "Es IST deine Realitaet. Sprich daraus in ICH-Form."
+)
+
+
 def _build_identity_block() -> str:
     """Hardware-Identity-Block fuer System-Prompt — verhindert Halluzination.
 
@@ -248,11 +280,50 @@ def _build_telemetry_footer() -> str:
     return "\n".join(parts) + "\n"
 
 
-def _build_local_context_snippet() -> str:
+def _heuristic_style_label(text: str) -> str:
+    """Phase 1e: Kurzen Stil-Etikett aus Moloch-Antwort ableiten.
+
+    Heuristik aus Satzlaenge + Keywords + Satzende. Wird in VORHER-Tag
+    eingebettet damit das LLM sein eigenes Echo wahrnimmt.
+    """
+    if not text:
+        return "neutral"
+    t = text.strip()
+    low = t.lower()
+    end = t[-1] if t else ""
+    flavor = []
+    # Tonalitaet via Markov-typische Marker (im Moloch-Stil)
+    if any(w in low for w in ("laeuft", "tja", "qapla", "morgen", "ja klar", "von mir aus")):
+        flavor.append("trocken")
+    if any(w in low for w in ("verdammt", "scheiss", "schrott", "müll", "muell")):
+        flavor.append("frech")
+    if any(w in low for w in ("zu spaet", "zu spät", "müde", "muede", "irgendwann")):
+        flavor.append("matt")
+    if "?" in t:
+        flavor.append("fragend")
+    if end == "!":
+        flavor.append("lebhaft")
+    elif t.endswith("..."):
+        flavor.append("nachdenklich")
+    # Laenge fallback
+    if not flavor:
+        if len(t) < 20:
+            flavor.append("kurz-knapp")
+        elif len(t) < 60:
+            flavor.append("ruhig")
+        else:
+            flavor.append("ausfuehrlich")
+    return "-".join(flavor[:2])
+
+
+def _build_local_context_snippet(user_msg: Optional[str] = None) -> str:
     """Live-Kontext aus moloch_status.json bauen (Vision + Inner State).
 
     Gibt eine Einzeiler-Ergaenzung zum Compact-Prompt zurueck, damit Qwen2.5
     wissen kann wen er sieht und wie er sich fuehlt. Leerer String bei Fehler.
+
+    Phase 1d: Identity-Block + Telemetry-Footer NUR bei Hardware-Frage.
+    Phase 1e: VORHER-Tag bekommt Stil-Echo aus letzter Moloch-Antwort.
     """
     try:
         with open(_STATUS_JSON_PATH, 'r') as f:
@@ -352,32 +423,37 @@ def _build_local_context_snippet() -> str:
             parts.append(f"Tageszeit: {time_period}.")
 
         # History-Block: letzte 2 Chat-Turns (User-Frage + Moloch-Antwort).
-        # Mistral 7B zitierte den alten 5-Turn-Block woertlich zurueck — Echo-Problem.
-        # Fix: nur letzte 2 Turns, Moloch-Antworten auf 30 chars gekuerzt
-        # (User-Messages bleiben 80 chars fuer Kontext).
+        # Phase 1e: VORHER-Tag bekommt Stil-Etikett aus letzter Moloch-Antwort.
         try:
             from core.longterm_memory import get_memory
             msgs = get_memory().get_recent_messages(n=2) or []
             if msgs:
                 hist_parts = []
+                last_moloch_text = ""
                 for m in msgs[-2:]:
                     sender = m.get("sender", "?")
                     text = (m.get("text") or "")
+                    if sender != "user":
+                        last_moloch_text = text
                     # Moloch-Antworten kurz — verhindert Mistral-Echo
                     max_len = 80 if sender == "user" else 30
                     if len(text) > max_len:
                         text = text[:max_len - 3] + "..."
                     hist_parts.append(f"{sender}: {text}")
-                parts.append("VORHER: " + " | ".join(hist_parts))
+                style_label = _heuristic_style_label(last_moloch_text)
+                parts.append(
+                    f"VORHER (dein letzter Satz klang: {style_label}): "
+                    + " | ".join(hist_parts)
+                )
         except Exception:
             pass  # Memory-Singleton evtl. nicht init in standalone Test
 
-        # Hardware-Identity-Block + Live-Telemetrie-Footer anhaengen
-        # (Markus' Direktive 27.04: keine Hardware-Halluzination)
+        # Phase 1d: Identity-Block + Telemetry-Footer NUR bei Hardware-Frage.
+        # Markus' Frust-Vermeidung: Standard-Smalltalk soll keinen Hardware-Block sehen.
         snippet = " " + " ".join(parts)
-        identity_block = _build_identity_block()
-        telemetry = _build_telemetry_footer()
-        return snippet + identity_block + telemetry
+        if _is_hardware_query(user_msg):
+            snippet += _build_identity_block() + _build_telemetry_footer()
+        return snippet
     except Exception:
         return ""
 
@@ -504,6 +580,10 @@ class LocalLLMBridge:
         self._vision_resume_callback: Optional[Callable] = None
         self._last_provider: str = "none"
         self._request_count: int = 0
+        # Phase 1b: adaptive max_tokens — bei Multi-Turn-Drift Latenz>8s -> Tokens reduzieren
+        self._last_response_latency_s: float = 0.0
+        self._adaptive_drift_threshold_s: float = 8.0
+        self._adaptive_drift_max_tokens: int = 80
         # Circuit-Breaker: Ollama automatisch ueberbruecken wenn wiederholt offline
         self._ollama_fail_count: int = 0
         self._ollama_backoff_until: float = 0.0
@@ -856,25 +936,41 @@ class LocalLLMBridge:
 
             # LLM-Profile-System hat Vorrang: aktives Profil aus llm_profiles.json laden.
             # settings.llm_profile > profiles.active. Profile bringt eigene system/temp/tokens mit.
-            # Fallback (kein Profil-File): bisheriger Compact-Override + Live-Kontext.
+            # Phase 1c: System-Profil -> Bridge-Satz -> ThreeBrain -> LiveContext -> Memory
+            #   -> Identity (conditional in LiveContext via _is_hardware_query).
             profile = _get_active_profile()
             if profile is not None:
                 profile_system = profile.get("system", OLLAMA_LOCAL_SYSTEM_COMPACT)
+                # Phase 1a: Identity-Bridge-Satz direkt nach Profil
+                profile_system = profile_system + "\n" + _IDENTITY_BRIDGE
+                # Phase 1c: ThreeBrain VOR LiveContext (war bisher nur DeepSeek-Pfad)
+                tb_state = _build_threebrain_state_snippet(max_chars=600)
+                if tb_state:
+                    profile_system += tb_state
                 if profile.get("include_live_context", False):
-                    profile_system = profile_system + _build_local_context_snippet()
+                    profile_system = profile_system + _build_local_context_snippet(prompt)
                 system = profile_system
                 # Profile-Sampling ueberschreibt Caller-Defaults
                 pmt = profile.get("max_tokens")
                 if isinstance(pmt, int) and pmt > 0:
                     max_tokens = pmt
+                # Phase 1b: adaptiver Token-Cut bei Multi-Turn-Drift
+                if self._last_response_latency_s > self._adaptive_drift_threshold_s:
+                    cut = self._adaptive_drift_max_tokens
+                    if max_tokens > cut:
+                        logger.info(
+                            f"[LLM] adaptive Token-Reduktion {max_tokens}->{cut} "
+                            f"(letzte Latenz {self._last_response_latency_s:.1f}s)"
+                        )
+                        max_tokens = cut
                 ptemp = profile.get("temperature")
                 if isinstance(ptemp, (int, float)):
                     temperature = float(ptemp)
                 logger.info(f"[LLM] Profil aktiv: {profile.get('system','')[:30]}... ({len(system)} Zeichen, max_tokens={max_tokens}, temp={temperature})")
             elif system and len(system) > OLLAMA_LOCAL_SYSTEM_MAX:
                 # Fallback wenn keine Profile-Datei: alter Compact-Pfad
-                ctx = _build_local_context_snippet()
-                system = OLLAMA_LOCAL_SYSTEM_COMPACT + ctx
+                ctx = _build_local_context_snippet(prompt)
+                system = OLLAMA_LOCAL_SYSTEM_COMPACT + "\n" + _IDENTITY_BRIDGE + ctx
                 logger.info(f"[LLM] System-Prompt gekuerzt -> kompakte Persona + Kontext ({len(system)} Zeichen)")
 
             messages = []
@@ -906,9 +1002,12 @@ class LocalLLMBridge:
             self._ollama_fail_count = 0
             self._ollama_backoff_until = 0.0
             self._last_provider = f"lokal_{model.split(':')[0]}"
+            # Phase 1b: Latenz tracken fuer adaptiven Token-Cut beim naechsten Request
+            duration_ns = data.get('total_duration', 0) or 0
+            self._last_response_latency_s = duration_ns / 1_000_000_000
             logger.info(
                 f"[LLM-BRIDGE] {model}: {len(text)} Zeichen in "
-                f"{data.get('total_duration', 0) // 1_000_000}ms"
+                f"{duration_ns // 1_000_000}ms"
             )
             return text
 
@@ -1055,8 +1154,14 @@ class LocalLLMBridge:
             profile = tentacle_profile or _get_active_profile()
         if profile is not None:
             profile_system = profile.get("system") or system or TENTACLE_SYSTEM_COMPACT
+            # Phase 1a: Identity-Bridge-Satz nach Profil
+            profile_system = profile_system + "\n" + _IDENTITY_BRIDGE
+            # Phase 1c: ThreeBrain VOR LiveContext
+            tb_state = _build_threebrain_state_snippet(max_chars=600)
+            if tb_state:
+                profile_system += tb_state
             if profile.get("include_live_context", True):
-                profile_system = profile_system + _build_local_context_snippet()
+                profile_system = profile_system + _build_local_context_snippet(prompt)
             system = profile_system
             pmt = profile.get("max_tokens")
             if isinstance(pmt, int) and pmt > 0:
@@ -1066,7 +1171,7 @@ class LocalLLMBridge:
                 temperature = float(ptemp)
         elif not system:
             # Letzter Fallback wenn weder Profile noch User-System gegeben
-            system = TENTACLE_SYSTEM_COMPACT + _build_local_context_snippet()
+            system = TENTACLE_SYSTEM_COMPACT + "\n" + _IDENTITY_BRIDGE + _build_local_context_snippet(prompt)
 
         # Memory-Kontext (Identity + Top-5 Fakten + letzte 3 Turns + Core State)
         # an Mistral mitgeben. Mistral kann das fuer kontextreiche Antworten nutzen
@@ -1143,6 +1248,7 @@ class LocalLLMBridge:
             return None
 
         # Persona-Injection wenn chat_server stateless anruft (system leer)
+        # Phase 1c-Reihenfolge: Profil -> Bridge -> ThreeBrain -> LiveContext -> Memory
         if not system:
             profiles_data = _load_profiles()
             if profiles_data:
@@ -1150,8 +1256,15 @@ class LocalLLMBridge:
                 profile = tentacle_profile or _get_active_profile()
                 if profile is not None:
                     system = profile.get("system") or ""
+                    # Phase 1a: Bridge-Satz nach Profil
+                    if system:
+                        system += "\n" + _IDENTITY_BRIDGE
+                    # Phase 1c: ThreeBrain VOR LiveContext
+                    tb_state = _build_threebrain_state_snippet()
+                    if tb_state:
+                        system += tb_state
                     if profile.get("include_live_context", True):
-                        system = system + _build_local_context_snippet()
+                        system = system + _build_local_context_snippet(prompt)
                     pmt = profile.get("max_tokens")
                     if isinstance(pmt, int) and pmt > 0:
                         max_tokens = pmt
@@ -1162,11 +1275,6 @@ class LocalLLMBridge:
                     system = (system or "") + "\n\n--- MEMORY ---\n" + memory_ctx
             except Exception:
                 pass
-
-            # ThreeBrain Welle 1.3: Drift + Patch + Journal-Events injizieren
-            tb_state = _build_threebrain_state_snippet()
-            if tb_state:
-                system = (system or "") + tb_state
 
         resp = None
         try:
