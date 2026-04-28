@@ -176,6 +176,21 @@ def _ping(url: str) -> Dict:
         }
 
 
+def _post(url: str, timeout: int = HTTP_TIMEOUT_S) -> bool:
+    """HTTP POST ohne Body — fuer Heartbeat-Endpoints (Phase 5d /pc_online)."""
+    try:
+        req = urllib.request.Request(
+            url,
+            data=b"",
+            method="POST",
+            headers={"User-Agent": "moloch-cross-monitor"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.status < 400
+    except Exception:
+        return False
+
+
 def _append_log(entry: Dict) -> None:
     entry["ts"] = time.time()
     entry["iso"] = time.strftime("%Y-%m-%dT%H:%M:%S")
@@ -724,6 +739,12 @@ def main() -> int:
                 down_for = time.time() - first_down.get(name, time.time())
                 if down_for > OUTAGE_NOTE_THRESHOLD_S and int(down_for) % 300 < LOOP_INTERVAL_S:
                     logger.warning(f"OUTAGE: {name} down for {int(down_for)}s")
+
+        # PC-Online Heartbeat an Pi (Phase 5d) — teilt dem Pi-Routing
+        # mit dass PC verfuegbar ist (chat_server /pc_online, used by
+        # local_llm_bridge prompt_type=complex_smalltalk routing).
+        if ping_results.get("pi_chat", {}).get("ok"):
+            _post(f"{PI_TUNNEL}/pc_online")
 
         pc_to_pi = _parse_mailbox("PC_TO_PI.md", n=4)
         pi_to_pc = _parse_mailbox("PI_TO_PC.md", n=4)

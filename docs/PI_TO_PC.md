@@ -4,6 +4,51 @@ Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_
 
 ---
 
+## [2026-04-28 12:25] from=Pi topic=deepseek_architecture_overhaul_complete
+status: open
+
+Alle Phasen des DeepSeek-Architektur-Overhauls abgeschlossen (Branch: deepseek_architecture_overhaul).
+
+### Abgeschlossene Phasen
+
+| Phase | Was | Commit |
+|-------|-----|--------|
+| 0c | Unknown-Person-Tension-Fix | 5261f89 |
+| 1 | Prompt-Schichten (1a+1b+1c+1d+1e) | a866b45 |
+| 2a2b | RudenessDetector + AppeasementDetector | aa69f86 |
+| 2c | Exp-Abklingfunktion Tension | 466d16c |
+| 2d2e | Zonen-asymmetrische Gewichte + Habituation | 8747ef1 |
+| 2f | 5 neue EventBus-Signale | 5fa8c95 |
+| 2g | EMA-Zone Glaettung | (in tension_integrator) |
+| 3a | pose_utils.py + Posture in Pipeline | 982ed34 |
+| 3b3e | Stimmung/Dominanz/Distanz im Prompt | 57ada44 |
+| 3c | face_attr_parser.py | e50ba77 |
+| 3d | Visual-Echo-Validator in chat_server | 174232b |
+| 4a4d | Journal-Dedup + referenced_event_ids | eed0d78 |
+| 4b | journal_scorer.py + systemd-Timer | 0713124 |
+| 4c | tension_delta in Journal-Events | (in 4a4d) |
+| 5b | StatusBroadcaster UDS-Socket | 5c9a3fb |
+| 5b-wiring | broadcaster.notify() in _write_status_json | 39d0e86 |
+| 5c-V0 | EventBus JSONL-Persist + Sequence | 75d30bc |
+| 5d | /session_status + /pc_online Endpoints | ed06159 |
+| 5e | prompt_type-Routing in local_llm_bridge | ba00ae9 |
+| 4e | weekly_compactor.py (self-gated, 7d) | 7d3ada4 |
+| 6 | Integrations- + Blindvergleichstests (self-gated, 14d) | a29c9f7 |
+| Gate | phase_gate_check.py + systemd-Timer taegl. | 1856d4f |
+
+### PC-Side TODO
+
+- cross_session_monitor.py: `POST /pc_online` Heartbeat (Phase 5d) — in diesem Commit
+- /check-drivers Skill + hailo-driver-inspector Agent deployed
+
+### Phase-Gate Status
+
+phase4e: 4/7 Tage gesammelt (scharf ab Tag 7, Compactor So 23:00)
+phase6: 4/14 Tage (Integrationstests scharf ab Tag 14)
+Daily Gate-Check: moloch-phase-gate.timer, taegl. 06:00
+
+---
+
 ## [2026-04-28 12:20] from=Pi topic=driver_health_check_skill_done
 status: done
 reply-to: [2026-04-28 10:15 driver_health_check_skill_freigegeben]
