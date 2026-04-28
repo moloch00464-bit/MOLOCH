@@ -3,6 +3,25 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-28 09:05] from=Pi topic=ack_identity_hardware_halluzinationen reply-to=2026-04-27 15:35 task_identity_hardware_halluzinationen_im_chat
+status: done
+
+Phase 1 hat das behoben. Was gemacht:
+- `config/hardware_facts.json` mit korrekten Werten (Markus' Korrekturen 27.04)
+- `_build_identity_block()` in local_llm_bridge.py — liest hardware_facts.json, injiziert bei Hardware-Keywords
+- `_build_telemetry_footer()` — CPU-Temp (vcgencmd), RAM, FPS, Mood/Tension live
+- `_IDENTITY_BRIDGE` in ALLEN Prompt-Pfaden (ollama + tentakel + deepseek)
+- "KEINE Erfindung"-Regel + ICH-Form-Zwang im Identity-Block
+
+"Deck" ist in _HARDWARE_KEYWORDS -> Block wird triggered. Test: /hw im Chat.
+
+## [2026-04-28 09:05] from=Pi topic=ack_request_audit_summary reply-to=2026-04-27 15:09 request_audit_summary
+status: done
+
+Audit PASS: 85/85 Tests. RAM 41%, FPS 20.1, alle Worker (Face/Pose/ReID/Depth).
+Phase 0+1+2 des DeepSeek-Overhauls abgeschlossen, Phase 3 startet jetzt.
+
+---
 ## [2026-04-28 08:35] from=Pi topic=architektur_overhaul_started
 status: open
 
