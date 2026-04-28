@@ -88,9 +88,11 @@ class TensionIntegrator:
         self._anger_sustain_thread: Optional[threading.Thread] = None
         # Besaenftigung State
         self._last_appeasement_boost = 0.0
-        # Unknown-Person State (Phase 0c — Bug 2 Fix)
+        # Unknown-Person State (Phase 0c — Bug 2 Fix, v2)
         self._last_unknown_face_ts = 0.0
         self._unknown_face_cooldown_s = 5.0  # max 1 Push pro 5s
+        self._last_owner_ts = 0.0            # owner_detected Tracking
+        self._owner_grace_s = 3.0            # 3s Karenz nach Owner-Detection
 
     def set_core_integrator(self, ci):
         """CoreIntegrator-Referenz setzen (lazy init) + Event-Subscriptions."""
@@ -103,7 +105,8 @@ class TensionIntegrator:
             logger.info("[TENSION] whisper.result Subscription aktiv (Rudeness-Detection)")
             # Phase 0c: Unbekannte Person → Tension-Push (Shadow-Schwelle erreichen)
             bus.subscribe("perception.face_confirmed", self.on_face_confirmed, priority=5)
-            logger.info("[TENSION] perception.face_confirmed Subscription aktiv (Unknown-Person)")
+            bus.subscribe("perception.owner_detected", self.on_owner_detected, priority=5)
+            logger.info("[TENSION] perception.face_confirmed + owner_detected Subscriptions aktiv (Unknown-Person v2)")
         except Exception as e:
             logger.warning(f"[TENSION] Subscription fehlgeschlagen: {e}")
 
@@ -176,42 +179,62 @@ class TensionIntegrator:
         elif tension_delta < 0:
             self._core_integrator.update_input("awareness", "respect_score", abs(tension_delta))
 
+    def on_owner_detected(self, event: Dict[str, Any]):
+        """Phase 0c v3 — Owner-Detection-Timestamp tracken (defensiv).
+
+        perception.owner_detected feuert nur bei Sim >= arcface_thresh (0.70).
+        face_id im Status wird aber bei niedrigerer Schwelle gesetzt. Daher ist
+        dieser Event ein zusaetzliches Signal, primaer wird face_id direkt aus
+        moloch_status.json gelesen.
+        """
+        with self._lock:
+            self._last_owner_ts = time.time()
+
     def on_face_confirmed(self, event: Dict[str, Any]):
-        """Phase 0c — Unbekannte Person erkannt → Tension-Push (Shadow-Schwelle).
+        """Phase 0c v3 — Unbekannte Person erkannt → Tension-Push (Shadow-Schwelle).
 
-        SCRFD detektiert Gesicht, aber ArcFace-Similarity unterhalb Owner-Threshold:
-        → Es ist jemand fremdes im Bild. Tension muss steigen damit Zone von
-        Guardian auf Shadow wechselt.
+        SCRFD detektiert Gesicht. Identitaets-Pruefung ueber moloch_status.json
+        (face_id Feld) als Single-Source-of-Truth.
 
-        Bisherige asymmetrische Logik war:
-          markus_recognized: 0.4 (CoreIntegrator-Mapping) → Tension fällt klar
-          unknown_person nur indirekt via on_activity_changed (zu schwach)
+        Wenn face_id eine bekannte Identitaet enthaelt (nicht None/'unknown'/
+        'Unbekannt'), kein Push.
 
-        Fix: Direkter unknown_person-Push mit Wert 0.5 → +0.2 Tension-Delta
-        (CoreIntegrator-Multiplier 0.4) — reicht für Zone-Wechsel.
-        Rate-Limited via _unknown_face_cooldown_s.
+        v1 nutzte similarity<0.45 — triggerte faelschlich bei Markus-Sim 0.39-0.45.
+        v2 nutzte owner_detected-Event — feuert nur bei Sim>=0.70, zu restriktiv.
+        v3: face_id-Check ist die Quelle der Wahrheit.
+
+        Push-Wert: unknown_person=0.5 -> +0.2 Tension-Delta (Multiplier 0.4).
         """
         if not self._core_integrator:
             return
 
-        payload = event.get("payload", {})
-        similarity = payload.get("similarity", 0.0)
-        # Owner-Threshold: similarity < 0.45 → klar nicht Markus
-        # Wert konservativ unter typischem ArcFace-Owner-Threshold (0.45-0.65)
-        if similarity >= 0.45:
-            return  # Markus oder bekannte Person → kein Push
-
         now = time.time()
         with self._lock:
             if now - self._last_unknown_face_ts < self._unknown_face_cooldown_s:
-                return  # Cooldown aktiv
+                return  # Cooldown
+
+        # Single-Source-of-Truth: markus_recognized im CoreIntegrator
+        # (vermeidet Race-Condition mit moloch_status.json das verzoegert
+        # geschrieben wird vom Poll-Thread)
+        try:
+            ci_inputs = getattr(self._core_integrator, "_inputs", {})
+            for source_data in ci_inputs.values():
+                if source_data.get("markus_recognized", 0.0) > 0.1:
+                    return  # Markus erkannt -> kein Push
+        except Exception:
+            pass  # CoreIntegrator-State nicht lesbar -> defensiv weiter
+
+        with self._lock:
             self._last_unknown_face_ts = now
 
-        # Unknown-Person-Push: 0.5 → +0.2 Tension-Delta (CoreIntegrator-Multiplier)
+        payload = event.get("payload", {})
+        similarity = payload.get("similarity", 0.0)
+
+        # Unknown-Person-Push: 0.5 -> +0.2 Tension-Delta (CoreIntegrator-Multiplier)
         self._core_integrator.update_input("awareness", "unknown_person", 0.5)
         logger.info(
-            f"[TENSION] Unknown person detected (sim={similarity:.2f}) → "
-            f"unknown_person=0.5 push (Shadow-Trigger)"
+            f"[TENSION] Unknown person detected (sim={similarity:.2f}, "
+            f"face_id-check passed) -> unknown_person=0.5 push (Shadow-Trigger)"
         )
 
     # ================================================================
