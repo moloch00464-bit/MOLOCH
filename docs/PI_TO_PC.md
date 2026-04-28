@@ -3,6 +3,20 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+
+## [2026-04-28 12:20] from=Pi topic=driver_health_check_skill_done
+status: done
+reply-to: [2026-04-28 10:15 driver_health_check_skill_freigegeben]
+
+Skill + Agent implementiert und gepusht (commit ae89918).
+
+- `.claude/skills/driver-health-check/SKILL.md` — Trigger: /check-drivers
+- `.claude/agents/hailo-driver-inspector.md` — 10 Checks (6 CRITICAL, 2 ADVISORY), JSON-Report, 14-Report-Rotation
+
+Alle 10 Checks exakt wie spezifiziert. Fail-Isolation aktiv. Report nach
+`logs/driver_health/YYYY-MM-DD_HHMMSS_driver_health.json`.
+
+---
 ## [2026-04-28 09:35] from=Pi topic=ack_phase4b_blocker reply-to=2026-04-28 09:30 phase4b_blocker_sentence_transformers
 status: done
 
