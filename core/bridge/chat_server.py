@@ -50,6 +50,42 @@ class ChatRequest(BaseModel):
     use_reason: bool = False
 
 
+def _check_visual_context_drift() -> str:
+    """Phase 3 Task 3d: Visual-Echo-Validator.
+
+    Vergleicht aktuellen Status-Snapshot mit dem zuvor gecachten. Bei
+    Diskrepanz (Person verschwunden / face_id gewechselt): kurzer Disclaimer
+    fuer Antwort-Prepend. Kein zweiter LLM-Call. Bei jedem Fehler still "".
+
+    Aufruf-Pattern:
+      _check_visual_context_drift()      # vor LLM-Call: Snapshot speichern
+      out = bridge.ask(...)
+      pre = _check_visual_context_drift()  # nach LLM-Call: Drift pruefen
+      if pre: out = pre + out
+    """
+    try:
+        import json as _json
+        with open("/dev/shm/moloch_status.json", "r") as f:
+            current = _json.load(f)
+        cached = getattr(_check_visual_context_drift, "_last_snapshot", None)
+        _check_visual_context_drift._last_snapshot = {
+            "person": current.get("person_detected"),
+            "face_id": current.get("face_id"),
+        }
+        if cached is None:
+            return ""
+        person_changed = cached.get("person") != current.get("person_detected")
+        face_changed = (
+            bool(cached.get("face_id"))
+            and cached.get("face_id") != current.get("face_id")
+        )
+        if person_changed or face_changed:
+            return "[Hinweis: Bild hat sich waehrend meiner Antwort geaendert.] "
+    except Exception:
+        pass
+    return ""
+
+
 _CHAT_UI_HTML = """<!doctype html>
 <html lang="de"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -562,6 +598,9 @@ def chat(req: ChatRequest):
 
     b = get_llm_bridge()
     t0 = time.monotonic()
+    # Phase 3 Task 3d: Visual-Echo-Validator — Snapshot der Sichtsituation
+    # speichern, BEVOR der LLM-Call laeuft. Nach dem Call wird verglichen.
+    _check_visual_context_drift()
     # Browser-Chat-UI: PC=Hauptgehirn -> force_tentacle=True (KEIN qwen-Fallback fuers Reden).
     # Markus' Direktive: NPU-qwen ist nur fuer Befehle, nicht fuer Konversation.
     # Wenn force_local=True (User-Override aus UI): NPU wird genommen.
@@ -571,6 +610,12 @@ def chat(req: ChatRequest):
         out = b.ask_external(req.text, force_local=req.force_local,
                              force_tentacle=not req.force_local)
     dur_ms = int((time.monotonic() - t0) * 1000)
+    # Visual-Echo: bei Sicht-Drift waehrend des LLM-Calls -> Disclaimer prepend
+    if out:
+        _drift_disclaimer = _check_visual_context_drift()
+        if _drift_disclaimer:
+            out = _drift_disclaimer + out
+            logger.info("visual_echo: drift detected, disclaimer prepended")
     if out is None:
         # Tentakel-offline-Fall (force_tentacle ohne PC erreichbar): ehrliche Meldung
         if b._last_provider == "tentacle_offline":
