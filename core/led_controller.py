@@ -96,7 +96,15 @@ class LEDController:
             pass
 
     def blink(self, count=6, interval=0.3):
-        """Status-LED blinken, danach AN lassen (MOLOCH hat noch Kontrolle)."""
+        """Status-LED blinken, danach AN lassen (MOLOCH hat noch Kontrolle).
+
+        Mini-Bug Fix 2026-04-28: Markus-Standlicht hat Prioritaet. Wenn
+        _markus_on=True → kein Blink-Override, sonst flackert LED wild
+        durch konkurrierende Atmosphere/Behavior-Trigger und Markus sieht
+        sie als "leuchtet nicht".
+        """
+        if self._markus_on:
+            return  # Markus erkannt -> Standlicht haelt, kein Blink
         def do_blink():
             for _ in range(count):
                 self.off()
