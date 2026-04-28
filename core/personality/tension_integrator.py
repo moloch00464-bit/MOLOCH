@@ -88,6 +88,9 @@ class TensionIntegrator:
         self._anger_sustain_thread: Optional[threading.Thread] = None
         # Besaenftigung State
         self._last_appeasement_boost = 0.0
+        # Unknown-Person State (Phase 0c — Bug 2 Fix)
+        self._last_unknown_face_ts = 0.0
+        self._unknown_face_cooldown_s = 5.0  # max 1 Push pro 5s
 
     def set_core_integrator(self, ci):
         """CoreIntegrator-Referenz setzen (lazy init) + Event-Subscriptions."""
@@ -95,10 +98,14 @@ class TensionIntegrator:
         # Whisper-Rudeness Subscription — self-subscribe statt Service-Verdrahtung
         try:
             from core.moloch_event_bus import get_event_bus
-            get_event_bus().subscribe("whisper.result", self.on_whisper_result, priority=5)
+            bus = get_event_bus()
+            bus.subscribe("whisper.result", self.on_whisper_result, priority=5)
             logger.info("[TENSION] whisper.result Subscription aktiv (Rudeness-Detection)")
+            # Phase 0c: Unbekannte Person → Tension-Push (Shadow-Schwelle erreichen)
+            bus.subscribe("perception.face_confirmed", self.on_face_confirmed, priority=5)
+            logger.info("[TENSION] perception.face_confirmed Subscription aktiv (Unknown-Person)")
         except Exception as e:
-            logger.warning(f"[TENSION] whisper.result Subscription fehlgeschlagen: {e}")
+            logger.warning(f"[TENSION] Subscription fehlgeschlagen: {e}")
 
     def on_context_update(self, event: Dict[str, Any]):
         """Event-Handler fuer context_update Events.
@@ -168,6 +175,44 @@ class TensionIntegrator:
             self._core_integrator.update_input("awareness", "person_detected", tension_delta)
         elif tension_delta < 0:
             self._core_integrator.update_input("awareness", "respect_score", abs(tension_delta))
+
+    def on_face_confirmed(self, event: Dict[str, Any]):
+        """Phase 0c — Unbekannte Person erkannt → Tension-Push (Shadow-Schwelle).
+
+        SCRFD detektiert Gesicht, aber ArcFace-Similarity unterhalb Owner-Threshold:
+        → Es ist jemand fremdes im Bild. Tension muss steigen damit Zone von
+        Guardian auf Shadow wechselt.
+
+        Bisherige asymmetrische Logik war:
+          markus_recognized: 0.4 (CoreIntegrator-Mapping) → Tension fällt klar
+          unknown_person nur indirekt via on_activity_changed (zu schwach)
+
+        Fix: Direkter unknown_person-Push mit Wert 0.5 → +0.2 Tension-Delta
+        (CoreIntegrator-Multiplier 0.4) — reicht für Zone-Wechsel.
+        Rate-Limited via _unknown_face_cooldown_s.
+        """
+        if not self._core_integrator:
+            return
+
+        payload = event.get("payload", {})
+        similarity = payload.get("similarity", 0.0)
+        # Owner-Threshold: similarity < 0.45 → klar nicht Markus
+        # Wert konservativ unter typischem ArcFace-Owner-Threshold (0.45-0.65)
+        if similarity >= 0.45:
+            return  # Markus oder bekannte Person → kein Push
+
+        now = time.time()
+        with self._lock:
+            if now - self._last_unknown_face_ts < self._unknown_face_cooldown_s:
+                return  # Cooldown aktiv
+            self._last_unknown_face_ts = now
+
+        # Unknown-Person-Push: 0.5 → +0.2 Tension-Delta (CoreIntegrator-Multiplier)
+        self._core_integrator.update_input("awareness", "unknown_person", 0.5)
+        logger.info(
+            f"[TENSION] Unknown person detected (sim={similarity:.2f}) → "
+            f"unknown_person=0.5 push (Shadow-Trigger)"
+        )
 
     # ================================================================
     # WHISPER RUDENESS DETECTION — Tension-Spike bei Beleidigungen
