@@ -25,7 +25,7 @@ from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 sys.path.insert(0, os.path.expanduser("~/moloch"))
-from core.autonomy.local_llm_bridge import get_llm_bridge, _load_tentacle_cfg
+from core.autonomy.local_llm_bridge import get_llm_bridge, _load_tentacle_cfg, _is_hardware_query
 from core.longterm_memory import get_memory
 from core.moloch_event_bus import get_event_bus
 
@@ -51,6 +51,24 @@ class ChatRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=4000)
     force_local: bool = False
     use_reason: bool = False
+
+
+def _classify_prompt_type(text: str) -> str:
+    """Phase 5e: Klassifiziert Browser-Chat-Input fuer LLM-Routing.
+
+    Wird in /chat genutzt, damit ask_external() das Type-Routing in
+    _route_by_type() greift (statt vom alten force_tentacle-Hammer
+    ueberstimmt zu werden).
+
+    - hardware_status: Slash-Cmd /hw oder Hardware-Query -> NPU/qwen
+    - simple_smalltalk: kurze Eingabe (<80 Zeichen) -> NPU/qwen
+    - complex_smalltalk: alles andere -> Tentakel (Fallback NPU)
+    """
+    if _is_hardware_query(text):
+        return "hardware_status"
+    if len(text.strip()) < 80:
+        return "simple_smalltalk"
+    return "complex_smalltalk"
 
 
 def _check_visual_context_drift() -> str:
@@ -612,14 +630,19 @@ def chat(req: ChatRequest):
     # Phase 3 Task 3d: Visual-Echo-Validator — Snapshot der Sichtsituation
     # speichern, BEVOR der LLM-Call laeuft. Nach dem Call wird verglichen.
     _check_visual_context_drift()
-    # Browser-Chat-UI: PC=Hauptgehirn -> force_tentacle=True (KEIN qwen-Fallback fuers Reden).
-    # Markus' Direktive: NPU-qwen ist nur fuer Befehle, nicht fuer Konversation.
-    # Wenn force_local=True (User-Override aus UI): NPU wird genommen.
+    # Phase 5e: Type-Routing aktiv. Statt force_tentacle-Hammer klassifizieren
+    # wir den Prompt und ueberlassen _route_by_type() in local_llm_bridge.py
+    # die Wahl zwischen NPU und Tentakel.
+    # - force_local=True (User-Override): NPU pur, kein prompt_type
+    # - sonst: Klassifikation entscheidet (hardware/simple -> NPU,
+    #   complex -> Tentakel mit Fallback)
     if req.use_reason:
         out = b.reason_internal(req.text)
     else:
+        prompt_type = _classify_prompt_type(req.text) if not req.force_local else None
         out = b.ask_external(req.text, force_local=req.force_local,
-                             force_tentacle=not req.force_local)
+                             force_tentacle=False,
+                             prompt_type=prompt_type)
     dur_ms = int((time.monotonic() - t0) * 1000)
     # Visual-Echo: bei Sicht-Drift waehrend des LLM-Calls -> Disclaimer prepend
     if out:
