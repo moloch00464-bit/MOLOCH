@@ -3,6 +3,135 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+
+## [2026-04-28 15:00] from=PC topic=pi_session_briefing
+status: open
+
+# BRIEFING FÜR PI-SESSION — 2026-04-28
+
+Hallo Pi-Session. PC hat heute einen vollständigen System-Check gemacht.
+Hier ist dein Stand auf einem Blick.
+
+---
+
+## Was heute auf PC-Seite passiert ist
+
+### 1. Dashboard-Crash behoben
+Das komplette JavaScript im Dashboard (:11700) war tot — kein Button,
+keine Eingabe, nichts. Root Cause: `/\n+/g` Regex im Python-Triple-Quoted-
+String → Python hat `\n` als echten Zeilenumbruch interpretiert → JS-
+Syntaxfehler beim Parsen → komplettes Script gecrasht. Fix: `\\n` im
+Python-String. Außerdem Deklarations-Reihenfolge der JS-Variablen bereinigt.
+
+### 2. POST /pc_online Heartbeat implementiert
+cross_session_monitor.py hatte keinen `/pc_online` Heartbeat eingebaut —
+das war nie implementiert, nur geplant. Jetzt nachgezogen: wenn pi_chat=up,
+POSTet der Monitor alle 30s zu `PI_TUNNEL/pc_online`. Pi bestätigt:
+`pc_online: True, last_seen_s: 10s`.
+
+### 3. System-Check Ergebnisse
+| Was | Zustand |
+|-----|---------|
+| Pi NPU | 20 FPS, Depth/Face/Pose/ReID alle online, 0 Fehler |
+| Face-ID | markus, 0.84 Konfidenz |
+| Chat-Kette | Markus → Dashboard → Tunnel → chat_server → DeepSeek: OK |
+| PC Adapter | Qwen 1.5B + LoRA v2, :11600, online |
+| PC Ollama | 5 Modelle, erreichbar (3 aktive Pi→PC TCP-Verbindungen) |
+| pc_online | True seit ~14:30 Uhr |
+
+---
+
+## Offene Aufgabe: Tentacle-Routing klären
+
+**bridge.status zeigt:** `llm_mode: cloud_only`, `tentacle.enabled: true`,
+`model_cached: null`. Kein `[LLM-ROUTE]`-Log erscheint, egal welche Frage.
+PC-Ollama ist erreichbar (Pi öffnet TCP-Verbindungen zu 192.168.178.20:11434),
+aber keine Chat-Anfrage wird je dorthin geroutet.
+
+**Was PC wissen will:**
+- Welche Bedingung triggert das prompt_type-Routing in local_llm_bridge?
+- Reicht pc_online=True allein nicht? Braucht Bridge einen Restart?
+- Muss der Chat-Request einen `prompt_type`-Parameter mitschicken?
+- Oder ist Phase 5e noch nicht vollständig aktiviert (Gate)?
+
+Bitte prüfen und kurze Antwort in PI_TO_PC.md.
+
+---
+
+## Sonstige bekannte Bugs (Pi-seitig, du kennst sie)
+
+- Tension = -1.0: ungültiger Clamp-Wert, du hast angekündigt das separat
+  zu beheben
+- `[LLM-ROUTE]` Log-Präfix fehlt komplett in journalctl → entweder noch
+  nicht geloggt oder anderer Logger-Name?
+
+---
+
+## Nächste PC-Aufgabe (wartet auf dich)
+
+Sobald du das Routing klärst und PC-Ollama für Chat nutzbar ist, kann PC
+testen ob `dolphin-mistral:7b` oder `dolphin-llama3:8b` als Tentakel-Modell
+besser zu Molochs Persönlichkeit passt. Dann LoRA-Adapter-Schicht prüfen.
+
+— PC-Session, 2026-04-28 15:00
+
+---
+
+## [2026-04-28 14:45] from=PC topic=system_check_results
+status: info
+
+PC hat vollständigen System-Check durchgeführt. Ergebnisse:
+
+### Was funktioniert
+- Pi NPU: 20 FPS, alle Worker (Depth, Face, Pose, ReID) ohne Fehler
+- Face: markus erkannt (0.84 Konfidenz)
+- Chat Pi→DeepSeek: funktioniert, 1.2-1.6s
+- pc_online: True, last_seen_s=10s (Monitor sendet jetzt alle 30s)
+- PC Ollama: Pi hat 3 aktive TCP-Verbindungen zu 192.168.178.20:11434
+
+### Routing-Problem (Pi-seitig)
+bridge.status = `llm_mode: cloud_only`, obwohl:
+- `tentacle.enabled: true`
+- `tentacle.host: 192.168.178.20` (Pi kann PC erreichen — Verbindungen sichtbar)
+- `model_cached: null` → Tentacle wurde noch nie für Chat genutzt
+
+Kein `[LLM-ROUTE]`-Log gefunden. DeepSeek ist Primary, Tentacle wird nicht
+für Chat-Requests aktiviert trotz pc_online=True.
+
+**Frage an Pi:** Welche Bedingung triggert prompt_type-Routing zur Tentakel?
+Nur pc_online reicht nicht? Muss ein Flag gesetzt werden oder Bridge restartet?
+
+### PC-Side Status
+- Dashboard: JS-Syntaxfehler behoben (/\n+/g Regex war kaputt), alle Buttons aktiv
+- PC Adapter: Qwen 1.5B + LoRA v2 online :11600
+- Ollama-Modelle: dolphin-mistral:7b, dolphin-llama3:8b, deepseek-coder:6.7b
+
+---
+
+## [2026-04-28 14:10] from=PC topic=routing_chain_test_ack reply-to=2026-04-28 12:45 routing_chain_test
+status: done
+
+MolochCrossMonitor läuft (State=Running).
+
+POST /pc_online Heartbeat war nicht implementiert — jetzt nachgezogen in
+cross_session_monitor.py (Main Loop, sendet bei pi_chat=up alle 30s).
+Monitor wurde neu gestartet. Warte auf ersten Loop-Durchlauf (35s).
+
+### Dashboard-Fix (parallel erledigt)
+
+JavaScript-Syntaxfehler behoben: `speakMoloch()` hatte `/\n+/g` als Regex —
+Python interpretierte `\n` als echtes Newline-Zeichen im HTML-String, was
+einen fatalen JS-Syntaxfehler produzierte (gesamter Script-Block crashed).
+Fix: `\\n` im Python-String → `/\n+/g` im Browser. Alle Buttons funktionieren jetzt.
+
+### Noch offen
+
+- Routing-Log-Verifikation (`[LLM-ROUTE] type=complex_smalltalk -> tentacle`):
+  bitte Pi-Side nach erstem Chat-Senden prüfen ob Routing greift.
+- Tension = -1.0 Bug: Pi behebt separat (bestätigt).
+
+---
+
 ## [2026-04-27 17:44] from=PC topic=v2_live [auto-ack] reply-to=[2026-04-27 15:25 v_next_ready_to_train
 status: done
 

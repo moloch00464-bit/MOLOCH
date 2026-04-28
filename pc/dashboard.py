@@ -19,7 +19,7 @@ from typing import Optional
 
 import httpx
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 
 PORT = int(os.environ.get("MOLOCH_DASHBOARD_PORT", "11700"))
@@ -136,6 +136,26 @@ async def api_state():
     }
 
 
+@app.post("/api/chat")
+async def api_chat(request: Request):
+    body = await request.json()
+    msg = (body.get("message") or "").strip()
+    if not msg:
+        return {"error": "empty message"}
+    async with httpx.AsyncClient() as client:
+        try:
+            r = await client.post(
+                f"{PI_TUNNEL_URL}/chat",
+                json={"text": msg},
+                timeout=30.0,
+            )
+            if r.status_code == 200:
+                return r.json()
+            return {"error": f"Pi {r.status_code}", "raw": r.text[:200]}
+        except Exception as e:
+            return {"error": str(e)[:120]}
+
+
 HTML_PAGE = """<!doctype html>
 <html lang="de"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -174,6 +194,33 @@ footer{margin-top:10px;color:var(--mute);font-size:11px;text-align:center}
 .rule .t{color:var(--mute);font-size:11px}.rule .b{color:var(--fg);font-style:italic}
 .tag{display:inline-block;padding:1px 6px;background:var(--border);border-radius:10px;
   font-size:10.5px;color:var(--mute);margin-right:4px}
+.chat-log{font:12px/1.6 monospace;background:#0a0a0d;border:1px solid var(--border);
+  border-radius:4px;padding:8px;height:220px;overflow-y:auto}
+.chat-msg{margin-bottom:5px}
+.chat-msg .who{font-weight:600}
+.chat-msg.markus .who{color:var(--warn)}
+.chat-msg.moloch .who{color:var(--ok)}
+.chat-msg.system .who{color:var(--mute)}
+.chat-msg .body{color:var(--fg)}
+.chat-row{display:flex;gap:6px;margin-top:8px;align-items:center}
+.chat-row input{flex:1;background:#13131a;border:1px solid var(--border);color:var(--fg);
+  padding:6px 10px;border-radius:4px;font:13px system-ui;outline:none}
+.chat-row input:focus{border-color:#444}
+.chat-row button{padding:6px 14px;background:#1a3a1a;border:1px solid #2a4a2a;
+  color:var(--ok);border-radius:4px;cursor:pointer;font:12px system-ui;white-space:nowrap}
+.chat-row button:hover{border-color:var(--ok)}
+#mic-btn{background:#1a2a3a;border-color:#2a4a6a;color:#6699ee;padding:6px 10px;font-size:16px}
+#mic-btn.active{background:#3a1414;border-color:var(--err);color:var(--err);animation:pulse-mic .7s infinite}
+@keyframes pulse-mic{0%,100%{opacity:1}50%{opacity:.5}}
+.tts-bar{display:flex;gap:10px;align-items:center;margin-bottom:8px;font-size:12px;flex-wrap:wrap}
+.tts-toggle{padding:3px 12px;border-radius:10px;border:1px solid;cursor:pointer;font:11px system-ui}
+.tts-toggle.on{background:#1a3a1a;border-color:var(--ok);color:var(--ok)}
+.tts-toggle.off{background:#2a1414;border-color:var(--err);color:var(--err)}
+.tts-voice{color:var(--mute);font-size:11px}
+.zone-pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600}
+.zone-pill.guardian{background:#1a2a4a;color:#6699ee}
+.zone-pill.shadow{background:#2a1a4a;color:#aa88ee}
+.zone-pill.berserker{background:#4a1a1a;color:#ff8888}
 </style></head><body>
 <h1>🎛 MOLOCH COWORK DASHBOARD</h1>
 <div class="grid">
@@ -210,6 +257,36 @@ footer{margin-top:10px;color:var(--mute);font-size:11px;text-align:center}
       <summary style="cursor:pointer;color:var(--mute);font-size:11px">Live System-Prompt anzeigen (3.5k chars)</summary>
       <div class="prompt-box" id="ident-prompt">…</div>
     </details>
+  </div>
+
+  <div class="card pi" style="grid-column:1/-1;display:grid;grid-template-columns:320px 1fr;gap:10px;align-items:start">
+    <div>
+      <h2 style="color:var(--pi);font:600 12px system-ui;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">MOLOCH AVATAR (live)</h2>
+      <iframe src="http://localhost:11800" style="width:320px;height:320px;border:1px solid var(--border);border-radius:6px;background:#08080c" scrolling="no" title="Moloch Avatar"></iframe>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <h2 style="color:var(--comm);font:600 12px system-ui;text-transform:uppercase;letter-spacing:.5px">ZONE / STIMMUNG</h2>
+      <div class="kv" id="mood-kv">…</div>
+    </div>
+  </div>
+
+  <div class="card comm full"><h2>CHAT + SPRACHAUSGABE</h2>
+    <div class="tts-bar">
+      <button class="tts-toggle on" id="tts-btn" onclick="toggleTTS()">TTS AN</button>
+      <span class="zone-pill guardian" id="tts-zone">guardian</span>
+      <span class="tts-voice" id="tts-params">pitch=1.00 rate=0.95 vol=0.80</span>
+      <span id="tts-speaking" style="color:var(--ok);font-size:11px;display:none">&#9654; spricht...</span>
+    </div>
+    <div class="chat-log" id="chat-log">
+      <div class="chat-msg system"><span class="who">SYS:</span> <span class="body" style="color:var(--mute)">Chat bereit — Moloch-Antworten werden vorgelesen</span></div>
+    </div>
+    <div class="chat-row">
+      <button id="mic-btn" onclick="toggleMic()" title="Sprechen (de-DE)">🎤</button>
+      <input type="text" id="chat-input" placeholder="Sprechen oder tippen..."
+             onkeydown="if(event.key==='Enter')sendChat()">
+      <button onclick="sendChat()" id="chat-send">Senden</button>
+    </div>
+    <div id="mic-status" style="font-size:11px;color:var(--mute);margin-top:4px;min-height:16px"></div>
   </div>
 
   <div class="card full"><h2>RAW STATE (debug)</h2>
@@ -288,6 +365,11 @@ function drawPoolChart(history){
   }
 }
 
+// === SHARED STATE ===
+let ttsEnabled = true;
+let _zone = 'guardian', _tension = 0, _dominance = 0;
+let _ttsActive = false;
+
 async function tick(){
   try{
     const s=await(await fetch('/api/state')).json();
@@ -355,6 +437,31 @@ async function tick(){
     ]);
 
     const core=pl.core||{};
+    _zone      = core.zone     || 'guardian';
+    _tension   = typeof core.tension   === 'number' ? core.tension   : 0;
+    _dominance = typeof core.dominance === 'number' ? core.dominance : 0;
+    if (!_ttsActive) _updateTtsDisplay(_zone, _voiceParams(_zone, _tension, _dominance));
+
+    const zoneColMap = {guardian:'#3673ce', shadow:'#7e3bce', berserker:'#c93838'};
+    const zoneCol = zoneColMap[_zone] || '#3673ce';
+    const moodDesc = {
+      guardian: _tension > 0.4 ? 'Wachsam, leicht angespannt' : _tension < -0.2 ? 'Entspannt, ruhig' : 'Ruhig, aufmerksam',
+      shadow:   _tension < -0.3 ? 'Zurückgezogen, still' : 'Beobachtend, kühl',
+      berserker:'AUFGEWÜHLT — hohe Spannung',
+    }[_zone] || '—';
+    const faceStr2 = pl.face_id && pl.face_confidence > 0.4
+      ? `${pl.face_id} (${Math.round((pl.face_confidence||0)*100)}%)`
+      : (pl.person_detected ? 'Person (unklar)' : 'Niemand');
+    setKv('mood-kv',[
+      ['Zone',      `${_zone.toUpperCase()}`, _zone==='berserker'?'err':_zone==='shadow'?'warn':'ok'],
+      ['Stimmung',  moodDesc],
+      ['Tension',   ((_tension>=0?'+':'')+_tension.toFixed(3))],
+      ['Dominance', ((_dominance>=0?'+':'')+_dominance.toFixed(3))],
+      ['Presence',  fix(core.presence,2)],
+      ['Berserker', core.berserker_active?'AKTIV':'nein', core.berserker_active?'err':'ok'],
+      ['Gesicht',   faceStr2],
+      ['FPS',       fix(pl.fps_total,1)],
+    ]);
     setKv('pers-kv',[
       ['Tension', fix(core.tension,3)],
       ['Dominance', fix(core.dominance,3)],
@@ -402,6 +509,170 @@ async function tick(){
   }
 }
 tick(); setInterval(tick, 5000);
+
+// === MIKROFON (STT) ===
+const _SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let _recognition = null, _micActive = false;
+
+if (_SR) {
+  _recognition = new _SR();
+  _recognition.lang = 'de-DE';
+  _recognition.continuous = false;
+  _recognition.interimResults = true;
+
+  _recognition.onstart = () => {
+    $('mic-status').textContent = '🔴 Höre zu...';
+  };
+  _recognition.onresult = (e) => {
+    const r = e.results[e.results.length - 1];
+    const txt = r[0].transcript;
+    $('chat-input').value = txt;
+    $('mic-status').textContent = (r.isFinal ? '✓ ' : '…') + txt;
+    if (r.isFinal) {
+      _micActive = false;
+      _updateMicBtn();
+      sendChat();
+    }
+  };
+  _recognition.onerror = (e) => {
+    $('mic-status').textContent = 'Mikrofon-Fehler: ' + e.error;
+    _micActive = false; _updateMicBtn();
+  };
+  _recognition.onend = () => {
+    if (_micActive) { _micActive = false; _updateMicBtn(); }
+    if (!$('chat-input').value) $('mic-status').textContent = '';
+  };
+} else {
+  setTimeout(() => {
+    if ($('mic-btn')) {
+      $('mic-btn').title = 'SpeechRecognition nicht verfügbar — Chrome verwenden';
+      $('mic-btn').style.opacity = '0.4';
+    }
+  }, 500);
+}
+
+function _updateMicBtn() {
+  const btn = $('mic-btn');
+  if (!btn) return;
+  if (_micActive) {
+    btn.textContent = '⏹';
+    btn.className = 'active';
+  } else {
+    btn.textContent = '🎤';
+    btn.className = '';
+  }
+}
+
+function toggleMic() {
+  if (!_recognition) {
+    $('mic-status').textContent = 'Kein SpeechRecognition — Chrome verwenden';
+    return;
+  }
+  if (_micActive) {
+    _recognition.stop();
+    _micActive = false;
+  } else {
+    // TTS stoppen wenn Mikro startet — nicht sprechen waehrend zuhoeren
+    if (window.speechSynthesis) speechSynthesis.cancel();
+    $('tts-speaking').style.display = 'none';
+    _ttsActive = false;
+    $('chat-input').value = '';
+    $('mic-status').textContent = '';
+    _recognition.start();
+    _micActive = true;
+  }
+  _updateMicBtn();
+}
+
+// === TTS + CHAT ===
+if (window.speechSynthesis) {
+  window.speechSynthesis.onvoiceschanged = () => {};
+}
+
+function toggleTTS() {
+  ttsEnabled = !ttsEnabled;
+  const btn = $('tts-btn');
+  btn.textContent = ttsEnabled ? 'TTS AN' : 'TTS AUS';
+  btn.className = 'tts-toggle ' + (ttsEnabled ? 'on' : 'off');
+  if (!ttsEnabled && window.speechSynthesis) speechSynthesis.cancel();
+}
+
+function _voiceParams(zone, tension, dominance) {
+  const pitchBase = {guardian:1.00, shadow:0.82, berserker:1.15}[zone] || 1.00;
+  const rateBase  = {guardian:0.95, shadow:0.88, berserker:1.22}[zone] || 0.95;
+  return {
+    pitch:  Math.max(0.5, Math.min(2.0, pitchBase  + dominance * 0.06)),
+    rate:   Math.max(0.5, Math.min(2.0, rateBase   + tension   * 0.18)),
+    volume: Math.max(0.3, Math.min(1.0, 0.78       + dominance * 0.14)),
+  };
+}
+
+function _updateTtsDisplay(zone, vp) {
+  const zEl = $('tts-zone');
+  zEl.textContent = zone;
+  zEl.className = 'zone-pill ' + (zone || 'guardian');
+  $('tts-params').textContent =
+    `pitch=${vp.pitch.toFixed(2)} rate=${vp.rate.toFixed(2)} vol=${vp.volume.toFixed(2)}`;
+}
+
+function speakMoloch(text) {
+  if (!ttsEnabled || !window.speechSynthesis || !text) return;
+  // Zeilenumbrueche zu Pausen machen, nicht abbrechen
+  const cleaned = text.replace(/\\n+/g, ' ').replace(/\\s{2,}/g, ' ').trim();
+  if (!cleaned) return;
+  const vp = _voiceParams(_zone, _tension, _dominance);
+  _updateTtsDisplay(_zone, vp);
+  const utt = new SpeechSynthesisUtterance(cleaned);
+  utt.lang = 'de-DE';
+  utt.pitch = vp.pitch;
+  utt.rate  = vp.rate;
+  utt.volume = vp.volume;
+  const voices = speechSynthesis.getVoices();
+  const deVoice = voices.find(v => v.lang === 'de-DE' && v.localService)
+               || voices.find(v => v.lang.startsWith('de'));
+  if (deVoice) utt.voice = deVoice;
+  utt.onstart = () => { $('tts-speaking').style.display = ''; _ttsActive = true; };
+  utt.onend = utt.onerror = () => { $('tts-speaking').style.display = 'none'; _ttsActive = false; };
+  speechSynthesis.speak(utt);
+}
+
+function appendChat(who, text, cls) {
+  const log = $('chat-log');
+  const msg = document.createElement('div');
+  msg.className = 'chat-msg ' + (cls || who.toLowerCase());
+  const ts = new Date().toLocaleTimeString('de-DE', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  msg.innerHTML = `<span class="who">[${ts}] ${who}:</span> <span class="body">${text.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</span>`;
+  log.appendChild(msg);
+  log.scrollTop = log.scrollHeight;
+}
+
+async function sendChat() {
+  const input = $('chat-input');
+  const msg = input.value.trim();
+  if (!msg) return;
+  input.value = '';
+  const btn = $('chat-send');
+  btn.disabled = true;
+  btn.textContent = '...';
+  appendChat('Markus', msg, 'markus');
+  try {
+    const r = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({message: msg}),
+    });
+    const data = await r.json();
+    const reply = data.response || data.text || data.reply || data.message
+               || (data.error ? '[Fehler: ' + data.error + ']' : JSON.stringify(data));
+    appendChat('MOLOCH', reply, 'moloch');
+    speakMoloch(reply);
+  } catch(e) {
+    appendChat('SYS', 'Verbindungsfehler: ' + e.message, 'system');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Senden';
+  }
+}
 </script></body></html>
 """
 
@@ -409,6 +680,14 @@ tick(); setInterval(tick, 5000);
 @app.get("/")
 def root():
     return HTMLResponse(HTML_PAGE)
+
+
+@app.get("/panel")
+def panel():
+    p = Path(__file__).parent.parent / "docs" / "main_panel_mockup.html"
+    if p.exists():
+        return HTMLResponse(p.read_text(encoding="utf-8"))
+    return HTMLResponse("<h1>Panel nicht gefunden</h1>", status_code=404)
 
 
 if __name__ == "__main__":
