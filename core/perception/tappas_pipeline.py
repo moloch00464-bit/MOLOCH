@@ -1410,6 +1410,11 @@ class TappasPipeline:
             face_age = frame_id - getattr(face_result, 'frame_id', 0) if face_result else 999
             if face_result and face_result.data.get("faces") and face_age <= 5:
                 for face in face_result.data["faces"]:
+                    try:
+                        from core.perception.face_attr_parser import format_face_attr_from_dict as _fmt_face_attr
+                        face_attr_str = _fmt_face_attr(face)
+                    except Exception:
+                        face_attr_str = "?"
                     face_entry = {
                         "class": "face",
                         "bbox": face["bbox"],
@@ -1421,6 +1426,7 @@ class TappasPipeline:
                         "smiling": face.get("emotion") == "happy" if face.get("emotion") else None,
                         "track_id": None,
                         "landmarks": face.get("landmarks"),  # 5 SCRFD-Punkte [[x,y],...] normalisiert [0,1]
+                        "face_attr": face_attr_str,
                     }
                     faces.append(face_entry)
                     detections.append(face_entry)
