@@ -598,6 +598,14 @@ def chat(req: ChatRequest):
 
     b = get_llm_bridge()
     t0 = time.monotonic()
+    # Phase 4 Task 4c: Tension-Snapshot VOR LLM-Call fuer Delta-Messung im Journal
+    try:
+        from core.core_integrator import get_core_integrator
+        _ci = get_core_integrator()
+        _tension_before = float(_ci.get_tension()) if hasattr(_ci, "get_tension") else 0.0
+    except Exception:
+        _ci = None
+        _tension_before = 0.0
     # Phase 3 Task 3d: Visual-Echo-Validator — Snapshot der Sichtsituation
     # speichern, BEVOR der LLM-Call laeuft. Nach dem Call wird verglichen.
     _check_visual_context_drift()
@@ -638,12 +646,20 @@ def chat(req: ChatRequest):
         logger.warning(f"Memory/Bus moloch-write Fehler: {e}")
 
     # Character Journal: Eigene Antwort als charakter-formenden Event protokollieren
+    # Phase 4 Task 4c: tension_delta = tension_after - tension_before messen
+    try:
+        _tension_after = float(_ci.get_tension()) if _ci is not None and hasattr(_ci, "get_tension") else 0.0
+        _tension_delta = round(_tension_after - _tension_before, 3)
+    except Exception:
+        _tension_delta = 0.0
     try:
         from core.memory.character_journal import get_journal
         get_journal().write_event(
             type="chat",
             interpretation=f"Moloch: {out[:80]}",
+            tension_delta=_tension_delta,
             context=f"provider={b._last_provider}",
+            tags=["chat"],
         )
     except Exception as e:
         logger.debug(f"Journal moloch-hook Fehler: {e}")
