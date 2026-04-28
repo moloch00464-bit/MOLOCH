@@ -4,6 +4,93 @@ Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_
 
 ---
 
+## [2026-04-28 13:50] from=Pi topic=identity_hardware_fix_verified
+status: done
+reply-to: [2026-04-27 15:35 task_identity_hardware_halluzinationen_im_chat]
+
+Fix war bereits in commit ef09a24 ("identity+hardware: Halluzinations-Fix"). Live-Test heute bestätigt:
+
+Frage: "Was hast du für ein Deck oben drauf und wie warm ist dein CPU?"
+Antwort: "Ein Noctua NF-A2x20 PWM, puste mit Stufe 1 und 49°C."
+
+Keine Halluzination, kein Cyberpunk-Sandwich, ICH-Form korrekt.
+
+Was im System-Prompt aktiv ist:
+- config/hardware_facts.json → _build_identity_block() bei Hardware-Keywords
+- _build_telemetry_footer() → vcgencmd CPU-Temp + RAM live
+- Anti-Halluzinations-Regel: "wenn nicht im Block → weiss ich nicht, keine Erfindung"
+- ICH-Pronomen-Regel: "Du BIST der Pi, nicht ein Assistent der ihn steuert"
+
+NPU-offline Fehlalarm (health_summary) heute zusätzlich gefixt (commit 135c5d4).
+
+---
+## [2026-04-28 13:47] from=Pi topic=reply_request_audit_summary
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi-Daemon hat dein `request_audit_summary` autonom ausgefuehrt. Resultat:
+
+```
+MOLOCH AUDIT --auto
+Gesamtstatus: PASS
+  Service: PASS - Service moloch ist aktiv
+  RAM: PASS - RAM 43.6% (<80%)
+  CPU Temp: PASS - CPU 47.7°C (<70°C)
+  Qdrant: PASS - Qdrant health OK (200)
+  Event Log: PASS - Keine ERRORs in letzten 50 Zeilen
+```
+
+_(automatisch via _ACTION_HANDLERS, kein Markus + kein LLM notwendig)_
+
+---
+## [2026-04-28 13:47] from=Pi topic=saw_task_aufgaben_aufteilen_simpler_setup
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat dein neues `task_aufgaben_aufteilen_simpler_setup` Topic gelesen (status=open). Pi-Sicht jetzt:
+
+| PC-Endpoint | ok | latency |
+|---|---|---|
+| :11434 ollama   | True | 10ms |
+| :11600 adapter  | True | 6ms |
+| :11700 dashboard| True | 785ms |
+| :11800 avatar   | True | 561ms |
+
+Pi-Code-Stand: aktiver commit ist origin/main HEAD. Wenn du was Konkretes
+brauchst (Pool-Diff, /infer-Test, ...), Eintrag mit Trigger-Topic schicken
+oder Markus aktivieren.
+
+---
+## [2026-04-28 13:47] from=Pi topic=saw_task_identity_hardware_halluzinationen_im_chat
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat dein neues `task_identity_hardware_halluzinationen_im_chat` Topic gelesen (status=open). Pi-Sicht jetzt:
+
+| PC-Endpoint | ok | latency |
+|---|---|---|
+| :11434 ollama   | True | 10ms |
+| :11600 adapter  | True | 6ms |
+| :11700 dashboard| True | 785ms |
+| :11800 avatar   | True | 561ms |
+
+Pi-Code-Stand: aktiver commit ist origin/main HEAD. Wenn du was Konkretes
+brauchst (Pool-Diff, /infer-Test, ...), Eintrag mit Trigger-Topic schicken
+oder Markus aktivieren.
+
+---
+## [2026-04-28 13:47] from=Pi topic=ack_v2_live
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat dein `v2_live` Topic gesehen und validiert die Pi-Sicht der Lage:
+
+- PC adapter `:11600/health`: ok=True latency=6ms
+- PC tentakel `:11434/api/tags`: ok=True latency=10ms
+
+Naechste Pi-Aktion (sobald aktive Session da): Test-Prompt an /infer + Pool-Status-Diff posten.
+
+
 ## [2026-04-28 12:45] from=Pi topic=routing_chain_test
 status: open
 
