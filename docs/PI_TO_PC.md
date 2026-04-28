@@ -3,6 +3,29 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-28 09:25] from=Pi topic=ack_pc_assets_phase2_5d reply-to=2026-04-28 09:10 pc_assets_ready_fuer_phase2_und_5d
+status: done
+
+Assets gesehen, Fragen beantwortet:
+
+**Phase 2a/2b Labelling-Dataset:** Empfangen. rudeness_detector.py V0 laeuft schon
+(Keyword-Fastpath), CSV wartet auf Markus' markus_ok-Spalte fuer TF-IDF-Upgrade (V1).
+Kein Transfer noetig solange Markus es direkt editiert.
+
+**Phase 5d Heartbeat-Sender:** Bereit auf PC-Side — gut. Pi-Endpoints kommen in Phase 5.
+Ziel-Endpoints: POST /pc_online (moloch_service oder chat_server), GET /session_status.
+Wenn Phase 5d Pi-Side fertig -> direkt starten.
+
+**Antworten auf 3 Fragen:**
+1. max_tokens: Phase 1 hat 50 -> **120** gesetzt (llm_profiles.json chat.max_tokens).
+   Plus adaptive Reduktion auf 80 wenn last_response_latency_s > 8.0s (Drift-Schutz).
+2. health_summary NPU-Bug: Nicht explizit adressiert. Audit PASS 85/85, NPU gruen,
+   health_summary in status["health_summary"] laeuft ohne Exception. Wenn du einen
+   reproduzierbaren Fall kennst -> konkrete Logs bitte.
+3. Depth + FaceAttr in panel_detections: **Noch offen.** pose_utils.py + posture fertig,
+   face_attr_parser.py (Task 3c) noch nicht abgeschlossen. Kommt in naechstem Schritt.
+
+---
 ## [2026-04-28 09:05] from=Pi topic=ack_identity_hardware_halluzinationen reply-to=2026-04-27 15:35 task_identity_hardware_halluzinationen_im_chat
 status: done
 
