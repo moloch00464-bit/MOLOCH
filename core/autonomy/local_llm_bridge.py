@@ -29,9 +29,113 @@ import signal
 import subprocess
 import threading
 import time
+from collections import deque
 from typing import Optional, Dict, Callable, Any
 
 logger = logging.getLogger("LocalLLMBridge")
+
+# Phase 3 Task 3b: Tension/Dominance als natuerliche Sprache statt nackter Zahl.
+# Qwen2.5-1.5B + Tentakel-Mistral verstehen Adjektivpaare zuverlaessiger als
+# Vorzeichen-Floats ("eisig-distanziert" statt "tension=-0.7").
+_TENSION_PHRASES = [
+    (-1.0, -0.6, "eisig-distanziert"),
+    (-0.6, -0.3, "gelassen-ruhig"),
+    (-0.3, -0.1, "entspannt-fokussiert"),
+    (-0.1,  0.1, "neutral-praesent"),
+    ( 0.1,  0.3, "angespannt-wach"),
+    ( 0.3,  0.6, "gereizt-scharf"),
+    ( 0.6,  1.0, "kampfbereit-elektrisch"),
+]
+_DOM_PHRASES = [
+    (-1.0, -0.4, "defensiv-zurueckgezogen"),
+    (-0.4, -0.1, "gelassen-beobachtend"),
+    (-0.1,  0.2, "praesent-neutral"),
+    ( 0.2,  0.6, "dominant-praezise"),
+    ( 0.6,  1.0, "dominierend-absolut"),
+]
+
+
+def _tension_phrase(tension: float) -> str:
+    """Tension [-1,1] → Adjektivpaar + Zahlenwert. Phase 3 Task 3b."""
+    try:
+        t = float(tension)
+    except (TypeError, ValueError):
+        t = 0.0
+    for lo, hi, label in _TENSION_PHRASES:
+        if lo <= t < hi:
+            return f"{label} ({t:.2f})"
+    # Boundary: t == 1.0 faellt in letzten Bucket
+    if t >= 1.0:
+        return f"{_TENSION_PHRASES[-1][2]} ({t:.2f})"
+    return f"neutral-praesent ({t:.2f})"
+
+
+def _dom_phrase(dominance: float) -> str:
+    """Dominance [-1,1] → Beschreibung + Zahlenwert. Phase 3 Task 3b."""
+    try:
+        d = float(dominance)
+    except (TypeError, ValueError):
+        d = 0.0
+    for lo, hi, label in _DOM_PHRASES:
+        if lo <= d < hi:
+            return f"{label} ({d:.2f})"
+    if d >= 1.0:
+        return f"{_DOM_PHRASES[-1][2]} ({d:.2f})"
+    return f"praesent-neutral ({d:.2f})"
+
+
+# Phase 3 Task 3e: BBox-Flaeche der letzten 5 Frames fuer Tendenz-Bestimmung.
+# maxlen=5 → ~1s Historie bei Status-JSON-Updaterate ~5Hz.
+_bbox_area_history: deque = deque(maxlen=5)
+
+
+def _distance_phrase(panel_detections) -> str:
+    """BBox-Flaeche → Distanz-Kategorie + Tendenz aus Zeitreihe. Phase 3 Task 3e.
+
+    Args:
+        panel_detections: Liste aus moloch_status.json (normalisierte BBox 0..1).
+    Returns:
+        z.B. "nah, kommt naeher" oder "mittel, stabil" oder "" wenn keine Person.
+    """
+    if not panel_detections:
+        return ""
+    # Groesste Person/Face-BBox als Referenz (naechste Person dominiert Distanz).
+    best_area = 0.0
+    for det in panel_detections:
+        cls = det.get('class', '')
+        if cls not in ('person', 'face'):
+            continue
+        bbox = det.get('bbox') or []
+        if len(bbox) < 4:
+            continue
+        try:
+            x1, y1, x2, y2 = bbox[0], bbox[1], bbox[2], bbox[3]
+            area = max(0.0, (x2 - x1)) * max(0.0, (y2 - y1))
+        except (TypeError, ValueError):
+            continue
+        if area > best_area:
+            best_area = area
+    if best_area <= 0.0:
+        return ""
+    # Kategorie
+    if best_area < 0.02:
+        cat = "fern"
+    elif best_area < 0.08:
+        cat = "mittel"
+    elif best_area < 0.20:
+        cat = "nah"
+    else:
+        cat = "sehr_nah"
+    # Tendenz aus Historie (Vergleich aktuell vs. aeltester Wert)
+    tendency = "stabil"
+    if _bbox_area_history:
+        oldest = _bbox_area_history[0]
+        delta = best_area - oldest
+        # 10% relative Aenderung als Schwelle gegen Jitter
+        if oldest > 0 and abs(delta) / oldest >= 0.10:
+            tendency = "kommt_naeher" if delta > 0 else "entfernt_sich"
+    _bbox_area_history.append(best_area)
+    return f"{cat}, {tendency}"
 
 # hailo-ollama Konfiguration
 OLLAMA_HOST = "http://localhost:8000"
