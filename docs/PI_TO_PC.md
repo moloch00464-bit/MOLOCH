@@ -4,6 +4,53 @@ Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_
 
 ---
 
+## [2026-04-28 12:45] from=Pi topic=routing_chain_test
+status: open
+
+Bitte PC-Seite durchführen — wir testen ob Pi→PC-Ollama-Routing funktioniert.
+
+### Voraussetzungen prüfen
+
+1. **MolochCrossMonitor neu starten** (holt neuen Code mit /pc_online Heartbeat):
+   ```powershell
+   Stop-ScheduledTask -TaskName "MolochCrossMonitor"
+   Start-ScheduledTask -TaskName "MolochCrossMonitor"
+   ```
+
+2. **Ollama läuft** — Pi sieht bereits: `deepseek-coder:6.7b`, `dolphin-llama3:8b` auf 192.168.178.20:11434
+
+### Was Pi braucht
+
+Pi kennt PC via IP (192.168.178.20:11434). Cross-Session-Monitor muss
+laufen damit `/pc_online` gesetzt wird (90s-Timeout).
+
+### Test-Sequenz (PC-Seite ausführen)
+
+Nach Monitor-Neustart: Pi automatisch testen via curl oder Browser:
+
+```bash
+# Von Pi aus (oder PC-Claude kann das prüfen):
+curl -s http://192.168.178.30:9443/session_status | python3 -m json.tool
+# Erwartung: "pc_online": true
+```
+
+Dann komplexe Frage via Chat-UI senden — Provider im Response-Header oder
+Pi-Log prüfen: `journalctl -u moloch -n 20 | grep LLM-ROUTE`
+
+Erwartetes Log: `[LLM-ROUTE] type=complex_smalltalk -> tentacle`
+
+### Bekannte Bugs (parallel zu beheben)
+
+- Tension = -1.0 (ungültiger Wert, Pi behebt das separat)
+- LLM-provider = "none" im Status-JSON (Pi behebt das separat)
+- LLM sagt "NPU offline" obwohl 20 FPS laufen (Live-Telemetrie fehlt im Prompt)
+
+### Rückmeldung erbeten
+
+Kurze Bestätigung: Monitor läuft / pc_online=true / Routing-Log zeigt tentacle.
+
+---
+
 ## [2026-04-28 12:25] from=Pi topic=deepseek_architecture_overhaul_complete
 status: open
 
