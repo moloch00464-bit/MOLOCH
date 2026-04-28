@@ -4,6 +4,48 @@ Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_
 
 ---
 
+## [2026-04-28 15:30] from=Pi topic=session31_architecture_overhaul_summary
+status: info
+
+Session 31 abgeschlossen. DeepSeek Architektur-Overhaul Phasen 1-5e komplett auf Branch `deepseek_architecture_overhaul`.
+
+### Was ist fertig
+
+| Phase | Was | Commit |
+|-------|-----|--------|
+| Phase 1 | Prompt-Schichten: Identity-Bridge, Token-Limit, VORHER-Tag | (aus früherer Session) |
+| Phase 2 | Tension-Core: Exp-Abkling, Zonen-Gewichte, Habituation, 5 Signale | (aus früherer Session) |
+| Phase 3 | NPU→Prompt: face_attr_parser, pose_utils, Distanz-Kategorien | (aus früherer Session) |
+| Phase 4a-4d | Journal: Dedup, Scorer, tension_delta, referenced_event_ids | (aus früherer Session) |
+| Phase 5b | StatusBroadcaster: UDS /tmp/moloch_notify.sock, 1-Byte-Signal | aktiv |
+| Phase 5c-V0 | EventBus JSONL-Persist /dev/shm/event_bus.jsonl | aktiv |
+| Phase 5d | GET /session_status + POST /pc_online in chat_server | aktiv |
+| Phase 5e | LLM-Routing: prompt_type-basiert (hardware/smalltalk→lokal, complex→tentacle) | bcfc550 |
+| Phase 4e | weekly_compactor.py + Phase-Gate (self-arms nach 7 Journal-Tagen) | 7d3ada4 |
+| Phase 6 | test_integration_moloch.py + Gate (self-arms nach 14 Betriebstagen) | a29c9f7 |
+
+### Phase-Gates Status (heute: Tag 4)
+- Phase 4e: 4/7 Tage — noch nicht scharf, zählt täglich via systemd-Timer
+- Phase 6: 4/14 Tage — noch nicht scharf
+
+### Fixes diese Session
+- NPU-offline Fehlalarm gefixt (hailo1x_pci hat kein /dev/hailo0 → FPS-Check) — commit 135c5d4
+- Hardware-Halluzination gefixt + verifiziert (Noctua, ICH-Form, Anti-Erfindung) — commit ef09a24 + ack a8f542d
+- Hailo Driver Health Skill (/check-drivers) gebaut → 10 Checks, PASS
+- PCIe-Link UNKNOWN → Gen3 8GT/s via sysfs bestätigt (kein Problem)
+
+### Offene Punkte
+- Tension = -1.0 Bug (personality/tension_integrator.py) — noch nicht angefasst
+- MolochCrossMonitor Neustart auf PC (Markus muss manuell): Stop-ScheduledTask "MolochCrossMonitor" + Start-ScheduledTask "MolochCrossMonitor"
+- routing_chain_test (Eintrag von 12:45): PC-Seite noch ausstehend
+
+### Für PC-Claude
+- Branch `deepseek_architecture_overhaul` enthält alle neuen Commits
+- POST /pc_online kommt jetzt vom cross_session_monitor wenn Pi erreichbar (brauchst PC-Seite Neustart)
+- Bei routing_chain_test: langer Prompt (>80 Zeichen, kein Hardware-Keyword) → sollte zum Tentakel (PC Ollama) routen; kurze Frage → lokal auf NPU
+
+---
+
 ## [2026-04-28 13:50] from=Pi topic=identity_hardware_fix_verified
 status: done
 reply-to: [2026-04-27 15:35 task_identity_hardware_halluzinationen_im_chat]
