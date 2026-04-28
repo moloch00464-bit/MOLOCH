@@ -42,6 +42,31 @@ _tension_high_since: Optional[float] = None
 _tension_lock = threading.Lock()
 
 
+def _npu_is_active(status: Dict[str, Any] = None) -> bool:
+    """NPU-Aktivität prüfen ohne /dev/hailo0 (hailo1x_pci-Treiber hat kein Device-Node).
+
+    Prüfkette:
+    1. FPS > 0 aus Status-JSON → NPU verarbeitet Frames (sicherste Methode)
+    2. hailo_platform importierbar → Treiber + SDK vorhanden
+    3. Legacy-Fallback: /dev/hailo0 (alter hailort-Treiber)
+    """
+    # 1. FPS aus bereits geladenem Status-JSON (kein zweiter I/O-Call nötig)
+    if status:
+        fps = _extract_fps(status)
+        if fps > 0:
+            return True
+
+    # 2. hailo_platform SDK importierbar?
+    try:
+        import hailo_platform  # noqa: F401
+        return True
+    except ImportError:
+        pass
+
+    # 3. Legacy: /dev/hailo0 (ältere Treiber-Versionen)
+    return os.path.exists("/dev/hailo0")
+
+
 def collect_diagnostics() -> Dict[str, Any]:
     """Kompletter Systemzustand aus allen Quellen.
 
@@ -65,7 +90,9 @@ def collect_diagnostics() -> Dict[str, Any]:
     diag["thread_count"] = threading.active_count()
 
     # 3. NPU Status
-    diag["npu_status"] = "aktiv" if os.path.exists("/dev/hailo0") else "offline"
+    # Hailo-10H: hailo1x_pci-Treiber erstellt KEIN /dev/hailo0.
+    # Zuverlässigste Prüfung: FPS > 0 aus Status-JSON.
+    diag["npu_status"] = "aktiv" if _npu_is_active(status) else "offline"
 
     # 4. Core-State (Tension, Dominance, Mood, Zone)
     core = status.get("core", {})
