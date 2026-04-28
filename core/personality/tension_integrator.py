@@ -71,6 +71,22 @@ _APPEASEMENT_KEYWORDS: List[str] = [
 _APPEASEMENT_BASE_BOOST = -0.25         # Basis-Senkung bei Besaenftigung
 _APPEASEMENT_RESISTANCE_DURING_ANGER = 0.25  # Nur 25% Wirkung bei aktivem Floor
 
+# Phase 2 Task 2d: Zonen-asymmetrische Gewichte
+# Im Berserker reagiert er weniger auf Provokation (er IST schon erregt)
+# und auch weniger auf Besaenftigung (schwer abzukuehlen).
+_ZONE_MULTIPLIERS: Dict[str, Dict[str, float]] = {
+    "guardian":  {"rudeness": 1.00, "appeasement": 1.00},
+    "shadow":    {"rudeness": 0.70, "appeasement": 0.60},
+    "berserker": {"rudeness": 0.35, "appeasement": 0.25},
+}
+
+
+def _zone_mult(zone: Optional[str], kind: str) -> float:
+    """Liefert Multiplikator fuer (zone, kind). Default 1.0 bei unbekannt."""
+    if not zone:
+        return 1.0
+    return _ZONE_MULTIPLIERS.get(zone, {}).get(kind, 1.0)
+
 
 class TensionIntegrator:
     """Bridge zwischen Gate-3 Awareness und CoreIntegrator."""
@@ -91,6 +107,15 @@ class TensionIntegrator:
         self._anger_sustain_thread: Optional[threading.Thread] = None
         # Letzter Decay-Tick (fuer dt-basierte exp-Abklingfunktion)
         self._last_decay_ts: float = time.time()
+        # Phase 2 Task 2e: Habituation — gleicher Text <180s -> nur 50% Wirkung
+        self._last_rudeness_texts: Dict[str, float] = {}
+        self._habituation_window_s: float = 180.0
+        self._habituation_factor: float = 0.5
+        # Phase 2 Task 2g: EMA-geglaettete Tension fuer Zone-Entscheidung
+        self._tension_zone_ema: float = 0.0
+        self._ema_alpha: float = 0.2
+        # Phase 2 Task 2f: Wiederholte-Frage-Detection (letzte Whisper-Texte)
+        self._last_whisper_texts: List[str] = []
         # Besaenftigung State
         self._last_appeasement_boost = 0.0
         # Unknown-Person State (Phase 0c — Bug 2 Fix, v2)
@@ -276,8 +301,23 @@ class TensionIntegrator:
             self._last_rudeness_ts = now
             self._last_rudeness_boost = boost
 
+        # Phase 2 Task 2d: Zone-Multiplikator
+        zone = self._get_current_zone()
+        z_mult = _zone_mult(zone, "rudeness")
+        boost *= z_mult
+        # Phase 2 Task 2e: Habituation (gleicher Text <180s -> 50%)
+        boost = self._apply_habituation(text, boost)
+        boost = self._clamp(boost, -1.0, 1.0)
+        if boost <= 0.0:
+            logger.debug("[TENSION] Rudeness nach Zone/Habituation auf 0 reduziert")
+            return
+
         # Tension-Spike via CoreIntegrator — conflict_input erhoeht Tension
         self._core_integrator.update_input("voice", "conflict_input", boost)
+        logger.info(
+            f"[TENSION] Rudeness applied: zone={zone} mult={z_mult:.2f} "
+            f"final_boost={boost:.2f}"
+        )
         logger.info(f"[TENSION] Rudeness erkannt! Boost={boost:.2f} Text='{text[:50]}'")
 
         # Character Journal: Beleidigung als charakter-formenden Event protokollieren
@@ -369,11 +409,21 @@ class TensionIntegrator:
                                                    time.time() + 10.0)
                 logger.info("[TENSION] Starke Besaenftigung — Anger-Floor verkuerzt auf 10s")
             boost = effective
+        # Phase 2 Task 2d: Zone-Multiplikator
+        zone = self._get_current_zone()
+        z_mult = _zone_mult(zone, "appeasement")
+        boost *= z_mult
+        boost = self._clamp(boost, -1.0, 1.0)
+        if boost >= 0.0:
+            return
         with self._lock:
             self._last_appeasement_boost = boost
         # Negativer Wert → respect_score erhoeht → Tension sinkt
         self._core_integrator.update_input("voice", "respect_score", abs(boost))
-        logger.info(f"[TENSION] Besaenftigung erkannt: boost={boost:.2f} Text='{text[:50]}'")
+        logger.info(
+            f"[TENSION] Besaenftigung applied: zone={zone} mult={z_mult:.2f} "
+            f"final_boost={boost:.2f} Text='{text[:50]}'"
+        )
 
         # Character Journal: Besaenftigung als charakter-formenden Event protokollieren
         try:
@@ -409,6 +459,57 @@ class TensionIntegrator:
             return 0.3
         else:
             return min(0.5 + (hits - 2) * 0.1, 0.8)
+
+    # ================================================================
+    # HELPERS — Zone, Clamp, Habituation
+    # ================================================================
+
+    def _get_current_zone(self) -> Optional[str]:
+        """Aktuelle Personality-Zone aus CoreIntegrator (defensiv)."""
+        try:
+            if self._core_integrator and hasattr(self._core_integrator, "get_personality_zone"):
+                return self._core_integrator.get_personality_zone()
+        except Exception:
+            return None
+        return None
+
+    @staticmethod
+    def _clamp(v: float, lo: float, hi: float) -> float:
+        return max(lo, min(hi, v))
+
+    def _apply_habituation(self, text: str, delta: float) -> float:
+        """Phase 2 Task 2e: Gleicher Text <180s -> 50% Wirkung."""
+        try:
+            text_hash = hashlib.md5(text.lower().strip().encode()).hexdigest()[:8]
+            now = time.time()
+            with self._lock:
+                last_ts = self._last_rudeness_texts.get(text_hash)
+                if last_ts is not None:
+                    elapsed = now - last_ts
+                    if elapsed < self._habituation_window_s:
+                        old = delta
+                        delta *= self._habituation_factor
+                        logger.info(
+                            f"[TENSION] Habituation: gleicher Text vor {elapsed:.0f}s "
+                            f"-> delta {old:.2f} → {delta:.2f}"
+                        )
+                self._last_rudeness_texts[text_hash] = now
+                # Garbage Collection: alte Eintraege > 2*window entfernen
+                cutoff = now - 2 * self._habituation_window_s
+                stale = [k for k, v in self._last_rudeness_texts.items() if v < cutoff]
+                for k in stale:
+                    self._last_rudeness_texts.pop(k, None)
+        except Exception as e:
+            logger.debug(f"[TENSION] Habituation-Fehler: {e}")
+        return delta
+
+    def _update_zone_ema(self, raw_tension: float):
+        """Phase 2 Task 2g: EMA-Update fuer Zone-Glaettung."""
+        with self._lock:
+            self._tension_zone_ema = (
+                self._ema_alpha * raw_tension
+                + (1.0 - self._ema_alpha) * self._tension_zone_ema
+            )
 
     def get_state(self) -> Dict[str, Any]:
         """Aktueller State fuer Debugging/IPC."""
