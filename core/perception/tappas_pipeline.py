@@ -1546,16 +1546,23 @@ class TappasPipeline:
             # (PoseWorker laeuft auch ohne YOLO-Person-Detection)
             if pose_result and pose_result.data.get("poses") and pose_age <= 15:
                 # Max 2 Poses — mehr erzeugt visuelles Chaos im Preview
+                from core.perception.pose_utils import classify_posture
                 for pose in pose_result.data["poses"][:2]:
                     kpts = pose.get("keypoints")
                     if kpts is not None:
                         import numpy as np
                         kpts_list = kpts.tolist() if hasattr(kpts, "tolist") else kpts
+                        # Posture-Klassifikation aus Keypoints (Phase 3 Task 3a)
+                        try:
+                            posture = classify_posture(kpts_list)
+                        except Exception:
+                            posture = "unbekannt"
                         detections.append({
                             "class": "pose",
                             "bbox": pose.get("bbox_norm", []),
                             "confidence": 1.0,
                             "keypoints": kpts_list,  # 17×3 [x_norm, y_norm, vis]
+                            "posture": posture,
                         })
 
             attr_result = self._result_collector.get_latest("PersonAttrWorker")
