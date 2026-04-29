@@ -701,12 +701,17 @@ def _fetch_search_context(query: str) -> str:
         results = data.get("results", []) or []
         if not results:
             return ""
-        lines = [f"Live-Recherche fuer '{query}' (Top {len(results)}):"]
-        for r in results[: cfg.get("max_results", 5)]:
-            title = (r.get("title") or "?").strip()
-            snippet = (r.get("snippet") or "").strip()[:200]
+        # Kompakt halten — augmented prompt darf nicht ueber tentacle_llm.timeout_sec
+        # rauslaufen. Nur Top-3, kurze Snippets, eine Zeile pro Treffer.
+        lines = [
+            f"LIVE-SUCHE '{query}' (referenziere min. 1 URL):",
+        ]
+        max_n = min(3, cfg.get("max_results", 5))
+        for i, r in enumerate(results[:max_n], 1):
+            title = (r.get("title") or "?").strip()[:80]
+            snippet = (r.get("snippet") or "").strip()[:120]
             url_r = (r.get("url") or "").strip()
-            lines.append(f"- {title} — {snippet} ({url_r})")
+            lines.append(f"[{i}] {title} — {snippet} ({url_r})")
         return "\n".join(lines)
     except requests.exceptions.RequestException as e:
         logger.warning(f"[search_proxy] Fehler: {e}")
@@ -1382,12 +1387,19 @@ class LocalLLMBridge:
         if not model:
             return None
 
-        # web_research: PC search_proxy-Ergebnisse als Kontext prepend
+        # web_research: PC search_proxy-Ergebnisse als Kontext prepend.
+        # Augmentation im USER-Prompt (statt System-Prompt) — dolphin-llama3:8b
+        # ignoriert System-Block-Anweisungen wenn Profil-System dominiert. User-Prompt
+        # ist die letzte Sache vor der Antwort und wird zuverlaessig befolgt.
         if prompt_type == "web_research":
             web_ctx = _fetch_search_context(prompt)
             if web_ctx:
-                system = (system or "") + "\n\n--- LIVE-RECHERCHE ---\n" + web_ctx
-                logger.info(f"[LLM-TENTACLE] web_research: {len(web_ctx)} Zeichen Search-Kontext injiziert")
+                prompt = (
+                    web_ctx
+                    + "\n\n=== ENDE LIVE-SUCHE ===\n\nFRAGE des Users (beantworte NUR auf Basis der Live-Suche oben, referenziere mindestens eine URL):\n"
+                    + prompt
+                )
+                logger.info(f"[LLM-TENTACLE] web_research: {len(web_ctx)} Zeichen Search-Kontext im User-Prompt augmentiert")
         timeout_s = int(cfg.get("timeout_sec", 30))
 
         # Profile-Wahl Tentakel-spezifisch:
