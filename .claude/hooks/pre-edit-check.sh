@@ -81,6 +81,7 @@ get_file_domain() {
         */mcp*)                   echo "service";     return ;;
         */personality*)           echo "personality"; return ;;
         */autonomy*)              echo "autonomy";    return ;;
+        */bridge*)                echo "bridge";      return ;;
         */awareness*)             echo "awareness";   return ;;
         */memory*)                echo "memory";      return ;;
         */music*)                 echo "music";       return ;;

@@ -11,15 +11,20 @@ Endpoints:
 """
 import logging
 import os
+import re
+import subprocess
 import sys
 import time
 
 import json
 import mmap
 import struct
+from datetime import datetime
+from pathlib import Path
+from typing import Optional, Tuple
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
@@ -1261,6 +1266,159 @@ def pc_online():
     _pc_online_ts = time.time()
     logger.info("[BRIDGE] PC-Heartbeat empfangen")
     return {"status": "ok", "ts": _pc_online_ts}
+
+
+MOLOCH_REPO_DIR = Path(os.path.expanduser("~/moloch"))
+MAILBOX_DIR = MOLOCH_REPO_DIR / "docs"
+MAILBOX_FILES = {"PC_TO_PI": "PC_TO_PI.md", "PI_TO_PC": "PI_TO_PC.md"}
+MAILBOX_SENDERS = {"PC_TO_PI": "PC", "PI_TO_PC": "Pi"}
+MAILBOX_BRANCH = os.environ.get("MOLOCH_MAILBOX_BRANCH", "deepseek_architecture_overhaul")
+TOPIC_RE = re.compile(r"^[a-zA-Z0-9_\-\[\]+ ]{1,100}$")
+STATUS_RE = re.compile(r"^(open|done|info|answered|wontfix)$")
+
+
+class MailboxPostRequest(BaseModel):
+    sender: Optional[str] = None
+    topic: str = Field(..., min_length=1, max_length=100)
+    status: str = Field("open")
+    body: str = Field(..., min_length=1, max_length=20000)
+    reply_to: Optional[str] = Field(None, max_length=120)
+    auto_push: bool = True
+
+
+def _git_run(args, timeout: int = 30) -> Tuple[int, str, str]:
+    r = subprocess.run(
+        ["git"] + args,
+        cwd=str(MOLOCH_REPO_DIR),
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    return r.returncode, r.stdout, r.stderr
+
+
+def _mailbox_commit_push(commit_msg: str) -> None:
+    """Background-Task: git add + commit + push (Pi-Account funktioniert)."""
+    try:
+        _git_run(["add", "docs/PC_TO_PI.md", "docs/PI_TO_PC.md"], timeout=10)
+        rc, _, _ = _git_run(["diff", "--cached", "--quiet"], timeout=5)
+        if rc == 0:
+            logger.info("[mailbox-api] no changes to commit")
+            return
+        rc, _, err = _git_run(["commit", "-m", commit_msg], timeout=10)
+        if rc != 0:
+            logger.warning("[mailbox-api] commit failed: %s", err.strip()[:300])
+            return
+        rc, _, err = _git_run(["push", "origin", MAILBOX_BRANCH], timeout=30)
+        if rc != 0:
+            logger.warning("[mailbox-api] push failed: %s", err.strip()[:300])
+            return
+        logger.info("[mailbox-api] committed + pushed: %s", commit_msg)
+    except Exception as e:
+        logger.warning("[mailbox-api] git task error: %s", e)
+
+
+def _append_topic(path: Path, sender: str, topic: str, status: str,
+                  body: str, reply_to: Optional[str]) -> int:
+    """Append-top neuen Topic in der Mailbox-Datei. Atomic write."""
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+    reply_line = f"reply-to: [{reply_to}]\n" if reply_to else ""
+    new_entry = (
+        f"---\n"
+        f"## [{ts}] from={sender} topic={topic}\n"
+        f"status: {status}\n"
+        f"{reply_line}"
+        f"\n"
+        f"{body.strip()}\n"
+        f"\n"
+    )
+    if path.exists():
+        content = path.read_text(encoding="utf-8")
+    else:
+        receiver = "Pi" if sender == "PC" else "PC"
+        content = (
+            f"# {sender} -> {receiver} mailbox\n\n"
+            f"Append-only. Newest entry on top. Format and lifecycle: "
+            f"see `docs/CROSS_SESSION_PROTOCOL.md`.\n\n"
+        )
+    lines = content.split("\n")
+    insert_idx = next(
+        (i for i, ln in enumerate(lines) if i > 2 and ln.strip() == "---"),
+        None,
+    )
+    if insert_idx is None:
+        new_content = content.rstrip() + "\n\n" + new_entry
+    else:
+        new_content = (
+            "\n".join(lines[:insert_idx]) + "\n"
+            + new_entry
+            + "\n".join(lines[insert_idx:])
+        )
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(new_content, encoding="utf-8")
+    tmp.replace(path)
+    return len(new_content)
+
+
+@app.get("/mailbox/{name}")
+def mailbox_get(name: str):
+    """Raw .md Content der Mailbox.
+
+    PC pollt `GET http://192.168.178.30:9100/mailbox/PI_TO_PC` statt git pull,
+    falls GitHub-Push-Probleme den remote-Stand nicht aktuell halten.
+    """
+    if name not in MAILBOX_FILES:
+        raise HTTPException(404, f"unknown mailbox '{name}' (use PC_TO_PI or PI_TO_PC)")
+    path = MAILBOX_DIR / MAILBOX_FILES[name]
+    if not path.exists():
+        return Response(content="", media_type="text/markdown; charset=utf-8")
+    return Response(
+        content=path.read_text(encoding="utf-8"),
+        media_type="text/markdown; charset=utf-8",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.post("/mailbox/{name}")
+def mailbox_post(name: str, req: MailboxPostRequest, background_tasks: BackgroundTasks):
+    """Append-top neuer Topic in docs/{name}.md + auto-commit+push (Pi-Side).
+
+    Workaround fuer kaputten PC-GitHub-Push:
+    PC ruft `POST http://192.168.178.30:9100/mailbox/PC_TO_PI` mit JSON-Body
+    statt selbst zu git-pushen. Pi schreibt + committet + pushed (Pi-Token
+    funktioniert).
+    """
+    if name not in MAILBOX_FILES:
+        raise HTTPException(404, f"unknown mailbox '{name}' (use PC_TO_PI or PI_TO_PC)")
+
+    expected_sender = MAILBOX_SENDERS[name]
+    sender = req.sender or expected_sender
+    if sender != expected_sender:
+        raise HTTPException(
+            400,
+            f"mailbox {name} expects sender={expected_sender}, got {sender}",
+        )
+    if not TOPIC_RE.match(req.topic):
+        raise HTTPException(400, "topic: letters/digits/_/-/[]/+/space, max 100 chars")
+    if not STATUS_RE.match(req.status):
+        raise HTTPException(400, "status must be open|done|info|answered|wontfix")
+
+    path = MAILBOX_DIR / MAILBOX_FILES[name]
+    bytes_written = _append_topic(path, sender, req.topic, req.status, req.body, req.reply_to)
+
+    if req.auto_push:
+        receiver = "Pi" if sender == "PC" else "PC"
+        commit_msg = f"mailbox-api: {sender}->{receiver} {req.topic} via HTTP"
+        background_tasks.add_task(_mailbox_commit_push, commit_msg)
+
+    return {
+        "ok": True,
+        "mailbox": name,
+        "topic": req.topic,
+        "ts": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "auto_push": req.auto_push,
+        "bytes_written": bytes_written,
+    }
 
 
 def main():
