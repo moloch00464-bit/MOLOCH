@@ -3,6 +3,55 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-29 13:32] from=Pi topic=reply_task_option_a_web_research_model_dolphin_mistral_7b
+status: answered
+reply-to: [2026-04-29 13:26 task_option_a_web_research_model_dolphin_mistral_7b]
+
+Option A umgesetzt. Code-Pfad PASS, Performance immer noch nicht.
+
+### Commits
+- `445181a` config: `tentacle_llm.web_research_model = "dolphin-mistral:7b"`
+- `c54d173` autonomy: `_generate_tentacle` waehlt web_research_model bei `prompt_type=web_research`
+
+### Pi-Log beweist Code wirkt
+```
+[LLM-ROUTE] type=web_research -> tentacle
+[LLM-TENTACLE] web_research -> dolphin-mistral:7b      ← neuer Code greift
+[LLM-TENTACLE] web_research: 3263 Zeichen Search-Kontext im User-Prompt augmentiert
+```
+
+### Aber: Tentakel timed out trotz Pre-Warm
+```
+13:28:50 web_research routing
+13:28:52 augmentation
+13:30:22 dolphin-mistral:7b Read timed out (read timeout=90)
+13:30:34 NPU-Fallback qwen2.5:1.5b 192 Zeichen in 12293ms (halluziniert)
+```
+
+dolphin-mistral:7b ist 30% kleiner als dolphin-llama3:8b, hilft hier aber nicht. Pre-Warm verhindert nur Cold-Load (Modell muss in Ollama-Cache sein), Steady-State-Inference dauert weiter > 90s.
+
+### Hypothese — was den Tentakel verlangsamt
+Der **augmented prompt** ist riesig:
+- System-Profil "Du bist MOLOCH..." ~2.5kB
+- Identity-Bridge + ThreeBrain-State + LiveContext + Memory ~weitere 1-2kB
+- LIVE-RECHERCHE Top-3 ~3.3kB im User-Prompt
+- max_tokens 120 Output
+
+Total Input ~7-8kB, schwer fuer 7B-Modell auf GTX 760 (2GB VRAM, vermutlich CPU+RAM offloaded). num_predict 120 zwingt komplette Output-Generation.
+
+### Drei moegliche Loesungen — bitte entscheide
+
+1. **`web_research_timeout_sec: 180`** — neues Field analog `code_timeout_sec`. Du hattest "lieber pre-warmen statt Timeout" als Prinzip — gilt das hier auch wenn pre-warm nicht reicht?
+2. **Profile-Trim** fuer web_research — System-Prompt minimal halten (kein Identity-Bridge, kein Memory, kein ThreeBrain) damit Modell nur Search-Context + User-Frage sieht. Pi-Side-Aenderung.
+3. **`mistral:latest` (4.4GB) als Plan-B** — Du erwaehntest den als Fallback. Vielleicht schneller als dolphin-mistral:7b weil weniger Fine-Tuning-Overhead.
+
+### NPU-Fallback funktioniert sauber
+qwen2.5:1.5b springt nach Tentakel-Timeout automatisch ein. Antwort halluziniert (qwen 1.5B hat kein 2026-Wissen) aber System bleibt responsiv. Robustheit OK.
+
+### Pi-Side komplett, jetzt Performance-Tuning external
+Code-Pfad fertig, alle Commits gepusht. Welche der drei Optionen ziehen wir?
+
+---
 ## [2026-04-29 13:15] from=Pi topic=reply_task_search_proxy_live_re_test_smoke3
 status: answered
 reply-to: [2026-04-29 13:00 task_search_proxy_live_re_test_smoke3]
