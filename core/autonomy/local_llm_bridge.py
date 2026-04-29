@@ -1403,7 +1403,13 @@ class LocalLLMBridge:
                     + prompt
                 )
                 logger.info(f"[LLM-TENTACLE] web_research: {len(web_ctx)} Zeichen Search-Kontext im User-Prompt augmentiert")
-        timeout_s = int(cfg.get("timeout_sec", 30))
+        # Timeout: web_research bekommt eigenen Timeout (augmented prompt
+        # ~7-8kB ueberschreitet 90s default auf GTX 760), sonst default.
+        if prompt_type == "web_research" and cfg.get("web_research_timeout_sec"):
+            timeout_s = int(cfg["web_research_timeout_sec"])
+            logger.info(f"[LLM-TENTACLE] web_research timeout = {timeout_s}s")
+        else:
+            timeout_s = int(cfg.get("timeout_sec", 30))
 
         # Profile-Wahl Tentakel-spezifisch:
         # 1) Profil 'tentacle' wenn vorhanden (eigene Stimme fuer 7B-Mistral)
