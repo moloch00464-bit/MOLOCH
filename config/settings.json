@@ -117,6 +117,8 @@
     "port": 11434,
     "model": "dolphin-llama3:8b",
     "code_model": "deepseek-coder:6.7b",
+    "code_timeout_sec": 180,
+    "code_num_predict": 300,
     "web_research_model": "dolphin-mistral:7b",
     "web_research_timeout_sec": 180,
     "web_research_num_predict": 200,

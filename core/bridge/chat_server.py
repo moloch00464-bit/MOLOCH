@@ -65,10 +65,20 @@ _WEB_RESEARCH_KEYWORDS = (
 )
 
 _CODE_KEYWORDS = (
+    # Direkte "schreib X"-Imperative
     "schreib python", "schreib mir python", "schreib code", "schreib mir code",
+    "schreib mir eine python", "schreib eine python",
+    "schreib mir ein script", "schreib mir ein skript",
+    "schreib mir eine funktion", "schreib eine funktion",
+    "schreib mir eine klasse", "schreib eine klasse",
     "code für", "code fuer", "regex fuer", "regex für",
-    " sql ", " bash ", "javascript", "typescript", "python script",
-    "python skript", "shell script", "bash script",
+    # Sprache + Element
+    "python-funktion", "python funktion", "python-klasse", "python klasse",
+    "python-script", "python script", "python-skript", "python skript",
+    "javascript funktion", "javascript-funktion",
+    # Standalone-Sprachen (mit Leerzeichen wegen false positive)
+    " sql ", " bash ", "javascript", "typescript",
+    "shell script", "shell skript", "bash script", "bash skript",
 )
 
 _CODE_TOKEN_PREFIXES = ("def ", "class ", "import ", "from ", "function ",

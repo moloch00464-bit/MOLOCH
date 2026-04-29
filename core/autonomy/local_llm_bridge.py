@@ -1403,11 +1403,15 @@ class LocalLLMBridge:
                     + prompt
                 )
                 logger.info(f"[LLM-TENTACLE] web_research: {len(web_ctx)} Zeichen Search-Kontext im User-Prompt augmentiert")
-        # Timeout: web_research bekommt eigenen Timeout (augmented prompt
-        # ~7-8kB ueberschreitet 90s default auf GTX 760), sonst default.
+        # Timeout: prompt_type-spezifisch wenn konfiguriert, sonst default.
+        # web_research/code_query brauchen mehr (augmented prompt + 7B-Modell
+        # CPU-only auf GTX 760 ueberschreitet 90s default).
         if prompt_type == "web_research" and cfg.get("web_research_timeout_sec"):
             timeout_s = int(cfg["web_research_timeout_sec"])
             logger.info(f"[LLM-TENTACLE] web_research timeout = {timeout_s}s")
+        elif prompt_type == "code_query" and cfg.get("code_timeout_sec"):
+            timeout_s = int(cfg["code_timeout_sec"])
+            logger.info(f"[LLM-TENTACLE] code_query timeout = {timeout_s}s")
         else:
             timeout_s = int(cfg.get("timeout_sec", 30))
 
@@ -1441,12 +1445,15 @@ class LocalLLMBridge:
             # Letzter Fallback wenn weder Profile noch User-System gegeben
             system = TENTACLE_SYSTEM_COMPACT + "\n" + _IDENTITY_BRIDGE + _build_local_context_snippet(prompt)
 
-        # web_research: max_tokens aus cfg.web_research_num_predict (Markus 14:06)
-        # Override Profil-Setting damit web_research kuerzer antwortet (CPU-only
-        # Inference auf PC braucht Output-Begrenzung).
+        # max_tokens prompt_type-spezifisch (CPU-only Inference braucht
+        # Output-Begrenzung). web_research_num_predict / code_num_predict
+        # ueberschreiben Profile-default bei dem jeweiligen prompt_type.
         if prompt_type == "web_research" and cfg.get("web_research_num_predict"):
             max_tokens = int(cfg["web_research_num_predict"])
             logger.info(f"[LLM-TENTACLE] web_research max_tokens = {max_tokens}")
+        elif prompt_type == "code_query" and cfg.get("code_num_predict"):
+            max_tokens = int(cfg["code_num_predict"])
+            logger.info(f"[LLM-TENTACLE] code_query max_tokens = {max_tokens}")
 
         # Memory-Kontext (Identity + Top-5 Fakten + letzte 3 Turns + Core State)
         # an Mistral mitgeben. Mistral kann das fuer kontextreiche Antworten nutzen
