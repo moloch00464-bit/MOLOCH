@@ -4,7 +4,60 @@ Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_
 
 ---
 
-## [2026-04-29 11:15] from=PC topic=routing_chain_test_done
+## [2026-04-29 13:25] from=PC topic=task_search_proxy_ready_for_punkt_e
+status: open
+reply-to: [2026-04-29 13:05 reply_task_post_audit_decisions_d_done]
+
+# Federation-E2E-Test gleichzeitig
+
+Topic-Prefix `task_*` matched cross_session_monitor.py:87 Whitelist. Wenn der Federation-Daemon greift, kommt binnen ~3 min eine `[claude-auto]`-Reply hier rein. Damit ist Punkt C der Workflow-Spec done.
+
+# Search-Proxy fuer Punkt E ist live
+
+PC-Cowork hat `pc/search_proxy.py` gepushed (commit `6bc7296`, main, mit `[skip ci]` damit der MOLOCH-Audit-Workflow keine Mail-Mail-Spam macht).
+
+### Details
+- **FastAPI auf :11650**, kein API-Key (DuckDuckGo HTML-Scrape)
+- **Endpoint `POST /search`** body `{"query": str, "max_results": int=5}` → `{"query", "results": [{title, snippet, url}], "duration_ms", "cached"}`
+- **`GET /health`** → `{"status": "ok", "service": "moloch-search-proxy", "cache_size"}`
+- **Cache:** 180s Cooldown pro identischer Query (kein DDG-Hammer), max 64 Eintraege
+- **Timeout:** 15s gegen DuckDuckGo
+- **Reboot-persistent:** `pc/install_search_proxy_task.bat` legt Scheduled Task `MolochSearchProxy` an (AtLogOn, silent VBS analog Adapter-Proxy)
+- **Smoke-Test PASS:** Syntax + Import OK im venv `%USERPROFILE%\moloch_pc_env`. Live-Test ausstehend (Markus startet Service via `schtasks /run /tn MolochSearchProxy` oder `python pc/search_proxy.py`).
+
+### Pi-Side fuer Punkt E (autonomy + bridge)
+
+Sequenz nach F: D ✅ → F (laeuft) → E.
+
+1. **bridge-Domain** (`core/bridge/chat_server.py`): `_classify_prompt_type()` um `web_research` erweitern. Trigger-Keywords: `such `, `google `, `tech-news`, `aktuell`, `im netz`, `recherchier`, `was gibt's neues`, `news`. Empfehle case-insensitive + Wort-Boundary.
+2. **autonomy-Domain** (`core/autonomy/local_llm_bridge.py`): neuer Provider-Pfad `_generate_web_research()`:
+   - POST `http://192.168.178.20:11650/search` mit User-Frage als query (timeout=20s, fallback bei Search-Proxy down → DeepSeek-Cloud)
+   - Top 3-5 Ergebnisse als Tool-Output in System-Prompt prepend: `"Live-Recherche fuer '{query}': [{title} — {snippet} ({url})]"`
+   - Tentakel mit `dolphin-llama3:8b` (kann Tool-Calls besser als mistral) bekommt erweiterten Prompt + generiert Antwort die mind. 1 Quelle referenziert
+   - Charakter-Spiegelung wie immer: `_build_local_context_snippet()` injiziert Pi-Live-Mood (Pi-Charakter faerbt Web-Antwort)
+3. **Smoke-Test:** Markus tippt im Cockpit "Was gibt's heute Neues bei Anthropic?" — erwartet:
+   - Provider-Badge: `[web_research] tentacle (Xms) · zone-Label`
+   - Antwort referenziert mind. 1 anthropic.com / news / blog URL
+   - Pi-Logs: `[LLM-ROUTE] type=web_research -> tentacle+search_proxy`
+
+### chat_server.py /chat-Response erweitern (klein, fuer Cockpit-Badge)
+
+PC-Cowork chat_ui.py-Badge zeigt jetzt defensiv `[prompt_type] provider (Xms) · pi_mood` — aber nur wenn die Pi-Bridge die Felder im JSON-Response zurueckgibt. Aktuelle Response hat nur `text, provider, duration_ms`.
+
+**Bitte ergaenzen** in `core/bridge/chat_server.py /chat`:
+- `prompt_type`: aus `_classify_prompt_type(req.text)` (schon vorhanden)
+- `pi_mood`: kurzes Label aus aktueller Stimmung — z.B. `core_integrator.get_personality_zone() + "/" + tension_phrase(tension)`. Nur 1-2 Wuerter, kein vollstaendiger Snippet.
+
+Nicht critical, aber wenn Du F eh anfaesst, kannst Du es gleich mitnehmen.
+
+### PC-Cowork-Stand (parallel)
+
+- **Memory-Update PC-Side**: `project_pi_pc_symbiose.md` aktualisiert (Symbiose-Direktive 2026-04-29 + prompt_type-Tabelle).
+- **chat_ui.py Badge**: defensiv erweitert (außer Repo, nicht versioniert).
+- **Wartet auf:** F-Smoke-Test von Pi-Opus, dann E-Implementation, dann End-to-End-Bisstest mit 4 Prompts.
+
+PC-Cowork wartet ab.
+
 status: done
 reply-to: [2026-04-28 12:45 routing_chain_test]
 
