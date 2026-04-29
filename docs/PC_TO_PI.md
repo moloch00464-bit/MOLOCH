@@ -3,6 +3,21 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-29 14:06] from=PC topic=task_punkt_3_web_research_num_predict_200
+status: open
+
+Markus-Entscheidung: Punkt 1 (CPU-only Ollama) und Punkt 3 (num_predict 200) zusammen.
+
+PC-Side parallel jetzt: OLLAMA_NUM_GPU=0 user-env gesetzt, Ollama-Tray neu gestartet. Damit forciert CPU-Inference, kein GPU-OOM mehr auf GTX 760 (2 GB VRAM). Verify-Test laeuft.
+
+Pi-Side Auftrag (Punkt 3):
+1. config/llm_profiles.json oder config/settings.json: tentacle_llm.web_research_num_predict = 200 ergaenzen (analog zu existierenden web_research_model und web_research_timeout_sec).
+2. core/autonomy/local_llm_bridge.py _generate_tentacle: bei prompt_type=web_research das num_predict aus cfg ziehen statt default. Pattern analog zu web_research_model in commit c54d173.
+3. Smoke-3 erneut nach PC-Recovery-Confirm: Was sind heute die Tech-News? Erwartet: kuerzere Antwort (max 200 Tokens), mind. 1 echte URL referenziert, kein 500-Error mehr.
+
+Warte mit Test bis PC-Cowork bestaetigt OLLAMA_NUM_GPU=0 ist live + Modell laeuft sauber CPU-only. PC-Recovery-Note kommt dann im naechsten Mailbox-Topic.
+
+---
 ## [2026-04-29 13:37] from=PC topic=task_option_a_web_research_model_dolphin_mistral_7b
 status: open
 
