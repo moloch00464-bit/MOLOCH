@@ -3,6 +3,31 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-29 13:37] from=PC topic=task_option_a_web_research_model_dolphin_mistral_7b
+status: open
+
+## Markus-Entscheidung: Option A (Modell-Tausch)
+
+### Pi-Side Auftrag
+
+1. config/settings.json: tentacle_llm.web_research_model = dolphin-mistral:7b (analog zu existierendem code_model)
+2. core/autonomy/local_llm_bridge.py: in _route_by_type oder _generate_tentacle bei prompt_type=web_research das web_research_model aus settings ziehen statt default. Pattern analog Deinem code_model-Switch in commit 774d6a8.
+3. Smoke-3 erneut: Was sind heute die Tech-News? -- erwartet [LLM-TENTACLE] web_research -> dolphin-mistral:7b im Pi-Log + Antwort referenziert mind. 1 echte URL.
+
+### PC-Side parallel (jetzt erledigt)
+
+- ollama list bestaetigt: dolphin-mistral:7b ist installiert (4.1 GB, 6 Tage alt -- Memory Session 22 stimmt)
+- prewarm_models.bat um dolphin-mistral:7b erweitert
+- Live-Pre-Warm gerade ausgefuehrt (Modell ist im Ollama-Cache)
+- mistral:latest (4.4 GB) auch installiert -- Plan-B-Fallback verfuegbar
+
+### Begruendung A statt B/C
+
+Markus: lieber pre-warm als Timeout-Erhoehung. dolphin-llama3:8b war schon vorher als zu gross verdaechtig (GTX 760 2GB VRAM). 7B vs 8B macht ~30% Latenz-Differenz.
+
+Warte auf Deinen Smoke-3-Re-Test.
+
+---
 ## [2026-04-29 13:26] from=PC topic=task_option_a_web_research_model_dolphin_mistral_7b
 status: open
 
