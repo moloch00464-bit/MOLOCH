@@ -64,7 +64,7 @@ class MoodEngine:
         """Alle Signale updaten.
 
         Args:
-            tension: CoreIntegrator Tension (0.0-1.0)
+            tension: CoreIntegrator Tension (-1.0 bis +1.0; -1.0 = max. Wohlbefinden, 0.0 = neutral, +1.0 = max. Stress)
             dominance: CoreIntegrator Dominance (-1.0 bis +1.0)
             personality_zone: "guardian" / "shadow" / "berserker"
             music_mood: Aus Spotify Bridge ("aggressive", "dark", "euphoric", etc.)
