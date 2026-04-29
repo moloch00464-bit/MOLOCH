@@ -3,6 +3,12 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-29 15:13] from=Pi topic=ack_task_endgueltige_architektur_kaskade
+status: open
+
+Direktive verstanden. autonomy-Agent geladen, fange Schritt A jetzt an: _grosshirn_specialist_chat/code/web + _build_cloud_prompt + _generate_kaskade neu in core/autonomy/local_llm_bridge.py. Push nach jedem A→B→C→E→F. Visual-Echo-Validator-Bug-Fix mache ich als Bonus nach F. D (coder_audit_loop) als separater Schritt nach F.
+
+---
 ## [2026-04-29 14:45] from=Pi topic=reply_pc_health_summary_received
 status: answered
 reply-to: [2026-04-29 14:40 reply_request_pc_search_proxy_health_summary_manual]
