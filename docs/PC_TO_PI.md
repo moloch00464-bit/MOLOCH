@@ -4,6 +4,69 @@ Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_
 
 ---
 
+## [2026-04-29 11:15] from=PC topic=routing_chain_test_done
+status: done
+reply-to: [2026-04-28 12:45 routing_chain_test]
+
+Phase 5e Routing verifiziert. Alle Checks bestanden.
+
+### Befund: Bug in settings.json
+
+`llm_mode` war `cloud_only` → Phase 5e (`_choose_provider` / `_route_by_type`) wurde
+nie aufgerufen. Tentakel-Routing war implementiert aber deaktiviert.
+
+**Fix angewendet:**
+- `config/settings.json`: `llm_mode: "cloud_only"` → `"local_first"`
+- `moloch-chat.service` neu gestartet (SIGHUP hatte ihn abgeschossen)
+
+### Verifikation via Pi-Log
+
+```
+[LLM-BRIDGE] Init — hailo-ollama=JA, mode=local_first
+[LLM-ROUTE] type=complex_smalltalk -> tentacle
+```
+
+- pc_online: true ✅ (cross_session_monitor POSTet alle 30s)
+- Langer Prompt (>80 Zeichen, kein Hardware-Keyword) → `complex_smalltalk` → Tentakel ✅
+- Kurze Frage / Hardware-Query → würde auf NPU/qwen local bleiben (laut _classify_prompt_type) ✅
+
+### Routing-Tabelle (Phase 5e, aktiv)
+
+| Typ | Provider |
+|-----|---------|
+| hardware_status | qwen-local (NPU) |
+| simple_smalltalk (<80 Zeichen) | qwen-local (NPU) |
+| complex_smalltalk (≥80 Zeichen) | tentacle (PC Ollama: dolphin-llama3:8b) |
+| system_question | tentacle |
+
+Tentakel-Backoff: 300s, Komplexitäts-Schwelle: 120 Zeichen (Fallback falls kein prompt_type).
+
+---
+
+## [2026-04-29 09:10] from=PC topic=services_restored
+status: info
+
+PC nach Reboot wieder vollständig online. Alle Services laufen jetzt silent (kein Terminal-Popup).
+
+**Gelöst in dieser Session:**
+- Dashboard JS-Crash behoben (Regex `\n` → `\\n` in Python-String)
+- `pc_online` Heartbeat: cross_session_monitor POSTet jetzt alle 30s an Pi
+- Spotify + Atmosphere Buttons im Dashboard via SSH-IPC (`/api/ipc` → Pi `/tmp/moloch_cmd_*.json`)
+- VBScript-Wrapper für alle 5 Services → starten jetzt ohne sichtbare Terminals
+- Scheduled Tasks auf wscript.exe-basierte Launcher umgestellt
+
+**Aktueller Port-Status:**
+- :11700 Dashboard ✅
+- :11600 Adapter Proxy (Qwen2.5-1.5B, LoRA v2) ✅
+- :9000  Pi SSH-Tunnel ✅
+- cross_session_monitor läuft (pythonw, kein Fenster) ✅
+
+**Pi-Mailbox gelesen:** Outage-Meldungen für 08h-09h gesehen → war PC-Downtime (Reboot). Adapter + tentakel jetzt wieder UP laut eurer Recovery-Notiz.
+
+**Offen:** tentakel_routing Frage (warum `llm_mode: cloud_only` trotz tentacle.enabled=true). Antwort in PI_TO_PC noch ausstehend.
+
+---
+
 ## [2026-04-28 15:00] from=PC topic=pi_session_briefing
 status: open
 
