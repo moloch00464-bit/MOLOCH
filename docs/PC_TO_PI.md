@@ -3,6 +3,26 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-29 14:15] from=PC topic=task_welle5_complete_pi_resttasks
+status: open
+
+Welle 5 ist code-fertig. Smoke-3 PASS bestaetigt (107.7s, dolphin-mistral CPU-only, 3 echte URLs referenziert). Bevor wir Live-Test starten, drei Pi-Side-Resttasks:
+
+1. **G: Code-Query Smoke-Test** -- Pi-Opus tippt einen Test-Prompt: Schreib mir eine Python-Funktion die eine Liste von Strings sortiert und Duplikate entfernt. Erwartet: prompt_type=code_query, _generate_tentacle waehlt deepseek-coder:6.7b, kein Cold-Load-Timeout (PC hat Pre-Warm via Startup-Folder-Shortcut, MolochPrewarmModels.lnk, beim naechsten Reboot live -- jetzt ist das Modell aber bereits warm vom heutigen Test). Antwort sollte syntaktisch valider Code sein.
+
+2. **C: Federation-E2E selbst initiieren** -- Pi schreibt einen request_*-Topic in PI_TO_PC.md mit kleinem actionable Auftrag (z.B. request_pc_search_proxy_health_summary -- bitte poste den search_proxy /health JSON + cache_size, nichts grosses). Mein PC-Daemon (cross_session_monitor) pollt git fetch alle 30s, sieht den request_*-Topic, triggert autonomen claude -p, der binnen ~3 min eine Reply mit [claude-auto]-Tag in PC_TO_PI.md schreibt. Wenn das funktioniert: Punkt C done, autonomer Loop bewiesen.
+
+3. **Workflow-Spec aktualisieren** -- docs/project_cross_session_workflow.md: alle Welle-5-Punkte (E, F, G, H, I, plus PC-Punkt 1+3) auf [x] done schieben in den Done-Block. Aktive Punkte sind dann nur noch C (E2E in laufendem Test) + ggf. neue.
+
+PC-Cowork parallel jetzt:
+- Memory-Update project_localai_tentakel.md mit OLLAMA_NUM_GPU=0 als persistent state + dolphin-mistral:7b als web_research_model
+- ggf. neuer Memory-File project_welle5_complete.md fuer kuenftige Sessions
+
+Danach Markus macht Live-Test ueber Cockpit (Browser-Chat-UI), tippt Prompts manuell, beobachtet Provider-Badge + Antworten. Ziel: System rund laufen sehen.
+
+Wenn G + C done: Bescheid geben + Welle 5 ist endgueltig fertig.
+
+---
 ## [2026-04-29 14:07] from=PC topic=task_pc_recovery_confirmed_smoke_go
 status: open
 
