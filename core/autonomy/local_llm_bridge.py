@@ -653,6 +653,67 @@ _CAPS_PATH = os.path.join(
 
 # Tentakel-LLM Cache (settings.json.tentacle_llm mit mtime-Cache)
 _tentacle_cfg_cache: Dict = {"mtime": 0.0, "data": None}
+_search_cfg_cache: Dict = {"mtime": 0.0, "data": None}
+
+
+def _load_search_cfg() -> Dict:
+    """Liest settings.json.search_proxy mit mtime-Cache (Welle 5)."""
+    defaults = {
+        "enabled": False,
+        "host": "192.168.178.20",
+        "port": 11650,
+        "max_results": 5,
+        "timeout_sec": 20,
+    }
+    try:
+        mtime = os.path.getmtime(_SETTINGS_PATH)
+    except OSError:
+        return defaults
+    if _search_cfg_cache["data"] is not None and _search_cfg_cache["mtime"] == mtime:
+        return _search_cfg_cache["data"]
+    try:
+        with open(_SETTINGS_PATH, "r", encoding="utf-8") as f:
+            s = json.load(f)
+        cfg = dict(defaults)
+        cfg.update(s.get("search_proxy", {}) or {})
+        _search_cfg_cache["data"] = cfg
+        _search_cfg_cache["mtime"] = mtime
+        return cfg
+    except Exception as e:
+        logger.warning(f"[search_proxy] Config-Lesefehler: {e} — nutze Defaults")
+        return defaults
+
+
+def _fetch_search_context(query: str) -> str:
+    """POST :11650/search via PC search_proxy. Returns formatted Top-N or ''."""
+    cfg = _load_search_cfg()
+    if not cfg.get("enabled"):
+        return ""
+    url = f"http://{cfg.get('host')}:{cfg.get('port')}/search"
+    try:
+        resp = requests.post(
+            url,
+            json={"query": query, "max_results": cfg.get("max_results", 5)},
+            timeout=cfg.get("timeout_sec", 20),
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        results = data.get("results", []) or []
+        if not results:
+            return ""
+        lines = [f"Live-Recherche fuer '{query}' (Top {len(results)}):"]
+        for r in results[: cfg.get("max_results", 5)]:
+            title = (r.get("title") or "?").strip()
+            snippet = (r.get("snippet") or "").strip()[:200]
+            url_r = (r.get("url") or "").strip()
+            lines.append(f"- {title} — {snippet} ({url_r})")
+        return "\n".join(lines)
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"[search_proxy] Fehler: {e}")
+        return ""
+    except Exception as e:
+        logger.warning(f"[search_proxy] unerwarteter Fehler: {e}")
+        return ""
 
 
 def _load_tentacle_cfg() -> Dict:
@@ -846,7 +907,8 @@ class LocalLLMBridge:
         if chosen == "tentacle":
             # 1a. Tentakel zuerst (komplexer Prompt)
             result = self._generate_tentacle(prompt, system, max_tokens,
-                                             temperature=temperature, top_p=top_p)
+                                             temperature=temperature, top_p=top_p,
+                                             prompt_type=prompt_type)
             if result:
                 return result
             # PC=Hauptgehirn: bei force_tentacle KEIN qwen-Fallback (Markus-Direktive).
@@ -876,7 +938,8 @@ class LocalLLMBridge:
             # 1b. Fallback auf Tentakel wenn NPU still (und Tentakel verfuegbar)
             if not force_local and _load_tentacle_cfg().get("enabled"):
                 result = self._generate_tentacle(prompt, system, max_tokens,
-                                                 temperature=temperature, top_p=top_p)
+                                                 temperature=temperature, top_p=top_p,
+                                                 prompt_type=prompt_type)
                 if result:
                     return result
 
@@ -918,7 +981,8 @@ class LocalLLMBridge:
 
         if prompt_type in ("hardware_status", "simple_smalltalk"):
             chosen = "ollama"
-        elif prompt_type in ("complex_smalltalk", "system_question"):
+        elif prompt_type in ("complex_smalltalk", "system_question",
+                             "code_query", "web_research"):
             chosen = "tentacle" if tentacle_healthy else "ollama"
         else:
             return None  # unbekannter Typ -> Komplexitaets-Logik
@@ -1282,8 +1346,15 @@ class LocalLLMBridge:
     def _generate_tentacle(self, prompt: str, system: str,
                            max_tokens: int,
                            temperature: float = 0.7,
-                           top_p: float = 0.95) -> Optional[str]:
-        """Ollama-Tentakel auf LAN-Rechner (Standard-Ollama-API /api/chat)."""
+                           top_p: float = 0.95,
+                           prompt_type: Optional[str] = None) -> Optional[str]:
+        """Ollama-Tentakel auf LAN-Rechner (Standard-Ollama-API /api/chat).
+
+        Welle 5 — prompt_type-abhaengiges Routing:
+        - code_query  -> cfg["code_model"] (deepseek-coder) wenn vorhanden
+        - web_research -> default model + search_proxy-Kontext im System-Prompt
+        - sonst -> default model via _discover_tentacle_model
+        """
         cfg = _load_tentacle_cfg()
         if not cfg.get("enabled"):
             return None
@@ -1301,9 +1372,22 @@ class LocalLLMBridge:
                     f"{cfg.get('backoff_sec',300)}s Backoff"
                 )
             return None
-        model = self._discover_tentacle_model(cfg)
+
+        # Modell-Wahl: code_model fuer code_query, sonst default
+        if prompt_type == "code_query" and cfg.get("code_model"):
+            model = cfg["code_model"]
+            logger.info(f"[LLM-TENTACLE] code_query -> {model}")
+        else:
+            model = self._discover_tentacle_model(cfg)
         if not model:
             return None
+
+        # web_research: PC search_proxy-Ergebnisse als Kontext prepend
+        if prompt_type == "web_research":
+            web_ctx = _fetch_search_context(prompt)
+            if web_ctx:
+                system = (system or "") + "\n\n--- LIVE-RECHERCHE ---\n" + web_ctx
+                logger.info(f"[LLM-TENTACLE] web_research: {len(web_ctx)} Zeichen Search-Kontext injiziert")
         timeout_s = int(cfg.get("timeout_sec", 30))
 
         # Profile-Wahl Tentakel-spezifisch:
