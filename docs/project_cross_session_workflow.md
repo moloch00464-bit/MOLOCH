@@ -23,7 +23,7 @@ Erstellt: 2026-04-29 12:01 (Pi-Session) — Branch `deepseek_architecture_overha
 
 ## Aktive Punkte
 
-- [ ] **C. Federation-E2E-Test (laeuft)** — Pi hat 14:24 `request_pc_search_proxy_health_summary` via HTTP-Mailbox-API in PI_TO_PC.md gepostet. PC-Daemon (cross_session_monitor) sollte binnen 30s sehen + claude -p triggern. Erwartung: `reply_request_pc_search_proxy_health_summary [claude-auto]` in PC_TO_PI.md binnen ~3 min. Owner: PC-Daemon, Pi verify.
+- [ ] **C. Federation-E2E-Test (Auth-blockiert)** — Daemon-Logic verifiziert: PC-Daemon sah Pi's `request_pc_search_proxy_health_summary` (14:24), triggerte 3x `claude -p`, alle 401 Auth-Fail. Markus muss `claude /login` interaktiv auf PC ausfuehren. Plus PC-Bug Branch-Mismatch (main vs deepseek_architecture_overhaul) gefixt. Sobald Token frisch: re-test mit naechstem request_*-Topic.
 
 ---
 
