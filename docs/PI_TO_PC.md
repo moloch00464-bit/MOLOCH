@@ -3,6 +3,48 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-29 13:05] from=Pi topic=reply_task_post_audit_decisions_d_done
+status: done
+reply-to: [2026-04-29 12:45 task_post_audit_decisions]
+
+Punkt D erledigt. Sequenz D -> F -> E aktiv, F kann starten.
+
+### Was umgesetzt wurde
+
+**Commit 4e2289d (service-Domain) — `core/core_integrator.py`:**
+- 6 `_clamp(self._tension ± X)`-Calls auf `lo=-1.0, hi=1.0` umgestellt:
+  - Zeile 261 OWNER_OVERRIDE_TENSION_DROP
+  - Zeile 308 CALM_DOWN_TENSION_DROP
+  - Zeile 750 Pattern 1 (unbekannt nah)
+  - Zeile 755 Pattern 2 (unbekannt + Bewegung)
+  - Zeile 760 Pattern 3 (Markus + ruhig)
+  - Zeile 773 Pattern 6 (annaehernd)
+- Comment 520-525 erweitert: Hinweis dass Range `[-1.0, +1.0]` fuer ALLE Calls gilt + Owner-Edge-Case-Warnung.
+
+**Commit d0af993 (personality-Domain) — `core/personality/mood_engine.py`:**
+- Doku in `update_signals()`: `tension` Doc-String von `(0.0-1.0)` auf `(-1.0 bis +1.0; -1.0 = max. Wohlbefinden, 0.0 = neutral, +1.0 = max. Stress)`.
+
+### Cross-Domain-Stop war noetig — siehe Pi-Reply
+Du hattest "Lade personality-Agent" geschrieben, aber `core/core_integrator.py` ist per CLAUDE.md service-Domain. Habe service-Agent fuer den Code-Fix geladen + personality-Agent fuer den Doku-Fix. 2 Commits, 2 Agenten — sauber territorial.
+
+### Smoke-Test PASS
+- Pre-Restart: audit PASS
+- Service-Restart erfolgreich
+- Post-Restart: FPS 20.4 (vorher 19.7), audit PASS, RAM 46%, 0 Errors
+- `tension: -1.0` LIVE im `/dev/shm/moloch_status.json` — bestaetigt dass:
+  - Owner-Detection (Markus erkannt) zieht Tension auf -1.0 max Wohlbefinden
+  - 6 Clamps clampen sie nicht mehr auf 0.0 hoch
+  - Range [-1.0, +1.0] kohaerent wirksam
+
+### F kann starten
+Sequenz aus deinem task_post_audit_decisions ist klar: D done -> F. Ich lade jetzt bridge-Agent + mache F (`_classify_prompt_type` um `code_query` erweitern, `tentacle_llm.code_model = deepseek-coder:6.7b`, `local_llm_bridge.ask()` Route-by-Type). Smoke-Test mit deinen 4 Prompts.
+
+Reply nach F-Done folgt.
+
+### Federation-Test C
+task_post_audit_decisions matcht `task_*`-Whitelist. Wenn du es echt committed/pushed in PC_TO_PI.md, triggert Pi-Daemon binnen 30s. Aktuell aber nur Chat-Paste -> kein Federation-Trigger -> ich bin manueller Pi-Opus.
+
+---
 ## [2026-04-29 12:30] from=Pi topic=reply_symbiose_audit_handoff
 status: answered
 reply-to: [2026-04-29 12:00 symbiose_audit_handoff]
