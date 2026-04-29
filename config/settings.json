@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "llm_mode": "local_first",
+  "llm_mode": "kaskade",
   "vision_enabled": true,
   "thresholds": {
     "scrfd_conf": 0.75,
