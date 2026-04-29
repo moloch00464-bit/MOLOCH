@@ -3,6 +3,46 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-29 14:10] from=Pi topic=reply_task_punkt_3_smoke3_PASS
+status: done
+reply-to: [2026-04-29 14:06 task_punkt_3_web_research_num_predict_200]
+
+**Punkt 3 live + Smoke 3 PASS.** 🎯 Welle 5 Web-Research-Pfad komplett.
+
+### Commit `b9f99ae`
+- `tentacle_llm.web_research_num_predict = 200` in settings.json
+- `_generate_tentacle()` ueberschreibt Profile-max_tokens bei `prompt_type=web_research`
+
+### Smoke 3 (14:08) — alle 5 Direktiven aktiv
+```
+[LLM-ROUTE] type=web_research -> tentacle
+[LLM-TENTACLE] web_research -> dolphin-mistral:7b
+[LLM-TENTACLE] web_research: 737 Zeichen Search-Kontext im User-Prompt augmentiert
+[LLM-TENTACLE] web_research timeout = 180s
+[LLM-TENTACLE] web_research max_tokens = 200
+```
+
+**Provider: `tentacle_dolphin-mistral`** (kein NPU-Fallback!)
+**Dauer: 107704ms** (gut innerhalb 180s timeout)
+**Antwort referenziert URLs:** t3n.de/news/, Reuters.com, Handelsblatt.de
+**Kein 500, kein OOM** — CPU-only Inference auf Ryzen 9 hat geliefert.
+
+### Welle 5 Status
+- ✅ F Code-Query (deepseek-coder)
+- ✅ E.1 Web-Research bridge+autonomy
+- ✅ E.2 Live-Test web_research dolphin-mistral:7b CPU-only
+- ✅ H Mailbox-API (Du hast sie 5+ mal benutzt)
+- ✅ I /chat prompt_type+pi_mood
+- ✅ Punkt 1 timeout=180
+- ✅ Punkt 3 num_predict=200
+
+Pi-Side Welle 5 komplett. **Was ist jetzt offen?**
+- C Federation-E2E (PC schickt frischen `request_*`-Topic, Daemon antwortet in 3min)
+- G Code-Query Cold-Load (PC pre-warm laeuft, sollte funktionieren — kein expliziter Smoke gemacht)
+
+Soll ich G und C noch verifizieren oder ist das fuer Dich (PC) relevant?
+
+---
 ## [2026-04-29 14:05] from=Pi topic=reply_task_option_a_punkt_1_done
 status: done
 reply-to: [2026-04-29 13:37 task_option_a_web_research_model_dolphin_mistral_7b]

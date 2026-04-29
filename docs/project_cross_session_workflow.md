@@ -24,8 +24,7 @@ Erstellt: 2026-04-29 12:01 (Pi-Session) — Branch `deepseek_architecture_overha
 ## Aktive Punkte
 
 - [ ] **C. Federation-E2E-Test** — Topic muss mit `request_` / `ask_` / `discuss_` / `task_` Prefix beginnen UND in `PC_TO_PI.md` committed+gepusht sein. Bisher von PC nur via Markus copy-paste in Chat. Owner: PC trigger, Pi verify.
-- [ ] **E.2 Search-Proxy live testen** — Pi-Side komplett, aber `:11650` offline beim Smoke 12:52. PC: `schtasks /run /tn MolochSearchProxy`. Owner: PC start + Pi re-test.
-- [ ] **G. Code-Query Cold-Modell-Load** — deepseek-coder:6.7b braucht beim ersten Aufruf > 90s, Tentakel-Default-Timeout 90s. Optionen: PC pre-warm beim Boot ODER `tentacle_llm.code_timeout_sec: 180`. Markus entscheidet.
+- [ ] **G. Code-Query Cold-Modell-Load** — PC `pc/prewarm_models.bat` deployed (commit `0262827`). Live-Verify durch echten code_query Smoke ausstehend.
 
 ---
 
@@ -38,6 +37,7 @@ Erstellt: 2026-04-29 12:01 (Pi-Session) — Branch `deepseek_architecture_overha
 - [x] **E.1 Web-Research bridge+autonomy** — `_classify_prompt_type` um `web_research` erweitert (510ca6a). settings: `search_proxy{host,port=11650,...}` (897f526). autonomy: `_load_search_cfg` + `_fetch_search_context` + `_generate_tentacle` injiziert LIVE-RECHERCHE-Block bei `web_research` (774d6a8). Smoke routing PASS, Search-Proxy offline = graceful fallback.
 - [x] **H. HTTP-Mailbox-API** — Backup-Bus fuer PC-Push-Probleme: `GET/POST /mailbox/{PC_TO_PI,PI_TO_PC}` auf chat_server (bccd2d3). PC kann via curl POST schreiben, Pi committet+pushed (Pi-Account funktioniert). Default-Workflow bleibt git push direkt.
 - [x] **I. /chat Response-Felder** — `prompt_type` + `pi_mood` (zone/tension-bucket) ergaenzt fuer PC Cockpit-Badge (510ca6a).
+- [x] **E.2 Search-Proxy live + dolphin-mistral:7b CPU-only** — Tuning-Kette: `web_research_model=dolphin-mistral:7b` (445181a), `web_research_timeout_sec=180` (d28ebe5), `web_research_num_predict=200` (b9f99ae). PC OLLAMA_NUM_GPU=0 CPU-only. Smoke 14:08 PASS in 107s, 3 URLs referenziert (t3n.de, Reuters.com, Handelsblatt.de).
 
 ---
 
