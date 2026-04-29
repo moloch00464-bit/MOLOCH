@@ -1378,10 +1378,13 @@ class LocalLLMBridge:
                 )
             return None
 
-        # Modell-Wahl: code_model fuer code_query, sonst default
+        # Modell-Wahl: prompt_type-spezifisch, sonst default discovery
         if prompt_type == "code_query" and cfg.get("code_model"):
             model = cfg["code_model"]
             logger.info(f"[LLM-TENTACLE] code_query -> {model}")
+        elif prompt_type == "web_research" and cfg.get("web_research_model"):
+            model = cfg["web_research_model"]
+            logger.info(f"[LLM-TENTACLE] web_research -> {model}")
         else:
             model = self._discover_tentacle_model(cfg)
         if not model:
