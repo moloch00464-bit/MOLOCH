@@ -3,6 +3,42 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-29 15:25] from=Pi topic=reply_kaskade_smoke_F_PASS
+status: done
+reply-to: [2026-04-29 15:10 task_endgueltige_architektur_kaskade_kleinhirn_grosshirn_deepseek]
+
+KASKADE LIVE. Schritte A-B-C-E + Smoke F komplett.
+
+## Commits
+- ae9b9fb Schritt A+B+E (autonomy): _generate_kaskade + 3 Specialists + ask_external dispatch + LLM_MODE_KASKADE
+- 00675d7 Schritt C: config/coder_skill_prompt.txt mit MOLOCH-NEVER-Regeln + System-Kontext
+- c364d6c Schritt B-Aktivierung: settings.json llm_mode local_first -> kaskade
+
+## Smoke F (5 Prompts)
+NPU direkt (Kaskade-Bypass):
+- F.1 simple Hallo Moloch -> qwen-NPU 9s, prompt_type=simple_smalltalk
+- F.2 hardware (nicht explizit getestet, Pfad unveraendert)
+
+Kaskade-Pipeline:
+- F.3 langer Reflektions-Prompt -> kaskade_deepseek_complex_smalltalk, 30s. dolphin-llama3 28s/195 Zeichen Specialist -> DeepSeek 176 Zeichen. Pi-Live-Kontext sichtbar (Type da vorne, kurz weg).
+- F.4 Schreib Python-Funktion -> kaskade_deepseek_code_query, 114s. deepseek-coder 112s/766 Zeichen Specialist -> DeepSeek 263 Zeichen. Lambda-Code mit Charakter (Set frisst doppelt, Sort macht Ordnung).
+- F.5 Was sind Tech-News -> kaskade_deepseek_web_research, 143s. DDG -> dolphin-mistral 140s/451 Zeichen -> DeepSeek 85 Zeichen (Halt die Ohren zu: Tech-Aktien...).
+
+Provider-String pro Pfad eindeutig im /chat-Response. Charakter-Stimme bei allen Kaskade-Pfaden klar Moloch (direkt, knapp, deutsch, Slang). Pi-Live-Kontext durchgehend.
+
+## Bekannte Issues fuer Folge-Welle
+1. Visual-Echo-Validator-Bug (Markus 14:50 Hinweis) — [Hinweis: Bild hat sich waehrend meiner Antwort geaendert.] triggert bei JEDEM Turn. core/bridge/chat_server.py::_check_visual_context_drift muss konservativer (z.B. nur bei face_id-Wechsel zu unbekannt). Mache ich als Bonus-Fix.
+2. F.5 web_research DeepSeek-Output sehr knapp (85 Zeichen) trotz 451 Zeichen Specialist-Vorarbeit. DeepSeek summarisiert aggressiv. Vermutlich max_tokens-Issue oder Prompt-Tweak noetig.
+3. Cold-Calls 100s+ pro Specialist auf CPU-only — Kaskade ist insgesamt schnell aber Code/Web sind > 1.5 Min. Markus muss entscheiden ob das akzeptabel ist.
+
+## Was offen ist
+- D coder_audit_loop (separater Schritt nach F)
+- Visual-Echo-Validator-Fix (Bonus, mache ich gleich)
+- Federation E2E (claude /login pending)
+
+Welle 5 KASKADE inhaltlich erfuellt. Markus kann jetzt im Cockpit https://192.168.178.30:9443/ Live-Test machen.
+
+---
 ## [2026-04-29 15:13] from=Pi topic=ack_task_endgueltige_architektur_kaskade
 status: open
 
