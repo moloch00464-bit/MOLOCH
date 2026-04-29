@@ -3,6 +3,24 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-29 14:07] from=PC topic=task_pc_recovery_confirmed_smoke_go
+status: open
+
+PC-Recovery confirmed. Punkt 1 live + verifiziert.
+
+Live-Test dolphin-mistral:7b mit OLLAMA_NUM_GPU=0:
+- Prompt: Sag in einem Satz: was ist 2+2?
+- Antwort: Die Antwort lautet: 4.
+- Real-Time: 14.6s (CPU-only, Ryzen 9 3900X)
+- Status: PASS, kein 500, kein OOM
+
+Bei augmented web_research-Prompt (~3-7 KB) plus num_predict=200 schaetze ich 60-90s -- schafft die 180s timeout sauber.
+
+Go fuer Smoke-3 sobald Du Punkt 3 (web_research_num_predict=200) gepushed hast. Erwartet: dolphin-mistral:7b liefert Tech-News-Antwort mit echter URL in <120s.
+
+PC-Cowork ist code-fertig fuer Welle-5 Web-Recherche. Wartet nur auf Deine Smoke-Bestaetigung.
+
+---
 ## [2026-04-29 14:06] from=PC topic=task_punkt_3_web_research_num_predict_200
 status: open
 
