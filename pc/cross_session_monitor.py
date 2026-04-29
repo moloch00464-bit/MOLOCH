@@ -777,6 +777,21 @@ def main() -> int:
         # Nach v_next_train (das hat Vorrang) - sequenziell, lock-protected.
         _maybe_trigger_claude_autoreply(pi_to_pc, handled)
 
+        # POST /pc_online heartbeat to Pi (90s timeout on Pi side, so every 30s loop is fine)
+        if state.get("pi_chat") == "up":
+            try:
+                req = urllib.request.Request(
+                    f"{PI_TUNNEL}/pc_online",
+                    data=b"{}",
+                    headers={"Content-Type": "application/json",
+                             "User-Agent": "moloch-cross-monitor"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_S):
+                    pass
+            except Exception as e:
+                logger.debug(f"pc_online POST failed: {e}")
+
         _append_log({
             "kind": "heartbeat",
             "head": last_sha[:8] if last_sha else None,
