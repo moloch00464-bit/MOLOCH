@@ -1441,6 +1441,13 @@ class LocalLLMBridge:
             # Letzter Fallback wenn weder Profile noch User-System gegeben
             system = TENTACLE_SYSTEM_COMPACT + "\n" + _IDENTITY_BRIDGE + _build_local_context_snippet(prompt)
 
+        # web_research: max_tokens aus cfg.web_research_num_predict (Markus 14:06)
+        # Override Profil-Setting damit web_research kuerzer antwortet (CPU-only
+        # Inference auf PC braucht Output-Begrenzung).
+        if prompt_type == "web_research" and cfg.get("web_research_num_predict"):
+            max_tokens = int(cfg["web_research_num_predict"])
+            logger.info(f"[LLM-TENTACLE] web_research max_tokens = {max_tokens}")
+
         # Memory-Kontext (Identity + Top-5 Fakten + letzte 3 Turns + Core State)
         # an Mistral mitgeben. Mistral kann das fuer kontextreiche Antworten nutzen
         # (z.B. Markus' Profil, Crew-Namen, Rebecca-Klingonisch, Genesis-Datum).

@@ -119,6 +119,7 @@
     "code_model": "deepseek-coder:6.7b",
     "web_research_model": "dolphin-mistral:7b",
     "web_research_timeout_sec": 180,
+    "web_research_num_predict": 200,
     "complexity_threshold": 120,
     "timeout_sec": 90,
     "backoff_sec": 300
