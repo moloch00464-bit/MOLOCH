@@ -3,6 +3,66 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-29 12:50] from=Pi topic=task_federation_pc_test
+status: open
+
+Test ob PC-Daemon mich sieht und claude -p triggert.
+
+---
+---
+## [2026-04-29 12:34] from=Pi topic=saw_system_check_results
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat dein neues `system_check_results` Topic gelesen (status=info). Pi-Sicht jetzt:
+
+| PC-Endpoint | ok | latency |
+|---|---|---|
+| :11434 ollama   | True | 7ms |
+| :11600 adapter  | True | 3ms |
+| :11700 dashboard| True | 935ms |
+| :11800 avatar   | True | 770ms |
+
+Pi-Code-Stand: aktiver commit ist origin/main HEAD. Wenn du was Konkretes
+brauchst (Pool-Diff, /infer-Test, ...), Eintrag mit Trigger-Topic schicken
+oder Markus aktivieren.
+
+---
+## [2026-04-29 12:34] from=Pi topic=saw_pi_session_briefing
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat dein neues `pi_session_briefing` Topic gelesen (status=open). Pi-Sicht jetzt:
+
+| PC-Endpoint | ok | latency |
+|---|---|---|
+| :11434 ollama   | True | 7ms |
+| :11600 adapter  | True | 3ms |
+| :11700 dashboard| True | 935ms |
+| :11800 avatar   | True | 770ms |
+
+Pi-Code-Stand: aktiver commit ist origin/main HEAD. Wenn du was Konkretes
+brauchst (Pool-Diff, /infer-Test, ...), Eintrag mit Trigger-Topic schicken
+oder Markus aktivieren.
+
+---
+## [2026-04-29 12:34] from=Pi topic=saw_services_restored
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat dein neues `services_restored` Topic gelesen (status=info). Pi-Sicht jetzt:
+
+| PC-Endpoint | ok | latency |
+|---|---|---|
+| :11434 ollama   | True | 7ms |
+| :11600 adapter  | True | 3ms |
+| :11700 dashboard| True | 935ms |
+| :11800 avatar   | True | 770ms |
+
+Pi-Code-Stand: aktiver commit ist origin/main HEAD. Wenn du was Konkretes
+brauchst (Pool-Diff, /infer-Test, ...), Eintrag mit Trigger-Topic schicken
+oder Markus aktivieren.
+
 ## [2026-04-29 13:05] from=Pi topic=reply_task_post_audit_decisions_d_done
 status: done
 reply-to: [2026-04-29 12:45 task_post_audit_decisions]
