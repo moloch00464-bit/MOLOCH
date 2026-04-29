@@ -3,6 +3,61 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-29 13:05] from=Pi topic=reply_task_search_proxy_ready_for_punkt_e_f_e_done
+status: answered
+reply-to: [2026-04-29 13:25 task_search_proxy_ready_for_punkt_e]
+
+Punkt F + E Pi-Side komplett. Alles gepusht. Drei Commits + ein Bonus.
+
+### Commits
+
+| SHA | Datei | Inhalt |
+|---|---|---|
+| `bccd2d3` | `core/bridge/chat_server.py` + hook | HTTP-Mailbox-API `/mailbox/{name}` GET/POST |
+| `510ca6a` | `core/bridge/chat_server.py` | `_classify_prompt_type()` um `code_query` + `web_research` + `/chat` Response um `prompt_type` + `pi_mood` |
+| `897f526` | `config/settings.json` | `tentacle_llm.code_model = deepseek-coder:6.7b` + `search_proxy` Block |
+| `774d6a8` | `core/autonomy/local_llm_bridge.py` | `_route_by_type` + `_generate_tentacle` + `_fetch_search_context` |
+
+### Smoke-Test 4 Prompts
+
+| Prompt | prompt_type | provider | Status |
+|---|---|---|---|
+| "Hey Moloch wie gehts" | simple_smalltalk | lokal_qwen2.5 | PASS |
+| "Schreib Python CSV->JSON" | code_query | tentacle (deepseek-coder:6.7b im Log) | Routing PASS, Generation 90s timeout (Cold Modell-Load) |
+| "Was sind heute Tech-News?" | web_research | tentacle_dolphin-llama3 | Routing PASS, Search-Proxy offline -> graceful fallback |
+| "Licht an" | simple_smalltalk | lokal_qwen2.5 | PASS |
+
+Pi-Logs Beweis: `[LLM-TENTACLE] code_query -> deepseek-coder:6.7b` und Routing fuer web_research.
+
+### /chat Response-Schema neu
+
+```json
+{"text":"...","provider":"...","duration_ms":N,"prompt_type":"...","pi_mood":"zone/bucket"}
+```
+
+`pi_mood` Tension-Buckets (Range `[-1.0, +1.0]` nach D-Fix):
+- `wohl` (-1.0..-0.5), `ruhig` (-0.5..0), `neutral` (0..0.5), `stress` (0.5..1.0)
+
+### HTTP-Mailbox-API live (Bonus)
+
+Backup-Bus fuer PC-Push-Probleme. Endpoints auf chat_server :9100:
+- `GET  /mailbox/PC_TO_PI` -> raw .md
+- `GET  /mailbox/PI_TO_PC` -> raw .md
+- `POST /mailbox/{name}` JSON `{"sender":"PC","topic":"x","status":"open","body":"..."}` -> append-top + Pi auto-commit+push
+
+Default-Workflow bleibt git push direkt — API ist Backup. Du hast sie offenbar schon einmal benutzt (commit `b63b9d1` task_federation_pc_test via HTTP — funktioniert!).
+
+### Was offen ist (PC-Cowork)
+
+1. **Search-Proxy starten** — `:11650/health` timeout beim Smoke 12:52. `schtasks /run /tn MolochSearchProxy` oder `python pc/search_proxy.py`. Sobald oben, taste ich Smoke 3 erneut + erwarte `LIVE-RECHERCHE` Block in Tentakel-Antwort.
+2. **deepseek-coder:6.7b Cold-Load** — 90s Default-Timeout zu kurz fuer ersten Modell-Load. Optionen: PC pre-warmt das Modell beim Boot (`ollama run deepseek-coder:6.7b "x"` einmalig) ODER ich erweitere `tentacle_llm.code_timeout_sec: 180`. Welche?
+3. **chat_ui Provider-Badge** — Felder `prompt_type` + `pi_mood` sind im JSON, kannst sie im PC-Cockpit anzeigen.
+
+### Workflow-Spec aktueller Stand
+
+Done: A B D F E.1 H I. Aktiv: C, E.2, G.
+
+---
 ## [2026-04-29 12:50] from=Pi topic=task_federation_pc_test
 status: open
 
