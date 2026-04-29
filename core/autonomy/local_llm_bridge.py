@@ -640,7 +640,8 @@ def _build_threebrain_state_snippet(max_chars: int = 800) -> str:
 LLM_MODE_OFF = "off"                # kein LLM ueberhaupt
 LLM_MODE_CLOUD_ONLY = "cloud_only"  # nur DeepSeek Cloud, kein hailo-ollama
 LLM_MODE_LOCAL_FIRST = "local_first"  # hailo-ollama zuerst, Cloud als Fallback
-LLM_MODE_VALID = {LLM_MODE_OFF, LLM_MODE_CLOUD_ONLY, LLM_MODE_LOCAL_FIRST}
+LLM_MODE_KASKADE = "kaskade"          # Pi-Kleinhirn -> PC-Grosshirn-Specialist -> DeepSeek (Markus' Endarchitektur 2026-04-29)
+LLM_MODE_VALID = {LLM_MODE_OFF, LLM_MODE_CLOUD_ONLY, LLM_MODE_LOCAL_FIRST, LLM_MODE_KASKADE}
 LLM_MODE_DEFAULT = LLM_MODE_LOCAL_FIRST  # HailoRT 5.3.0 + qwen2.5:1.5b laeuft stabil parallel zu TAPPAS
 
 _SETTINGS_PATH = os.path.join(
@@ -898,6 +899,35 @@ class LocalLLMBridge:
                 self._last_provider = "stille"
                 return None
             result = self._generate_deepseek(prompt, system, max_tokens)
+            if result:
+                return result
+            self._last_provider = "stille"
+            return None
+
+        # Mode "kaskade": Pi-Kleinhirn -> PC-Specialist -> DeepSeek (Markus 2026-04-29).
+        # NPU-qwen NUR fuer hardware_status + simple_smalltalk, alles andere durch Kaskade.
+        if mode == LLM_MODE_KASKADE:
+            logger.debug(f"[LLM-BRIDGE] mode=kaskade type={prompt_type} force_local={force_local}")
+            if force_local or prompt_type in ("hardware_status", "simple_smalltalk"):
+                # NPU-Pfad direkt — kein Cloud, kein Specialist
+                result = self._generate_ollama(prompt, system, max_tokens,
+                                                model=model, timeout=timeout,
+                                                temperature=temperature, top_p=top_p,
+                                                force_local=force_local)
+                if result:
+                    return result
+                self._last_provider = "stille"
+                return None
+            # Volle Kaskade fuer complex_smalltalk / code_query / web_research / system_question
+            result = self._generate_kaskade(prompt, system, max_tokens, prompt_type=prompt_type)
+            if result:
+                return result
+            # Letzter Notausgang: NPU-qwen (eher halluziniert, aber nicht stille)
+            logger.warning("[LLM-BRIDGE] kaskade still — Notausgang NPU-qwen")
+            result = self._generate_ollama(prompt, system, max_tokens,
+                                            model=model, timeout=timeout,
+                                            temperature=temperature, top_p=top_p,
+                                            force_local=False)
             if result:
                 return result
             self._last_provider = "stille"
@@ -1513,6 +1543,185 @@ class LocalLLMBridge:
         finally:
             if resp is not None:
                 resp.close()
+
+    # ========================================================================
+    # KASKADE-Architektur (Markus 2026-04-29 14:50, task_endgueltige_architektur):
+    #   Pi-Kleinhirn (Charakter, Memory, Vision)
+    #   -> PC-Grosshirn-Specialist (chat / code / web — Pre-Processing)
+    #   -> DeepSeek-Cloud (Stimme, charaktergetreu, integriert)
+    # NPU-qwen NUR fuer hardware_status + simple_smalltalk, nicht durch Kaskade.
+    # ========================================================================
+
+    def _call_tentacle_raw(self, model: str, system: str, prompt: str,
+                            max_tokens: int = 200,
+                            timeout_s: int = 90,
+                            temperature: float = 0.7) -> Optional[str]:
+        """Low-level Ollama /api/chat ohne Persona-Injection.
+
+        Specialists sind Werkzeuge — kein Profile, kein Identity-Bridge,
+        kein Live-Context-Injection. Persona kommt erst in DeepSeek.
+        """
+        cfg = _load_tentacle_cfg()
+        if not cfg.get("enabled"):
+            return None
+        if time.monotonic() < self._tentacle_backoff_until:
+            return None
+        if not self._is_tentacle_running(cfg):
+            return None
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        resp = None
+        try:
+            t0 = time.monotonic()
+            resp = self._http.post(
+                f"{self._tentacle_url(cfg)}/api/chat",
+                json={"model": model, "messages": messages, "stream": False,
+                      "options": {"num_predict": max_tokens,
+                                  "temperature": temperature}},
+                timeout=timeout_s)
+            resp.raise_for_status()
+            data = json.loads(resp.content.decode('utf-8'))
+            text = (data.get("message", {}) or {}).get("content", "").strip()
+            import re
+            text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+            if not text:
+                return None
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            logger.info(f"[LLM-SPECIALIST] {model}: {len(text)} Zeichen in {elapsed_ms}ms")
+            return text
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+            logger.warning(f"[LLM-SPECIALIST] {model} timeout/conn: {e}")
+            return None
+        except Exception as e:
+            logger.warning(f"[LLM-SPECIALIST] {model} Fehler: {e}")
+            return None
+        finally:
+            if resp is not None:
+                resp.close()
+
+    def _grosshirn_specialist_chat(self, pi_context: str, user_msg: str) -> str:
+        """Konversation-Specialist: dolphin-llama3:8b (oder cfg.model). Pre-Processing fuer Cloud."""
+        cfg = _load_tentacle_cfg()
+        model = cfg.get("model") or "dolphin-llama3:8b"
+        system = (
+            "Du bist der Konversations-Pre-Processor fuer M.O.L.O.C.H.\n"
+            "Markus stellt eine Frage an Moloch. Erfasse die Intention, gib eine\n"
+            "knappe sachliche Vor-Antwort die der Cloud-Stimme als Material dient.\n"
+            "Du bist NICHT die Stimme — du bist Vorarbeit. Maximal 2-3 Saetze.\n\n"
+            "Pi-Live-Kontext (zu beachten):\n" + (pi_context or "(kein Kontext)")
+        )
+        timeout_s = int(cfg.get("timeout_sec", 90))
+        out = self._call_tentacle_raw(model, system, user_msg, max_tokens=200, timeout_s=timeout_s)
+        return out or ""
+
+    def _grosshirn_specialist_code(self, pi_context: str, user_msg: str) -> str:
+        """Code-Specialist: deepseek-coder:6.7b mit MOLOCH coder_skill_prompt."""
+        cfg = _load_tentacle_cfg()
+        model = cfg.get("code_model") or "deepseek-coder:6.7b"
+        skill_path = os.path.join(os.path.dirname(_SETTINGS_PATH), "coder_skill_prompt.txt")
+        try:
+            with open(skill_path, "r", encoding="utf-8") as f:
+                skill = f.read()
+        except Exception:
+            skill = (
+                "Du bist Code-Audit-Spezialist fuer M.O.L.O.C.H. (Raspberry Pi 5 + "
+                "Hailo NPU). Schreibe sauberen Python-Code mit deutschen Kommentaren. "
+                "subprocess immer mit timeout=30, JSON atomic, kein shell=True."
+            )
+        system = skill + "\n\nPi-Live-Kontext:\n" + (pi_context or "(kein Kontext)")
+        timeout_s = int(cfg.get("code_timeout_sec", 180))
+        max_tok = int(cfg.get("code_num_predict", 300))
+        out = self._call_tentacle_raw(model, system, user_msg, max_tokens=max_tok, timeout_s=timeout_s)
+        return out or ""
+
+    def _grosshirn_specialist_web(self, pi_context: str, user_msg: str) -> str:
+        """Web-Specialist: dolphin-mistral:7b + DDG search proxy."""
+        cfg = _load_tentacle_cfg()
+        model = cfg.get("web_research_model") or "dolphin-mistral:7b"
+        search_results = _fetch_search_context(user_msg)
+        system = (
+            "Du bist der Web-Recherche-Pre-Processor fuer M.O.L.O.C.H.\n"
+            "Live-Suchergebnisse stehen in der User-Message. Fasse 2-3 Saetze\n"
+            "fuer die Cloud-Stimme zusammen + erwaehne mindestens eine URL.\n"
+            "Du bist NICHT die Stimme — du bist Vorarbeit.\n\n"
+            "Pi-Live-Kontext:\n" + (pi_context or "(kein Kontext)")
+        )
+        if search_results:
+            user_full = search_results + "\n\n=== USER FRAGE ===\n" + user_msg
+        else:
+            user_full = "(Live-Suche aktuell offline.)\n\nUSER FRAGE: " + user_msg
+        timeout_s = int(cfg.get("web_research_timeout_sec", 180))
+        max_tok = int(cfg.get("web_research_num_predict", 200))
+        out = self._call_tentacle_raw(model, system, user_full, max_tokens=max_tok, timeout_s=timeout_s)
+        return out or ""
+
+    def _build_cloud_prompt(self, pi_context: str, specialist_out: str,
+                             user_msg: str, prompt_type: str) -> str:
+        """DeepSeek-Cloud-Prompt: User-Frage + Specialist-Vorarbeit.
+        Persona kommt aus DeepSeek-System-Prompt (TENTACLE_SYSTEM_COMPACT).
+        """
+        type_label = {
+            "complex_smalltalk": "Konversations-Specialist",
+            "code_query": "Code-Specialist (deepseek-coder)",
+            "web_research": "Web-Recherche-Specialist (mit Live-Suche)",
+        }.get(prompt_type or "", "Specialist")
+        parts = [f"Markus sagt: {user_msg}"]
+        if specialist_out:
+            parts.append(
+                f"\n[Vorarbeit vom {type_label}]\n{specialist_out}\n[Ende Vorarbeit]"
+            )
+        else:
+            parts.append("\n[Specialist-Vorarbeit nicht verfuegbar — antworte direkt.]")
+        parts.append(
+            "\nAntworte als Moloch in deinem Charakter — nutze die Vorarbeit als "
+            "Material, sprich aber in deiner eigenen Stimme. Kurz, direkt."
+        )
+        return "\n".join(parts)
+
+    def _generate_kaskade(self, prompt: str, system: str,
+                           max_tokens: int,
+                           prompt_type: Optional[str] = None) -> Optional[str]:
+        """KASKADE: Pi-Kleinhirn -> PC-Specialist -> DeepSeek-Cloud.
+
+        Hardware/simple_smalltalk laufen NICHT durch Kaskade — die werden
+        in ask_external direkt auf NPU-qwen geroutet. Hier nur:
+        complex_smalltalk / code_query / web_research / system_question.
+        """
+        user_msg = prompt
+        pi_ctx = _build_local_context_snippet(user_msg)
+        logger.info(f"[LLM-KASKADE] starte type={prompt_type}")
+
+        if prompt_type == "code_query":
+            specialist_out = self._grosshirn_specialist_code(pi_ctx, user_msg)
+        elif prompt_type == "web_research":
+            specialist_out = self._grosshirn_specialist_web(pi_ctx, user_msg)
+        else:
+            specialist_out = self._grosshirn_specialist_chat(pi_ctx, user_msg)
+
+        if specialist_out:
+            logger.info(f"[LLM-KASKADE] specialist gab {len(specialist_out)} Zeichen")
+        else:
+            logger.warning("[LLM-KASKADE] specialist still — DeepSeek antwortet ohne Vorarbeit")
+
+        cloud_prompt = self._build_cloud_prompt(pi_ctx, specialist_out, user_msg,
+                                                  prompt_type or "complex_smalltalk")
+        # DeepSeek injiziert Profile selbst wenn system leer (siehe _generate_deepseek)
+        result = self._generate_deepseek(cloud_prompt, system or "", max_tokens or 400)
+
+        if result:
+            self._last_provider = f"kaskade_deepseek_{prompt_type or 'chat'}"
+            logger.info(f"[LLM-KASKADE] DeepSeek lieferte {len(result)} Zeichen")
+            return result
+
+        # Fallback: wenn DeepSeek versagt, gib specialist_out zurueck
+        if specialist_out:
+            logger.warning("[LLM-KASKADE] DeepSeek still — specialist-only Fallback")
+            self._last_provider = f"kaskade_specialist_only_{prompt_type or 'chat'}"
+            return specialist_out
+        logger.warning("[LLM-KASKADE] beide still — None")
+        return None
 
     # ========================================================================
 
