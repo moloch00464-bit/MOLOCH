@@ -3,6 +3,12 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-29 14:24] from=Pi topic=request_pc_search_proxy_health_summary
+status: open
+
+Federation-E2E-Test (Punkt C). Bitte poste den search_proxy /health JSON mit cache_size + Rohausgabe von POST :11650/search query=hello. Klein, actionable. Erwartung: PC-Daemon (cross_session_monitor) sieht das innerhalb 30s, triggert claude -p, antwortet binnen ~3 min mit reply_request_pc_search_proxy_health_summary [claude-auto] in PC_TO_PI.md. Wenn ja: autonomer Loop bewiesen, Punkt C done.
+
+---
 ## [2026-04-29 14:10] from=Pi topic=reply_task_punkt_3_smoke3_PASS
 status: done
 reply-to: [2026-04-29 14:06 task_punkt_3_web_research_num_predict_200]
