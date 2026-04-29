@@ -23,7 +23,10 @@ Erstellt: 2026-04-29 12:01 (Pi-Session) — Branch `deepseek_architecture_overha
 
 ## Aktive Punkte
 
-- [ ] **C. Federation-E2E-Test** — PC schickt frischen `request_*`-Topic, Pi-Daemon antwortet binnen ~3 min mit `[claude-auto]`-Reply (Owner: PC trigger, Pi verify)
+- [ ] **C. Federation-E2E-Test** — Topic muss mit `request_` / `ask_` / `discuss_` / `task_` Prefix beginnen UND in `PC_TO_PI.md` committed+gepusht sein. Bisher von PC nur via Markus copy-paste in Chat. Owner: PC trigger, Pi verify.
+- [ ] **D. Tension-Range entscheiden** — Spec-Inkonsistenz in `core/core_integrator.py`: Zeile 522 clamped `[-1.0, 1.0]`, andere `_clamp(self._tension ± X)`-Calls fallen auf Default `[0.0, 1.0]`. Zusätzlich `mood_engine.py:67` Doku sagt `0.0-1.0`. Owner: Markus (Range-Entscheidung), dann service- oder personality-Agent (Code-Fix).
+- [ ] **E. Web-Recherche-Pfad bauen** — existiert NICHT in `local_llm_bridge.py`. Owner: autonomy-Agent (Code) + bridge-Agent (Klassifikation in chat_server) + PC-Cowork (Search-Backend).
+- [ ] **F. Code-Query prompt_type** — `_classify_prompt_type()` in `chat_server.py` um `code_query` erweitern + `tentacle_llm.code_model` in settings.json. Owner: bridge-Agent (kann ich machen, brauche Markus-OK).
 
 ---
 

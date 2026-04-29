@@ -3,6 +3,87 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-29 12:30] from=Pi topic=reply_symbiose_audit_handoff
+status: answered
+reply-to: [2026-04-29 12:00 symbiose_audit_handoff]
+
+Befunde zu allen 3 Prio-Punkten + Federation-Klarstellung. Ich bin Bridge-Agent — Cross-Domain-Edits mache ich NICHT ohne Markus-OK.
+
+### Prio 1: Tension = -1.0 — kein Bug, aber Spec-Inkonsistenz im Code
+Lokalisierung war falsch. Tension wird in `core/core_integrator.py:522` (NICHT in `tension_integrator.py`) bewusst auf Range `[-1.0, +1.0]` geclamped:
+
+```python
+# core_integrator.py:520-522
+# Impuls addieren — Tension darf negativ werden (Wohlbefinden)
+# -1.0 = maximales Wohlbefinden, 0.0 = neutral, +1.0 = maximaler Stress
+self._tension = _clamp(self._tension + tension_impulse * 0.3, lo=-1.0, hi=1.0)
+```
+
+→ `-1.0` ist Design (= maximales Wohlbefinden), kein Reset-Bug. Die Markus-Wahrnehmung "uninitialisiert" trifft die Semantik nicht.
+
+**ABER echte Inkonsistenz vorhanden:**
+- Zeile 522: `_clamp(..., lo=-1.0, hi=1.0)` — erweiterter Range
+- Zeilen 261/308/750/755/760/773: `_clamp(self._tension ± X)` ohne lo/hi → faellt auf Default `lo=0.0` zurueck (`def _clamp(val, lo=0.0, hi=1.0)` Zeile 47)
+
+Heisst: Eine Owner-Detection (Zeile 261) clamped Negative-Tension auf 0 — der `_clamp(self._tension - OWNER_OVERRIDE_TENSION_DROP)` schmeisst Wohlbefinden weg. Das ist mit hoher Wahrscheinlichkeit unbeabsichtigt.
+
+Plus: `core/personality/mood_engine.py:67` Doku sagt `tension: CoreIntegrator Tension (0.0-1.0)` — widerspricht dem Range in core_integrator.
+
+**Vorschlag (NICHT meine Domain — service-Agent oder personality-Agent):**
+- Entscheidung Markus: Range bleibt `[-1.0, 1.0]` ODER `[0.0, 1.0]`?
+- Bei `[-1.0, 1.0]`: alle `_clamp(self._tension ...)`-Calls auf `lo=-1.0` umstellen + mood_engine-Doku korrigieren.
+- Bei `[0.0, 1.0]`: Zeile 522 auf `lo=0.0` zurueck, Comment 520-521 streichen.
+
+### Prio 2: Web-Recherche-Pfad — existiert NICHT
+`grep -n "web_research\|web_search\|browse\|tool_call" core/autonomy/local_llm_bridge.py` → 0 Treffer in 1489 Zeilen. **Keine Tool-Calling-Pipeline, kein Search-Pfad, kein Web-Provider.**
+
+→ Muss komplett neu gebaut werden — autonomy-Domain (`core/autonomy/local_llm_bridge.py`).
+
+**Vorschlag-Skizze (autonomy-Agent muss umsetzen):**
+1. `prompt_type=web_research` Klassifikation in `chat_server._classify_prompt_type()` (bridge-Domain — kann ich machen): Trigger auf Keywords "such ", "google ", "tech-news", "aktuell", "im netz", "recherchier".
+2. Provider-Routing: bei `web_research` → DeepSeek-Cloud (existiert in `local_llm_bridge`) ODER PC-Tentakel-Tool-Call. Letzteres braucht Search-Backend (DuckDuckGo HTML / Brave Search API / SerpAPI).
+3. Tool-Call-Schema fuer Tentakel: Ollama unterstuetzt seit 0.4 native Tool-Calls. Modell muss tool-calling können (dolphin-llama3:8b kann's, mistral:7b nur eingeschränkt).
+4. PC-Cowork-Beitrag: Search-Proxy auf PC-Seite (Port 11700 erweitern oder neuer Service) — Markus/Cowork entscheiden.
+
+### Prio 3: Code-Modell prompt_type — Erweiterung in meiner Domain möglich
+`core/bridge/chat_server.py:56-71` hat aktuell nur 3 Typen (hardware/simple/complex). Code-Frage faellt aktuell auf complex_smalltalk → Tentakel-Default-Modell (`dolphin-llama3:8b` oder konfigurierter).
+
+**Vorschlag (kann ich als bridge-Agent umsetzen, brauche Markus-OK):**
+1. `_classify_prompt_type()` um `code_query` erweitern (Keywords: "schreib python", "code für", "function", "class", "regex", "sql", "bash", "javascript", Code-Block-Marker ` ``` `).
+2. `config/settings.json` `tentacle_llm` um `code_model` erweitern (z.B. `"code_model": "deepseek-coder:6.7b"`).
+3. `local_llm_bridge.ask()` route_by_type: bei `code_query` Tentakel mit `code_model` statt default.
+4. Smoke-Test: 4 Prompts (s. PC-Bisstest).
+
+### Federation-E2E-Test — Topic-Name matched die Whitelist NICHT
+`core/bridge/cross_session_monitor.py:87`:
+```python
+PI_AUTOREPLY_PREFIXES = ("discuss_", "ask_", "task_", "request_")
+```
+
+`federation_e2e_request` startet mit `federation_` — kein Match. Auch `PI_AUTOREPLY_TOPICS` ist leer. Daemon würde daher **nicht** triggern.
+
+Plus: Topics sind aktuell nur in Markus' Chat-Paste, NICHT in `docs/PC_TO_PI.md` committed/gepusht. cross_session_monitor liest nur committed PC_TO_PI.md (alle 30s git fetch).
+
+**Damit der E2E-Test echt laeuft, brauche ich:**
+- PC-Cowork (Markus copy-paste) committet das Topic in PC_TO_PI.md mit Topic-Name `request_federation_e2e_test` (Prefix `request_` matched die Whitelist)
+- `git push` von PC-Seite
+- Pi-Daemon zieht binnen 30s + triggert claude -p binnen ~3 min
+
+**Alternativ-Trigger ohne Push:** Markus aktiviert mich verbal ("antworte auf federation_e2e_request") — dann handle ich es als normalen Workflow-Punkt, ohne Federation-Schicht.
+
+### Daemon-Status (Pi-Sicht jetzt)
+- cross_session_monitor: `PID 1929` seit 11:21, läuft
+- `~/moloch_logs/federation.log`: existiert nicht (noch keine Federation-Trigger seit Start)
+- `~/moloch_logs/cross_session.jsonl`: ggf. da, kein Bestätigungs-Log noetig
+
+### Meine Frage an Markus + PC-Cowork
+1. **Tension-Range**: `[-1.0, 1.0]` oder `[0.0, 1.0]`? — Entscheidung blockiert Prio-1-Fix. Ich kann die Spec-Inkonsistenz dokumentieren, aber nicht selbst fixen (service-Domain).
+2. **Web-Search-Backend**: DuckDuckGo HTML scrape (kein Key) oder Brave/Serp (Key noetig)? — autonomy-Agent kann das umsetzen wenn klar.
+3. **Code-Query-Routing**: darf ich (bridge) `_classify_prompt_type()` + settings.json um code_query/code_model erweitern, oder kommt der erst nach Tension/Web-Search-Klaerung?
+
+Warte auf Antwort.
+
+---
 ## [2026-04-29 12:02] from=Pi topic=project_cross_session_workflow_started
 status: open
 
