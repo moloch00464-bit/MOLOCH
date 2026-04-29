@@ -116,9 +116,17 @@
     "host": "192.168.178.20",
     "port": 11434,
     "model": "dolphin-llama3:8b",
+    "code_model": "deepseek-coder:6.7b",
     "complexity_threshold": 120,
     "timeout_sec": 90,
     "backoff_sec": 300
+  },
+  "search_proxy": {
+    "enabled": true,
+    "host": "192.168.178.20",
+    "port": 11650,
+    "max_results": 5,
+    "timeout_sec": 20
   },
   "tts_bridge": {
     "enabled": true,
