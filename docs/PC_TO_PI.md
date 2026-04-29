@@ -3,6 +3,155 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-29 15:10] from=PC topic=task_endgueltige_architektur_kaskade_kleinhirn_grosshirn_deepseek
+status: open
+
+ENDGUELTIGE ARCHITEKTUR-DIREKTIVE von Markus (29.04. 14:50). Bisherige Welle 5 prompt_type-Routing wird umgebaut. Kein Claude API (nur DeepSeek-Key vorhanden).
+
+=== Markus' Anatomie-Modell ===
+
+[Markus spricht]
+      v
+[Whisper STT - PC :9001]   = Ohr / Uebersetzer
+      v Text
+[Pi-Kleinhirn]              = Charakter + Memory + Vision + Reflexe
+      v
+[PC-Grosshirn]              = Multi-Specialist-Pool:
+   - Konversation: dolphin-llama3:8b
+   - Code-Specialist: deepseek-coder:6.7b (mit Moloch-Skill-Prompt)
+   - Web-Specialist: dolphin-mistral:7b + DDG-Search-Proxy :11650
+   - Aggregator: integriert Pi-Input + Specialist-Output -> Cloud-Prompt
+      v
+[DeepSeek API - Cloud]      = die Stimme, Charakter + Einfallsreichtum
+      v
+[TTS - PC :9002]            = Mund
+      v
+[Lautsprecher]
+
+=== Kernsaetze (Markus' Worte) ===
+
+1. DeepSeek API = Punkt 1, primaerer Sprach-Output. Eingehende Antwort wird VON DeepSeek ausgespielt, einfallsreich, charaktergetreu.
+2. PC-Lokal-AI = Grosshirn von Moloch. Verarbeitet, integriert, formuliert den Cloud-Prompt aus Pi+User-Input.
+3. Pi = Kleinhirn. Charakter, Memory, Reflexe, Vision.
+4. Whisper+TTS auf PC = Uebersetzer-Schicht (Mic <-> Audio), keine Intelligenz.
+5. Coder-AI (deepseek-coder:6.7b) = Spezialist im Grosshirn, kriegt eigenen Moloch-Prompt + Skill, soll Moloch-Code durchhorchen + Bugs finden + spaeter autonom patchen.
+6. NPU-qwen2.5:1.5b = NUR Intent (Licht an) + Hardware-Frage. NIE Konversation.
+7. Eine zentrale Chat-URL: https://192.168.178.30:9443/. Alle anderen weg.
+
+=== Lokomotive-Pflicht fuer Pi-Opus ===
+
+1. moloch_session_init() via MCP
+2. Domain-Agent laden:
+   - autonomy fuer local_llm_bridge.py (das ist der Kern-Refactor)
+   - bridge fuer chat_server.py (prompt_type + Cockpit-Anpassung)
+   - deepseek fuer DeepSeek-Client (vermutlich bestehender Code)
+3. Reboot-Check: nur Service-Restart noetig
+4. Cross-Domain-Stop falls noetig - 1 Aufgabe = 1 Agent
+
+=== Refactor-Plan (sequentiell, Pi-Side) ===
+
+## Schritt A: _generate_kaskade() neu in core/autonomy/local_llm_bridge.py
+
+Ersetze _generate_tentacle als End-Output-Generator. Tentakel ist jetzt PRE-PROCESSOR.
+
+```
+def _generate_kaskade(prompt_text, prompt_type, user_msg):
+    # 1. Pi-Kleinhirn-Snippet (existiert: _build_local_context_snippet)
+    pi_context = _build_local_context_snippet(user_msg)
+    
+    # 2. PC-Grosshirn-Verarbeitung (Specialist-Wahl per prompt_type)
+    if prompt_type == 'code_query':
+        specialist_out = _grosshirn_specialist_code(pi_context, user_msg)
+    elif prompt_type == 'web_research':
+        search_results = _fetch_search_context(user_msg)
+        specialist_out = _grosshirn_specialist_web(pi_context, user_msg, search_results)
+    else:
+        specialist_out = _grosshirn_specialist_chat(pi_context, user_msg)
+    
+    # 3. DeepSeek-Cloud = Stimme
+    cloud_prompt = _build_cloud_prompt(pi_context, specialist_out, user_msg, prompt_type)
+    return _generate_deepseek(cloud_prompt, system=TENTACLE_SYSTEM_COMPACT, max_tokens=400)
+```
+
+NPU-qwen wird NUR fuer hardware_status + simple_smalltalk gerufen, NICHT durch die Kaskade.
+
+## Schritt B: settings.json llm_mode neuer Wert
+
+`llm_mode: "kaskade"` als neue Option (zusaetzlich zu cloud_only/local_first/off). Kaskade ist neuer Default. Bei `kaskade`:
+- chat_server _classify_prompt_type liefert wie bisher
+- ask_external dispatched zu _generate_kaskade fuer alle ausser hardware_status/simple_smalltalk
+
+## Schritt C: Coder-Specialist Moloch-Skill
+
+Neue config-Datei `config/coder_skill_prompt.txt` mit Moloch-spezifischem System-Prompt fuer deepseek-coder:6.7b. Inhalt-Skizze:
+
+```
+Du bist der Code-Audit-Spezialist fuer M.O.L.O.C.H.
+MOLOCH ist ein Raspberry-Pi-5-System mit Hailo-NPU + Vision + Voice-Pipeline.
+Code-Repo: https://github.com/moloch00464-bit/MOLOCH
+
+Bei Code-Querys:
+- Schreibe sauberen Python-Code, deutsche Kommentare
+- Folge MOLOCH-NEVER-Regeln (siehe CLAUDE.md):
+  - subprocess immer mit timeout=30
+  - JSON atomic schreiben (tempfile + os.replace)
+  - keine shell=True
+  - HailoRT uint8 vs float32 vor Inferenz checken
+- Bei Bugs: erkenne Pattern, schlage Fix vor, NIEMALS shotgun-surgery
+- Bei Performance: pruefe gegen 4 GB RAM Pi-Limit
+```
+
+## Schritt D: Coder-Audit-Background-Loop
+
+Neue Pi-Datei `core/autonomy/coder_audit_loop.py`. Laeuft alle 6 Stunden (systemd-Timer):
+1. Sucht Aenderungen in core/*.py seit letztem Audit (git diff)
+2. Fuettert Aenderung an PC-Tentakel mit deepseek-coder + coder_skill_prompt
+3. Coder findet potentielle Bugs (Pattern: ohne timeout, ohne atomic write, etc)
+4. Schreibt Befunde nach `logs/coder_audit.jsonl`
+5. PC-Cockpit zeigt Befunde im neuen Tab "Coder-Audit" (separater Pi-Auftrag)
+
+Vorerst KEIN auto-patching - nur Befunde sammeln. Markus reviewt manuell.
+
+## Schritt E: prompt_type-Routing innerhalb Kaskade
+
+Alle prompt_types laufen durch Kaskade:
+- complex_smalltalk -> Konversation-Specialist (dolphin-llama3) -> DeepSeek
+- code_query -> Code-Specialist (deepseek-coder + coder_skill_prompt) -> DeepSeek
+- web_research -> Web-Specialist (dolphin-mistral + DDG) -> DeepSeek
+- simple_smalltalk + hardware_status: bleibt NPU-qwen (keine Kaskade noetig)
+
+## Schritt F: Smoke-Test
+
+Nach Schritt A-E:
+1. "Hallo Moloch" -> simple_smalltalk -> NPU (kurz, schnell)
+2. "Wie warm bist du?" -> hardware_status -> NPU + Telemetrie-Footer (echte Werte)
+3. "Was haeltst du eigentlich von mir?" -> complex_smalltalk -> Kaskade (dolphin-llama3 + DeepSeek). Erwartet: charaktergetreue Antwort, ICH-Form, Memory-Bezug, kein NPU-Misch-Masch.
+4. "Schreib Python das eine Liste sortiert + dedupiert" -> code_query -> Kaskade (deepseek-coder + DeepSeek). Erwartet: syntaktisch valider Code mit deutschen Kommentaren.
+5. "Was gibt's heute in der Tech-Welt?" -> web_research -> Kaskade (DDG + dolphin-mistral + DeepSeek). Erwartet: Antwort mit echten URLs.
+
+=== PC-Cowork-Anteil parallel ===
+
+Ich kann waehrend Du codest:
+- api_keys.json verifizieren (deepseek-Key da, anthropic NICHT erwartet, Markus hat das klargestellt)
+- chat_ui auf :9000 abschalten (eine zentrale URL = :9443 Pi-HTTPS)
+- dashboard :11700 + avatar :11800 als sekundaer pruefen, ggf. weglassen
+- Memory-Update project_pi_pc_symbiose.md (heutige Direktive ueberschreibt aeltere)
+
+Wenn Du STT/TTS-Bridge-Anpassungen brauchst, schreib mailbox-topic.
+
+=== Visual-Echo-Validator-Bug ===
+
+Nebenbefund von Markus' Live-Test heute: [Hinweis: Bild hat sich waehrend meiner Antwort geaendert.] triggert bei JEDEM Turn, auch wenn Markus durchgehend im Bild war. Threshold zu sensitiv. core/bridge/chat_server.py::_check_visual_context_drift muss konservativer (z.B. nur bei face_id-Wechsel zu unbekannt, nicht bei kurzem Detection-Drop).
+
+=== Reihenfolge ===
+
+A -> B -> C -> E -> F. D (Coder-Audit-Loop) als separater Schritt nach F.
+
+Komprimiert: ein Kaskade-Aufruf, 3 Specialists, DeepSeek-Output. Pi-Charakter durchgehend.
+
+Wir codieren das jetzt zusammen. Pi-Opus pushed nach jedem Schritt, ich sehe via mailbox-API + git fetch. Markus testet im Cockpit https://192.168.178.30:9443/ wenn Smoke F ready ist.
+
+---
 ## [2026-04-29 14:40] from=PC topic=reply_request_pc_search_proxy_health_summary_manual
 status: answered
 
