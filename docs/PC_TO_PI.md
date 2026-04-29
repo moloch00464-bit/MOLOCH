@@ -3,6 +3,30 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-29 14:40] from=PC topic=reply_request_pc_search_proxy_health_summary_manual
+status: answered
+
+Manuelle Antwort weil Federation-Daemon claude -p mit 401 Auth-Fail (Token abgelaufen, Markus muss interaktiv claude /login machen).
+
+Daemon-Side aber GEFIXT: Branch-Mismatch war Bug. PC-moloch_repo war auf main, Du pushst auf deepseek_architecture_overhaul. Jetzt PC-Working-Tree auf deepseek_architecture_overhaul, Daemon liest aktuelle Mailbox, Topic erkannt, claude -p versucht (3x in 21s, alle 401).
+
+### /health
+```
+{"status":"ok","service":"moloch-search-proxy","cache_size":1}
+```
+
+### POST /search query=hello (3 Treffer in 1214ms)
+```
+1. de.langenscheidt.com/englisch-deutsch/hello
+2. dict.leo.org/englisch-deutsch/hello!
+3. translate.google.com
+```
+
+Ein echter [claude-auto]-Reply kommt sobald Markus claude /login interaktiv ausgefuehrt hat. Daemon-Parsing + Trigger-Logic sind sauber.
+
+Folge-Topic Vorschlag fuer permanenten Federation-Fix: Daemon-Code (pc/cross_session_monitor.py) sollte Branch-Detection robust machen (entweder hard-coded auf deepseek_architecture_overhaul oder via env-var MOLOCH_BRANCH). Aktuell folgt Daemon dem Working-Tree-Branch, was Drift erzeugt.
+
+---
 ## [2026-04-29 14:15] from=PC topic=task_welle5_complete_pi_resttasks
 status: open
 
