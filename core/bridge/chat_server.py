@@ -58,19 +58,77 @@ class ChatRequest(BaseModel):
     use_reason: bool = False
 
 
+_WEB_RESEARCH_KEYWORDS = (
+    "such ", "google ", "tech-news", "tech news", "aktuell",
+    "im netz", "recherchier", "was gibt's neues", "was gibts neues",
+    "neuigkeiten", "online suchen", "was ist heute", "news heute",
+)
+
+_CODE_KEYWORDS = (
+    "schreib python", "schreib mir python", "schreib code", "schreib mir code",
+    "code für", "code fuer", "regex fuer", "regex für",
+    " sql ", " bash ", "javascript", "typescript", "python script",
+    "python skript", "shell script", "bash script",
+)
+
+_CODE_TOKEN_PREFIXES = ("def ", "class ", "import ", "from ", "function ",
+                       "const ", "let ", "var ", "public ", "private ")
+
+
+def _is_web_research_query(text_low: str) -> bool:
+    return any(kw in text_low for kw in _WEB_RESEARCH_KEYWORDS)
+
+
+def _is_code_query(text: str, text_low: str) -> bool:
+    if "```" in text:
+        return True
+    if any(kw in text_low for kw in _CODE_KEYWORDS):
+        return True
+    stripped = text.lstrip().lower()
+    return any(stripped.startswith(p) for p in _CODE_TOKEN_PREFIXES)
+
+
+def _get_pi_mood_label() -> str:
+    """Kurzes 'zone/tension'-Label fuer Cockpit-Badge (PC chat_ui)."""
+    try:
+        from core.core_integrator import get_core_integrator
+        ci = get_core_integrator()
+        zone = ci.get_personality_zone() if hasattr(ci, "get_personality_zone") else "?"
+        tens = float(ci.get_tension()) if hasattr(ci, "get_tension") else 0.0
+        if tens >= 0.5:
+            t_label = "stress"
+        elif tens >= 0.0:
+            t_label = "neutral"
+        elif tens >= -0.5:
+            t_label = "ruhig"
+        else:
+            t_label = "wohl"
+        return f"{zone}/{t_label}"
+    except Exception:
+        return "?"
+
+
 def _classify_prompt_type(text: str) -> str:
-    """Phase 5e: Klassifiziert Browser-Chat-Input fuer LLM-Routing.
+    """Phase 5e + Welle 5: Klassifiziert Browser-Chat-Input fuer LLM-Routing.
 
     Wird in /chat genutzt, damit ask_external() das Type-Routing in
     _route_by_type() greift (statt vom alten force_tentacle-Hammer
     ueberstimmt zu werden).
 
+    Reihenfolge wichtig — spezifischer vor generischer:
     - hardware_status: Slash-Cmd /hw oder Hardware-Query -> NPU/qwen
+    - web_research: Web-Recherche-Keywords -> Tentakel + Search-Proxy (PC :11650)
+    - code_query: Code-Frage (Python/JS/SQL/Bash, Codeblock, def/class) -> Tentakel mit code_model (deepseek-coder)
     - simple_smalltalk: kurze Eingabe (<80 Zeichen) -> NPU/qwen
     - complex_smalltalk: alles andere -> Tentakel (Fallback NPU)
     """
     if _is_hardware_query(text):
         return "hardware_status"
+    text_low = text.lower()
+    if _is_web_research_query(text_low):
+        return "web_research"
+    if _is_code_query(text, text_low):
+        return "code_query"
     if len(text.strip()) < 80:
         return "simple_smalltalk"
     return "complex_smalltalk"
@@ -641,6 +699,7 @@ def chat(req: ChatRequest):
     # - force_local=True (User-Override): NPU pur, kein prompt_type
     # - sonst: Klassifikation entscheidet (hardware/simple -> NPU,
     #   complex -> Tentakel mit Fallback)
+    prompt_type: Optional[str] = None
     if req.use_reason:
         out = b.reason_internal(req.text)
     else:
@@ -695,7 +754,13 @@ def chat(req: ChatRequest):
     except Exception as e:
         logger.debug(f"Journal moloch-hook Fehler: {e}")
 
-    return {"text": out, "provider": b._last_provider, "duration_ms": dur_ms}
+    return {
+        "text": out,
+        "provider": b._last_provider,
+        "duration_ms": dur_ms,
+        "prompt_type": prompt_type,
+        "pi_mood": _get_pi_mood_label(),
+    }
 
 
 
