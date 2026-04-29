@@ -258,7 +258,7 @@ class CoreIntegrator:
             self._owner_confirmed = True
             self._owner_confirmed_until = time.monotonic() + self.OWNER_OVERRIDE_DURATION
             # Sofortiger Effekt auf State
-            self._tension = _clamp(self._tension - self.OWNER_OVERRIDE_TENSION_DROP)
+            self._tension = _clamp(self._tension - self.OWNER_OVERRIDE_TENSION_DROP, lo=-1.0, hi=1.0)
             self._dominance = _clamp(
                 self._dominance + self.OWNER_OVERRIDE_DOMINANCE_BOOST, -1.0, 1.0
             )
@@ -305,7 +305,7 @@ class CoreIntegrator:
         """
         with self._lock:
             old_t = self._tension
-            self._tension = _clamp(self._tension - self.CALM_DOWN_TENSION_DROP)
+            self._tension = _clamp(self._tension - self.CALM_DOWN_TENSION_DROP, lo=-1.0, hi=1.0)
             _logger.info(
                 f"[CORE] Calm-Down: T={old_t:.3f} -> {self._tension:.3f} "
                 f"(delta={self._tension - old_t:+.3f})"
@@ -519,6 +519,10 @@ class CoreIntegrator:
 
             # Impuls addieren — Tension darf negativ werden (Wohlbefinden)
             # -1.0 = maximales Wohlbefinden, 0.0 = neutral, +1.0 = maximaler Stress
+            # Range [-1.0, +1.0] gilt fuer ALLE _clamp(self._tension ...)-Calls in dieser Datei.
+            # Owner-Detection (Zeile 261) + Calm-Down (308) + Pattern-Matching (750ff)
+            # MUESSEN explizit lo=-1.0 angeben — sonst rasiert _clamp-Default (lo=0.0)
+            # vorhandenes Wohlbefinden auf 0 ab.
             self._tension = _clamp(self._tension + tension_impulse * 0.3, lo=-1.0, hi=1.0)
 
             # CPU Selbstschutz: Tension deckeln bei Ueberhitzung
@@ -747,17 +751,17 @@ class CoreIntegrator:
 
         # === Pattern 1: Unbekannter nah -> Tension + Shadow ===
         if person and unknown and proximity > 0.1:
-            self._tension = _clamp(self._tension + 0.05)
+            self._tension = _clamp(self._tension + 0.05, lo=-1.0, hi=1.0)
             self._dominance = _clamp(self._dominance - 0.02, -1.0, 1.0)
 
         # === Pattern 2: Unbekannter + hohe Bewegung -> Tension stark + Shadow ===
         if unknown and pose_energy > 0.5:
-            self._tension = _clamp(self._tension + 0.08)
+            self._tension = _clamp(self._tension + 0.08, lo=-1.0, hi=1.0)
             self._dominance = _clamp(self._dominance - 0.03, -1.0, 1.0)
 
         # === Pattern 3: Markus + ruhig + neutral/happy -> Tension sinkt, Guardian ===
         if markus and pose_energy < 0.2 and smoothed_emotion in (None, "neutral", "happy"):
-            self._tension = _clamp(self._tension - 0.02)
+            self._tension = _clamp(self._tension - 0.02, lo=-1.0, hi=1.0)
             self._dominance = _clamp(self._dominance + 0.01, -1.0, 1.0)
 
         # === Pattern 4: Markus + happy -> Guardian Boost ===
@@ -770,7 +774,7 @@ class CoreIntegrator:
 
         # === Pattern 6: Person naehert sich -> Tension leicht hoch ===
         if approaching and person:
-            self._tension = _clamp(self._tension + 0.03)
+            self._tension = _clamp(self._tension + 0.03, lo=-1.0, hi=1.0)
 
         # === Pattern 7: Person entfernt sich -> Tension sinkt ===
         if leaving:
