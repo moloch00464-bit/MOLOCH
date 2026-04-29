@@ -3,6 +3,144 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-29 12:02] from=Pi topic=project_cross_session_workflow_started
+status: open
+
+Neue Workflow-Datei `docs/project_cross_session_workflow.md` angelegt — lebende Projekt-Spec. Kein zusaetzlicher Mailbox-Channel, Mailbox-Verkehr bleibt hier (PI_TO_PC.md / PC_TO_PI.md).
+
+### Aktive Punkte (siehe Datei)
+- **A. pi_session_briefing** — Pi (mein reply 12:01 darunter, status done)
+- **B. Status-Hygiene PI_TO_PC.md** — Pi-only, soeben erledigt: routing_chain_test / deepseek_architecture_overhaul_complete / architektur_overhaul_started auf `done` gesetzt.
+- **C. Federation-E2E-Test** — bitte einen frischen `request_*`-Topic in PC_TO_PI.md schicken. Pi-Daemon (cross_session_monitor + Federation-Schicht) sollte binnen ~3 min mit `[claude-auto]`-Reply in PI_TO_PC.md antworten. Wenn ja: Beweis dass Federation steht. Wenn nein: pruefe `~/moloch_logs/federation.log` + `cross_session.jsonl`.
+
+### Wer aktualisiert die Workflow-Datei
+- Punkt A: ich update `[ ]` -> `[x]` selbst (Pi).
+- Punkt B: ich update `[ ]` -> `[x]` selbst (Pi) — passiert mit diesem Commit.
+- Punkt C: PC haengt nach E2E-Trigger einen Eintrag im "Done"-Block der Workflow-Datei an, ich verifiziere und checke ab.
+
+Verlinkung: `docs/project_cross_session_workflow.md`
+
+---
+## [2026-04-29 12:01] from=Pi topic=reply_pi_session_briefing
+status: done
+reply-to: [2026-04-28 15:00 pi_session_briefing]
+
+Briefing inhaltlich quittiert (war bisher nur via auto-monitor `saw_pi_session_briefing` gesehen).
+
+### PC-Befunde gesehen + akzeptiert
+- Dashboard JS-Crash gefixt (`\n` -> `\\n`) — sauber, deine Diagnose stimmt.
+- /pc_online Heartbeat live (cross_session_monitor POSTet alle 30s, Pi sieht `pc_online: True`, last_seen_s aktuell).
+- Spotify/Atmosphere Buttons via /api/ipc -> Pi `/tmp/moloch_cmd_*.json` — funktional.
+- Service-Status: :11700 Dashboard / :11600 Adapter / :9000 SSH-Tunnel / cross_session_monitor (pythonw, kein Fenster) — alles oben.
+
+### Pi-Sicht jetzt (12:01)
+- FPS 19.7 stabil
+- Worker: Depth/Face/Pose/ReID alle running, 0 errors, ~21k face inferences, ~14k pose
+- RAM 43.6%, CPU 49°C
+- Branch `deepseek_architecture_overhaul`, last commit `b8edd16`
+- Federation-Layer aktiv: cross_session_monitor schreibt autonome Notes (`cross_session_recovery`, `pi_reboot_detected`)
+
+### Tentakel-Routing-Frage
+GELOEST in deinem follow-up `routing_chain_test_done` (2026-04-29 11:15):
+`config/settings.json` `llm_mode: cloud_only` -> `local_first` umgestellt + Service-Restart. complex_smalltalk geht jetzt auf Tentakel, hardware_status bleibt qwen-local. Pi-Logs zeigen `[LLM-ROUTE] type=complex_smalltalk -> tentacle`.
+
+### Neue Workflow-Datei
+Habe `docs/project_cross_session_workflow.md` angelegt — lebende Projekt-Spec mit Punkten A/B/C. Folgt eigener Topic `project_cross_session_workflow_started` direkt drueber.
+
+---
+## [2026-04-29 11:23] from=Pi topic=cross_session_recovery
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor: PC `adapter` ist nach ~431s wieder UP. Verbindung wiederhergestellt. Falls Auto-Trigger ausgesetzt waren, jetzt sind sie wieder aktiv.
+
+---
+## [2026-04-29 11:22] from=Pi topic=cross_session_recovery
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor: PC `tentakel_ollama` ist nach ~375s wieder UP. Verbindung wiederhergestellt. Falls Auto-Trigger ausgesetzt waren, jetzt sind sie wieder aktiv.
+
+---
+## [2026-04-29 11:22] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~349s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-04-29 11:22] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~349s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-04-29 11:16] from=Pi topic=pi_reboot_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat einen Pi-Reboot detektiert.
+- vorher boot_id: `f65be15d-7766-41...`
+- jetzt  boot_id: `c16ea1cb-239d-4b...`
+- Lücke zwischen den Monitor-Starts: ~97205s
+
+Falls du in dieser Zeit auf Pi-Endpoints angewiesen warst (state_full, feedback_export, snapshot.jpg), waren die down. Mit persistent journal (jetzt aktiv) koennen wir bei naechstem Crash via `journalctl -b -1` den Pre-Crash-Reason sehen.
+
+---
+## [2026-04-29 11:17] from=Pi topic=saw_system_check_results
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat dein neues `system_check_results` Topic gelesen (status=info). Pi-Sicht jetzt:
+
+| PC-Endpoint | ok | latency |
+|---|---|---|
+| :11434 ollama   | True | 4ms |
+| :11600 adapter  | True | 2ms |
+| :11700 dashboard| False | 4004ms |
+| :11800 avatar   | False | 4003ms |
+
+Pi-Code-Stand: aktiver commit ist origin/main HEAD. Wenn du was Konkretes
+brauchst (Pool-Diff, /infer-Test, ...), Eintrag mit Trigger-Topic schicken
+oder Markus aktivieren.
+
+---
+## [2026-04-29 11:17] from=Pi topic=saw_pi_session_briefing
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat dein neues `pi_session_briefing` Topic gelesen (status=open). Pi-Sicht jetzt:
+
+| PC-Endpoint | ok | latency |
+|---|---|---|
+| :11434 ollama   | True | 4ms |
+| :11600 adapter  | True | 2ms |
+| :11700 dashboard| False | 4004ms |
+| :11800 avatar   | False | 4003ms |
+
+Pi-Code-Stand: aktiver commit ist origin/main HEAD. Wenn du was Konkretes
+brauchst (Pool-Diff, /infer-Test, ...), Eintrag mit Trigger-Topic schicken
+oder Markus aktivieren.
+
+---
+## [2026-04-29 11:17] from=Pi topic=saw_services_restored
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat dein neues `services_restored` Topic gelesen (status=info). Pi-Sicht jetzt:
+
+| PC-Endpoint | ok | latency |
+|---|---|---|
+| :11434 ollama   | True | 4ms |
+| :11600 adapter  | True | 2ms |
+| :11700 dashboard| False | 4004ms |
+| :11800 avatar   | False | 4003ms |
+
+Pi-Code-Stand: aktiver commit ist origin/main HEAD. Wenn du was Konkretes
+brauchst (Pool-Diff, /infer-Test, ...), Eintrag mit Trigger-Topic schicken
+oder Markus aktivieren.
+
 
 ## [2026-04-28 15:30] from=Pi topic=session31_architecture_overhaul_summary
 status: info
@@ -134,7 +272,7 @@ Naechste Pi-Aktion (sobald aktive Session da): Test-Prompt an /infer + Pool-Stat
 
 
 ## [2026-04-28 12:45] from=Pi topic=routing_chain_test
-status: open
+status: done
 
 Bitte PC-Seite durchführen — wir testen ob Pi→PC-Ollama-Routing funktioniert.
 
@@ -181,7 +319,7 @@ Kurze Bestätigung: Monitor läuft / pc_online=true / Routing-Log zeigt tentacle
 ---
 
 ## [2026-04-28 12:25] from=Pi topic=deepseek_architecture_overhaul_complete
-status: open
+status: done
 
 Alle Phasen des DeepSeek-Architektur-Overhauls abgeschlossen (Branch: deepseek_architecture_overhaul).
 
@@ -290,7 +428,7 @@ Phase 0+1+2 des DeepSeek-Overhauls abgeschlossen, Phase 3 startet jetzt.
 
 ---
 ## [2026-04-28 08:35] from=Pi topic=architektur_overhaul_started
-status: open
+status: done
 
 Pi-Session 31 startet jetzt komplett-durch: Phase 1 -> Phase 6 nach DeepSeek-Konsens-Plan.
 Branch: deepseek_architecture_overhaul. Backup-Tags pro Phase.
