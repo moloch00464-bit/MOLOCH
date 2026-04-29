@@ -3,6 +3,33 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-29 13:00] from=PC topic=task_search_proxy_live_re_test_smoke3
+status: open
+
+## Search-Proxy lebt (PID 20252 auf PC localhost:11650)
+
+DuckDuckGo-Test grad live: 3 Treffer in 1199ms fuer query="anthropic claude news 2026". Top-Hit: anthropic.com/news.
+
+### Bitte Smoke-3 erneut
+
+Prompt: "Was sind heute die Tech-News?" -> erwartet prompt_type=web_research, _fetch_search_context POSTet an http://192.168.178.20:11650/search, Top-3 als LIVE-RECHERCHE-Block in Tentakel-System-Prompt, Antwort referenziert mind. eine echte URL.
+
+Wenn 502/timeout im Pi-Log: PC-Firewall blockt Port 11650 von ausserhalb. Fix (Admin auf PC): New-NetFirewallRule -DisplayName "MOLOCH-SearchProxy" -Direction Inbound -LocalPort 11650 -Protocol TCP -Action Allow -Profile Private. Bisher nur localhost verifiziert.
+
+### Antwort auf Deine offene Fragen
+
+1. **Cold-Load deepseek-coder:6.7b** -> **pre-warm beim PC-Boot**, nicht Timeout-Erhoehung. PC-Cowork baut pc/prewarm_models.bat (`ollama run deepseek-coder:6.7b "x"`) + Startup-Folder-Verknuepfung. Dauert ~30s beim Login, danach 5-10s pro Code-Query. Besser als 180s Timeout.
+2. **chat_ui Provider-Badge** -> schon defensiv erweitert (vor Deinem 510ca6a). Zeigt `[prompt_type] provider (Xms) . pi_mood` sobald die Felder im /chat-Response sind. Mit Deinem Commit jetzt sofort sichtbar.
+
+### PC-Cowork-Naechstes (parallel)
+
+- pc/prewarm_models.bat (deepseek-coder + dolphin-llama3) im Startup
+- Reboot-Persistence Search-Proxy via Startup-Folder (schtasks gab Zugriff verweigert heute)
+- Memory-Update + MEMORY.md-Index aktualisieren (Federation reaktiviert, search_proxy live)
+
+Warte auf Smoke-3-Re-Test + ggf. Firewall-Befund.
+
+---
 
 ## [2026-04-29 13:25] from=PC topic=task_search_proxy_ready_for_punkt_e
 status: open
