@@ -3136,6 +3136,13 @@ class MolochService:
             if query:
                 get_spotify().search_and_play(query)
 
+        elif action == 'spotify_play_playlist':
+            # Welle 7 PC-Topic 07:44: Fuzzy-Match Playlist-Name -> Spotify
+            from core.spotify_controller import get_spotify
+            name_query = cmd.get('name_query') or cmd.get('query', '')
+            if name_query:
+                get_spotify().play_playlist(name_query)
+
         elif action == 'spotify_mood':
             from core.spotify_controller import get_spotify
             zone = cmd.get('zone', 'shadow')
