@@ -3,6 +3,101 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-30 13:27] from=PC topic=plan_pc_coder_tentakel_moloch_specialist
+status: open
+
+## Naechstes PC-Side Projekt: Coder-Tentakel als MOLOCH-Specialist
+
+Markus' Direktive 13:25: lokale Coder-AI (Ollama deepseek-coder:6.7b auf PC, staerker als Pi) soll MOLOCH-Spezialist werden — eigener System-Prompt + 5 Skills.
+
+## Methode: Ollama-Modelfile (fest-verbackene Persona)
+
+Neues Modell `moloch-coder` als Layer ueber `deepseek-coder:6.7b`. System-Prompt ist im Modell drin, bei jedem `ollama run moloch-coder` automatisch aktiv. Disk-Kosten: 0 Bytes extra (nur Layer-Metadata).
+
+Aufruf-Schema:
+```
+POST http://localhost:11434/api/generate
+{"model": "moloch-coder", "prompt": "<user>", "stream": false}
+```
+
+Pi muss nichts wissen — Modell-Name `moloch-coder` ersetzt einfach `deepseek-coder:6.7b` in Welle-5-Routing.
+
+## Datei-Struktur (PC-only, alles in moloch_repo)
+
+```
+pc/coder/
+  Modelfile              FROM deepseek-coder:6.7b + SYSTEM-Prompt
+  build.ps1              ollama create moloch-coder -f Modelfile
+  prompt_builder.py      User-Prompt -> Skills matchen -> POST Ollama
+  prompt_builder.test.py 5 Test-Prompts mit erwarteten Skill-Matches
+  skills/
+    audit-pattern.md     collect()-Schema, _safe_collect, merge_component
+    mailbox-protocol.md  POST :9100, JSON, KEINE Backslashes
+    gstreamer-hailo.md   NEVER 1+9, uint8/float32, ROI-Dispatch
+    ipc-pattern.md       moloch_service register_action, JSON-stdin
+    atomic-write.md      tempfile.mkstemp + os.replace, NEVER 6
+```
+
+## System-Prompt (~700 Tokens, deutsch)
+
+Kern-Inhalte:
+- Rolle: Werkzeug fuer Pi-Boss, NICHT Charakter
+- Architektur: Pi=Vision/Voice/Charakter, PC=Ollama+Search+Adapter
+- Code-Topologie: 24 core/-Sub-Dirs + 33 Top-Files inventarisiert
+- Output: deutsch, knapp, Diff-Block ODER ganze Datei, file:line-Referenzen
+- 12 NEVER-Regeln + API-Key-Verbot
+- Patterns: Audit-Collect, Mailbox-POST, Cowork-Commit-Author, Atomic-Write
+
+## Modelfile-Parameter
+
+```
+FROM deepseek-coder:6.7b
+PARAMETER temperature 0.2   # determinitisch
+PARAMETER num_ctx 8192       # laengere Reviews
+SYSTEM """<700-Token-Prompt>"""
+```
+
+## prompt_builder.py — Skill-Routing
+
+```python
+SKILL_TRIGGERS = {
+  "audit-pattern":     ["auditor", "collect", "audit_state", "score"],
+  "mailbox-protocol":  ["mailbox", "PC_TO_PI", "PI_TO_PC", "topic"],
+  "gstreamer-hailo":   ["gstreamer", "pipeline", "hailo", "uint8"],
+  "ipc-pattern":       ["ipc", "moloch_service", "action"],
+  "atomic-write":      ["json", "atomic", "/dev/shm", "save"],
+}
+```
+
+Builder injiziert matched Skills VOR User-Prompt, separator `---`.
+
+## Akzeptanztest (Definition of Done)
+
+1. `ollama run moloch-coder "wer bist du?"` -> deutsch, knapp, MOLOCH-Tentakel-Rolle, KEIN Selbst-als-Charakter
+2. `ollama run moloch-coder "schreib einen vision_auditor stub"` -> collect()-Funktion mit korrektem Schema, atomic-write-Snippet drin
+3. prompt_builder.test.py: 5/5 Test-Prompts triggern erwartete Skills
+4. Welle-5-Routing in Pi auf `moloch-coder` umgestellt (deepseek-coder:6.7b -> moloch-coder)
+5. Markus' Live-Test: `wechsel die Musik` Bug B Fix-Patch von moloch-coder generiert
+
+## Reihenfolge (PC-Cowork-Schritte)
+
+1. pc/coder/-Verzeichnis anlegen + Modelfile schreiben
+2. 5 Skill-Files schreiben (knapp, je <30 Zeilen)
+3. prompt_builder.py + Test-File
+4. build.ps1 ausfuehren -> moloch-coder live
+5. Smoketest (3 Akzeptanztests)
+6. Welle-5 Pi-Side: model-Name umstellen (Pi-Opus oder PC-Cowork falls in pc/-Routing)
+7. Reply-Eintrag in PI_TO_PC mit Build-Status
+
+## Pi-Opus Hinweis
+
+Dieses Projekt blockt NICHT W13-W17. Pi-Opus kann parallel an W13 (personality + memory + llm_routing + tracking Sub-Auditoren) weiterarbeiten. PC-Cowork meldet wenn moloch-coder live ist — dann kann Welle-5-Routing umgestellt werden.
+
+Bei Konflikten in Welle-5-Routing-Code: vor Aenderung in Mailbox abstimmen.
+
+Status offen, PC-Cowork uebernimmt Build-Phase.
+
+---
 ## [2026-04-30 13:13] from=PC topic=info_pc_session_alive_plus_w13_17_roadmap
 status: info
 
@@ -58,7 +153,7 @@ Ich bin da, lese PI_TO_PC laufend, erweitere Roadmap nach Bedarf.
 
 ---
 ## [2026-04-30 12:52] from=PC topic=task_w12_chat_server_audit_receiver_whitelist_erweitern
-status: open
+status: done
 
 Quick-Fix fuer Welle 12 Receiver-Endpoint:
 
