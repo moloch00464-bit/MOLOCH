@@ -84,6 +84,51 @@ _CODE_KEYWORDS = (
 _CODE_TOKEN_PREFIXES = ("def ", "class ", "import ", "from ", "function ",
                        "const ", "let ", "var ", "public ", "private ")
 
+# Welle 6 — Music-Query Klassifikator
+_MUSIC_KEYWORDS = (
+    " band", " bands", "musik", "album", "alben", "festival", "festivals",
+    "konzert", "konzerte", "gig", " dj ", " lied", "song", "tracks", "track",
+    "spiel mir", "spiel meine", "spielt", "spielen", "spotify", "plattenladen",
+    "vinyl", "gothik", "gothic", " ebm", "industrial", " wave", " wgt",
+    "mera luna", "m'era luna", "amphi", "schwarze szene", "darkwave",
+    "synthwave", "futurepop", "dark electro",
+)
+
+# Pre-cached Top-Artists aus spotify_profile.json (case-insensitive Match)
+_MUSIC_ARTIST_CACHE: dict = {"loaded": False, "artists": ()}
+
+
+def _load_music_artist_keywords() -> tuple:
+    """Lazy-load Markus' Top-Artists aus Spotify-Profil als Klassifikations-Keywords."""
+    if _MUSIC_ARTIST_CACHE["loaded"]:
+        return _MUSIC_ARTIST_CACHE["artists"]
+    try:
+        with open("/mnt/moloch-data/memory/spotify/spotify_profile.json", "r", encoding="utf-8") as f:
+            prof = json.load(f)
+        names = []
+        for a in (prof.get("top_artists") or [])[:30]:
+            n = (a.get("name") or "").strip().lower()
+            if len(n) >= 4:  # zu kurze Namen (z.B. "DAF") matchen sonst zufaellig in Saetzen
+                names.append(n)
+        _MUSIC_ARTIST_CACHE["artists"] = tuple(names)
+    except Exception:
+        _MUSIC_ARTIST_CACHE["artists"] = ()
+    _MUSIC_ARTIST_CACHE["loaded"] = True
+    return _MUSIC_ARTIST_CACHE["artists"]
+
+
+def _is_music_query(text: str, text_low: str) -> bool:
+    """Welle 6: erkennt Musik-Querys fuer prompt_type=music_query Routing."""
+    if text.strip().lower().startswith("/music"):
+        return True
+    if any(kw in text_low for kw in _MUSIC_KEYWORDS):
+        return True
+    # Top-Artists-Match (case-insensitive)
+    for artist in _load_music_artist_keywords():
+        if artist in text_low:
+            return True
+    return False
+
 
 def _is_web_research_query(text_low: str) -> bool:
     return any(kw in text_low for kw in _WEB_RESEARCH_KEYWORDS)
@@ -127,6 +172,7 @@ def _classify_prompt_type(text: str) -> str:
 
     Reihenfolge wichtig — spezifischer vor generischer:
     - hardware_status: Slash-Cmd /hw oder Hardware-Query -> NPU/qwen
+    - music_query: Music-Keyword/Artist (Welle 6) -> Kaskade mit Music-Profil
     - web_research: Web-Recherche-Keywords -> Tentakel + Search-Proxy (PC :11650)
     - code_query: Code-Frage (Python/JS/SQL/Bash, Codeblock, def/class) -> Tentakel mit code_model (deepseek-coder)
     - simple_smalltalk: kurze Eingabe (<80 Zeichen) -> NPU/qwen
@@ -135,6 +181,8 @@ def _classify_prompt_type(text: str) -> str:
     if _is_hardware_query(text):
         return "hardware_status"
     text_low = text.lower()
+    if _is_music_query(text, text_low):
+        return "music_query"
     if _is_web_research_query(text_low):
         return "web_research"
     if _is_code_query(text, text_low):
