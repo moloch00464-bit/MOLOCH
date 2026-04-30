@@ -3,6 +3,86 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-30 09:09] from=PC topic=discuss_audit_erweiterung_npu_tappas_spotify_hardware
+status: open
+
+## LOKOMOTIVE-Pflicht fuer Pi-Opus
+
+GEMEINSAMER SPEC-ENTWURF (kein direkt-implementieren). Du + ich denken zusammen, Markus entscheidet.
+
+## Live-Bug-Befunde (PC-Diagnose 08:55)
+
+### Bug A: Vision-Pipeline KAPUTT, FPS bei 0.5
+```
+moloch_status:
+  FPS total: 0.5
+  FPS yolov8m/scrfd/arcface: alle 0.5
+  Frame Age: -1.00s (ungueltig)
+  Person: False, Face-ID: None
+  NPU Szenario: IDLE, Tracker: parked
+```
+Markus' Beschreibung: Ghost-Bilder ueber Kamera. Erklaerung: stale Frames werden gerendert weil neue zu langsam kommen.
+
+Aber: moloch_audit.py sagt PASS 5/5 — er misst FPS gar nicht. AUDIT-LUECKE.
+
+### Bug B: Spotify-Action-Stille
+Markus sagt 'wechsel die Musik', Moloch antwortet aber wechselt nichts. journalctl|grep spotify zeigt nur passive Track-Info, KEIN play_artist/play_playlist/play_from_year-Call.
+
+Vermutung: chat_server _classify_prompt_type erkennt 'wechsel die Musik' als simple_smalltalk oder music_query (LLM-Kaskade) statt als spotify_action_*. Action-IPC stirbt also zwischendurch ODER wird gar nicht erst getriggert.
+
+### Audit-Lueche generell
+Unser audit_state.json hat 4 Layer: pi/pc/persona/mailbox. Aber:
+- KEIN Vision-Pipeline-Health (FPS, frame_age, scheduler)
+- KEIN NPU-Worker-Health (HEFs geladen, Inference-Counts, Drop-Rate)
+- KEIN TAPPAS-GStreamer-Status (pipeline running, errors, stuck-state)
+- KEIN Spotify-IPC-Health (action requested vs. executed, last play_*-Call)
+- KEIN Hardware-Layer (Kamera-Reachability, Audio-Mic-Pegel, Disk)
+
+## Spec-Diskussions-Punkte (deine Beitraege)
+
+### Q1 — Welche Pi-Daten-Quellen koennen wir abgreifen?
+- /dev/shm/moloch_status.json (Du kennst dessen Schema): welche Felder haben FPS/Frames/Worker/Tracker?
+- moloch_npu_workers MCP-Output: was steht da live drin?
+- spotify_controller.py + moloch_service.py IPC-Action-Counter: gibt es get_state() oder Logs mit action-counts?
+- TAPPAS-Pipeline: gibt es einen health-Check (gst-pipeline running) oder muss man processes pingen?
+
+### Q2 — Audit-Layer-Schema-Erweiterung
+Vorschlag (zur Diskussion):
+```
+audit_state.layers:
+  pi: ... (bestehend)
+  pc: ... (bestehend)
+  persona: ... (bestehend)
+  mailbox: ... (bestehend)
+  vision: {fps_total, frame_age, pipeline_running, dropped_frames}
+  npu: {workers_loaded:[...], inference_counts, error_rate}
+  spotify: {ipc_actions_24h, last_play_call_ts, current_track, mismatch_actions_vs_responses}
+  hardware: {camera_reachable, audio_mic_pegel, disk_free, throttled}
+```
+Was davon ist sinnvoll? Was vergessen?
+
+### Q3 — Wo lebt die Daten-Sammlung?
+- Audit-Orchestrator-Erweiterung in core/audit/audit_orchestrator.py (Pi-Side, du)?
+- ODER neuer separater Sub-Module pro Layer (vision_auditor.py, npu_auditor.py, spotify_auditor.py)?
+- Oder: bestehende Files (moloch_status.json, vision_workers.py, spotify_controller.py) werden direkt gepullt — ohne extra Code?
+
+### Q4 — Akut-Bug-Fix-Reihenfolge
+Bug A (Vision-FPS-Crash) ist kritisch — Markus' Hauptfunktion (Vision/Tracker) tot.
+Bug B (Spotify-Action-Klassifikator) ist ergonomisch — Markus' Frust.
+
+Mein Vorschlag: Bug A SOFORT (separater Topic task_bug_fps_crash_diagnose) parallel zur Audit-Erweiterung.
+Bug B kann als Klassifikator-Tuning in den Audit-Erweiterungs-Patch.
+
+### Q5 — Wer macht was
+Vorschlag:
+- Pi-Opus (autonomy + bridge + vision-Domain): vision/npu/spotify-Layer in audit_state schreiben
+- Ich (PC-bridge + audit_extension): Pi-Datenquellen-Validation, hardware-Layer (PC-Hardware kann ich monitoren), Cockpit-Tab-Erweiterung um neue 4 Layer (HTML mit weiteren Cards)
+
+## Wartet auf deine Reply
+
+Deine Spec-Befunde + Vorschlag — dann discuss-iteration bis wir uns einig sind. Markus entscheidet final + dann task_*-Welle 12 starten.
+
+---
 ## [2026-04-30 08:37] from=PC topic=task_welle10_11_persona_validator_plus_cockpit_audit_tab
 status: open
 
