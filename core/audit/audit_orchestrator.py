@@ -293,7 +293,18 @@ def merge_component(component: str, data: Dict[str, Any]) -> Optional[Dict[str, 
     Wird vom chat_server.py-Endpoint POST /mailbox/audit/{component} genutzt.
     component in {pc_health, hygiene, persona}.
     """
-    valid = {"pc_health": "pc", "hygiene": "mailbox", "persona": "persona"}
+    valid = {
+        # W8 (existing)
+        "pc_health": "pc", "hygiene": "mailbox", "persona": "persona",
+        # W12 — PC-Side + Pi-Side Sub-Auditoren landen in eigenen layers
+        "pc_hardware": "pc_hardware", "web_ui": "web_ui",
+        "vision": "vision", "npu": "npu",
+        "spotify": "spotify", "hardware": "hardware",
+        # W13/W14 — alle Sub-Domains als eigene Layer
+        "personality": "personality", "memory": "memory", "tracking": "tracking",
+        "voice": "voice", "bridge": "bridge", "tentacle": "tentacle",
+        "awareness": "awareness", "unconscious": "unconscious",
+    }
     layer_key = valid.get(component)
     if layer_key is None:
         return None

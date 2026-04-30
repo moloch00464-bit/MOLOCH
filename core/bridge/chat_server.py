@@ -1827,7 +1827,18 @@ def mailbox_post(name: str, req: MailboxPostRequest, background_tasks: Backgroun
     }
 
 
-_AUDIT_VALID_COMPONENTS = {"pc_health", "hygiene", "persona"}
+_AUDIT_VALID_COMPONENTS = {
+    # W8 (existing)
+    "pc_health", "hygiene", "persona",
+    # W12 PC-Side (PC-Cowork pushed pc_hardware + web_ui — siehe task 12:52)
+    "pc_hardware", "web_ui",
+    # W12 Pi-Side Sub-Auditoren (folgen direkt, ggf. lokal-merged statt POST)
+    "vision", "npu", "spotify", "hardware",
+    # W13 Domains
+    "personality", "memory", "tracking",
+    # W14 Domains
+    "voice", "bridge", "tentacle", "awareness", "unconscious",
+}
 
 _LAST_TURN_PATH = "/dev/shm/last_turn.json"
 
