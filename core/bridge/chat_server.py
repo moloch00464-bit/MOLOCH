@@ -94,6 +94,9 @@ _MUSIC_KEYWORDS = (
     "synthwave", "futurepop", "dark electro",
 )
 
+# Year-Filter fuer music_query (Welle 6 Schritt 7): 1950-2039 sinnvoll
+_YEAR_RE = re.compile(r"\b(19[5-9]\d|20[0-3]\d)\b")
+
 # Pre-cached Top-Artists aus spotify_profile.json (case-insensitive Match)
 _MUSIC_ARTIST_CACHE: dict = {"loaded": False, "artists": ()}
 
@@ -714,6 +717,20 @@ def status():
     }
 
 
+def _trigger_spotify_year(year: int) -> bool:
+    """Schreibe IPC-Cmd nach /tmp/moloch_cmd_*.json — Service polled alle 200ms."""
+    try:
+        cmd = {"action": "spotify_from_year", "year": int(year)}
+        path = f"/tmp/moloch_cmd_{int(time.time() * 1000)}.json"
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(cmd, f)
+        logger.info(f"[BRIDGE] IPC spotify_from_year year={year} -> {path}")
+        return True
+    except Exception as e:
+        logger.warning(f"[BRIDGE] IPC-Schreibfehler: {e}")
+        return False
+
+
 @app.post("/chat")
 def chat(req: ChatRequest):
     # User-Input ins gemeinsame Memory + EventBus (Browser-Chat synchron mit Voice)
@@ -726,6 +743,30 @@ def chat(req: ChatRequest):
         )
     except Exception as e:
         logger.warning(f"Memory/Bus user-write Fehler: {e}")
+
+    # Welle 6 Schritt 7: Year-Filter Shortcut.
+    # Wenn music_query mit Jahres-Match erkannt wird, triggern wir Spotify
+    # direkt via IPC statt durch die LLM-Kaskade — sofortige Action statt
+    # 90-180s LLM-Antwort.
+    if not req.force_local and not req.use_reason:
+        _ptype_quick = _classify_prompt_type(req.text)
+        if _ptype_quick == "music_query":
+            _ymatch = _YEAR_RE.search(req.text)
+            if _ymatch:
+                _year = int(_ymatch.group(1))
+                if _trigger_spotify_year(_year):
+                    _reply = f"Spiele Favoriten aus {_year}. Augen auf die Tracks."
+                    try:
+                        get_memory().save_message("moloch", _reply, source="chat_server")
+                    except Exception:
+                        pass
+                    return {
+                        "text": _reply,
+                        "provider": "spotify_action_year",
+                        "duration_ms": 50,
+                        "prompt_type": "music_query",
+                        "pi_mood": _get_pi_mood_label(),
+                    }
 
     # Character Journal: Konversation als charakter-formenden Event protokollieren
     try:
