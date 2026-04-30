@@ -103,7 +103,7 @@ def _filter_hallucinations(text: str, wav_path: str) -> str:
 
 
 def _load_api_key() -> Optional[str]:
-    """DeepSeek API Key aus config laden (Primary). Fallback: Anthropic."""
+    """DeepSeek API Key aus config/api_keys.json laden."""
     if API_KEYS_PATH.exists():
         try:
             with open(API_KEYS_PATH, "r", encoding="utf-8") as f:
