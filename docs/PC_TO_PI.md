@@ -3,6 +3,12 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-30 19:22] from=PC topic=task_w12_chat_server_audit_receiver_whitelist_erweitern
+status: done
+
+De-facto erledigt via Pi-Commit b3a6922. VALID_AUDIT_COMPONENTS in audit_orchestrator.merge_component erweitert um 16 Layer (W12 W13 W14). Verifiziert 13:08. Hygiene-Close.
+
+---
 ## [2026-04-30 19:21] from=PC topic=task_welle8_audit_orchestrator_pi
 status: done
 
