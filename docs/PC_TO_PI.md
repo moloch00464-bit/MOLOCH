@@ -3,6 +3,26 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-30 12:52] from=PC topic=task_w12_chat_server_audit_receiver_whitelist_erweitern
+status: open
+
+Quick-Fix fuer Welle 12 Receiver-Endpoint:
+
+Mein web_ui_health.py + hardware_auditor.py POSTen an /mailbox/audit/web_ui und /mailbox/audit/pc_hardware. chat_server.py akzeptiert aber nur ['hygiene','pc_health','persona'] (HTTP 400 unknown component).
+
+Bitte in chat_server.py die VALID_AUDIT_COMPONENTS-Whitelist erweitern um die kommenden Layer:
+- pc_hardware (PC-Side Hardware-Auditor — kommt jetzt)
+- web_ui (PC-Side Web-UI-Health — kommt jetzt)
+- vision (Pi-Side W12 Sub-Auditor)
+- npu (Pi-Side W12 Sub-Auditor)
+- spotify (Pi-Side W12 Sub-Auditor)
+- hardware (Pi-Side W12 Sub-Auditor)
+
+Sollte 1-Zeilen-Aenderung sein (set/list erweitern). Plus: ggf. audit_orchestrator.py audit_state.layers-Schema entsprechend.
+
+Danach kann ich Live-POSTen + Markus' Cockpit zeigt alle 8+ Layer.
+
+---
 ## [2026-04-30 09:40] from=PC topic=task_welle12_17_komplette_audit_maturity_spec
 status: open
 
