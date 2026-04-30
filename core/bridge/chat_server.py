@@ -1966,6 +1966,60 @@ def feedback_export():
         raise HTTPException(500, f"Feedback export error: {e}")
 
 
+# ============================================================================
+# W17 Self-Awareness — Capability Injection in System-Prompt (30s Cache)
+# ============================================================================
+
+_CAP_CACHE: Dict[str, object] = {"ts": 0.0, "summary": "", "reflections": []}
+_CAP_CACHE_TTL_S: float = 30.0
+
+
+def _get_capabilities_cached() -> Tuple[str, list]:
+    """Cached Capability-Summary + Top-3 Failure-Reflections.
+
+    30s TTL — Capability-Inventory liest /dev/shm/audit_state.json und
+    sollte nicht bei jedem Chat neu erhoben werden. Best-effort: bei
+    Fehlern gibt es leere Strings statt Crash.
+    """
+    now = time.time()
+    cached_ts = float(_CAP_CACHE["ts"])  # type: ignore[arg-type]
+    cached_summary = str(_CAP_CACHE["summary"])  # type: ignore[arg-type]
+    if now - cached_ts < _CAP_CACHE_TTL_S and cached_summary:
+        return cached_summary, list(_CAP_CACHE["reflections"])  # type: ignore[arg-type]
+    summary = ""
+    reflections: list = []
+    try:
+        from core.audit.self_awareness.capability_inventory import collect_capabilities
+        cap = collect_capabilities() or {}
+        summary = (cap.get("summary_de") or "").strip()
+    except Exception as e:
+        logger.debug(f"capability_inject: collect failed: {e}")
+    try:
+        from core.audit.self_awareness.failure_reflection import reflect_on_failures
+        refl = reflect_on_failures() or {}
+        if (refl.get("status") or "").upper() in ("WARN", "FAIL"):
+            reflections = list(refl.get("reflections_de") or [])[:3]
+    except Exception as e:
+        logger.debug(f"capability_inject: reflect failed: {e}")
+    _CAP_CACHE["ts"] = now
+    _CAP_CACHE["summary"] = summary
+    _CAP_CACHE["reflections"] = reflections
+    return summary, reflections
+
+
+def _build_capability_snippet() -> str:
+    """Erzeugt den Block der dem System-Prompt angehaengt wird."""
+    sum_de, refl_lines = _get_capabilities_cached()
+    if not sum_de and not refl_lines:
+        return ""
+    parts = []
+    if sum_de:
+        parts.append(f"\n\n**System-Selbstwahrnehmung:** {sum_de}")
+    for line in refl_lines:
+        parts.append(f"\n- {line}")
+    return "".join(parts)
+
+
 @app.get("/system_prompt")
 def system_prompt_preview():
     """Debug: was wuerde dem Cloud-LLM als System-Prompt geschickt?"""
@@ -1987,6 +2041,10 @@ def system_prompt_preview():
         tb = _build_threebrain_state_snippet()
         if tb:
             system = system + tb
+        # W17 Self-Awareness: capability injection (nach Mood/Tension-Block)
+        cap_block = _build_capability_snippet()
+        if cap_block:
+            system = system + cap_block
         return {"length": len(system), "system": system}
     except Exception as e:
         raise HTTPException(500, f"Prompt build error: {e}")
