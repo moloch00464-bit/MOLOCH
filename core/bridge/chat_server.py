@@ -16,11 +16,12 @@ import re
 import subprocess
 import sys
 import time
+import uuid
 
 import json
 import mmap
 import struct
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
@@ -2399,6 +2400,76 @@ def mailbox_audit_post(component: str, payload: Dict):
         raise
     except Exception as e:
         raise HTTPException(500, f"audit-merge Fehler: {e}")
+
+
+# ============================================================================
+# Closed-Loop Audit Trigger (W17 Phase 2 — Cockpit-getriggerte Verifier-Runs)
+# ============================================================================
+
+_VERIFY_VALID_TYPES = {
+    "all", "ptz", "led", "fan", "tts", "spotify",
+    "memory_recall", "bridge_roundtrip",
+}
+
+
+def _spawn_closed_loop_run(verify_type: str = "all") -> Dict:
+    """Fire-and-forget Spawn des Closed-Loop-Orchestrators.
+
+    Verify dauert bis zu 3 Min — kein Warten, kein capture. Ergebnis landet
+    in /dev/shm/closed_loop_state.json (vom Orchestrator selbst geschrieben).
+    """
+    rid = str(uuid.uuid4())[:8]
+    vt = verify_type if verify_type in _VERIFY_VALID_TYPES else "all"
+    args = ["python3", "-m", "core.audit.closed_loop.closed_loop_orchestrator",
+            f"--{vt}"]
+    try:
+        subprocess.Popen(
+            args,
+            cwd="/home/molochzuhause/moloch",
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception as e:
+        raise HTTPException(500, f"Verify-Spawn fehlgeschlagen: {e}")
+    return {
+        "run_id": rid,
+        "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "verify_type": vt,
+    }
+
+
+@app.post("/audit/verify", status_code=202)
+def audit_verify_trigger(payload: Dict):
+    """W17 Phase 2: Cockpit triggert Closed-Loop-Verifier.
+
+    Body: {"verify": "all"|"ptz"|"led"|"fan"|"tts"|"spotify"|"memory_recall"|"bridge_roundtrip"}
+    Returnt 202 Accepted — Run laeuft async im Hintergrund.
+    """
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "payload muss JSON-Objekt sein")
+    verify = payload.get("verify", "all")
+    if not isinstance(verify, str):
+        raise HTTPException(400, "verify muss String sein")
+    if verify not in _VERIFY_VALID_TYPES:
+        raise HTTPException(
+            400,
+            f"unknown verify type '{verify}' "
+            f"(valid: {sorted(_VERIFY_VALID_TYPES)})"
+        )
+    return _spawn_closed_loop_run(verify)
+
+
+@app.get("/audit/verify_status")
+def audit_verify_status():
+    """W17 Phase 2: aktueller Closed-Loop-State (vom letzten Run)."""
+    state_path = "/dev/shm/closed_loop_state.json"
+    if not os.path.exists(state_path):
+        return {"status": "never_run"}
+    try:
+        with open(state_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        raise HTTPException(500, f"closed_loop_state Read-Fehler: {e}")
 
 
 def main():
