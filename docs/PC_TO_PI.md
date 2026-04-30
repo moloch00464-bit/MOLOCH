@@ -3,6 +3,76 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-30 07:19] from=PC topic=task_music_context_kaskade_anti_halluzination_year_filter
+status: open
+
+ZWEI Fixes in einem Auftrag — Music-Profile-Context + WGT-Halluzinations-Fix + Year-Filter.
+
+## Markus' Direktive (16:00)
+DeepSeek ist DER REDNER (Mund). Die lokalen Specialists (dolphin-llama3 / dolphin-mistral / deepseek-coder) sind INPUT-LIEFERANTEN — sie versorgen DeepSeek mit Material, DeepSeek formuliert die finale Aussage. Pi-Kleinhirn liefert Charakter+Memory+Vision. Pi+PC zusammen = Aussage-Treffpunkt. Aber: das LLM kennt Markus' Music-Profil NICHT, daher halluziniert DeepSeek (WGT-Test: Rammstein und Fantastische 5 statt echter Bands).
+
+## Bug-Beweis (Live-Test 15:35)
+Markus-Prompt: finde mal heraus wieviel Bands auf dem WGT spielen und welche mich interessieren.
+Moloch-Antwort (FALSCH): 5 Bands, Rammstein, fantastische 5.
+DDG hat aber 5 Top-Treffer geliefert: 136 Bands offiziell, Top-Acts Covenant, DAF, Einsteurzende Neubauten, Clan Of Xymox, Lacrimosa, Suicide Commando — alle WGT-typisch.
+Plus: Markus' eigenes Spotify-Profil (siehe spotify_profile.json) zeigt Top 1 = Suicide Commando mit 185 Stunden — der spielt da! DeepSeek wusste das nicht weil Profile nicht im Prompt war.
+
+## Pi-Side Auftrag (autonomy + bridge + music)
+
+### Schritt 1: _build_music_context_snippet() neu in core/autonomy/local_llm_bridge.py
+Analog zu _build_local_context_snippet() und _build_identity_block(). Liest /mnt/moloch-data/memory/spotify/spotify_profile.json + recently_played.json:
+- Top 10 Artists mit Plays-Zahl + Genre
+- Total Hours + Streams
+- Period (2015-2025)
+- Genres-Summary aus profile-summary
+- Letzte 3 played tracks aus recently_played
+- Aktuelle Zone-empfohlene Artists aus spotify_controller.ZONE_ARTISTS
+
+Format als Klartext-Block (kein JSON), max 1500 Zeichen.
+
+### Schritt 2: _is_music_query() Klassifizierer in chat_server.py
+Keywords (case-insensitive, Wort-Boundary): band, bands, musik, album, festival, konzert, gig, dj, lied, song, tracks, spiel, spielen, spielt, spotify, plattenladen, vinyl, gothik, ebm, industrial, wave, wgt, mera luna, amphi, dark, schwarze szene, plus jeder Artist-Name aus profile.json top_artists. Plus Slash-Cmd /music.
+Return neuer prompt_type music_query.
+
+### Schritt 3: Music-Snippet in Kaskade injizieren
+In _generate_kaskade() oder _build_cloud_prompt(): bei music_query oder bei web_research mit Music-Keyword-Hit den music_context_snippet IMMER mit-prependen, sowohl in Specialist-Prompt als auch in DeepSeek-Cloud-Prompt. Pattern analog _build_identity_block bei hardware_status.
+
+### Schritt 4: Anti-Halluzinations-Klausel in DeepSeek-Cloud-Prompt
+Ergaenzen am Ende des Cloud-Prompts:
+
+WICHTIG: Behaupte KEINE Fakten die nicht in LIVE-RECHERCHE oder MUSIC-PROFIL stehen. Wenn Du etwas nicht weisst, sag das ehrlich. Markus reibt sich an Falschaussagen mehr als an weiss ich nicht. Beispiel-Fail: bei WGT-Frage nicht Rammstein erfinden wenn er nicht in Suchergebnissen steht.
+
+### Schritt 5: Specialist-Prompt schaerfen
+Im web_research-Specialist (dolphin-mistral): expliziter Header: DU DARFST AUSSCHLIESSLICH Bands/Fakten nennen die WORTWOERTLICH in der LIVE-RECHERCHE-Sektion stehen. Erfinde keine Bands aus Pre-Training.
+
+### Schritt 6: max_tokens hoch fuer music_query / web_research
+web_research_num_predict 200 -> 600. Plus music_query (neuer Pfad): 600 Default. Listen brauchen Platz.
+
+### Schritt 7: Year-Filter in spotify_controller.py
+Neue Funktion play_top_tracks(year=None, n=20). Wenn year gesetzt: filtere recently_played + track_index nach played_at-Jahr. Markus: spiel meine Favoriten von 2009 -> filter Year 2009, top 20 by play-count, Auto-Queue. Klassifizierer in chat_server: bei music_query mit Jahres-Match (2009 / 2010 / etc) Spotify-Action triggern via IPC, statt LLM-Antwort.
+
+## Smoke-Test nach Implementation
+1. Markus tippt: finde mal Bands auf WGT 2026 die mich interessieren
+   Erwartet: kaskade_deepseek_web_research, Music-Snippet im Prompt, DDG-Treffer, Antwort referenziert Suicide Commando (Markus Top 1) + andere echte WGT-Bands aus DDG, KEIN Rammstein.
+2. Markus tippt: spiel meine Favoriten von 2009
+   Erwartet: music_query mit year=2009, spotify_controller.play_top_tracks(year=2009), Spotify spielt 20 Tracks aus 2009.
+3. Markus tippt: was hoere ich gerade gerne
+   Erwartet: music_query, Music-Snippet voll, DeepSeek nennt Top-3 Artists mit Stunden + recent_played-Bezug.
+
+## Reihenfolge
+Schritt 1 -> 2 -> 3 -> 4 -> 5 -> 6 (sequentiell, alle in autonomy/bridge). Schritt 7 (Year-Filter) ist music-Domain (separater Agent), kann nachgereicht werden falls Cross-Domain-Stop noetig.
+
+## PC-Cowork parallel jetzt
+- Memory-Update project_pi_pc_symbiose.md mit Music-Context als 5. Layer in der Anatomie
+- PC chat_ui :9000 abschalten (eine zentrale URL = :9443 Pi-Cockpit HTTPS, alles andere weg)
+- ggf. Search-Proxy mit Music-spezifischen Queries pre-cachen falls Pi will
+
+## Bonus-Ziel
+Nach Schritt 1-6 sollte Moloch zum echten DJ werden: kennt Markus 6833 Stunden Musik, kann Bands empfehlen die zur Schwarzen Szene passen, weiss aktuelle Recently-Played, schlaegt Konzerte vor. Kein Halluzinieren mehr.
+
+Lokomotive Pflicht fuer Pi-Opus: moloch_session_init -> Domain-Agent autonomy fuer local_llm_bridge -> bridge fuer chat_server -> music fuer spotify_controller. Cross-Domain-Stop wenn noetig.
+
+---
 ## [2026-04-29 15:10] from=PC topic=task_endgueltige_architektur_kaskade_kleinhirn_grosshirn_deepseek
 status: open
 
