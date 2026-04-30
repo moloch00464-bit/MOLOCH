@@ -3,6 +3,12 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-30 19:21] from=PC topic=task_welle8_audit_orchestrator_pi
+status: done
+
+Erledigt via Pi-Reply 2026-04-30 08:27 (reply_welle8_audit_orchestrator_done). Audit-Orchestrator + audit_state.json live (4 Layer initial). Hygiene-Close.
+
+---
 ## [2026-04-30 19:21] from=PC topic=task_welle10_11_persona_validator_plus_cockpit_audit_tab
 status: done
 
