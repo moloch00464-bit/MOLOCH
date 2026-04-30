@@ -107,6 +107,15 @@ _MUSIC_KEYWORDS = (
 # Year-Filter fuer music_query (Welle 6 Schritt 7): 1950-2039 sinnvoll
 _YEAR_RE = re.compile(r"\b(19[5-9]\d|20[0-3]\d)\b")
 
+# Welle 7 PC-Topic 07:44: Playlist-Pattern.
+# Beispiele: "spiel meine Playlist X", "spiel die Playlist Y", "leg Playlist Z auf",
+# "starte Playlist A", "Playlist B abspielen"
+_PLAYLIST_RE = re.compile(
+    r"(?:spiel(?:e)?(?:\s+mir)?(?:\s+(?:meine|die|den|den))?|leg(?:e)?|starte?)\s+"
+    r"(?:die\s+)?playlist\s+(.+?)(?:\s+(?:ab|an|auf)\s*$|$)",
+    re.IGNORECASE,
+)
+
 # Pre-cached Top-Artists aus spotify_profile.json (case-insensitive Match)
 _MUSIC_ARTIST_CACHE: dict = {"loaded": False, "artists": ()}
 
@@ -772,6 +781,20 @@ def _trigger_spotify_year(year: int) -> bool:
         return False
 
 
+def _trigger_spotify_play_playlist(name_query: str) -> bool:
+    """IPC-Trigger fuer fuzzy-matched Playlist-Name (Welle 7 Schritt 2.3)."""
+    try:
+        cmd = {"action": "spotify_play_playlist", "name_query": str(name_query)}
+        path = f"/tmp/moloch_cmd_{int(time.time() * 1000)}.json"
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(cmd, f)
+        logger.info(f"[BRIDGE] IPC spotify_play_playlist name='{name_query}' -> {path}")
+        return True
+    except Exception as e:
+        logger.warning(f"[BRIDGE] IPC-Schreibfehler: {e}")
+        return False
+
+
 @app.post("/chat")
 def chat(req: ChatRequest):
     # User-Input ins gemeinsame Memory + EventBus (Browser-Chat synchron mit Voice)
@@ -785,13 +808,30 @@ def chat(req: ChatRequest):
     except Exception as e:
         logger.warning(f"Memory/Bus user-write Fehler: {e}")
 
-    # Welle 6 Schritt 7: Year-Filter Shortcut.
-    # Wenn music_query mit Jahres-Match erkannt wird, triggern wir Spotify
-    # direkt via IPC statt durch die LLM-Kaskade — sofortige Action statt
-    # 90-180s LLM-Antwort.
+    # Welle 6 Schritt 7 + Welle 7 Schritt 2.3: Music-IPC-Shortcuts.
+    # Wenn music_query mit Year-Match ODER Playlist-Pattern erkannt wird,
+    # triggern wir Spotify direkt via IPC statt durch die LLM-Kaskade.
     if not req.force_local and not req.use_reason:
         _ptype_quick = _classify_prompt_type(req.text)
         if _ptype_quick == "music_query":
+            # 1. Playlist-Recognition zuerst (spezifischer als Year)
+            _pmatch = _PLAYLIST_RE.search(req.text)
+            if _pmatch:
+                _name = _pmatch.group(1).strip().rstrip(".!?,").strip()
+                if _name and _trigger_spotify_play_playlist(_name):
+                    _reply = f"Lege Playlist '{_name}' auf."
+                    try:
+                        get_memory().save_message("moloch", _reply, source="chat_server")
+                    except Exception:
+                        pass
+                    return {
+                        "text": _reply,
+                        "provider": "spotify_action_playlist",
+                        "duration_ms": 50,
+                        "prompt_type": "music_query",
+                        "pi_mood": _get_pi_mood_label(),
+                    }
+            # 2. Year-Filter Shortcut
             _ymatch = _YEAR_RE.search(req.text)
             if _ymatch:
                 _year = int(_ymatch.group(1))
