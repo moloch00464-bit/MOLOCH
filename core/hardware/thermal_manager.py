@@ -315,6 +315,11 @@ class ThermalManager:
         # Recovery tracking
         self._was_above_warning = False
 
+        # W16 Expression: externer Tension-Request (0..100), Default 0 = inaktiv
+        # Wird mit thermal_level via max() gemerged — thermal-Override bleibt gewahrt.
+        self._tension_pwm_request: int = 0
+        self._tension_pwm_ts: float = 0.0   # Letzter Set-Zeitpunkt (fuer Audit)
+
         logger.info("ThermalManager initialized")
 
     # =========================================================================
@@ -564,6 +569,22 @@ class ThermalManager:
             self._hysteresis_fan_level = target_fan
             logger.debug(f"Hysteresis fan level: {old_hysteresis} -> {target_fan} at {self._smoothed_temp:.1f}°C")
 
+        # W16 Expression: Tension-Request mit thermal_level via max() mergen.
+        # thermal_level NIE umgangen — Fan kann nur HOEHER drehen, nie niedriger.
+        with self._state_lock:
+            tension_req = self._tension_pwm_request
+        tension_level = self._tension_pwm_to_level(tension_req)
+        effective_level = max(self._hysteresis_fan_level, tension_level)
+        if effective_level > self._fan_level and self._can_write_fan:
+            # Tension oder Hysteresis verlangen mehr als Kernel gerade gibt → aktiv schreiben.
+            if self._write_fan_state(effective_level):
+                self._fan_level = effective_level
+                if tension_level > self._hysteresis_fan_level:
+                    logger.debug(
+                        f"Fan boost: tension={tension_req}% -> level {tension_level} "
+                        f"(thermal {self._hysteresis_fan_level})"
+                    )
+
         # Determine thermal state
         new_state = self._determine_thermal_state(self._smoothed_temp)
         old_state = self.state
@@ -576,6 +597,41 @@ class ThermalManager:
         if self._fan_level != self._last_fan_level:
             self._handle_fan_change(self._last_fan_level, self._fan_level)
             self._last_fan_level = self._fan_level
+
+    # =========================================================================
+    # W16 EXPRESSION API — Tension-Request mappen + setzen + lesen
+    # =========================================================================
+
+    def _tension_pwm_to_level(self, pwm_pct: int) -> int:
+        """W16: Mappt Tension-PWM-Prozent (0..100) auf fan_level (0..4)."""
+        pct = max(0, min(100, int(pwm_pct)))
+        if pct <= 20:
+            return 0
+        if pct <= 40:
+            return 1
+        if pct <= 60:
+            return 2
+        if pct <= 80:
+            return 3
+        return 4
+
+    def set_tension_pwm(self, value: int):
+        """W16 Expression: externer Tension-Request 0..100.
+        Wird mit thermal_level via max() gemerged. Fan kann nur HOEHER drehen.
+        Thread-safe."""
+        clamped = max(0, min(100, int(value)))
+        with self._state_lock:
+            self._tension_pwm_request = clamped
+            self._tension_pwm_ts = time.time()
+
+    def get_tension_pwm(self) -> Dict[str, Any]:
+        """W16: aktuellen Tension-Request lesen (fuer Audit)."""
+        with self._state_lock:
+            return {
+                "pwm_pct": self._tension_pwm_request,
+                "level": self._tension_pwm_to_level(self._tension_pwm_request),
+                "set_age_s": (time.time() - self._tension_pwm_ts) if self._tension_pwm_ts > 0 else None,
+            }
 
     def _handle_state_transition(self, old_state: ThermalState, new_state: ThermalState):
         """Handle thermal state transition."""
