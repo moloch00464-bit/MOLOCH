@@ -885,9 +885,58 @@ class SpotifyController:
         logger.info(f"[SPOTIFY] {len(uris)} selten gehoerte Tracks entdeckt")
         return self.play(uri=uris)
 
-    def play_from_year(self, year: int) -> bool:
-        """Kann ohne Jahr-Info im Index nicht filtern — spielt stattdessen Top Tracks."""
-        logger.info(f"[SPOTIFY] Jahr-Filter nicht verfuegbar im Index, spiele Top Tracks")
+    def play_from_year(self, year: int, n: int = 20) -> bool:
+        """Spiele Tracks aus einem bestimmten Jahr (Welle 6 Schritt 7).
+
+        Datenquelle: recently_played.json — filtert Items deren `played_at`
+        mit '{year}-' beginnt. Bei Treffern: shuffle + top-n. Wenn keine
+        Treffer (z.B. fuer Jahre vor 2026, weil recently_played nur ~20
+        Items aktuelles Jahr hat), graceful fallback auf play_top_tracks.
+
+        Markus' Direktive 07:19: 'spiel meine Favoriten von 2009'.
+        Aktueller Datenstand: recently_played hat nur 2026-Daten.
+        Fuer Jahre vor 2026 spielt es deshalb Top Tracks + Log-Hinweis.
+        """
+        if not self._ensure_auth():
+            return False
+        try:
+            with open(_RECENTLY_PLAYED_PATH, "r", encoding="utf-8") as f:
+                rp = json.load(f)
+        except Exception as e:
+            logger.warning(f"[SPOTIFY] recently_played.json Fehler: {e}")
+            rp = []
+        if not isinstance(rp, list):
+            rp = rp.get("recently_played") or rp.get("items") or [] if isinstance(rp, dict) else []
+
+        year_prefix = f"{year}-"
+        matches: List[str] = []
+        for t in rp:
+            if not isinstance(t, dict):
+                continue
+            pa = t.get("played_at") or ""
+            if pa.startswith(year_prefix):
+                uri = t.get("uri")
+                if uri:
+                    matches.append(uri)
+
+        # Dedup-Reihenfolge wahren (set verliert order)
+        seen = set()
+        uniq = []
+        for u in matches:
+            if u not in seen:
+                seen.add(u)
+                uniq.append(u)
+
+        if uniq:
+            random.shuffle(uniq)
+            uris = uniq[:n]
+            logger.info(f"[SPOTIFY] {len(uris)} Tracks aus Jahr {year} (recently_played)")
+            return self.play(uri=uris)
+
+        logger.info(
+            f"[SPOTIFY] Kein Treffer fuer Jahr {year} in recently_played "
+            f"({len(rp)} Items insgesamt) — Fallback Top Tracks"
+        )
         return self.play_top_tracks()
 
     # =========================================================================
