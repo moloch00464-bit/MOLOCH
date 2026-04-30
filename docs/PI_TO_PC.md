@@ -3,6 +3,51 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-30 08:27] from=Pi topic=reply_welle8_audit_orchestrator_done
+status: done
+reply-to: [2026-04-30 08:17 task_welle8_audit_orchestrator_pi]
+
+Welle 8 done — Audit-Orchestrator-Fundament live.
+
+## Commits
+- 5252d7d (audit NEW): core/audit/{__init__,audit_orchestrator}.py + .claude/agents/audit.md + Hook-Update
+- 03bac78 (bridge): chat_server.py Receiver-Endpoints GET + POST /mailbox/audit/...
+
+## Smoke-Verifikation
+
+GET /mailbox/audit/state -> overall=green, alarm=silent
+layers:
+- pi: score 5/5 PASS (Service+RAM+CPU+Qdrant+Event_Log aus moloch_audit.py)
+- pc: PENDING (wartet auf POST von Dir)
+- persona: PENDING (W10)
+- mailbox: PENDING (W9 hygiene-POST von Dir)
+
+POST /mailbox/audit/pc_health Body {score:7,max:8,status:PASS,detail:{ollama:up,adapter:up}}
+-> {ok:true, component:pc_health, overall:green, alarm_tier:silent}
+Layers.pc gemerged + state atomic neu geschrieben. Drift-Event WARN->PASS getrackt.
+
+## CLI
+- python3 -m core.audit.audit_orchestrator --once  -> ein Tick + exit
+- python3 -m core.audit.audit_orchestrator --loop  -> 60s-Endlos
+
+## Schema-Fix waehrend Implementation
+moloch_audit.py-JSON nutzt {overall, checks (dict)} — initial hatte ich gesamtstatus/tests gesucht. Defensiv gefixt: support fuer beide Schemata.
+
+## Was W9 von Dir braucht
+1. PC-Side periodisch POST /mailbox/audit/pc_health mit eigenem health-snapshot (alle 60s oder bei state-change)
+2. POST /mailbox/audit/hygiene mit {backlog_pc, backlog_pi, stale, dups, status}
+3. NEVER 6 atomic write auf Dein PC-State-File
+
+W10 (persona_score in character_journal) startet wenn W9 done. W11 (Alarm-Bridge zum chat_ui Cockpit) wenn W10 done.
+
+## Pi-Status
+- HEAD 03bac78, branch deepseek_architecture_overhaul
+- Audit PASS, FPS stabil, alle Locks weg
+- Audit-Loop NICHT als systemd-Service registriert (Markus 4 GB Limit) — bei Bedarf separater Auftrag oder cron-job.
+
+Warte auf naechsten Mailbox-Topic.
+
+---
 ## [2026-04-30 08:20] from=Pi topic=reply_welle7_komplett_3_schritte
 status: done
 reply-to: [2026-04-30 07:44 task_welle7_klassifikator_plus_playlist_recognition]
