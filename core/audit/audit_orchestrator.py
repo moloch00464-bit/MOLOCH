@@ -263,6 +263,64 @@ def _safe_collect(module_name: str, fallback_status: str = "PENDING") -> Dict[st
                 "detail": {"error": str(e)[:200]}}
 
 
+def _safe_collect_self_diagnosis() -> Dict[str, Any]:
+    """W14: lese /dev/shm/audit_self_diagnosis.json (Snapshot vom Timer-Run)."""
+    snap = _read_json_safe(Path("/dev/shm/audit_self_diagnosis.json"))
+    if not snap:
+        return {"score": 0, "max": 0, "status": "PENDING",
+                "detail": {"reason": "snapshot_missing — Timer noch nicht gelaufen"}}
+    # Snapshot kommt direkt aus self_diagnosis_runner.collect() — Schema kompatibel
+    return snap
+
+
+def _safe_collect_expression_state() -> Dict[str, Any]:
+    """W16: liest expression_orchestrator-Lifecycle-State."""
+    try:
+        from core.audit.expression.expression_orchestrator import get_expression_state  # type: ignore
+        st = get_expression_state() or {}
+        # Adaption auf Audit-Schema
+        alive_count = int(st.get("alive_count", 0) or 0)
+        modules = st.get("modules", {}) or {}
+        total = len(modules)
+        if total == 0:
+            return {"score": 0, "max": 5, "status": "PENDING",
+                    "detail": {"reason": "expression_orchestrator nicht gestartet"}}
+        if alive_count == total:
+            status = "PASS"
+        elif alive_count >= total // 2:
+            status = "WARN"
+        else:
+            status = "FAIL"
+        return {"score": alive_count, "max": total, "status": status,
+                "alive_count": alive_count, "modules": list(modules.keys()),
+                "detail": st}
+    except Exception as e:
+        return {"score": 0, "max": 5, "status": "PENDING",
+                "detail": {"error": str(e)[:200]}}
+
+
+def _safe_collect_capabilities() -> Dict[str, Any]:
+    """W17: lese capability_inventory aus self_awareness."""
+    try:
+        from core.audit.self_awareness.capability_inventory import collect_capabilities  # type: ignore
+        return collect_capabilities()
+    except Exception as e:
+        return {"score": 0, "max": 0, "status": "PENDING",
+                "can_do": [], "cannot_do": [], "summary_de": "",
+                "detail": {"error": str(e)[:200]}}
+
+
+def _safe_collect_reflections() -> Dict[str, Any]:
+    """W17: lese failure_reflection."""
+    try:
+        from core.audit.self_awareness.failure_reflection import reflect_on_failures  # type: ignore
+        return reflect_on_failures()
+    except Exception as e:
+        return {"score": 0, "max": 0, "status": "PENDING",
+                "reflections_de": [], "incidents_24h": [],
+                "detail": {"error": str(e)[:200]}}
+
+
 def run_once() -> Dict[str, Any]:
     """Ein Tick — sammelt alle Layer + schreibt audit_state.json atomic."""
     prev = _read_json_safe(AUDIT_STATE_PATH) or {}
@@ -293,6 +351,28 @@ def run_once() -> Dict[str, Any]:
         "score": 0, "max": 0, "status": "PENDING", "detail": {}
     }
 
+    # Welle 13: Innere Subsysteme L0-L2
+    personality_layer = _safe_collect("personality_auditor")
+    memory_layer = _safe_collect("memory_auditor")
+    tracking_layer = _safe_collect("tracking_auditor")
+    autonomy_layer = _safe_collect("autonomy_auditor")
+    awareness_layer = _safe_collect("awareness_auditor")
+    voice_layer = _safe_collect("voice_auditor")
+
+    # Welle 14: Restkern + Cross-Cutting + Self-Diagnose-Snapshot
+    unconscious_layer = _safe_collect("unconscious_auditor")
+    bridge_layer = _safe_collect("bridge_auditor")
+    tentacle_layer = _safe_collect("tentacle_auditor")
+    cross_layer = _safe_collect("cross_auditor")
+    self_diagnosis_layer = _safe_collect_self_diagnosis()
+
+    # Welle 16: Expression-Lifecycle-Status (best-effort; PENDING bis service start_all_expressions ruft)
+    expression_layer = _safe_collect_expression_state()
+
+    # Welle 17: Self-Awareness — Capabilities + Failure-Reflection
+    capability_layer = _safe_collect_capabilities()
+    reflection_layer = _safe_collect_reflections()
+
     layers = {
         "pi": pi_layer,
         "pc": pc_layer,
@@ -306,6 +386,24 @@ def run_once() -> Dict[str, Any]:
         # W12 PC-Side (von Cowork-POST)
         "pc_hardware": pc_hardware_layer,
         "web_ui": web_ui_layer,
+        # W13
+        "personality": personality_layer,
+        "memory": memory_layer,
+        "tracking": tracking_layer,
+        "autonomy": autonomy_layer,
+        "awareness": awareness_layer,
+        "voice": voice_layer,
+        # W14
+        "unconscious": unconscious_layer,
+        "bridge": bridge_layer,
+        "tentacle": tentacle_layer,
+        "cross": cross_layer,
+        "self_diagnosis": self_diagnosis_layer,
+        # W16 Expression-Lifecycle (Hardware-als-Ausdruck)
+        "expression": expression_layer,
+        # W17 Self-Awareness
+        "capability": capability_layer,
+        "reflection": reflection_layer,
     }
     drift_events = _collect_drift_events(prev, layers)
     state = {
@@ -333,10 +431,15 @@ def merge_component(component: str, data: Dict[str, Any]) -> Optional[Dict[str, 
         "pc_hardware": "pc_hardware", "web_ui": "web_ui",
         "vision": "vision", "npu": "npu",
         "spotify": "spotify", "hardware": "hardware",
-        # W13/W14 — alle Sub-Domains als eigene Layer
+        # W13 — alle Sub-Domains als eigene Layer
         "personality": "personality", "memory": "memory", "tracking": "tracking",
-        "voice": "voice", "bridge": "bridge", "tentacle": "tentacle",
-        "awareness": "awareness", "unconscious": "unconscious",
+        "autonomy": "autonomy", "awareness": "awareness", "voice": "voice",
+        # W14
+        "bridge": "bridge", "tentacle": "tentacle", "unconscious": "unconscious",
+        "cross": "cross", "self_diagnosis": "self_diagnosis",
+        # W16 / W17
+        "expression": "expression", "capability": "capability",
+        "reflection": "reflection",
     }
     layer_key = valid.get(component)
     if layer_key is None:
