@@ -572,6 +572,86 @@ def _build_local_context_snippet(user_msg: Optional[str] = None) -> str:
     except Exception:
         return ""
 
+_MUSIC_PROFILE_PATH = "/mnt/moloch-data/memory/spotify/spotify_profile.json"
+_RECENTLY_PLAYED_PATH = "/mnt/moloch-data/memory/spotify/recently_played.json"
+
+
+def _build_music_context_snippet(max_chars: int = 1500) -> str:
+    """Markus' Spotify-Profil als Klartext fuer Cloud + Specialist (Welle 6).
+
+    Liest spotify_profile.json + recently_played.json + ZONE_ARTISTS.
+    Wird bei prompt_type=music_query und web_research-mit-Music-Hit vor den
+    LLM-Call prepended — verhindert WGT-Halluzinations-Bug (DeepSeek wusste
+    Markus' Top-Artists nicht und erfand Rammstein/Fantastische 5).
+
+    Format: Klartext-Block, max ~1.5kB. Best-effort, leerer String bei Fehler.
+    """
+    try:
+        with open(_MUSIC_PROFILE_PATH, "r", encoding="utf-8") as f:
+            prof = json.load(f)
+    except Exception:
+        return ""
+    summary = prof.get("summary", {}) or {}
+    top_artists = (prof.get("top_artists") or [])[:10]
+    genre_prof = prof.get("genre_profile", {}) or {}
+
+    lines = ["=== MARKUS' MUSIK-PROFIL (Spotify, langfristig) ==="]
+    period = summary.get("period_years") or summary.get("period") or "2015-2025"
+    total_h = summary.get("total_hours") or summary.get("hours") or "?"
+    streams = summary.get("total_streams") or summary.get("streams") or "?"
+    lines.append(f"Zeitraum: {period} | Total: {total_h}h / {streams} Streams")
+
+    top_genres = genre_prof.get("top_genres") or genre_prof.get("genres") or []
+    if isinstance(top_genres, list) and top_genres:
+        gtxt = ", ".join(str(g) for g in top_genres[:6])
+        lines.append(f"Genres: {gtxt}")
+
+    if top_artists:
+        lines.append("Top 10 Artists (Plays / Stunden / Genre):")
+        for a in top_artists:
+            name = a.get("name", "?")
+            plays = a.get("plays", "?")
+            hours = a.get("hours", "?")
+            genre = a.get("genre", "")
+            lines.append(f"  #{a.get('rank','?')} {name} — {plays}p / {hours}h ({genre})")
+
+    # Recently played (letzte 3)
+    try:
+        with open(_RECENTLY_PLAYED_PATH, "r", encoding="utf-8") as f:
+            rp = json.load(f)
+        recent = rp.get("recently_played") or rp.get("items") or rp
+        if isinstance(recent, list) and recent:
+            lines.append("Zuletzt gehoert (letzte 3):")
+            for t in recent[:3]:
+                tn = t.get("track") or t.get("name") or "?"
+                an = t.get("artist") or (t.get("artists") or [{}])[0].get("name", "?")
+                lines.append(f"  - {an} — {tn}")
+    except Exception:
+        pass
+
+    # ZONE_ARTISTS (lazy import damit kein Zirkel-Problem)
+    try:
+        from core.spotify_controller import ZONE_ARTISTS
+        cur_zone = "shadow"  # default fallback wenn kein Status
+        try:
+            with open(_STATUS_JSON_PATH, "r") as f:
+                st = json.load(f)
+            cur_zone = (st.get("core") or {}).get("zone", "shadow")
+        except Exception:
+            pass
+        zlist = ZONE_ARTISTS.get(cur_zone) or ZONE_ARTISTS.get("shadow") or []
+        if zlist:
+            lines.append(f"Zone-{cur_zone}-Artists (passend zur aktuellen Stimmung):")
+            lines.append("  " + ", ".join(zlist[:10]))
+    except Exception:
+        pass
+
+    snippet = "\n".join(lines)
+    if len(snippet) > max_chars:
+        snippet = snippet[:max_chars - 4] + "\n..."
+    return snippet
+
+
 def _build_threebrain_state_snippet(max_chars: int = 800) -> str:
     """ThreeBrain Welle 1.3: Drift + Patch + letzte Journal-Events fuer Cloud-Chat.
 
@@ -1017,7 +1097,7 @@ class LocalLLMBridge:
         if prompt_type in ("hardware_status", "simple_smalltalk"):
             chosen = "ollama"
         elif prompt_type in ("complex_smalltalk", "system_question",
-                             "code_query", "web_research"):
+                             "code_query", "web_research", "music_query"):
             chosen = "tentacle" if tentacle_healthy else "ollama"
         else:
             return None  # unbekannter Typ -> Komplexitaets-Logik
@@ -1636,18 +1716,31 @@ class LocalLLMBridge:
         out = self._call_tentacle_raw(model, system, user_msg, max_tokens=max_tok, timeout_s=timeout_s)
         return out or ""
 
-    def _grosshirn_specialist_web(self, pi_context: str, user_msg: str) -> str:
-        """Web-Specialist: dolphin-mistral:7b + DDG search proxy."""
+    def _grosshirn_specialist_web(self, pi_context: str, user_msg: str,
+                                    music_ctx: str = "") -> str:
+        """Web-Specialist: dolphin-mistral:7b + DDG search proxy.
+
+        Bei music_query wird music_ctx (Markus' Spotify-Profil) mit-prependet
+        damit das Modell Bands aus Live-Suche mit Markus' Top-Artists abgleichen
+        kann. Anti-Hallu-Header verhindert Erfindungen aus Pre-Training.
+        """
         cfg = _load_tentacle_cfg()
         model = cfg.get("web_research_model") or "dolphin-mistral:7b"
         search_results = _fetch_search_context(user_msg)
-        system = (
-            "Du bist der Web-Recherche-Pre-Processor fuer M.O.L.O.C.H.\n"
-            "Live-Suchergebnisse stehen in der User-Message. Fasse 2-3 Saetze\n"
-            "fuer die Cloud-Stimme zusammen + erwaehne mindestens eine URL.\n"
-            "Du bist NICHT die Stimme — du bist Vorarbeit.\n\n"
-            "Pi-Live-Kontext:\n" + (pi_context or "(kein Kontext)")
-        )
+        system_parts = [
+            "Du bist der Web-Recherche-Pre-Processor fuer M.O.L.O.C.H.",
+            "DU DARFST AUSSCHLIESSLICH Bands, Fakten, URLs nennen die WORTWOERTLICH",
+            "in der LIVE-RECHERCHE-Sektion stehen. Erfinde NICHTS aus Pre-Training.",
+            "Wenn etwas nicht in der Suche ist, sag 'kein Treffer'.",
+            "Fasse 2-4 Saetze fuer die Cloud-Stimme + erwaehne mindestens eine URL.",
+            "Du bist NICHT die Stimme — du bist Vorarbeit.",
+            "",
+            "Pi-Live-Kontext:",
+            pi_context or "(kein Kontext)",
+        ]
+        if music_ctx:
+            system_parts.extend(["", music_ctx])
+        system = "\n".join(system_parts)
         if search_results:
             user_full = search_results + "\n\n=== USER FRAGE ===\n" + user_msg
         else:
@@ -1658,16 +1751,23 @@ class LocalLLMBridge:
         return out or ""
 
     def _build_cloud_prompt(self, pi_context: str, specialist_out: str,
-                             user_msg: str, prompt_type: str) -> str:
-        """DeepSeek-Cloud-Prompt: User-Frage + Specialist-Vorarbeit.
+                             user_msg: str, prompt_type: str,
+                             music_ctx: str = "") -> str:
+        """DeepSeek-Cloud-Prompt: User-Frage + Specialist-Vorarbeit + ggf. Music-Profil.
+
         Persona kommt aus DeepSeek-System-Prompt (TENTACLE_SYSTEM_COMPACT).
+        Anti-Hallu-Klausel am Ende — Markus reibt sich an Falschaussagen mehr
+        als an 'weiss ich nicht'.
         """
         type_label = {
             "complex_smalltalk": "Konversations-Specialist",
             "code_query": "Code-Specialist (deepseek-coder)",
             "web_research": "Web-Recherche-Specialist (mit Live-Suche)",
+            "music_query": "Musik-Specialist (Live-Suche + Markus' Profil)",
         }.get(prompt_type or "", "Specialist")
         parts = [f"Markus sagt: {user_msg}"]
+        if music_ctx:
+            parts.append(f"\n{music_ctx}")
         if specialist_out:
             parts.append(
                 f"\n[Vorarbeit vom {type_label}]\n{specialist_out}\n[Ende Vorarbeit]"
@@ -1677,6 +1777,13 @@ class LocalLLMBridge:
         parts.append(
             "\nAntworte als Moloch in deinem Charakter — nutze die Vorarbeit als "
             "Material, sprich aber in deiner eigenen Stimme. Kurz, direkt."
+        )
+        parts.append(
+            "\nWICHTIG: Behaupte KEINE Fakten die nicht in der Vorarbeit oder im "
+            "Musik-Profil stehen. Wenn Du etwas nicht weisst, sag das ehrlich. "
+            "Markus reibt sich an Falschaussagen mehr als an 'weiss ich nicht'. "
+            "Beispiel-Fail: bei WGT-Frage nicht Rammstein erfinden wenn er nicht "
+            "in den Suchergebnissen steht."
         )
         return "\n".join(parts)
 
@@ -1691,12 +1798,17 @@ class LocalLLMBridge:
         """
         user_msg = prompt
         pi_ctx = _build_local_context_snippet(user_msg)
+        # Music-Kontext nur bei music_query (verhindert WGT-Hallu-Bug 2026-04-29)
+        music_ctx = _build_music_context_snippet() if prompt_type == "music_query" else ""
         logger.info(f"[LLM-KASKADE] starte type={prompt_type}")
 
         if prompt_type == "code_query":
             specialist_out = self._grosshirn_specialist_code(pi_ctx, user_msg)
         elif prompt_type == "web_research":
             specialist_out = self._grosshirn_specialist_web(pi_ctx, user_msg)
+        elif prompt_type == "music_query":
+            # Music nutzt web-Specialist mit Music-Profil zusaetzlich (DDG + Profil)
+            specialist_out = self._grosshirn_specialist_web(pi_ctx, user_msg, music_ctx=music_ctx)
         else:
             specialist_out = self._grosshirn_specialist_chat(pi_ctx, user_msg)
 
@@ -1706,7 +1818,8 @@ class LocalLLMBridge:
             logger.warning("[LLM-KASKADE] specialist still — DeepSeek antwortet ohne Vorarbeit")
 
         cloud_prompt = self._build_cloud_prompt(pi_ctx, specialist_out, user_msg,
-                                                  prompt_type or "complex_smalltalk")
+                                                  prompt_type or "complex_smalltalk",
+                                                  music_ctx=music_ctx)
         # DeepSeek injiziert Profile selbst wenn system leer (siehe _generate_deepseek)
         result = self._generate_deepseek(cloud_prompt, system or "", max_tokens or 400)
 
