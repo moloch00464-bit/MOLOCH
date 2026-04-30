@@ -82,6 +82,7 @@ get_file_domain() {
         */personality*)           echo "personality"; return ;;
         */autonomy*)              echo "autonomy";    return ;;
         */bridge*)                echo "bridge";      return ;;
+        */audit*)                 echo "audit";       return ;;
         */awareness*)             echo "awareness";   return ;;
         */memory*)                echo "memory";      return ;;
         */music*)                 echo "music";       return ;;
