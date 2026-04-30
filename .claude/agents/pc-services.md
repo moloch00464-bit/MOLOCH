@@ -4,6 +4,7 @@ description: "Windows Scheduled Tasks (schtasks), nssm, services-orchestration, 
 tools: Read, Grep, Glob, Edit, Write, Bash, PowerShell
 model: sonnet
 maxTurns: 15
+skills: pc-bridge, pc-cowork-startup, moloch-mcp
 memory: project
 ---
 

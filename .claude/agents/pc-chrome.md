@@ -4,6 +4,7 @@ description: "Chrome-Profile, Permissions (Mic/Cam/Notifications), Site-Settings
 tools: Read, Grep, Glob, Edit, Write, Bash, PowerShell
 model: sonnet
 maxTurns: 15
+skills: pc-bridge, pc-mic-fix, moloch-mcp
 memory: project
 ---
 

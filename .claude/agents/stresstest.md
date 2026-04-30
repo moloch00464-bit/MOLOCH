@@ -5,6 +5,7 @@ tools: Read, Grep, Glob, Bash
 disallowedTools: Edit, Write
 model: sonnet
 maxTurns: 15
+skills: moloch-status, moloch-audit, moloch-dev
 memory: project
 ---
 

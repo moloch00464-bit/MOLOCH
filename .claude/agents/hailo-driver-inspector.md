@@ -4,6 +4,7 @@ description: Hailo NPU + PCIe Treiber-Gesundheitscheck. 10 sequenzielle Checks (
 model: sonnet
 tools: Bash, Read, Write
 maxTurns: 15
+skills: moloch-dev, driver-health-check
 ---
 
 # Hailo Driver Inspector

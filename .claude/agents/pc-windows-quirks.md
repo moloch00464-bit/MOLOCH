@@ -4,6 +4,7 @@ description: "Windows-spezifische Subprocess- und Pfad-Fallen die auf Linux nich
 tools: Read, Grep, Glob, Edit, Bash, PowerShell
 model: sonnet
 maxTurns: 10
+skills: pc-bridge
 memory: project
 ---
 
