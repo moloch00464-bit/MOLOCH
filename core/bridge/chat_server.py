@@ -97,6 +97,11 @@ _MUSIC_KEYWORDS = (
     "gerne hoer", "gerne hör", "gern hoer", "gern hör",
     "lieblings", "lieblingsband", "lieblingslied", "lieblingsalbum",
     "lieblingsmusik", "lieblings-song", "playlist",
+    # PC-Topic 07:44 — weitere Music-Reflektions-Begriffe
+    "gerade gerne", "gerade gern", "gerade hoere", "gerade höre",
+    "mein liebling", "mein favorit", "favoriten",
+    " top ", " hits", "charts",
+    "80er", "90er", "2000er", "70er",
 )
 
 # Year-Filter fuer music_query (Welle 6 Schritt 7): 1950-2039 sinnvoll
@@ -200,37 +205,68 @@ def _classify_prompt_type(text: str) -> str:
     return "complex_smalltalk"
 
 
+_VISUAL_DRIFT_HYSTERESIS_S = 3.0
+
+
 def _check_visual_context_drift() -> str:
-    """Phase 3 Task 3d + Welle 7: Visual-Echo-Validator (konservative Variante).
+    """Phase 3 Task 3d + Welle 7 PC-Topic 07:44: Visual-Echo-Validator
+    konservativ + 3s-Hysterese.
 
-    Triggert NUR bei echten Identitaets-Wechseln, nicht bei kurzen Detection-
-    Drops oder Person-Toggles. Markus' Bug 2026-04-29: Disclaimer kam bei JEDEM
-    Turn auch wenn Markus durchgehend im Bild war (kurzer SCRFD-Drop reichte).
+    Triggert NUR bei echten Identitaets-Wechseln die mindestens 3 Sekunden
+    anhalten. Markus' Bug-Befund 2026-04-29: Disclaimer kam bei JEDEM Turn
+    auch wenn Markus durchgehend im Bild war — kurzer SCRFD-Drop reichte.
 
-    Trigger jetzt nur:
-    - face_id-Wechsel von erkannter Person -> ANDERE erkannte Person
-    - face_id-Wechsel von erkannt -> 'unknown' (Eindringling)
-    NICHT mehr:
-    - person_detected True/False Toggle (zu fragil bei kurzem Drop)
-    - face_id erkannt -> None (kann False-Negative sein)
+    State (function attribute):
+        _stable_face: face_id der als stabil gilt (Anker)
+        _pending_face: face_id der den Anker ersetzen will
+        _pending_since: monotonic-Zeit als Pending begann
+
+    Logik pro Aufruf:
+    1. Wenn cur_face == _stable_face -> stabil, pending zuruecksetzen, ""
+    2. Wenn cur_face != _stable_face:
+       a) Wenn pending == cur_face und Aenderung >=3s alt:
+          -> Trigger Marker (alt -> cur), _stable = cur, pending reset
+       b) Sonst: pending = cur_face, since = now (Hysterese laeuft)
     """
     try:
         import json as _json
         with open("/dev/shm/moloch_status.json", "r") as f:
             current = _json.load(f)
         cur_face = current.get("face_id")
-        cached = getattr(_check_visual_context_drift, "_last_snapshot", None)
-        _check_visual_context_drift._last_snapshot = {
-            "face_id": cur_face,
-        }
-        if cached is None:
+        now = time.monotonic()
+        stable = getattr(_check_visual_context_drift, "_stable_face", None)
+        pending = getattr(_check_visual_context_drift, "_pending_face", None)
+        pending_since = getattr(_check_visual_context_drift, "_pending_since", 0.0)
+
+        # Erstaufruf — Anker setzen, kein Trigger
+        if stable is None:
+            _check_visual_context_drift._stable_face = cur_face
+            _check_visual_context_drift._pending_face = None
             return ""
-        old_face = cached.get("face_id")
-        # Trigger nur bei wirklichem Identitaets-Wechsel
-        if old_face and cur_face and old_face != cur_face:
-            return "[Hinweis: andere Person im Bild waehrend meiner Antwort.] "
-        if old_face and old_face != "unknown" and cur_face == "unknown":
-            return "[Hinweis: Unbekannter im Bild waehrend meiner Antwort.] "
+
+        # Stabil — kein Drift
+        if cur_face == stable:
+            _check_visual_context_drift._pending_face = None
+            return ""
+
+        # cur_face != stable -> moeglicher Drift
+        if pending == cur_face:
+            # Hysterese laeuft schon
+            if (now - pending_since) >= _VISUAL_DRIFT_HYSTERESIS_S:
+                # Anker uebernehmen + Marker (basierend auf altem stable)
+                old = stable
+                _check_visual_context_drift._stable_face = cur_face
+                _check_visual_context_drift._pending_face = None
+                if old and old != "unknown" and cur_face == "unknown":
+                    return "[Hinweis: Unbekannter im Bild waehrend meiner Antwort.] "
+                if old and cur_face and old != cur_face:
+                    return "[Hinweis: andere Person im Bild waehrend meiner Antwort.] "
+                return ""
+            # Hysterese noch nicht erfuellt — kein Marker
+            return ""
+        # Neuer Pending — Hysterese-Timer starten
+        _check_visual_context_drift._pending_face = cur_face
+        _check_visual_context_drift._pending_since = now
     except Exception:
         pass
     return ""
