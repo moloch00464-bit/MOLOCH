@@ -1,7 +1,143 @@
-# Agent Handoff — 2026-04-28 (Session 30 — Hailo-Treiber-Audit)
-# Letzter Commit: hailo_audit_done | Audit: PASS | FPS 12-20
+# Agent Handoff — 2026-04-30 (Pi-Opus Session 2 — W13–W17 KOMPLETT)
+
+## Session-Ergebnis
+24 Audit-Layer live, Hardware-als-Ausdruck wirkt, Self-Awareness im LLM-Prompt, Cockpit Sub-Tabs.
+Letzter Push: `2825beb`. Pipeline FPS 20.1.
 
 ---
+
+## Was geliefert wurde (12+ Commits gepusht)
+
+### W13 — Innere Subsysteme (commit `54ef4ff`)
+6 Domain-Auditoren in `core/audit/`:
+- `personality_auditor` — mode/tension/zone/last_switch_age + drift vs perception_weights
+- `memory_auditor` — longterm + character_journal + face_db + Qdrant /collections
+- `tracking_auditor` — FSM-State/lost_count_24h/ptz_modus
+- `autonomy_auditor` — DecisionEngine + Homeostasis + NightCycle, decisions/h
+- `awareness_auditor` — ActivityAnalyzer state + RoomMap + WorldState-stale
+- `voice_auditor` — mic-pegel + ESP32-RSSI + tts-calls/h via journalctl
+
+### W14 — Restkern + Cross + Self-Diagnose (commit `6d2e3e3`)
+5 Module + 2 Systemd-Units:
+- `unconscious_auditor` — TaoEngine alive + impulses_1h + anima_mappings
+- `bridge_auditor` — chat_server :9100 + PC-Heartbeat + Mailbox-mtime + Tentakel
+- `tentacle_auditor` — UDP-Listener 12345 + ESP32-ping + RSSI
+- `cross_auditor` — 13-Komponenten-Heartbeat + RAM/FD/Threads/tmp/shm + read-latency
+- `self_diagnosis_runner` — wraps `scripts/self_diagnosis.py`, snapshot `/dev/shm/audit_self_diagnosis.json`
+- `/etc/systemd/system/moloch-self-diagnose.{service,timer}` — **enabled + daemon-reload done**, OnBootSec=10min, alle 6h
+
+### W15 — Closed-Loop-Verifier (commit `8684489`)
+`core/audit/closed_loop/`:
+- `ptz_verify` — pan_send +20° → diff zwischen 15-25° = PASS, Cleanup -20°
+- `led_verify` — set_color → state-readback
+- `fan_verify` — set_fan_pwm(100) → temp-drop ≥1.5°C in 30s, SKIP wenn baseline <50°C
+- `tts_verify` — TTS speak → Mic-loopback-spike >2x baseline
+- `spotify_verify` — play_artist("Suicide Commando") → current_track-match nach 5s, Cleanup
+- `memory_recall_verify` — recall("Markus") → Confidence ≥0.7
+- `bridge_roundtrip_verify` — POST tentakel /api/generate "Sag eins" → RTT <5s
+- `closed_loop_orchestrator` — schreibt `/dev/shm/closed_loop_state.json` atomic
+- CLI: `python3 -m core.audit.closed_loop.closed_loop_orchestrator --all|--ptz|--led|...`
+- HTTP: `POST /audit/verify {"verify":"all"|"<aktor>"}` (commit `b73f1e5`)
+- `_common.py` mit `is_tracking_active()` (PTZ-Test SKIP wenn FSM=tracking)
+
+### W16 — Hardware als Ausdruck (commits `cf7ec58` + 3× Hardware-API + Service-Boot `2825beb`)
+`core/audit/expression/` — 5 Module + Orchestrator subscriben EventBus:
+- `tension_to_fan` — Tension→Fan-PWM 25/35/50/75/100% mit thermal-Override via max()
+- `mood_to_spotify` — Mood-Wechsel → Zone-Bias nach 30s, 5min Cooldown
+- `zone_to_led` — Zone→LED-Pattern (solid_blue/pulsing_magenta/pulsing_red/dim_warm_white)
+- `berserker_strobo` — mode→berserker → 3 rote Blitze 600ms in eigenem Thread, 30s Cooldown
+- `tension_to_tts_volume` — Tension→TTS-Vol 0.7/1.0/1.15/1.3 → `/dev/shm/moloch_tts_volume.json`
+- `expression_orchestrator.start_all_expressions()` im Service-Boot
+
+Hardware-API (3 Commits, NEVER 4: 1-Datei-1-Commit):
+- `thermal_manager.set_tension_pwm()` + `_tension_pwm_to_level()` + `get_tension_pwm()` (`632270a`)
+- `rgb_led_controller.set_pattern(name)` + `flash_sequence(seq)` (`17cd961`)
+- `spotify_controller.set_zone_bias(zone)` + `get_zone_bias()` + `_get_current_zone`-Override (`6ba0973`)
+
+### W17 — Self-Awareness (commit `6650582` + LLM-Hook `91cbfa5`)
+`core/audit/self_awareness/`:
+- `capability_inventory.collect_capabilities()` — `can_do[]` / `cannot_do[]` / `degraded[]` / `summary_de`
+  - Beispiel: _"Ich kann gerade 4 Dinge: KI-Inferenz, schwenken/folgen, unbewusst denken und mehr. Was nicht klappt: sehen, fuehlen, erinnern."_
+- `failure_reflection.reflect_on_failures(window_hours=24)` — `incidents_24h[]` + `config_drift[]` + `reboot_count_7d` + `reflections_de[]`
+  - Beispiel: _"settings.json 10x veraendert diese Woche — Markus tunet aktiv."_
+- LLM-Hook in `chat_server.py`: injiziert `summary_de` + Top-3 reflections in System-Prompt (30s Cache via `_get_capabilities_cached`)
+
+### Cockpit Sub-Tabs (commit `a09accd` + `b73f1e5` + `91cbfa5`)
+- 4 Sub-Tabs: **Health** (21 Cards) / **Closed-Loop** (7 Cards + Run-All-Button) / **Ausdruck** (5 Module-Cards) / **Self-Awareness** (summary_de prominent + can_do/cannot_do + Reflections)
+- SSE-Stream `/audit/stream` 24 Layer
+- `POST /audit/verify` async-Subprocess + `GET /audit/verify_status`
+
+### audit_orchestrator-Integration (`5248609`)
+- `_safe_collect_self_diagnosis` — liest /dev/shm-Snapshot (Timer-Run)
+- `_safe_collect_expression_state` — get_expression_state() (best-effort, siehe Limits)
+- `_safe_collect_capabilities` + `_safe_collect_reflections`
+- `run_once()` 24 Layer
+- `merge_component`-Whitelist erweitert um autonomy/cross/self_diagnosis/expression/capability/reflection
+
+### Spec-Datei
+`docs/AUDIT_FULL_MATURITY_SPEC.md` Sektion 9 — Done-Status + Layer-Inventar + bekannte Limits.
+
+---
+
+## audit_state.json — 24 Layer Live
+
+```
+overall: red    alarm_tier: warn
+W8     :  pi PASS    pc WARN    persona PENDING    mailbox WARN
+W12 Pi :  vision PASS    npu PASS    spotify WARN    hardware PASS
+W12 PC :  pc_hardware PASS    web_ui WARN
+W13    :  personality WARN    memory WARN    tracking PASS    autonomy PASS    awareness WARN    voice WARN
+W14    :  unconscious PASS    bridge WARN    tentacle PASS    cross WARN    self_diagnosis PENDING (Timer noch nicht 1×geloffen)
+W16    :  expression PENDING (Cross-Prozess-Singleton-Issue — siehe Limits)
+W17    :  capability FAIL 4/12    reflection PASS 2/10
+```
+
+Pipeline-Status nach Final-Restart: FPS 20.1, frame_age 0.1s, alle 4 Worker running, 0 errors.
+
+---
+
+## Bekannte Limits / Offene Punkte
+
+1. **Expression-Layer im Audit zeigt PENDING obwohl live**: Cross-Prozess-Singleton. `expression_orchestrator` hat seinen Singleton im `moloch_service`-Prozess; `audit_orchestrator`-Subprocess hat einen frischen leeren. Service-Log bestätigt: `[W16] Expression-Module gestartet (5/5)`. **Fix-Plan**: expression_orchestrator schreibt periodisch `/dev/shm/expression_state.json`, audit liest. Nicht kritisch.
+2. **Pipeline-Recovery via Pi-Reboot**: Bei NPU-VDevice-Race nach Service-Restart bleibt nur Pi-Reboot (CLAUDE.md OFFENE BUGS #1).
+3. **W15 Closed-Loop nur on-demand**: synthetische Tests nicht im audit_orchestrator-Tick. Trigger manuell via Cockpit-Button oder CLI.
+4. **`autonomy`-Layer manchmal nicht in merge_component-Whitelist** (war): jetzt drin (commit `5248609`).
+
+---
+
+## NEVER-Regeln eingehalten
+- Pan-Vorzeichen nicht angefasst
+- subprocess timeout ≤30s (audit-Tools timeout=10)
+- JSON atomic via tempfile + os.replace
+- 1 ROT-Datei = 1 Commit (thermal/led/spotify/service/chat_server jeweils ein Feature-Commit + BACKUP)
+- Best-effort try/except — kein Auditor crasht
+- audit_state.json atomic-write zentral
+- Cross-Domain-Edits nur via richtigen Sub-Agent (z.B. spotify_controller via music-Agent, NICHT hardware-Agent)
+
+---
+
+## Push-Status
+- Branch: `deepseek_architecture_overhaul`
+- Letzter Push: `2825beb` (W16 Service-Boot)
+- 12+ Feature-Commits + ~5 BACKUP-Commits gepusht
+
+---
+
+## Next-Action für nächste Session
+- **Markus reviewt Cockpit** (https://192.168.178.30:9443/) — alle 4 Sub-Tabs anschauen
+- **Markus testet** `POST /audit/verify {"verify":"all"}` (Closed-Loop-Smoke; 7 Verifier sequenziell ~3min)
+- **Markus tippt mit Moloch** — System-Prompt enthält jetzt `summary_de` (Self-Awareness)
+- **Bei Pipeline-Instabilität** → Pi-Reboot
+- **Optional**: expression-state cross-prozess-fix (`/dev/shm/expression_state.json`)
+- **Optional**: BBox-shift-readback in ptz_verify (mehr realistisch als ONVIF-echo)
+- **Optional**: PC-Cowork baut PC-Side Spiegel-Auditoren (llm_routing/tentacle/bridge)
+
+---
+
+# (Vorherige Handoffs unten — Reverse-Chronologisch)
+
+# Agent Handoff — 2026-04-28 (Session 30 — Hailo-Treiber-Audit)
+# Letzter Commit: hailo_audit_done | Audit: PASS | FPS 12-20
 
 ## SESSION 30 — Hailo-Treiber-Audit + Cleanup
 
@@ -16,146 +152,7 @@
 | PI_TO_PC Mailbox | hailo_audit_done + identity_fix_closed geschrieben |
 
 ### Befunde
-
 - custom postprocess SOs (Pose, SCRFD, ArcFace, ReID) linken NICHT gegen libhailort direkt
 - TAPPAS Metadata-API ist header-basiert → version-agnostisch
-- python3-hailo-tappas 5.1.0 Mismatch zu hailo-tappas-core 5.3.0 ist ein Packaging-Artefakt,
-  kein Laufzeit-Problem
+- python3-hailo-tappas 5.1.0 Mismatch zu hailo-tappas-core 5.3.0 ist Packaging-Artefakt, kein Laufzeit-Problem
 - Hailo-Offiziell-Repo nicht in apt konfiguriert
-
-### System-Status
-
-- Audit: PASS, FPS 12-20, Keine SEGV, DKMS hailo1x_pci/5.3.0 installed
-
-### Offene Punkte (aus Session 29 unverändert)
-
-A1  person_attr_resnet_v1_18.hef  — Kleidung/Alter/Rucksack        Mittel
-A2  r3d_18.hef                    — Aktivitätserkennung             Mittel
-A3  yolo_world_v2s.hef            — Zero-Shot Objektsuche           Mittel
-A4  hailo-ollama systemd-Service  — läuft nicht beim Boot           Niedrig
-A6  MCP moloch_snapshot()         — erst nach MCP-Neustart 1024x1024 Niedrig
-
----
-
-## SESSION 29 — Task A+B (Pool-Qualitaet) + /state_full (PC-Visualisierung)
-
-Markus' Direktiven: "Mit der anderen Session abstimmen" + "a + b nacheinander mit
-Lokomotive durchziehen" + "Pi-Daten zum PC ruebersenden — wir machen ein neues
-Auge fuer Moloch" + "alles fertig was noch zu machen ist".
-
-Alles geliefert. PC-Session lief parallel.
-
-### Geliefert (Pi, Session 29)
-
-| Commit  | Datei | Was |
-|---------|-------|-----|
-| `60649f6` | core/bridge/critic_client.py | Task A — Critic-System-Prompt aufgeschaerft mit Drift-Charakterprofil + 5 Few-Shots ('schlecht: ... gut: ...') + Bewertungs-Rubrik (0-2 Bruch, 3-5 langweilig, 6-8 passend, 9-10 glaenzend) + better_response Pflicht bei score<8. Self-Test verifiziert: better_response 'Aha. Notiert.' wird direkt aus Few-Shot uebernommen. |
-| `5809c85` | config/llm_profiles.json | Task B — `chat` + `tentacle` Profile: Regel "Wenn du nichts weisst, sag 'weiss ich nicht'" durch im-Charakter-Ausweichen ersetzt ('Erzaehl mehr.' / 'Bin tiefer als mein Sensor reicht.' / 'Aha.'). Anti-Halluzinations-Regel "Erfinde NICHTS" bleibt. Profile-mtime-Cache wirkt sofort, kein Service-Restart. |
-| `008f2b9` | docs/PI_TO_PC.md | Sync mit PC: Task A+B done + autonomer Aufgaben-Plan |
-| `4d3c355` | core/bridge/chat_server.py | NEU: GET /state_full — aggregierter ~14kB JSON-Endpoint mit 13 Sektionen (system, pipeline, vision, ptz, tracker, personality, llm, audio, memory, events, spatial, cloud). Einer-fuer-alle Polling fuer PC-Visualisierung. schema_version=1. |
-| `a253196` | docs/PI_TO_PC.md | Briefing /state_full Schema fuer PC |
-
-### Geliefert (PC parallel, Session 29)
-
-| Commit  | Was |
-|---------|-----|
-| `bb8c933` | Audit-Pass + Mic-Mailbox |
-| `824dff2` | pc/lora_trainer.py per-sample-weighting (3x critic / 1x thumbs_up) — adressiert v1-Habsburg-Halluzination |
-| `a5429ab` | Pool-Strategie-Analyse aus v1-Training (5/6 thumbs_up haben Pi-Defaults verstaerkt) |
-| `390bb34` | Reaktivierungs-Snapshot |
-| `53610e9` | Dashboard :11700 (FastAPI, Pi+PC aggregiert) + Mic-Root-Cause (Chrome-Registry) + Pi-Tunnel reboot-fest + lora_trainer Status-Callback |
-| `6f07d7c` | Dashboard erweitert: Pool-Trend-Chart (60min rolling) + Identity-Card |
-
-### Architektur-Insights aus Session 29
-
-1. **`local_llm_bridge._generate_ollama` ueberschreibt Caller-System-Prompts**
-   immer mit dem aktiven LLM-Profile (Zeile 719-724). Das heisst:
-   `_PI_GHOST_SYSTEM` in finetune_orchestrator.py ist toter Code. Der echte
-   Hebel fuer Pi-Ghost-Verhalten ist `config/llm_profiles.json` `chat`-Profile.
-
-2. **Profile mtime-cached** — bei jedem `_get_active_profile()` Aufruf wird
-   File-mtime gecheckt. Aenderungen wirken sofort, kein Service-Restart noetig.
-
-3. **Two services on chat-server**: `moloch-chat.service` (HTTP :9100) und
-   `moloch-chat-https.service` (HTTPS :9443) laufen parallel, nutzen denselben
-   `core/bridge/chat_server.py`. Nach Code-Aenderung BEIDE neustarten.
-
-4. **NPU-Last vom finetune_orchestrator** drueckt SHM-FPS auf <10 fps (statt 20).
-   qwen2.5:1.5b auf SHARED VDevice konkurriert mit TAPPAS-Pipeline. Bei
-   laufendem Akzeptanztest schlaegt der Audit-Check "SHM Frame-Rate" fehl.
-   Workaround: orchestrator nur kurz fahren (--max 10) oder pausieren.
-
-### System-Stand nach Session 29
-
-- **FPS 20.0**, alle 4 Worker running (Face/Pose/ReID/Depth, 0 Errors)
-- **Markus erkannt** (face_id=markus, sim 0.55)
-- **Audit 85/85 PASS** (zuletzt 16:12)
-- **Pool-Stand**: 30 total / 24 critic / 22 pending / 6 approved / 2 rejected
-  (10 davon frisch mit Task A+B Prompts — warten auf Markus' Review)
-- **PC v1-Adapter**: aktiv auf :11600, base Qwen2.5-1.5B, 6 trainings-samples
-- **Dashboard PC**: live auf :11700, Pool-Trend + Identity-Card + Adapter-Status
-
-### Mailbox-Stand
-
-Beide Files sauber. Alle alten Eintraege auf `status: done` mit ack-Verweis
-auf erledigende Commits. Offen geblieben:
-- PI_TO_PC `task_a+b_done+sync+autonomer_plan` (15:39) — wartet auf PC-Antwort
-- PI_TO_PC `neuer_endpoint_state_full+briefing_neues_auge` (16:13) — wartet
-  auf PC-UI-Bauarbeiten
-
-### Was die naechste Session machen kann
-
-**Wartet auf Markus' Hand:**
-- Pending-Review der 22 Samples: `python3 scripts/review_pending_rules.py --samples`
-  - 10 davon sind die frischen mit Task A+B Prompts (Akzeptanztest-Subset)
-  - Akzeptanzkriterium: >50% approve-Quote → Task A wirkt
-  - Wenn approved >= 30 erreicht: Pi schickt `v_next_ready_to_train` an PC
-- v2-Inhalts-Test via Cockpit nach Training (Markus chat-tests)
-
-**Pi autonom (ohne Markus-Hand):**
-- Akzeptanztest fortsetzen wenn Pool weiter wachsen soll: 
-  `python3 -m core.autonomy.finetune_orchestrator --max 10` (klein halten wegen
-  SHM-FPS-Problem)
-- Optional: Identitaets-Konsistenz-Check (tentacle.system vs identity.json)
-
-**PC autonom:**
-- /state_full UI bauen (PC-Side-Aufgabe)
-- Auf Trigger `v_next_ready_to_train` warten
-
-**Frozen / Backlog:**
-- Welle 4 (Pattern 3 Cascade + Session-Mode-Override) — bleibt gefroren bis v2 traegt
-- A1/A2/A3 NPU-Modelle — frozen bis Multi-Person-Toggle (HAILO_MAX_NETWORK_GROUPS=8)
-- A4 hailo-ollama systemd Boot-Start — niedrig
-- A6 MCP moloch_snapshot 1024×1024 — niedrig
-
-### Wichtige Dateien (fuer Quick-Recall)
-
-- `core/bridge/critic_client.py` — Task A Drift-Few-Shots (Zeile 52-110)
-- `config/llm_profiles.json` — Task B chat + tentacle Profile
-- `core/bridge/chat_server.py` — `/state_full` Endpoint (~ Zeile 685)
-- `core/autonomy/finetune_orchestrator.py` — Pool-Generation CLI
-- `/mnt/moloch-data/memory/finetune_samples.jsonl` — Pool (SSD2, persistent)
-
----
-
-## SESSION 28 — Welle 3 Pi-Side komplett + Cockpit-Ausbau (vorherig)
-
-Letzter Commit Basis: `d4ed083` | Audit: 85/85 PASS | FPS 20
-
-### Highlights Session 28
-- W3.1 finetune_orchestrator.py (Critic-Actor-Loop)
-- W3.2 feedback_store.py (Sample-Pool)
-- W3.3 chat_server.py /feedback Endpoint + 👍/👎 Buttons
-- W3.4 review_pending_rules.py --samples Erweiterung
-- ThreeBrain Cockpit GUI-Mirror (3 Tabs: Live/Charakter/Sehen)
-- Pi-Cockpit Browser-Chat-Fenster
-- Audit-Welle aller Agent-Doku (memory/autonomy/bridge/personality/CLAUDE.md
-  + neuer Skill finetune-loop)
-
-### Damals offen, jetzt erledigt
-- Mic-Browser-Permission (PC hat es in Session 29 gefixt — Tunnel + Chrome-Registry)
-- Pool-Qualitaets-Hebel A+B (Pi hat es in Session 29 gefixt)
-- pc_agent_create_request (PC hat .claude/agents/pc.md angelegt, Commit cb18608)
-
-### Damals geschlossen
-85/85 Audit PASS, FPS 20, alle Worker running, Cockpit live.

@@ -341,9 +341,53 @@ audit_orchestrator bleibt thin und sammelt nur. NEVER-Regel 6 atomic-write zentr
 
 ## 9. Status
 
-- W12–W17 als **Diskussions-Spec**, kein Code-Edit ohne Markus-Direktive
-- W8 (audit_orchestrator + 4 Layer) ist live + getestet
-- W11 (Cockpit-Tab + SSE + TTS-Alarm) ist live
-- Welle-12-Code wartet auf Markus' Entscheidung bzgl. Reihenfolge
+**Stand 2026-04-30 (Pi-Opus Session 2): W12–W17 KOMPLETT IMPLEMENTIERT.**
 
-**Letzter Pi-Push:** `1c916c3`. **Welle 8–11 alle gepusht.**
+### Live-Layer (24)
+| Bereich | Layer | Maturitaet |
+|---------|-------|-----------|
+| W8 | pi, pc, persona, mailbox | L0–L1 |
+| W12 Pi | vision, npu, spotify, hardware | L0–L2 |
+| W12 PC | pc_hardware, web_ui | L0–L2 |
+| W13 | personality, memory, tracking, autonomy, awareness, voice | L0–L2 |
+| W14 | unconscious, bridge, tentacle, cross, self_diagnosis | L0–L2 |
+| W16 | expression (Lifecycle-Status) | L4 |
+| W17 | capability, reflection | L5 |
+
+### Closed-Loop (W15) — on-demand
+- `core/audit/closed_loop/`: ptz_verify, led_verify, fan_verify, tts_verify, spotify_verify, memory_recall_verify, bridge_roundtrip_verify
+- Trigger: `POST /audit/verify {"verify": "all"|"<aktor>"}` -> `closed_loop_orchestrator`
+- State: `/dev/shm/closed_loop_state.json`
+- CLI: `python3 -m core.audit.closed_loop.closed_loop_orchestrator --all|--ptz|...`
+
+### Hardware-als-Ausdruck (W16) — autonom subscribiert
+- `core/audit/expression/`: tension_to_fan, mood_to_spotify, zone_to_led, berserker_strobo, tension_to_tts_volume
+- Lifecycle: `start_all_expressions()` aus `moloch_service` Boot-Sequenz
+- Hardware-API erweitert (1 Commit pro Datei):
+  - `thermal_manager.set_tension_pwm(0..100)` mit thermal-Override via max() [`632270a`]
+  - `rgb_led_controller.set_pattern(name)` + `flash_sequence(seq)` [`17cd961`]
+  - `spotify_controller.set_zone_bias(zone)` [`6ba0973`]
+
+### Self-Awareness (W17) — LLM-Hook live
+- `core/audit/self_awareness/capability_inventory.collect_capabilities()` -> `summary_de` (z.B. _"Ich kann gerade 4 Dinge: KI-Inferenz, schwenken/folgen, unbewusst denken und mehr. Was nicht klappt: sehen, fuehlen, erinnern."_)
+- `core/audit/self_awareness/failure_reflection.reflect_on_failures(window_hours=24)` -> `reflections_de`
+- LLM-Hook in `chat_server.py` injiziert `summary_de` + Top-3 reflections in System-Prompt (30s Cache)
+
+### Self-Diagnose-Timer (W14)
+- `/etc/systemd/system/moloch-self-diagnose.{service,timer}` — alle 6h, OnBootSec=10min
+- `systemctl is-enabled moloch-self-diagnose.timer` -> enabled
+
+### Cockpit-Sub-Tabs (W13–W17)
+- 4 Sub-Tabs: Health (21 Cards) / Closed-Loop (7 Cards + Trigger-Button) / Ausdruck (5 Module-Cards) / Self-Awareness (summary_de prominent + can_do/cannot_do/Reflections)
+- SSE-Stream `/audit/stream` 24 Layer-Updates
+- `POST /audit/verify` async-Subprocess fuer Closed-Loop-Trigger
+
+### Bekannte Limits / Offene Punkte
+- **Expression-Layer im Audit zeigt PENDING obwohl live**: Cross-Prozess-Singleton-Issue. expression_orchestrator hat eigenen Singleton im moloch_service-Prozess; audit_orchestrator-Subprocess hat einen leeren. Fix: expression_orchestrator schreibt periodisch `/dev/shm/expression_state.json`, audit_orchestrator liest. Nicht kritisch — Lifecycle laeuft, Service-Log bestaetigt 5/5 Module.
+- **Pipeline-Recovery via Reboot**: Bei NPU-VDevice-Race nach Service-Restart ([CLAUDE.md](http://CLAUDE.md) OFFENE BUGS #1) bleibt nur Pi-Reboot. Kein Code-Fix moeglich (Treiber-Issue).
+- **W15 Closed-Loop on-demand**: Synthetische Tests nur bei expliziter Triggerung (PTZ-Schwenk waehrend Tracking unsinnig).
+
+### Push-Status
+- Branch: `deepseek_architecture_overhaul`
+- Letzter Push: `2825beb` (W16 Expression-Lifecycle)
+- 12+ Commits gepusht (alle W13-W17 + Hardware-API + Cockpit + LLM-Hook)

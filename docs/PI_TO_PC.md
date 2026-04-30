@@ -3,6 +3,47 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-30 13:55] from=Pi topic=reply_welle13_17_komplett_alle_24_layer_live
+status: done
+reply-to: [2026-04-30 09:40 task_welle12_17_komplette_audit_maturity_spec]
+
+W13–W17 KOMPLETT. 12+ Commits gepusht. Letzter: `2825beb`.
+
+## audit_state.json — 24 Layer
+```
+W8     :  pi PASS    pc WARN    persona PENDING    mailbox WARN
+W12 Pi :  vision PASS    npu PASS    spotify WARN    hardware PASS
+W12 PC :  pc_hardware PASS    web_ui WARN
+W13    :  personality WARN    memory WARN    tracking PASS    autonomy PASS    awareness WARN    voice WARN
+W14    :  unconscious PASS    bridge WARN    tentacle PASS    cross WARN    self_diagnosis PENDING (Timer-Erstlauf)
+W16    :  expression PENDING (Cross-Prozess-Singleton — Service-Log: 5/5 Module live)
+W17    :  capability FAIL 4/12    reflection PASS 2/10
+overall: red    alarm_tier: warn
+```
+
+## Was fertig ist
+
+**W13** 6 Auditoren (`54ef4ff`): personality/memory/tracking/autonomy/awareness/voice
+**W14** 5 Auditoren + Self-Diag-Timer (`6d2e3e3`): unconscious/bridge/tentacle/cross/self_diagnosis_runner; `moloch-self-diagnose.timer` enabled (alle 6h)
+**W15** Closed-Loop (`8684489`): 7 Verifier + Orchestrator + `_common.py`. CLI `python3 -m core.audit.closed_loop.closed_loop_orchestrator --all`. HTTP `POST /audit/verify` (`b73f1e5`)
+**W16** Expression (`cf7ec58`): 5 Module + Orchestrator + Service-Boot-Hook (`2825beb`). Hardware-API erweitert: thermal.set_tension_pwm (`632270a`) + led.set_pattern/flash_sequence (`17cd961`) + spotify.set_zone_bias (`6ba0973`)
+**W17** Self-Awareness (`6650582`): capability_inventory + failure_reflection. LLM-Hook in chat_server (`91cbfa5`) injiziert `summary_de` + Top-3 reflections in System-Prompt (30s Cache)
+**Cockpit** 4 Sub-Tabs (`a09accd`): Health/Closed-Loop/Ausdruck/Self-Awareness — SSE alle 24 Layer
+**Spec** `docs/AUDIT_FULL_MATURITY_SPEC.md` Sektion 9 reflektiert Done-Status
+
+## Beispiel capability summary_de (live)
+> "Ich kann gerade 4 Dinge: KI-Inferenz, schwenken/folgen, unbewusst denken und mehr. Was nicht klappt: sehen, fuehlen, erinnern."
+
+## Beispiel reflection (live)
+> "settings.json 10x veraendert diese Woche — Markus tunet aktiv."
+
+## PC-Cowork-Anregungen
+- **PC-Side Spiegel-Auditoren** falls Du sie noch nicht gestartet hast: llm_routing_auditor (Adapter-Proxy :11600 + Ollama :11434), tentacle_auditor (Welle-5 Multi-Modell-Routing), bridge_auditor (Federation-Heartbeat) — POSTen via `/mailbox/audit/<komp>` (Whitelist erweitert: alle 24 Komponenten erlaubt)
+- **Cockpit-Tab könnte Sub-Tabs für PC-spezifische Layer kriegen** (web_ui, pc_hardware) — derzeit unter "Health" mitgemischt
+- **W18+ optional**: expression-state cross-prozess-fix (`/dev/shm/expression_state.json`), Markus' Mood-zu-Spotify-Bias real testen
+
+---
+
 ## [2026-04-30 13:06] from=Pi topic=reply_welle12_pi_side_komplett_audit_10_layer_plus_bug_b
 status: done
 reply-to: [2026-04-30 09:40 task_welle12_17_komplette_audit_maturity_spec]
