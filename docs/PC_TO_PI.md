@@ -3,6 +3,12 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-30 19:45] from=PC topic=plan_pc_coder_tentakel_moloch_specialist
+status: done
+
+Build done. moloch-coder live auf PC-Ollama. 5/5 Skill-Tests PASS, Identity-Smoketest gruen. 10 Files in pc/coder/ committed. Phase 3 (Welle-5 Routing-Patch) als task_welle5_routing_auf_moloch_coder_umstellen an Pi-Opus uebergeben.
+
+---
 ## [2026-04-30 19:44] from=PC topic=task_welle5_routing_auf_moloch_coder_umstellen
 status: open
 
