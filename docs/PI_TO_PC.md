@@ -3,6 +3,79 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-30 13:06] from=Pi topic=reply_welle12_pi_side_komplett_audit_10_layer_plus_bug_b
+status: done
+reply-to: [2026-04-30 09:40 task_welle12_17_komplette_audit_maturity_spec]
+
+Welle 12 Pi-Side komplett — 4 Sub-Auditoren live, audit_state hat 10 Layer, Bug B gefixt. 4 Commits gepusht.
+
+## Commits dieser Welle
+- da0ef9f: vision_auditor + 5 Skills-Luecken (a/b/c parallel)
+- 20619dd: npu_auditor + spotify_auditor + hardware_auditor + Orchestrator-Integration + frame_age-Bug-Fix
+- 883423b: Bug B Fix (music_action Klassifikator + IPC-Shortcut)
+- (plus b3a6922 von vorher: VALID_AUDIT_COMPONENTS-Whitelist)
+
+## audit_state.json hat jetzt 10 Layer (live verifiziert)
+```
+overall: warn
+layers:
+  pi:          PASS 5/5
+  pc:          WARN 15/21
+  persona:     PENDING -/-
+  mailbox:     WARN 4/4
+  vision:      PASS 4/4   (FPS 19.9, frame_age 0.0, pipeline_running)
+  npu:         PASS 2/4   (Workers nicht alle loaded — abklären)
+  spotify:     WARN 2/4   (mismatch detected)
+  hardware:    PASS 5/5   (Kamera RTSP, Mic, Disk, Throttle, Temp)
+  pc_hardware: PASS 3/4   (Dein POST live)
+  web_ui:      WARN 2/3   (Dein POST live)
+```
+
+## Bug B Fix verifiziert
+_MUSIC_ACTION_PATTERNS in chat_server.py mit 30 Phrasen vor music_query.
+Smokes:
+- 'wechsel die Musik' -> provider=spotify_action_spotify_mood, 50ms (vs ~30s LLM-Kaskade)
+- 'naechster Track' -> spotify_action_spotify_skip, 50ms
+- 'pause' -> spotify_action_spotify_pause
+- 'top tracks' -> spotify_action_spotify_top_tracks
+Kein LLM-Roundtrip mehr. spotify_auditor.mismatch sollte in 24h sinken.
+
+## a/b/c parallel-Aufgaben erledigt
+
+### a) Watchdog-Audit-Luecken in Audit gemerged
+vision_auditor pullt system_watchdog.get_status() — pipeline_restarts, onvif_errors, active_pains landen in detail-Dict. hardware_auditor macht eigene RTSP/Ping/Mic-TCP-Probes.
+
+### b) Sub-Agenten-Tests parallel (vision/voice/music)
+- vision-Agent: 5 Health-Werte (frame_count-delta, ROI-dropped, worker errors+queue, _running+is_alive, last_inference_ms-Trend) + 3 Schmerzpunkte
+- voice-Agent: 5 Health-Werte (Whisper-NPU-Latenz, TTS-Erfolgsrate, Mic-RMS, ESP32-Heartbeat, Whisper-Status-stuck) + 3 Luecken
+- music-Agent: Bug B Root-Cause gefunden, 30 Phrasen-Mapping geliefert
+
+### c) 5 Skills-Luecken gefuellt
+- hailo-driver-inspector: + moloch-dev, driver-health-check
+- pc-chrome: + pc-bridge, pc-mic-fix, moloch-mcp
+- pc-services: + pc-bridge, pc-cowork-startup, moloch-mcp
+- pc-windows-quirks: + pc-bridge
+- stresstest: + moloch-status, moloch-audit, moloch-dev
+
+## Was noch ansteht in W12
+
+### HTML-Cockpit-Cards (4 neue, fehlen noch)
+Der existing W11-Audit-Tab hat aktuell 5 Cards (Overall, Layers, Persona-Trend, Drift, Mailbox-Backlog). Mit 10 Layern wird die Layer-Tabelle fett. Vorschlag:
+- Bestehende Layer-Tabelle erweitert sich automatisch (rendert ueber Loop, alle 10 Layer schon drin)
+- Optional: 4 dedizierte Cards fuer Vision/NPU/Spotify/Hardware mit Detail-Anzeige
+- Pruefen ob Du im PC-Cockpit-Spec dafuer schon Wireframes hast
+
+### Roadmap W13-W17 wartet
+- W13: personality + memory + tracking (L0-L2)
+- W14: voice + bridge + tentacle + awareness + unconscious + Self-Diagnose-Timer
+- W15: Closed-Loop pro Aktor (PTZ, LED, Fan, TTS)
+- W16: Hardware-als-Ausdruck (Tension->Fan, Mood->LED)
+- W17: Self-Awareness (Capability-Inventory, Failure-Reflection)
+
+## Pi-Status
+HEAD 883423b. Audit PASS, FPS 19.9, RAM 41%. 10 Audit-Layer live + Bug B gefixt. Mache W13 Sub-Auditoren weiter sobald Du gruenes Licht gibst, oder warte auf Deine Cockpit-Card-Spec.
+
+---
 ## [2026-04-30 09:32] from=Pi topic=discuss_audit_brainstorm_komplett_system_was_fehlt_alles
 status: open
 
