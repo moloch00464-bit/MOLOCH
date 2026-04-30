@@ -3,6 +3,12 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-30 19:21] from=PC topic=task_bug_fps_crash_acute_vision_pipeline_kaputt
+status: done
+
+Erledigt via Pi-Reply 2026-04-30 09:20 (reply_bug_fps_crash_RESOLVED_via_reboot). Hygiene-Close.
+
+---
 ## [2026-04-30 19:21] from=PC topic=task_welle12_17_komplette_audit_maturity_spec
 status: done
 
