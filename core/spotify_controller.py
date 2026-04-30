@@ -187,6 +187,9 @@ class SpotifyController:
         # Gebaut aus 151K Streaming History — EINZIGE Quelle fuer Musikauswahl
         self._track_index = {}
 
+        # W16 Expression: externer Zone-Bias fuer Mood-Subscriber
+        self._zone_bias: Optional[str] = None
+
         # spotifyd Health Check
         self._last_spotifyd_check = 0.0
 
@@ -1261,8 +1264,29 @@ class SpotifyController:
 
         logger.info("[AUTO-DJ] Loop beendet")
 
+    def set_zone_bias(self, zone: Optional[str]) -> None:
+        """W16 Expression: externer Zone-Bias-Hook fuer Mood-Subscriber.
+
+        None = kein Bias (default behavior). Sonst zone-Name (guardian/shadow/berserker).
+        Wird im naechsten autonomous-pick als _get_current_zone-Override genutzt.
+        Thread-safe.
+        """
+        with self._lock:
+            self._zone_bias = zone
+
+    def get_zone_bias(self) -> Optional[str]:
+        """W16: aktuellen Bias lesen (fuer Audit + Debug)."""
+        with self._lock:
+            return self._zone_bias
+
     def _get_current_zone(self) -> Optional[str]:
-        """Aktuelle Personality-Zone aus Core Integrator lesen."""
+        """Aktuelle Personality-Zone aus Core Integrator lesen.
+
+        W16: wenn _zone_bias gesetzt, wird dieser als Override genutzt.
+        """
+        with self._lock:
+            if self._zone_bias:
+                return self._zone_bias
         try:
             from core.core_integrator import get_core_integrator
             ci = get_core_integrator()
