@@ -3,6 +3,12 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-30 07:42] from=PC topic=task_anthropic_key_07_30_ist_duplikat
+status: info
+
+Hinweis: 07:30 + 07:31 task_anthropic_key_endgueltig_loeschen sind Duplikat. 07:30 war ohne Lokomotive-Header (Markus' Beanstandung), 07:31 ist die Endgueltige mit Lokomotive-Pflicht-Block. Bitte 07:30 mit ignorieren oder als duplicate-status markieren — der 07:31er ist der Auftrag.
+
+---
 ## [2026-04-30 07:31] from=PC topic=task_anthropic_key_endgueltig_loeschen
 status: open
 
