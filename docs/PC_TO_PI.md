@@ -3,6 +3,79 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-30 08:17] from=PC topic=task_welle8_audit_orchestrator_pi
+status: open
+
+## LOKOMOTIVE-Pflicht fuer Pi-Opus
+
+1. moloch_session_init() via MCP
+2. Domain-Agent: NEU 'audit' (Territorium core/audit/*.py + read-only auf moloch_audit.py + scripts/deep_audit.py + character_journal.py + feedback_store.py). Audit-Agent-File legst Du als Teil von W8 an.
+3. Reboot-Check: nur Service-Restart
+4. Pre-Flight: git status clean, python3 import-checks
+5. NEVER-Regel 6: audit_state.json IMMER atomic via tempfile + os.replace
+6. NEVER-Regel sparsam: Pi 4 GB RAM, Orchestrator NICHT als dauerhafter Service sondern Subprocess-Call alle 60s
+
+## Welle 8 — Audit-Orchestrator (Fundament fuer W9-W11)
+
+Kontext: Markus will End-zu-End-Audit-Infrastruktur, alle 4 Wellen sequentiell. W8 ist das Fundament — alle anderen Wellen schreiben/lesen audit_state.json. Voller Plan-Kontext liegt im PC-Plan-File.
+
+### Aufgabe
+
+**1. Neue Dateien:**
+- core/audit/__init__.py (leer oder Modul-Doku)
+- core/audit/audit_orchestrator.py — Hauptklasse + CLI
+
+**2. Schema /dev/shm/audit_state.json (Top-Level-Keys):**
+- overall: green | warn | red
+- updated_at: ISO-Timestamp
+- layers.pi: {score, max, status, detail} aus moloch_audit.py JSON
+- layers.pc: {score, max, status, detail} aus PC-Mailbox audit/pc_health
+- layers.persona: {avg, sparkline list 50, status} aus character_journal type=persona_score
+- layers.mailbox: {backlog_pc, backlog_pi, stale, dups, status} aus PC-Mailbox audit/hygiene
+- drift_events: list of {ts, layer, signal, severity}
+- alarm_tier: silent | warn | alert
+
+**3. Aggregator-Loop (60s Intervall):**
+- Subprocess: python3 moloch_audit.py --auto --json -> parse -> layers.pi
+- Read /home/molochzuhause/moloch_logs/cross_session.jsonl tail-1 -> heartbeat-Alter
+- Read latest character_journal Eintraege type=persona_score -> sparkline + avg
+- Read /dev/shm/audit_state vorigen Lauf -> drift_events trend
+- Compute overall: alle PASS = green, irgendwo WARN = warn, irgendwo FAIL = red
+- Compute alarm_tier: silent = 1 FAIL/h, warn = 3plus FAILs/h ODER persona<5 ueber 10 Turns, alert = 5plus FAILs ODER persona<3
+- Write atomic via tempfile + os.replace (NEVER-Regel 6)
+
+**4. Mailbox-Receiver-Endpoint in chat_server.py:**
+- Erweiterung POST /mailbox/audit/{component} (component = pc_health|hygiene|persona)
+- Body wird in audit_state.layers[component] gemerged
+- Triggert audit_orchestrator-Re-Compute-Tick
+
+**5. CLI-Modi:**
+- python3 -m core.audit.audit_orchestrator --once -> einmaliger Lauf, exit
+- python3 -m core.audit.audit_orchestrator --loop -> Endlos-Loop alle 60s
+
+**6. Neuer Agent-File .claude/agents/audit.md:**
+- name: audit
+- description: End-zu-End-Audit-Orchestrator. Aggregiert Pi + PC + Persona + Mailbox Layer. Schreibt audit_state.json atomic.
+- tools: Read, Grep, Glob, Edit, Write, Bash
+- model: opus
+- skills: moloch-dev, moloch-mcp
+- memory: project
+- Territorium: core/audit/*.py, .claude/agents/audit.md
+- Read-only: moloch_audit.py, scripts/deep_audit.py, character_journal.py, feedback_store.py, cross_session.jsonl, moloch_status.json
+- NEVER: editieren in core/personality/ oder core/memory/ (nur lesen)
+
+### Smoke-Test
+
+1. python3 -m core.audit.audit_orchestrator --once
+2. cat /dev/shm/audit_state.json | python3 -m json.tool
+3. Erwartet: valide JSON mit Keys overall + layers + alarm_tier. layers.persona darf leer sein (W10 noch nicht da).
+4. moloch_audit.py --auto PASS
+
+### Naechste Welle
+
+W9 (Mailbox-Hygiene) faengt PC-Cowork an wenn W8 done + Receiver-Endpoint live. Ich warte auf reply_welle8_done.
+
+---
 ## [2026-04-30 07:44] from=PC topic=task_welle7_klassifikator_plus_playlist_recognition
 status: open
 
