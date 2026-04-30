@@ -3,6 +3,96 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-30 09:11] from=PC topic=task_bug_fps_crash_acute_vision_pipeline_kaputt
+status: open
+
+## LOKOMOTIVE-Pflicht fuer Pi-Opus
+
+KRITISCH — Vision-Pipeline ist DEFACTO TOT. Markus hat KEIN Kamerabild. Vor Welle 12 (Audit-Erweiterung) muss Bug A gefixt werden.
+
+1. moloch_session_init() via MCP
+2. Domain-Agent: vision (core/perception/*.py) ODER service (core/moloch_service.py) je nach Root-Cause-Lokalisierung. Cross-Domain-Stop wenn beides noetig.
+3. Reboot-Check: bei Pipeline-Hang vermutlich Pi-Reboot noetig (wenn NPU-VDevice-Error-74 oder GStreamer-SEGV)
+4. Pre-Flight: backup CRITICAL files vor Edit
+
+## Live-Befunde (PC-MCP-Diagnose 08:55)
+
+### moloch_status
+```
+FPS total: 0.5
+FPS yolov8m: 0.5
+FPS scrfd:   0.5
+FPS arcface: 0.5
+Frame Age:   -1.00s   (UNGUELTIG, sollte <1s sein)
+Person:      False
+Face-ID:     None
+Face-Detect: 0.00
+Face-Match:  0.00
+NPU Szenario: IDLE
+NPU Stage:   face
+Tracker:     parked
+```
+
+### moloch_npu_workers
+```
+SuperRes: geladen=False
+LowLight: geladen=False
+```
+(SuperRes/LowLight ist on-demand, normal — aber wo sind die anderen Worker-Status-Eintraege? scrfd/arcface/pose/reid/yolo sollten gemeldet sein)
+
+## Hypothesen (Root-Cause)
+
+1. TAPPAS-GStreamer-Pipeline gestuckt (frame_age=-1 = nie initialisiert ODER nicht aktualisiert)
+2. NPU SHARED VDevice gelockt (Error 74 wenn zweites Process versucht hat zu connecten — Reboot fix)
+3. Scheduler-Hang (model_scheduler.py blockiert weil person_count=0, kein Trigger)
+4. RTSP-Reconnect-Issue (Sonoff-Kamera Hot-Plug — bekannter Bug, Reboot fix)
+5. moloch_status.json ist stale (Service schreibt nicht mehr, nur cached state in /dev/shm)
+6. Dein Welle-10/11 chat_server Code-Aenderungen haben Pipeline geblockt (unwahrscheinlich, aber Korrelation: FPS war heute morgen noch ok bei Welle-7-Smokes)
+
+## Diagnose-Schritte (sequenziell)
+
+### Schritt 1: stale moloch_status.json oder echter Pipeline-Hang?
+```
+stat -c '%Y' /dev/shm/moloch_status.json   # mtime in epoch
+date +%s
+diff -> wenn >5s: status.json wird NICHT mehr aktualisiert
+```
+
+### Schritt 2: GStreamer-Pipeline-Status
+```
+ps aux | grep gst-launch | head -3
+sudo journalctl -u moloch -n 50 --no-pager | grep -iE 'gst|pipeline|segv|error|frame'
+```
+
+### Schritt 3: NPU-Health
+```
+ls -la /dev/hailo*
+sudo journalctl -u moloch -n 30 | grep -iE 'hailo|vdevice|error 74|inference'
+```
+
+### Schritt 4: Service-Status
+```
+sudo systemctl status moloch | head -15
+```
+
+### Schritt 5: Recovery wenn Pipeline-Hang
+- Service-Restart: sudo systemctl restart moloch + warten 30s + moloch_status check
+- Wenn FPS nach 60s noch 0: Pi-Reboot (NEVER-Regel: NPU-Error-74 nur durch Reboot loesbar)
+- Wenn nach Reboot wieder 0: Cross-Reference mit Welle-10/11-Commits, ggf. revert
+
+### Schritt 6: Audit-Lueche kompensieren
+Dieser Bug haette von der EXISTIERENDEN moloch_audit.py NICHT erkannt werden duerfen — sie misst nicht FPS. Markus hat recht. Welle 12 muss Vision-Layer einbauen (FPS, frame_age, pipeline_running, worker-error-count).
+
+## Reihenfolge
+
+1. Bug A diagnostizieren + fixen (DIESE Mailbox)
+2. Spec-Diskussion fertig schreiben (discuss_audit_erweiterung_*-Topic, parallel)
+3. Markus reviewt beides + entscheidet Welle 12
+4. Welle 12 implementieren
+
+Reply-Erwartung: kurze Status-Update (Schritt 1+2+3 Ergebnisse, dann Markus' OK fuer Service-Restart oder Reboot).
+
+---
 ## [2026-04-30 09:09] from=PC topic=discuss_audit_erweiterung_npu_tappas_spotify_hardware
 status: open
 
