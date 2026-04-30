@@ -18,9 +18,31 @@ import socket
 import logging
 import threading
 import time
+import json
+import os
+import tempfile
+from datetime import datetime
 from typing import Optional, List, Tuple
 
 logger = logging.getLogger("RGBLed")
+
+# W18 Cross-Process State-Writer: in /dev/shm fuer Audit-Subprozesse lesbar
+LED_STATE_PATH = "/dev/shm/moloch_led_state.json"
+STATE_WRITER_INTERVAL_S = 5.0
+
+# Mapping Farbname -> RGB-Tuple (best-effort fuer Audit-Lesbarkeit)
+_COLOR_NAME_TO_RGB = {
+    "rot":     (255, 0, 0),
+    "gruen":   (0, 255, 0),
+    "blau":    (0, 0, 255),
+    "gelb":    (255, 255, 0),
+    "cyan":    (0, 255, 255),
+    "magenta": (255, 0, 255),
+    "weiss":   (255, 255, 255),
+    "orange":  (255, 128, 0),
+    "aus":     (0, 0, 0),
+    "regenbogen": (128, 128, 128),  # Symbolwert fuer animiertes Pattern
+}
 
 # Zustand → LED Mapping
 ZUSTAND_LED_MAP = {
@@ -54,14 +76,32 @@ class RGBLedController:
         self._wifi_mic_connected = False  # True sobald WiFi-Mic UDP-Pakete ankommen
         self._lock = threading.Lock()
 
+        # W18: Cross-Prozess State-Tracking — wird vom State-Writer-Thread nach /dev/shm geschrieben
+        self._last_color_rgb: Tuple[int, int, int] = (0, 0, 0)
+        self._last_color_name: str = "aus"
+        self._last_pattern_name: Optional[str] = None
+        self._last_brightness: int = 100  # Prozent — Hardware liefert keinen Readback, Default 100
+        self._last_change_ts: float = time.time()
+        self._available: bool = False  # True sobald Socket erfolgreich erstellt wurde
+        self._state_writer_thread: Optional[threading.Thread] = None
+        self._state_writer_stop = threading.Event()
+
     # =========================================================================
     # Lifecycle
     # =========================================================================
 
     def start(self):
         """Socket erstellen und Event-Bus abonnieren."""
-        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        logger.info(f"RGB-LED Controller gestartet (ESP: {self._esp_ip}:{self._udp_port})")
+        try:
+            self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self._available = True
+            logger.info(f"RGB-LED Controller gestartet (ESP: {self._esp_ip}:{self._udp_port})")
+        except OSError as e:
+            self._available = False
+            logger.warning(f"RGB-LED Socket-Init fehlgeschlagen: {e} — state-writer laeuft trotzdem (available=false)")
+
+        # W18: State-Writer-Thread starten (best-effort, auch wenn Socket fehlt)
+        self._start_state_writer()
 
         # Event-Bus abonnieren
         if self._event_bus and hasattr(self._event_bus, 'subscribe'):
@@ -91,9 +131,17 @@ class RGBLedController:
     def stop(self):
         """Aufraeumen."""
         self.send_command("LED:aus")
+        # W18: State-Writer-Thread stoppen
+        self._state_writer_stop.set()
         if self._sock:
             self._sock.close()
             self._sock = None
+        self._available = False
+        # Letzten State noch einmal schreiben (markiert available=false)
+        try:
+            self._atomic_write_state(self._get_state_dict())
+        except Exception:
+            pass
 
     # =========================================================================
     # Public API
@@ -120,6 +168,14 @@ class RGBLedController:
         if cmd:
             self.send_command(cmd)
             logger.info(f"LED-Zustand: {state}")
+            # W18: Cmd parsen und State updaten ("LED:gruen statisch mittel")
+            try:
+                payload = cmd[4:] if cmd.startswith("LED:") else cmd
+                parts = payload.split()
+                farbe = parts[0] if parts else "aus"
+                self._update_tracked_state(farbe=farbe, pattern_name=None)
+            except Exception:
+                pass
         else:
             logger.debug(f"Kein LED-Mapping fuer Zustand: {state}")
 
@@ -128,6 +184,8 @@ class RGBLedController:
         """Farbe direkt setzen (fuer Chat-Kommandos)."""
         cmd = f"LED:{farbe} {modus} {geschwindigkeit}"
         self.send_command(cmd)
+        # W18: Cross-Prozess State updaten + sofort schreiben
+        self._update_tracked_state(farbe=farbe, pattern_name=None)
 
     # =========================================================================
     # W16 EXPRESSION API — set_pattern + flash_sequence
@@ -157,6 +215,8 @@ class RGBLedController:
             if speed_override in ("langsam", "mittel", "schnell"):
                 speed = speed_override
         self.set_color(farbe, modus, speed)
+        # W18: Pattern-Name explizit nachziehen (set_color setzt nur Farbe)
+        self._update_tracked_state(farbe=farbe, pattern_name=name)
         logger.debug(f"[LED] set_pattern({name}) -> {farbe} {modus} {speed}")
 
     def flash_sequence(self, sequence: List[Tuple[Tuple[int, int, int], float]]):
@@ -171,6 +231,12 @@ class RGBLedController:
                 rgb, dauer = entry
                 farbe = self._rgb_to_color_name(rgb)
                 self.set_color(farbe, "statisch", "mittel")
+                # W18: Roh-RGB-Wert behalten (set_color hat nur Farbnamen)
+                self._update_tracked_state(
+                    farbe=farbe,
+                    pattern_name="flash_sequence",
+                    rgb_override=tuple(int(c) for c in rgb),
+                )
                 time.sleep(max(0.0, float(dauer)))
             except (TypeError, ValueError) as e:
                 logger.warning(f"[LED] flash_sequence Eintrag invalid {entry}: {e}")
@@ -274,6 +340,110 @@ class RGBLedController:
             self.set_state("idle")
         else:
             self.set_state("verbinden")
+
+
+    # =========================================================================
+    # W18 — Cross-Prozess State-Writer (/dev/shm/moloch_led_state.json)
+    # =========================================================================
+
+    def _update_tracked_state(self, farbe: Optional[str] = None,
+                              pattern_name: Optional[str] = None,
+                              rgb_override: Optional[Tuple[int, int, int]] = None,
+                              brightness: Optional[int] = None) -> None:
+        """W18: Aktualisiert den nachgehaltenen LED-State + schreibt sofort.
+        Wird nach jeder set_color / set_pattern / flash_sequence aufgerufen.
+        """
+        try:
+            if rgb_override is not None:
+                self._last_color_rgb = (
+                    int(rgb_override[0]),
+                    int(rgb_override[1]),
+                    int(rgb_override[2]),
+                )
+                # Farbnamen aus RGB ableiten falls nicht uebergeben
+                if farbe is None:
+                    farbe = self._rgb_to_color_name(rgb_override)
+            elif farbe is not None:
+                self._last_color_rgb = _COLOR_NAME_TO_RGB.get(farbe, (0, 0, 0))
+            if farbe is not None:
+                self._last_color_name = farbe
+            if pattern_name is not None:
+                self._last_pattern_name = pattern_name
+            if brightness is not None:
+                self._last_brightness = max(0, min(100, int(brightness)))
+            self._last_change_ts = time.time()
+            # Sofort schreiben — Audit-Subprozesse sehen Aenderung ohne 5s-Latenz
+            self._atomic_write_state(self._get_state_dict())
+        except Exception as e:
+            logger.debug(f"[LED] _update_tracked_state failed: {e}")
+
+    def _get_state_dict(self) -> dict:
+        """W18: Aktuellen LED-State als Dict fuer JSON-Export."""
+        ts = time.time()
+        return {
+            "ts": ts,
+            "iso": datetime.utcfromtimestamp(ts).isoformat() + "Z",
+            "available": bool(self._available),
+            "color": [int(self._last_color_rgb[0]),
+                      int(self._last_color_rgb[1]),
+                      int(self._last_color_rgb[2])],
+            "color_name": self._last_color_name,
+            "pattern_name": self._last_pattern_name,
+            "brightness": int(self._last_brightness),
+            "current_state": self._current_state,
+            "current_mood": self._current_mood,
+            "last_change_ts": float(self._last_change_ts),
+        }
+
+    @staticmethod
+    def _atomic_write_state(d: dict) -> None:
+        """W18: Atomic JSON-Write nach LED_STATE_PATH (NEVER 6: tempfile + os.replace)."""
+        try:
+            target_dir = os.path.dirname(LED_STATE_PATH) or "/tmp"
+            fd, tmp = tempfile.mkstemp(dir=target_dir, prefix=".led_state_", suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w") as f:
+                    json.dump(d, f, ensure_ascii=False)
+                os.replace(tmp, LED_STATE_PATH)
+            except Exception:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+                raise
+        except Exception as e:
+            logger.debug(f"[LED] state-write failed: {e}")
+
+    def _state_writer_loop(self) -> None:
+        """W18: Periodischer Writer-Thread — alle STATE_WRITER_INTERVAL_S Sekunden."""
+        logger.debug(f"[LED] state-writer-thread gestartet (interval={STATE_WRITER_INTERVAL_S}s)")
+        while not self._state_writer_stop.is_set():
+            try:
+                self._atomic_write_state(self._get_state_dict())
+            except Exception as e:
+                logger.debug(f"[LED] state-writer tick failed: {e}")
+            # wait() laesst sich sauber unterbrechen via stop-Event
+            if self._state_writer_stop.wait(timeout=STATE_WRITER_INTERVAL_S):
+                break
+        logger.debug("[LED] state-writer-thread beendet")
+
+    def _start_state_writer(self) -> None:
+        """W18: Daemon-Thread starten (idempotent)."""
+        if self._state_writer_thread and self._state_writer_thread.is_alive():
+            return
+        self._state_writer_stop.clear()
+        # Initial-Write damit die Datei sofort existiert
+        try:
+            self._atomic_write_state(self._get_state_dict())
+        except Exception:
+            pass
+        t = threading.Thread(
+            target=self._state_writer_loop,
+            name="led-state-writer",
+            daemon=True,
+        )
+        t.start()
+        self._state_writer_thread = t
 
 
 # =============================================================================
