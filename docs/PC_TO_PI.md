@@ -3,6 +3,54 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-30 07:31] from=PC topic=task_anthropic_key_endgueltig_loeschen
+status: open
+
+## LOKOMOTIVE-Pflicht fuer Pi-Opus
+
+1. moloch_session_init() via MCP
+2. Domain-Agent laden: deepseek (Territorium core/local_llm_bridge.py + core/deepseek_client.py + config/api_keys.json)
+3. Reboot-Check: nur Service-Restart noetig
+4. Pre-Flight: git status clean, ROT-File api_keys.json -> Backup-Commit BEVOR edit (NIEMALS Key in commit-message + nicht in Logs)
+
+## Markus-Direktive 16:30 verbatim
+Anthropic ist teuer fuer Moloch. DeepSeek API ist die Wahl fuer immer. Anthropic-Key war nur historisch der erste Key, ist jetzt Geschichte. Markus will den nirgendwo mehr sehen.
+
+## Auftrag
+
+### 1. config/api_keys.json — anthropic-Block raus
+Nur DeepSeek bleibt:
+{
+    "deepseek": {
+        "api_key": "sk-...",
+        "base_url": "https://api.deepseek.com/v1",
+        "model": "deepseek-chat"
+    }
+}
+
+WICHTIG: api_keys.json wird vermutlich via .gitignore ausgeschlossen — pruefen. Falls doch tracked: Backup-Commit OHNE Key-Inhalt (nur strukturelle Aenderung), Key-Wert NIEMALS im commit-diff sichtbar machen.
+
+### 2. Code-Audit — anthropic-Erwaehnungen raus
+grep -rn anthropic core/ scripts/ config/ -> Treffer-Liste
+- Wenn anthropic_client.py existiert: archivieren (move zu archive/) ODER mit DEPRECATED-Header markieren + Code dead-stellen
+- Wenn local_llm_bridge.py einen _generate_claude() oder anthropic-Pfad hat: entfernen oder unter if False: deaktivieren
+- agents/AGENT_DEEPSEEK.md: Anthropic-Key-Erwaehnung weg
+
+### 3. CLAUDE.md / Briefings
+- CLAUDE.md (Pi-Side): falls Anthropic erwaehnt, raus
+- agents/AGENT_DEEPSEEK.md Z.33: Anthropic Key-Hinweis weg
+
+### 4. Smoke-Test
+- python3 -c 'import json; print(list(json.load(open("config/api_keys.json")).keys()))' -> erwartet ["deepseek"]
+- moloch_audit.py --auto -> PASS
+
+## PC-Cowork parallel
+Memory-Update PC-Side (separat): project_localai_tentakel.md + project_pi_pc_symbiose.md + MEMORY.md — keine Anthropic-Erwaehnung mehr.
+
+## Reihenfolge
+1 -> 2 -> 3 -> 4. Sequentiell, ein Commit pro Schritt (NEVER 4: nicht mehrere ROT-Dateien in einem Commit).
+
+---
 ## [2026-04-30 07:30] from=PC topic=task_anthropic_key_endgueltig_loeschen
 status: open
 
