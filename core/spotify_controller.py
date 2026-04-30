@@ -32,6 +32,7 @@ import os
 import json
 import logging
 import subprocess
+import tempfile
 import threading
 import time
 import random
@@ -46,6 +47,10 @@ _TOKEN_CACHE = os.path.expanduser("~/.cache/spotipy/.cache")
 _PROFILE_PATH = "/mnt/moloch-data/memory/spotify/spotify_profile.json"
 _TRACK_INDEX_PATH = "/mnt/moloch-data/memory/spotify/track_index.json"
 _RECENTLY_PLAYED_PATH = "/mnt/moloch-data/memory/spotify/recently_played.json"
+
+# Cross-Prozess State (fuer Audit-Subprocess + andere Agenten)
+SPOTIFY_STATE_PATH = "/dev/shm/moloch_spotify_state.json"
+SPOTIFY_STATE_INTERVAL_S = 10.0
 
 # =========================================================================
 # Zone-Kuenstler Mapping (aus Markus' Spotify-Profil, 6833 Stunden)
@@ -208,6 +213,90 @@ class SpotifyController:
         self._cached_status: Dict[str, Any] = {}
         self._status_thread: Optional[threading.Thread] = None
         self._status_thread_started = False
+
+        # W18 State-Writer — schreibt periodisch nach /dev/shm/moloch_spotify_state.json
+        self._state_writer_thread: Optional[threading.Thread] = None
+        self._state_writer_started = False
+
+        # Initiales State-File (initialized=false) sofort schreiben
+        self._atomic_write_state(self._get_state_dict())
+        self._start_state_writer()
+
+    # =========================================================================
+    # W18 CROSS-PROZESS STATE WRITER
+    # =========================================================================
+
+    def _get_state_dict(self) -> Dict[str, Any]:
+        """Aktuellen State als Dict zusammenstellen (best-effort, kein API-Call)."""
+        track = self._cached_status.get("current_track") if self._cached_status else None
+        current_track = None
+        playing = False
+        if track:
+            playing = track.get("is_playing", False)
+            current_track = {
+                "name": track.get("track", ""),
+                "artist": track.get("artist", ""),
+                "album": track.get("album", ""),
+                "uri": track.get("uri", ""),
+            }
+        now = time.time()
+        return {
+            "ts": now,
+            "iso": datetime.utcfromtimestamp(now).isoformat() + "Z",
+            "initialized": self._initialized,
+            "playing": playing,
+            "current_track": current_track,
+            "zone_bias": self.get_zone_bias(),
+            "last_change_ts": now,
+        }
+
+    def _atomic_write_state(self, d: Dict[str, Any]) -> None:
+        """Atomic write nach SPOTIFY_STATE_PATH via tempfile + os.replace (NEVER 6)."""
+        try:
+            dir_path = os.path.dirname(SPOTIFY_STATE_PATH)
+            fd, tmp = tempfile.mkstemp(dir=dir_path, suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w") as f:
+                    json.dump(d, f, indent=2, ensure_ascii=False)
+                os.replace(tmp, SPOTIFY_STATE_PATH)
+            except Exception:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+                raise
+        except Exception as e:
+            logger.debug(f"[SPOTIFY] State-Write fehlgeschlagen: {e}")
+
+    def _start_state_writer(self) -> None:
+        """State-Writer Daemon-Thread starten."""
+        if self._state_writer_started:
+            return
+        self._state_writer_started = True
+        t = threading.Thread(
+            target=self._state_writer_loop,
+            daemon=True,
+            name="SpotifyStateWriter",
+        )
+        t.start()
+        self._state_writer_thread = t
+
+    def _state_writer_loop(self) -> None:
+        """Schreibt alle SPOTIFY_STATE_INTERVAL_S den State nach /dev/shm. Daemon."""
+        logger.debug("[SPOTIFY] State-Writer gestartet")
+        while True:
+            try:
+                self._atomic_write_state(self._get_state_dict())
+            except Exception as e:
+                logger.debug(f"[SPOTIFY] State-Writer Loop Fehler: {e}")
+            time.sleep(SPOTIFY_STATE_INTERVAL_S)
+
+    def _write_state_now(self) -> None:
+        """Sofort 1x State schreiben (bei wichtigen Aenderungen)."""
+        try:
+            self._atomic_write_state(self._get_state_dict())
+        except Exception:
+            pass
 
     def _ensure_auth(self) -> bool:
         """Lazy Authentication mit Retry-Cooldown (kein permanentes Aufgeben)."""
@@ -513,6 +602,7 @@ class SpotifyController:
 
             self._api_call(self._sp.start_playback, **kwargs)
             logger.info("[SPOTIFY] Play")
+            self._write_state_now()
             return True
         except Exception as e:
             logger.error(f"[SPOTIFY] Play fehlgeschlagen: {e}")
@@ -527,6 +617,7 @@ class SpotifyController:
         try:
             self._api_call(self._sp.pause_playback, device_id=self._device_id)
             logger.info("[SPOTIFY] Pause")
+            self._write_state_now()
             return True
         except Exception as e:
             logger.error(f"[SPOTIFY] Pause fehlgeschlagen: {e}")
@@ -1273,6 +1364,7 @@ class SpotifyController:
         """
         with self._lock:
             self._zone_bias = zone
+        self._write_state_now()
 
     def get_zone_bias(self) -> Optional[str]:
         """W16: aktuellen Bias lesen (fuer Audit + Debug)."""
