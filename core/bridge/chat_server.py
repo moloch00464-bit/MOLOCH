@@ -419,6 +419,42 @@ _CHAT_UI_HTML = """<!doctype html>
   .tab-btn.active{color:var(--fg);border-bottom-color:var(--accent);background:var(--bg)}
   .tab-content{flex:1;overflow-y:auto;padding:12px}
   .tab{display:none}.tab.active{display:block}
+  /* AUDIT SUB-TABS (W13-W17) */
+  .audit-subtabs{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+  .audit-subtab-btn{padding:6px 12px;cursor:pointer;border-radius:4px;border:1px solid var(--border);
+    background:var(--card);color:var(--mute);font:600 11px system-ui;letter-spacing:.3px}
+  .audit-subtab-btn.active{background:var(--accent);color:#000;border-color:var(--accent)}
+  .audit-sub{display:none}.audit-sub.active{display:block}
+  .audit-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px}
+  .audit-card{min-height:80px;padding:8px;border-radius:4px;background:#1a1c23;border:1px solid var(--border);cursor:pointer;
+    display:flex;flex-direction:column;gap:4px;font-size:11.5px}
+  .audit-card:hover{border-color:var(--accent)}
+  .audit-card-head{display:flex;align-items:center;gap:6px}
+  .audit-led{width:12px;height:12px;border-radius:50%;display:inline-block;flex-shrink:0}
+  .audit-led.pass{background:#5dc36b}
+  .audit-led.warn{background:#e6b84d}
+  .audit-led.fail{background:#ff7676}
+  .audit-led.pending{background:#7a7a8a}
+  .audit-card-name{font-weight:600;color:var(--fg);text-transform:uppercase;letter-spacing:.4px;font-size:11px}
+  .audit-card-score{margin-left:auto;font-variant-numeric:tabular-nums;color:var(--mute)}
+  .audit-card-detail{color:var(--mute);font-size:10.5px;line-height:1.3;overflow:hidden;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  .audit-modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;z-index:1000;
+    align-items:center;justify-content:center}
+  .audit-modal-bg.show{display:flex}
+  .audit-modal{background:var(--card);border:1px solid var(--accent);border-radius:8px;padding:14px;
+    max-width:80vw;max-height:80vh;overflow:auto;min-width:480px}
+  .audit-modal pre{font:11px/1.4 monospace;color:var(--fg);white-space:pre-wrap;word-break:break-word}
+  .audit-modal-close{float:right;background:transparent;border:0;color:var(--mute);cursor:pointer;font-size:18px}
+  .audit-verify-btn{padding:10px 20px;background:var(--accent);color:#000;border:0;border-radius:4px;
+    cursor:pointer;font:700 12px system-ui;letter-spacing:.5px;margin:8px 0}
+  .audit-verify-btn:disabled{opacity:.5;cursor:not-allowed}
+  .audit-self-summary{font-size:18px;line-height:1.4;color:var(--fg);padding:12px;background:#1a1c23;
+    border-radius:6px;border-left:3px solid var(--accent);margin-bottom:10px}
+  .audit-self-cols{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+  .audit-self-col h4{margin:0 0 6px;font:600 11px system-ui;color:var(--mute);letter-spacing:.5px;text-transform:uppercase}
+  .audit-self-col ul{margin:0;padding-left:16px;font-size:11.5px;line-height:1.4}
+  .audit-self-col li{margin-bottom:3px}
   .card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px}
   .card h3{margin:0 0 6px;font:600 12px system-ui;color:var(--mute);letter-spacing:.5px;text-transform:uppercase}
   .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:12.5px}
@@ -537,45 +573,73 @@ _CHAT_UI_HTML = """<!doctype html>
                   title="MOLOCH Avatar"
                   allow="microphone; camera; autoplay"></iframe>
         </div>
-        <!-- AUDIT TAB (W11) -->
+        <!-- AUDIT TAB (W13-W17) — 4 Sub-Tabs ueber 24 Layer -->
         <div class="tab" id="t-audit">
-          <div class="card">
-            <h3>Overall <span id="audit-overall" style="margin-left:8px;font-weight:normal"></span></h3>
-            <div class="kv" id="audit-overall-kv"></div>
-            <div style="margin-top:8px;font-size:11px;color:var(--mute)">
-              Tier: <span id="audit-tier">—</span> · Updated: <span id="audit-updated">—</span>
-              <button class="btn" style="float:right;height:24px;font-size:10px" onclick="auditRefresh()">Refresh</button>
+          <div class="audit-subtabs">
+            <button class="audit-subtab-btn active" data-sub="health">Health</button>
+            <button class="audit-subtab-btn" data-sub="loop">Closed-Loop</button>
+            <button class="audit-subtab-btn" data-sub="expr">Ausdruck</button>
+            <button class="audit-subtab-btn" data-sub="self">Self-Awareness</button>
+            <span style="margin-left:auto;font-size:11px;color:var(--mute);align-self:center">
+              Overall <span id="audit-overall" style="font-weight:600"></span> ·
+              Tier <span id="audit-tier">—</span> ·
+              <span id="audit-updated">—</span>
+              <button class="btn" style="height:22px;font-size:10px;margin-left:6px" onclick="auditRefresh()">Refresh</button>
+            </span>
+          </div>
+
+          <!-- SUB: HEALTH (21 Cards) -->
+          <div class="audit-sub active" id="sub-health">
+            <div class="audit-grid" id="audit-health-grid"></div>
+          </div>
+
+          <!-- SUB: CLOSED-LOOP (7 Verifier) -->
+          <div class="audit-sub" id="sub-loop">
+            <div class="card">
+              <h3>Closed-Loop Verifier</h3>
+              <button class="audit-verify-btn" id="audit-verify-all-btn" onclick="auditVerifyAll()">
+                JETZT ALLE VERIFIZIEREN
+              </button>
+              <span id="audit-verify-status" style="font-size:11px;color:var(--mute);margin-left:10px"></span>
+            </div>
+            <div class="audit-grid" id="audit-loop-grid"></div>
+          </div>
+
+          <!-- SUB: AUSDRUCK (5 Module) -->
+          <div class="audit-sub" id="sub-expr">
+            <div class="audit-grid" id="audit-expr-grid"></div>
+          </div>
+
+          <!-- SUB: SELF-AWARENESS -->
+          <div class="audit-sub" id="sub-self">
+            <div class="audit-self-summary" id="audit-self-summary">—</div>
+            <div class="audit-self-cols">
+              <div class="audit-self-col card">
+                <h4>Ich kann</h4>
+                <ul id="audit-self-can"></ul>
+              </div>
+              <div class="audit-self-col card">
+                <h4>Ich kann NICHT</h4>
+                <ul id="audit-self-cannot"></ul>
+              </div>
+              <div class="audit-self-col card">
+                <h4>Eingeschraenkt</h4>
+                <ul id="audit-self-degraded"></ul>
+              </div>
+            </div>
+            <div class="card">
+              <h3>Reflections</h3>
+              <ul id="audit-self-reflections" style="font-size:12px;line-height:1.5"></ul>
             </div>
           </div>
-          <div class="card">
-            <h3>Layer-Health</h3>
-            <table style="width:100%;font-size:12px;border-collapse:collapse" id="audit-layers-tbl">
-              <thead><tr style="text-align:left;color:var(--mute)">
-                <th>Layer</th><th>Status</th><th>Score</th><th>Detail</th>
-              </tr></thead>
-              <tbody id="audit-layers-body"></tbody>
-            </table>
-          </div>
-          <div class="card">
-            <h3>Persona-Trend (24h)</h3>
-            <svg id="audit-trend" width="100%" height="80" viewBox="0 0 400 80" preserveAspectRatio="none"
-                 style="background:var(--bg);border:1px solid var(--border);border-radius:4px">
-              <polyline points="" fill="none" stroke="#5dc36b" stroke-width="2"/>
-              <line x1="0" y1="40" x2="400" y2="40" stroke="var(--mute)" stroke-dasharray="2,3" stroke-width="0.5"/>
-            </svg>
-            <div style="font-size:11px;color:var(--mute);margin-top:4px">
-              avg: <span id="audit-persona-avg">—</span> ·
-              datapoints: <span id="audit-persona-n">—</span> ·
-              status: <span id="audit-persona-status">—</span>
-            </div>
-          </div>
-          <div class="card">
-            <h3>Drift-Events</h3>
-            <div id="audit-drift" style="font-size:12px;max-height:200px;overflow-y:auto"></div>
-          </div>
-          <div class="card">
-            <h3>Mailbox-Backlog</h3>
-            <div class="kv" id="audit-mailbox-kv"></div>
+        </div>
+
+        <!-- DETAIL-MODAL fuer Audit-Cards -->
+        <div class="audit-modal-bg" id="audit-modal-bg" onclick="if(event.target===this)auditCloseModal()">
+          <div class="audit-modal">
+            <button class="audit-modal-close" onclick="auditCloseModal()">×</button>
+            <h3 id="audit-modal-title" style="margin:0 0 8px">Layer</h3>
+            <pre id="audit-modal-body">…</pre>
           </div>
         </div>
       </div>
@@ -882,6 +946,146 @@ function auditRenderTrend(spark){
   pl.setAttribute('points',pts);
   pl.setAttribute('stroke',avg>=7?'#5dc36b':(avg>=5?'#e6b84d':'#ff7676'));
 }
+// Layer-Gruppierung fuer Health-Sub-Tab (alle 21 Health-Layer)
+const AUDIT_HEALTH_LAYERS = [
+  'pi','pc','persona','mailbox','vision','npu','spotify','hardware',
+  'pc_hardware','web_ui','personality','memory','tracking','autonomy',
+  'awareness','voice','unconscious','bridge','tentacle','cross','self_diagnosis'
+];
+// Closed-Loop Verifier (W14)
+const AUDIT_LOOP_VERIFIERS = ['ptz','led','fan','tts','spotify','memory','bridge'];
+// Ausdruck-Module (W16 expression)
+const AUDIT_EXPR_MODULES = [
+  'tension_to_fan','mood_to_spotify','zone_to_led','berserker_strobo','tension_to_tts_volume'
+];
+
+function _ledClass(s){
+  s=(s||'').toLowerCase();
+  if(s==='green'||s==='pass') return 'pass';
+  if(s==='warn'||s==='warning') return 'warn';
+  if(s==='red'||s==='fail'||s==='alert') return 'fail';
+  return 'pending';
+}
+function _shortDetail(L){
+  if(!L) return '';
+  if(L.summary) return String(L.summary).slice(0,80);
+  if(L.message) return String(L.message).slice(0,80);
+  if(L.detail){
+    try{
+      if(typeof L.detail==='string') return L.detail.slice(0,80);
+      const keys=Object.keys(L.detail).slice(0,3);
+      return keys.map(k=>`${k}=${JSON.stringify(L.detail[k]).slice(0,18)}`).join(' ');
+    }catch(e){return '';}
+  }
+  if(L.status) return L.status;
+  return '';
+}
+function _scoreStr(L){
+  if(!L) return '—';
+  if(L.score!==undefined&&L.max!==undefined) return `${L.score}/${L.max}`;
+  if(L.avg!==undefined&&L.avg!==null) return `avg=${L.avg}`;
+  return '';
+}
+function _ageStr(ts){
+  if(!ts) return 'never';
+  const d=Date.parse(ts);if(isNaN(d)) return ts;
+  const sec=Math.max(0,(Date.now()-d)/1000);
+  if(sec<60) return Math.round(sec)+'s ago';
+  if(sec<3600) return Math.round(sec/60)+'min ago';
+  if(sec<86400) return Math.round(sec/3600)+'h ago';
+  return Math.round(sec/86400)+'d ago';
+}
+
+function auditRenderHealthGrid(layers){
+  const grid=$("audit-health-grid");if(!grid)return;
+  const cards=[];
+  for(const name of AUDIT_HEALTH_LAYERS){
+    const L=layers[name]||{};
+    const status=L.status||'pending';
+    cards.push(
+      `<div class="audit-card" onclick="auditOpenModal('${name}')">
+        <div class="audit-card-head">
+          <span class="audit-led ${_ledClass(status)}"></span>
+          <span class="audit-card-name">${name}</span>
+          <span class="audit-card-score">${_scoreStr(L)}</span>
+        </div>
+        <div class="audit-card-detail">${_shortDetail(L)||'—'}</div>
+      </div>`
+    );
+  }
+  grid.innerHTML=cards.join('');
+}
+
+function auditRenderLoopGrid(layers,loopState){
+  const grid=$("audit-loop-grid");if(!grid)return;
+  const cards=[];
+  const loops=(loopState&&loopState.verifiers)||{};
+  for(const name of AUDIT_LOOP_VERIFIERS){
+    const v=loops[name]||{};
+    const status=v.status||'pending';
+    const ts=v.last_verified||v.timestamp||v.ts;
+    const detail=v.message||v.summary||v.detail_de||(v.error||'');
+    cards.push(
+      `<div class="audit-card" onclick="auditOpenModalLoop('${name}')">
+        <div class="audit-card-head">
+          <span class="audit-led ${_ledClass(status)}"></span>
+          <span class="audit-card-name">${name}</span>
+          <span class="audit-card-score">${status}</span>
+        </div>
+        <div class="audit-card-detail">Last verified: ${_ageStr(ts)}<br>${String(detail||'').slice(0,60)}</div>
+      </div>`
+    );
+  }
+  grid.innerHTML=cards.join('');
+}
+
+function auditRenderExprGrid(exprLayer){
+  const grid=$("audit-expr-grid");if(!grid)return;
+  const modules=(exprLayer&&exprLayer.modules)||{};
+  const cards=[];
+  for(const name of AUDIT_EXPR_MODULES){
+    const m=modules[name]||{};
+    const status=m.status||'pending';
+    const event=m.subscribed_event||m.event||'—';
+    const lastTs=m.last_action_ts||m.last_ts;
+    const live=m.live_value!==undefined?String(m.live_value):(m.value!==undefined?String(m.value):'—');
+    cards.push(
+      `<div class="audit-card" onclick="auditOpenModalExpr('${name}')">
+        <div class="audit-card-head">
+          <span class="audit-led ${_ledClass(status)}"></span>
+          <span class="audit-card-name">${name}</span>
+        </div>
+        <div class="audit-card-detail">
+          event: ${event}<br>
+          last: ${_ageStr(lastTs)} · live=${live}
+        </div>
+      </div>`
+    );
+  }
+  grid.innerHTML=cards.join('');
+}
+
+function auditRenderSelf(state){
+  const cap=(state.layers&&state.layers.capability)||{};
+  const refl=(state.layers&&state.layers.reflection)||{};
+  $("audit-self-summary").textContent=cap.summary_de||'(noch keine Selbstwahrnehmung)';
+  function _fillList(id,items,fmt){
+    const el=$(id);if(!el)return;
+    if(!items||!items.length){el.innerHTML='<li style="color:var(--mute)">—</li>';return;}
+    el.innerHTML=items.map(fmt).join('');
+  }
+  _fillList("audit-self-can",cap.can_do||[],x=>`<li>${typeof x==='string'?x:(x.name||JSON.stringify(x))}</li>`);
+  _fillList("audit-self-cannot",cap.cannot_do||[],x=>{
+    if(typeof x==='string') return `<li>${x}</li>`;
+    return `<li>${x.name||'?'} <span style="color:var(--mute)">— ${x.reason||x.why||''}</span></li>`;
+  });
+  _fillList("audit-self-degraded",cap.degraded||[],x=>{
+    if(typeof x==='string') return `<li>${x}</li>`;
+    return `<li>${x.name||'?'} <span style="color:var(--mute)">— ${x.reason||x.why||''}</span></li>`;
+  });
+  _fillList("audit-self-reflections",refl.reflections_de||[],x=>`<li>${typeof x==='string'?x:JSON.stringify(x)}</li>`);
+}
+
 function auditApply(state){
   if(!state)return;auditState=state;
   // Header-LED
@@ -889,46 +1093,98 @@ function auditApply(state){
   // Sparkline aus persona
   const spark=(state.layers&&state.layers.persona&&state.layers.persona.sparkline)||[];
   auditRenderSparkline(spark);
-  // Tab-Inhalt nur updaten wenn Tab aktiv (sonst Compute-Verschwendung)
+  // Tab-Inhalt nur updaten wenn Tab aktiv
   if(!$("t-audit").classList.contains("active"))return;
   $("audit-overall").textContent=state.overall||'—';
   $("audit-overall").style.color=auditColor(state.overall);
   $("audit-tier").textContent=state.alarm_tier||'—';
   $("audit-updated").textContent=state.updated_at||'—';
-  // Layer-Tabelle
-  const body=$("audit-layers-body");if(body){
-    const rows=[];const layers=state.layers||{};
-    for(const name of ['pi','pc','persona','mailbox']){
-      const L=layers[name]||{};
-      const status=L.status||'—';
-      const score=(L.score!==undefined&&L.max!==undefined)?`${L.score}/${L.max}`:(L.avg!==undefined?`avg=${L.avg}`:'—');
-      const detail=L.detail?JSON.stringify(L.detail).slice(0,80):'';
-      rows.push(`<tr><td>${name}</td><td style="color:${auditColor(status)}">${status}</td><td>${score}</td><td style="color:var(--mute);font-size:10px">${detail}</td></tr>`);
+  const layers=state.layers||{};
+  // alle Sub-Tabs immer rendern (Daten ist schon da)
+  auditRenderHealthGrid(layers);
+  auditRenderExprGrid(layers.expression||{});
+  auditRenderSelf(state);
+  // Closed-Loop separat (eigene State-Datei)
+  auditRefreshLoop();
+}
+
+// === MODAL ===
+function auditOpenModal(layerName){
+  const L=(auditState&&auditState.layers&&auditState.layers[layerName])||{};
+  $("audit-modal-title").textContent='Layer: '+layerName;
+  $("audit-modal-body").textContent=JSON.stringify(L,null,2);
+  $("audit-modal-bg").classList.add('show');
+}
+function auditOpenModalLoop(verifier){
+  const cl=window._auditLoopState||{};
+  const v=(cl.verifiers&&cl.verifiers[verifier])||{};
+  $("audit-modal-title").textContent='Closed-Loop: '+verifier;
+  $("audit-modal-body").textContent=JSON.stringify(v,null,2);
+  $("audit-modal-bg").classList.add('show');
+}
+function auditOpenModalExpr(mod){
+  const e=(auditState&&auditState.layers&&auditState.layers.expression)||{};
+  const m=(e.modules&&e.modules[mod])||{};
+  $("audit-modal-title").textContent='Ausdruck: '+mod;
+  $("audit-modal-body").textContent=JSON.stringify(m,null,2);
+  $("audit-modal-bg").classList.add('show');
+}
+function auditCloseModal(){$("audit-modal-bg").classList.remove('show');}
+
+// === SUB-TAB SWITCH ===
+function auditSubSwitch(name){
+  document.querySelectorAll('.audit-subtab-btn').forEach(b=>{
+    b.classList.toggle('active', b.dataset.sub===name);
+  });
+  document.querySelectorAll('.audit-sub').forEach(s=>{
+    s.classList.toggle('active', s.id==='sub-'+name);
+  });
+  if(name==='loop') auditRefreshLoop();
+}
+document.querySelectorAll('.audit-subtab-btn').forEach(b=>{
+  b.addEventListener('click',()=>auditSubSwitch(b.dataset.sub));
+});
+
+// === CLOSED-LOOP ===
+let _auditLoopPollTimer=null;
+async function auditRefreshLoop(){
+  try{
+    const r=await fetch('/audit/verify_status');
+    if(!r.ok) return;
+    const j=await r.json();
+    window._auditLoopState=j;
+    auditRenderLoopGrid(auditState&&auditState.layers||{}, j);
+    // Status-Anzeige
+    const st=$("audit-verify-status");
+    if(st){
+      if(j.running){st.textContent='Run aktiv: '+(j.run_id||'')+' seit '+_ageStr(j.started_at);}
+      else if(j.last_run_at){st.textContent='Letzter Run: '+_ageStr(j.last_run_at)+' ('+(j.overall||'?')+')';}
+      else {st.textContent='Noch nie gelaufen';}
     }
-    body.innerHTML=rows.join('');
-  }
-  // Persona-Trend
-  const persona=(state.layers&&state.layers.persona)||{};
-  auditRenderTrend(persona.sparkline||[]);
-  $("audit-persona-avg").textContent=persona.avg!==null&&persona.avg!==undefined?persona.avg:'—';
-  $("audit-persona-n").textContent=(persona.sparkline||[]).length;
-  $("audit-persona-status").textContent=persona.status||'—';
-  // Drift-Events
-  const drift=$("audit-drift");if(drift){
-    const evs=(state.drift_events||[]).slice(-10).reverse();
-    if(!evs.length){drift.innerHTML='<span style="color:var(--mute)">keine Events</span>';}
-    else{drift.innerHTML=evs.map(e=>`<div style="margin-bottom:4px"><span style="color:${auditColor(e.severity)}">[${e.severity}]</span> ${e.layer}: ${e.signal} <span style="color:var(--mute);font-size:10px">${e.ts}</span></div>`).join('');}
-  }
-  // Mailbox
-  const mb=(state.layers&&state.layers.mailbox)||{};
-  const mbkv=$("audit-mailbox-kv");if(mbkv){
-    mbkv.innerHTML=`<span>backlog_pc</span><span>${mb.backlog_pc??'—'}</span>
-      <span>backlog_pi</span><span>${mb.backlog_pi??'—'}</span>
-      <span>stale</span><span>${mb.stale??'—'}</span>
-      <span>dups</span><span>${mb.dups??'—'}</span>
-      <span>status</span><span style="color:${auditColor(mb.status)}">${mb.status||'—'}</span>`;
+    // Polling waehrend Run aktiv
+    if(j.running && !_auditLoopPollTimer){
+      _auditLoopPollTimer=setInterval(auditRefreshLoop, 5000);
+    } else if(!j.running && _auditLoopPollTimer){
+      clearInterval(_auditLoopPollTimer);_auditLoopPollTimer=null;
+    }
+  }catch(e){}
+}
+
+async function auditVerifyAll(){
+  const btn=$("audit-verify-all-btn");if(btn)btn.disabled=true;
+  try{
+    const r=await fetch('/audit/verify',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({verify:'all'})});
+    if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error(j.detail||r.statusText);}
+    setTimeout(auditRefreshLoop,1000);
+  }catch(e){
+    const st=$("audit-verify-status");if(st)st.textContent='Verify-Fehler: '+e.message;
+  }finally{
+    setTimeout(()=>{if(btn)btn.disabled=false;},3000);
   }
 }
+
 async function auditRefresh(){
   try{const r=await fetch('/mailbox/audit/state');if(r.ok){auditApply(await r.json());}}catch(e){}
 }
