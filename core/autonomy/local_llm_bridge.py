@@ -591,20 +591,37 @@ def _build_music_context_snippet(max_chars: int = 1500) -> str:
             prof = json.load(f)
     except Exception:
         return ""
-    summary = prof.get("summary", {}) or {}
+    summary = prof.get("summary")
     top_artists = (prof.get("top_artists") or [])[:10]
-    genre_prof = prof.get("genre_profile", {}) or {}
+    genre_prof = prof.get("genre_profile") if isinstance(prof.get("genre_profile"), dict) else {}
 
     lines = ["=== MARKUS' MUSIK-PROFIL (Spotify, langfristig) ==="]
-    period = summary.get("period_years") or summary.get("period") or "2015-2025"
-    total_h = summary.get("total_hours") or summary.get("hours") or "?"
-    streams = summary.get("total_streams") or summary.get("streams") or "?"
-    lines.append(f"Zeitraum: {period} | Total: {total_h}h / {streams} Streams")
+    # summary kann String (Klartext-Beschreibung) oder Dict sein
+    if isinstance(summary, str) and summary.strip():
+        lines.append(summary.strip()[:400])
+    elif isinstance(summary, dict):
+        period = summary.get("period_years") or summary.get("period") or "2015-2025"
+        total_h = summary.get("total_hours") or summary.get("hours") or "?"
+        streams = summary.get("total_streams") or summary.get("streams") or "?"
+        lines.append(f"Zeitraum: {period} | Total: {total_h}h / {streams} Streams")
 
-    top_genres = genre_prof.get("top_genres") or genre_prof.get("genres") or []
-    if isinstance(top_genres, list) and top_genres:
-        gtxt = ", ".join(str(g) for g in top_genres[:6])
-        lines.append(f"Genres: {gtxt}")
+    primary = genre_prof.get("primary_genres") or genre_prof.get("top_genres") or genre_prof.get("genres") or []
+    if isinstance(primary, list) and primary:
+        # primary_genres-Items koennen dicts {genre, hours, share_pct} oder Strings sein
+        names = []
+        for g in primary[:6]:
+            if isinstance(g, dict):
+                n = g.get("genre") or g.get("name")
+                if n:
+                    pct = g.get("share_pct")
+                    names.append(f"{n}{f' ({pct:.0f}%)' if isinstance(pct,(int,float)) else ''}")
+            elif isinstance(g, str):
+                names.append(g)
+        if names:
+            lines.append(f"Top-Genres: {', '.join(names)}")
+    scene = genre_prof.get("scene")
+    if isinstance(scene, str) and scene:
+        lines.append(f"Szene: {scene}")
 
     if top_artists:
         lines.append("Top 10 Artists (Plays / Stunden / Genre):")
@@ -615,17 +632,33 @@ def _build_music_context_snippet(max_chars: int = 1500) -> str:
             genre = a.get("genre", "")
             lines.append(f"  #{a.get('rank','?')} {name} — {plays}p / {hours}h ({genre})")
 
-    # Recently played (letzte 3)
+    # Recently played (letzte 3) — kann List ODER Dict-mit-items sein
     try:
         with open(_RECENTLY_PLAYED_PATH, "r", encoding="utf-8") as f:
             rp = json.load(f)
-        recent = rp.get("recently_played") or rp.get("items") or rp
-        if isinstance(recent, list) and recent:
-            lines.append("Zuletzt gehoert (letzte 3):")
+        if isinstance(rp, list):
+            recent = rp
+        elif isinstance(rp, dict):
+            recent = rp.get("recently_played") or rp.get("items") or []
+        else:
+            recent = []
+        if recent:
+            shown = []
             for t in recent[:3]:
-                tn = t.get("track") or t.get("name") or "?"
-                an = t.get("artist") or (t.get("artists") or [{}])[0].get("name", "?")
-                lines.append(f"  - {an} — {tn}")
+                if not isinstance(t, dict):
+                    continue
+                tn = t.get("track") or t.get("name")
+                an = t.get("artist")
+                if not an and isinstance(t.get("artists"), list) and t["artists"]:
+                    a0 = t["artists"][0]
+                    an = a0.get("name") if isinstance(a0, dict) else None
+                if tn or an:
+                    shown.append(f"  - {an or '?'} — {tn or '?'}")
+                elif t.get("played_at"):
+                    shown.append(f"  - (uri {(t.get('uri') or '')[:30]}…) @ {t['played_at'][:16]}")
+            if shown:
+                lines.append("Zuletzt gehoert (letzte 3):")
+                lines.extend(shown)
     except Exception:
         pass
 
