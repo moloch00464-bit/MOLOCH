@@ -9,6 +9,7 @@ Endpoints:
   GET  /status     -> Bridge-Stats
   POST /chat       -> {text, force_local?, use_reason?} -> {text, provider, duration_ms}
 """
+import asyncio
 import logging
 import os
 import re
@@ -26,7 +27,7 @@ from typing import Dict, Optional, Tuple
 import uvicorn
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 sys.path.insert(0, os.path.expanduser("~/moloch"))
@@ -396,6 +397,15 @@ _CHAT_UI_HTML = """<!doctype html>
       <div class="stat"><span>CPU</span><span class="v" id="s-cpu">—</span></div>
       <div class="stat"><span>RAM</span><span class="v" id="s-ram">—</span></div>
       <div class="stat"><span>Provider</span><span class="v" id="s-prov">—</span></div>
+      <div class="stat audit-stat" title="Audit-Ampel + Persona-Sparkline (W11)">
+        <span>Audit</span>
+        <span class="v" id="s-audit">
+          <span id="audit-led" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#7a7a8a;margin-right:6px;vertical-align:middle"></span>
+          <svg id="audit-spark" width="50" height="16" viewBox="0 0 50 16" style="vertical-align:middle">
+            <polyline points="" fill="none" stroke="#5dc36b" stroke-width="1.5"/>
+          </svg>
+        </span>
+      </div>
     </div>
   </header>
 
@@ -428,6 +438,7 @@ _CHAT_UI_HTML = """<!doctype html>
         <button class="tab-btn" data-tab="char">Charakter</button>
         <button class="tab-btn" data-tab="see">Sehen</button>
         <button class="tab-btn" data-tab="avatar">Avatar</button>
+        <button class="tab-btn" data-tab="audit">Audit</button>
       </div>
       <div class="tab-content">
         <!-- LIVE TAB -->
@@ -459,6 +470,47 @@ _CHAT_UI_HTML = """<!doctype html>
                   style="width:100%;height:100%;min-height:600px;border:0;background:#0a0a0d"
                   title="MOLOCH Avatar"
                   allow="microphone; camera; autoplay"></iframe>
+        </div>
+        <!-- AUDIT TAB (W11) -->
+        <div class="tab" id="t-audit">
+          <div class="card">
+            <h3>Overall <span id="audit-overall" style="margin-left:8px;font-weight:normal"></span></h3>
+            <div class="kv" id="audit-overall-kv"></div>
+            <div style="margin-top:8px;font-size:11px;color:var(--mute)">
+              Tier: <span id="audit-tier">—</span> · Updated: <span id="audit-updated">—</span>
+              <button class="btn" style="float:right;height:24px;font-size:10px" onclick="auditRefresh()">Refresh</button>
+            </div>
+          </div>
+          <div class="card">
+            <h3>Layer-Health</h3>
+            <table style="width:100%;font-size:12px;border-collapse:collapse" id="audit-layers-tbl">
+              <thead><tr style="text-align:left;color:var(--mute)">
+                <th>Layer</th><th>Status</th><th>Score</th><th>Detail</th>
+              </tr></thead>
+              <tbody id="audit-layers-body"></tbody>
+            </table>
+          </div>
+          <div class="card">
+            <h3>Persona-Trend (24h)</h3>
+            <svg id="audit-trend" width="100%" height="80" viewBox="0 0 400 80" preserveAspectRatio="none"
+                 style="background:var(--bg);border:1px solid var(--border);border-radius:4px">
+              <polyline points="" fill="none" stroke="#5dc36b" stroke-width="2"/>
+              <line x1="0" y1="40" x2="400" y2="40" stroke="var(--mute)" stroke-dasharray="2,3" stroke-width="0.5"/>
+            </svg>
+            <div style="font-size:11px;color:var(--mute);margin-top:4px">
+              avg: <span id="audit-persona-avg">—</span> ·
+              datapoints: <span id="audit-persona-n">—</span> ·
+              status: <span id="audit-persona-status">—</span>
+            </div>
+          </div>
+          <div class="card">
+            <h3>Drift-Events</h3>
+            <div id="audit-drift" style="font-size:12px;max-height:200px;overflow-y:auto"></div>
+          </div>
+          <div class="card">
+            <h3>Mailbox-Backlog</h3>
+            <div class="kv" id="audit-mailbox-kv"></div>
+          </div>
         </div>
       </div>
     </section>
@@ -727,13 +779,110 @@ async function refreshProv(){
 btnSend.onclick=send;
 inp.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}});
 
+// === AUDIT (W11) ===
+let auditState=null;
+function auditColor(s){
+  s=(s||'').toLowerCase();
+  if(s==='green'||s==='pass') return '#5dc36b';
+  if(s==='warn'||s==='warning') return '#e6b84d';
+  if(s==='red'||s==='fail'||s==='alert') return '#ff7676';
+  return '#7a7a8a';
+}
+function auditRenderSparkline(spark){
+  const svg=$("audit-spark");if(!svg)return;
+  if(!spark||!spark.length){svg.querySelector('polyline').setAttribute('points','');return;}
+  const W=50,H=16,n=spark.length;
+  const minS=Math.min(...spark,0),maxS=Math.max(...spark,10);
+  const pts=spark.map((v,i)=>{
+    const x=(i/(Math.max(1,n-1)))*W;
+    const y=H-((v-minS)/Math.max(0.01,maxS-minS))*H;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  const avg=spark.reduce((a,b)=>a+b,0)/n;
+  const stroke=avg>=7?'#5dc36b':(avg>=5?'#e6b84d':'#ff7676');
+  const pl=svg.querySelector('polyline');pl.setAttribute('points',pts);pl.setAttribute('stroke',stroke);
+}
+function auditRenderTrend(spark){
+  const svg=$("audit-trend");if(!svg||!spark)return;
+  const pl=svg.querySelector('polyline');if(!pl)return;
+  if(!spark.length){pl.setAttribute('points','');return;}
+  const W=400,H=80,n=spark.length;
+  const pts=spark.map((v,i)=>{
+    const x=(i/(Math.max(1,n-1)))*W;
+    const y=H-(Math.max(0,Math.min(10,v))/10)*H;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  const avg=spark.reduce((a,b)=>a+b,0)/n;
+  pl.setAttribute('points',pts);
+  pl.setAttribute('stroke',avg>=7?'#5dc36b':(avg>=5?'#e6b84d':'#ff7676'));
+}
+function auditApply(state){
+  if(!state)return;auditState=state;
+  // Header-LED
+  const led=$("audit-led");if(led)led.style.background=auditColor(state.overall);
+  // Sparkline aus persona
+  const spark=(state.layers&&state.layers.persona&&state.layers.persona.sparkline)||[];
+  auditRenderSparkline(spark);
+  // Tab-Inhalt nur updaten wenn Tab aktiv (sonst Compute-Verschwendung)
+  if(!$("t-audit").classList.contains("active"))return;
+  $("audit-overall").textContent=state.overall||'—';
+  $("audit-overall").style.color=auditColor(state.overall);
+  $("audit-tier").textContent=state.alarm_tier||'—';
+  $("audit-updated").textContent=state.updated_at||'—';
+  // Layer-Tabelle
+  const body=$("audit-layers-body");if(body){
+    const rows=[];const layers=state.layers||{};
+    for(const name of ['pi','pc','persona','mailbox']){
+      const L=layers[name]||{};
+      const status=L.status||'—';
+      const score=(L.score!==undefined&&L.max!==undefined)?`${L.score}/${L.max}`:(L.avg!==undefined?`avg=${L.avg}`:'—');
+      const detail=L.detail?JSON.stringify(L.detail).slice(0,80):'';
+      rows.push(`<tr><td>${name}</td><td style="color:${auditColor(status)}">${status}</td><td>${score}</td><td style="color:var(--mute);font-size:10px">${detail}</td></tr>`);
+    }
+    body.innerHTML=rows.join('');
+  }
+  // Persona-Trend
+  const persona=(state.layers&&state.layers.persona)||{};
+  auditRenderTrend(persona.sparkline||[]);
+  $("audit-persona-avg").textContent=persona.avg!==null&&persona.avg!==undefined?persona.avg:'—';
+  $("audit-persona-n").textContent=(persona.sparkline||[]).length;
+  $("audit-persona-status").textContent=persona.status||'—';
+  // Drift-Events
+  const drift=$("audit-drift");if(drift){
+    const evs=(state.drift_events||[]).slice(-10).reverse();
+    if(!evs.length){drift.innerHTML='<span style="color:var(--mute)">keine Events</span>';}
+    else{drift.innerHTML=evs.map(e=>`<div style="margin-bottom:4px"><span style="color:${auditColor(e.severity)}">[${e.severity}]</span> ${e.layer}: ${e.signal} <span style="color:var(--mute);font-size:10px">${e.ts}</span></div>`).join('');}
+  }
+  // Mailbox
+  const mb=(state.layers&&state.layers.mailbox)||{};
+  const mbkv=$("audit-mailbox-kv");if(mbkv){
+    mbkv.innerHTML=`<span>backlog_pc</span><span>${mb.backlog_pc??'—'}</span>
+      <span>backlog_pi</span><span>${mb.backlog_pi??'—'}</span>
+      <span>stale</span><span>${mb.stale??'—'}</span>
+      <span>dups</span><span>${mb.dups??'—'}</span>
+      <span>status</span><span style="color:${auditColor(mb.status)}">${mb.status||'—'}</span>`;
+  }
+}
+async function auditRefresh(){
+  try{const r=await fetch('/mailbox/audit/state');if(r.ok){auditApply(await r.json());}}catch(e){}
+}
+function auditConnectSSE(){
+  try{
+    const es=new EventSource('/audit/stream');
+    es.onmessage=(ev)=>{try{auditApply(JSON.parse(ev.data));}catch(e){}};
+    es.onerror=()=>{es.close();setTimeout(auditConnectSSE,5000);};
+  }catch(e){setTimeout(auditConnectSSE,5000);}
+}
+
 // === BOOT ===
 loadHistory();refreshLive();refreshProv();loadPrompt();refreshFeedbackStats();
+auditRefresh();auditConnectSSE();
 setInterval(refreshLive,2000);
 setInterval(refreshProv,15000);
 setInterval(refreshFeedbackStats,30000);
 setInterval(()=>{ if($("t-char").classList.contains("active")) refreshChar(); },5000);
 setInterval(()=>{ if($("t-see").classList.contains("active")) refreshSnap(); },2500);
+setInterval(()=>{ if($("t-audit").classList.contains("active")) auditRefresh(); },10000);
 </script></body></html>"""
 
 
@@ -1758,6 +1907,90 @@ def _write_last_turn_json(user_text: str, response_text: str,
         os.replace(tmp, _LAST_TURN_PATH)
     except Exception as e:
         logger.warning(f"[last_turn] write fail: {e}")
+
+
+_AUDIT_TTS_LOCK = Path(os.path.expanduser("~/moloch_logs/audit_tts_alarm_lock"))
+_AUDIT_TTS_COOLDOWN_S = 1800  # 30 min
+
+
+def _maybe_tts_alarm(state: Dict) -> None:
+    """Welle 11: Bei alarm_tier=alert TTS-Alarm sprechen, mit 30min-Cooldown."""
+    tier = (state or {}).get("alarm_tier")
+    if tier != "alert":
+        return
+    try:
+        _AUDIT_TTS_LOCK.parent.mkdir(parents=True, exist_ok=True)
+        if _AUDIT_TTS_LOCK.exists():
+            age = time.time() - _AUDIT_TTS_LOCK.stat().st_mtime
+            if age < _AUDIT_TTS_COOLDOWN_S:
+                return
+        ts = state.get("updated_at", "")
+        msg = f"MOLOCH ist driftend. Audit fehlgeschlagen seit {ts}."
+        # Lokale Pi-Sprache via personality_engine -> tts_pipeline
+        try:
+            from core.personality.personality_engine import get_personality_engine
+            pe = get_personality_engine()
+            if hasattr(pe, "speak"):
+                pe.speak(msg)
+        except Exception as e:
+            logger.warning(f"[audit-tts] speak fail: {e}")
+        _AUDIT_TTS_LOCK.touch()
+        logger.warning(f"[audit-tts] ALERT-TTS getriggert: {msg}")
+    except Exception as e:
+        logger.warning(f"[audit-tts] cooldown-check fail: {e}")
+
+
+@app.get("/audit/stream")
+async def audit_stream():
+    """Welle 11: SSE-Stream auf /dev/shm/audit_state.json mtime-Change.
+
+    Frontend EventSource verbindet hier. Bei jedem mtime-Wechsel: push
+    aktuelles JSON als event-stream. Plus initialer Push beim Connect +
+    Heartbeat alle 25s damit Proxies nicht killen.
+    """
+    audit_path = Path("/dev/shm/audit_state.json")
+
+    async def gen():
+        last_mtime = 0.0
+        last_alarm_check = 0.0
+        # Initial-Push
+        try:
+            if audit_path.exists():
+                content = audit_path.read_text(encoding="utf-8")
+                yield f"data: {content}\n\n"
+                last_mtime = audit_path.stat().st_mtime
+        except Exception:
+            pass
+        while True:
+            try:
+                if audit_path.exists():
+                    mt = audit_path.stat().st_mtime
+                    if mt > last_mtime:
+                        last_mtime = mt
+                        content = audit_path.read_text(encoding="utf-8")
+                        yield f"data: {content}\n\n"
+                        # TTS-Alarm-Check max alle 60s
+                        if time.time() - last_alarm_check > 60:
+                            last_alarm_check = time.time()
+                            try:
+                                state = json.loads(content)
+                                _maybe_tts_alarm(state)
+                            except Exception:
+                                pass
+                    else:
+                        # Heartbeat
+                        yield ": heartbeat\n\n"
+                else:
+                    yield ": no-audit-state\n\n"
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.debug(f"[audit-stream] tick fehler: {e}")
+            await asyncio.sleep(2.0)
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                              headers={"Cache-Control": "no-cache",
+                                       "X-Accel-Buffering": "no"})
 
 
 @app.get("/audit/last_turn")
