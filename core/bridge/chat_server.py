@@ -934,6 +934,18 @@ def chat(req: ChatRequest):
     except Exception as e:
         logger.debug(f"Journal moloch-hook Fehler: {e}")
 
+    # Welle 10: Last-Turn-Hook fuer PC-Persona-Validator
+    try:
+        _write_last_turn_json(
+            user_text=req.text,
+            response_text=out,
+            prompt_type=prompt_type,
+            provider=b._last_provider,
+            duration_ms=dur_ms,
+        )
+    except Exception as e:
+        logger.debug(f"last_turn-Hook Fehler: {e}")
+
     return {
         "text": out,
         "provider": b._last_provider,
@@ -1667,6 +1679,102 @@ def mailbox_post(name: str, req: MailboxPostRequest, background_tasks: Backgroun
 
 
 _AUDIT_VALID_COMPONENTS = {"pc_health", "hygiene", "persona"}
+
+_LAST_TURN_PATH = "/dev/shm/last_turn.json"
+
+
+def _write_last_turn_json(user_text: str, response_text: str,
+                          prompt_type: Optional[str],
+                          provider: Optional[str],
+                          duration_ms: int) -> None:
+    """Welle 10: Schreibe /dev/shm/last_turn.json atomic nach jedem /chat-Turn.
+
+    Wird vom PC-persona_validator gepollt (GET /audit/last_turn) damit er
+    Antworten gegen 5 Coherence-Signale (ich_form, slang_density, memory_ref,
+    anti_hallu, tension_match) scoren + POST /mailbox/audit/persona schicken
+    kann.
+    """
+    import uuid as _uuid
+    pi_context: Dict = {}
+    try:
+        with open("/dev/shm/moloch_status.json", "r", encoding="utf-8") as f:
+            st = json.load(f)
+        core = st.get("core") or {}
+        pi_context = {
+            "tension": core.get("tension", st.get("tension")),
+            "dominance": core.get("dominance", st.get("dominance")),
+            "zone": core.get("zone", "guardian"),
+            "mood_label": _get_pi_mood_label(),
+            "person_detected": st.get("person_detected"),
+            "face_id": st.get("face_id"),
+            "recent_memories": [],
+        }
+    except Exception:
+        pi_context = {"mood_label": _get_pi_mood_label()}
+    # recent_memories (Top-3) aus longterm_memory
+    try:
+        from core.longterm_memory import get_memory  # type: ignore
+        msgs = get_memory().get_recent_messages(n=3) or []
+        pi_context["recent_memories"] = [
+            {"role": m.get("role") or m.get("from") or "?",
+             "text": (m.get("text") or m.get("content") or "")[:200]}
+            for m in msgs if isinstance(m, dict)
+        ]
+    except Exception:
+        pi_context.setdefault("recent_memories", [])
+    # last_n_journal_types
+    journal_types: list = []
+    try:
+        from core.memory.character_journal import get_journal  # type: ignore
+        j = get_journal()
+        getter = getattr(j, "get_recent_events", None) or getattr(j, "recent_events", None)
+        if callable(getter):
+            try:
+                events = getter(limit=5) or []
+            except TypeError:
+                events = getter(5) or []
+            journal_types = [
+                ev.get("type") for ev in events
+                if isinstance(ev, dict) and ev.get("type")
+            ]
+    except Exception:
+        pass
+
+    payload = {
+        "turn_id": _uuid.uuid4().hex[:16],
+        "ts": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "user_text": user_text,
+        "response_text": response_text,
+        "prompt_type": prompt_type,
+        "provider": provider,
+        "duration_ms": int(duration_ms or 0),
+        "pi_context": pi_context,
+        "last_n_journal_types": journal_types,
+    }
+    try:
+        tmp = _LAST_TURN_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
+        os.replace(tmp, _LAST_TURN_PATH)
+    except Exception as e:
+        logger.warning(f"[last_turn] write fail: {e}")
+
+
+@app.get("/audit/last_turn")
+def audit_last_turn():
+    """Welle 10: letzter /chat-Turn als JSON. PC-Persona-Validator pollt das alle 10s."""
+    try:
+        with open(_LAST_TURN_PATH, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        return Response(
+            content=json.dumps(payload, ensure_ascii=False),
+            media_type="application/json",
+            headers={"Cache-Control": "max-age=5"},
+        )
+    except FileNotFoundError:
+        raise HTTPException(404, "last_turn.json existiert nicht — kein /chat-Turn seit Service-Start")
+    except Exception as e:
+        raise HTTPException(500, f"last_turn-Fehler: {e}")
 
 
 @app.get("/mailbox/audit/state")
