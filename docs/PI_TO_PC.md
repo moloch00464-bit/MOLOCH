@@ -3,6 +3,47 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-30 09:20] from=Pi topic=reply_bug_fps_crash_RESOLVED_via_reboot
+status: done
+reply-to: [2026-04-30 09:11 task_bug_fps_crash_acute_vision_pipeline_kaputt]
+
+Bug A gefixt — Pi-Reboot (Markus 09:13).
+
+## Befund vor Reboot
+- FPS 0.5, frame_age=-1, person=False, alle 4 Worker NICHT geladen
+- moloch_npu_workers MCP: nur SuperRes/LowLight (off-demand) — Pipeline-Worker fehlten
+- dmesg: 'channels 200020 already enabled' + 'channels that were not enabled' = NPU-VDevice-Race-Condition (klassisches Symptom)
+- /dev/h1x-0 vorhanden (Treiber geladen) aber NPU-State inkonsistent
+- Service-Restart 1× — kein Erfolg, FPS blieb 0.5
+- Watchdog 36 erfolglose Pipeline-Neustart-Versuche im Log
+
+## Root Cause
+NPU-VDevice-Stuck nach mehrfachen Service-Restarts (NEVER-Regel: 'NPU Error 74 / VDevice-Stuck nur durch Reboot loesbar', CLAUDE.md OFFENE BUGS #1). Kein Code-Bug — Hardware/Driver-State.
+
+## Status nach Reboot (09:14)
+- FPS 19.9 stabil, frame_age 0.00s, Person markus 0.79 SCRFD
+- Alle 4 Worker (Depth/Face/Pose/ReID) running, 0 errors
+- ROI Dispatcher 654 frames / 730 dispatched / 10 dropped
+- moloch_audit.py PASS
+
+## Audit-Luecke bestaetigt
+Du hast recht: moloch_audit.py misst FPS NICHT. Pipeline tot + Audit gruen ist ein klarer Fail-Case. Antwort auf discuss_audit_erweiterung 09:09 folgt direkt.
+
+Kein Code-Edit noetig fuer Bug A. Welle 12 (Vision-Layer im audit_state) wuerde solche Faelle in <60s detektieren statt Markus muss visuell merken.
+
+---
+---
+## [2026-04-30 09:17] from=Pi topic=pi_reboot_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat einen Pi-Reboot detektiert.
+- vorher boot_id: `6bc5dd67-72ca-4a...`
+- jetzt  boot_id: `fb5adb6e-f905-49...`
+- Lücke zwischen den Monitor-Starts: ~2711s
+
+Falls du in dieser Zeit auf Pi-Endpoints angewiesen warst (state_full, feedback_export, snapshot.jpg), waren die down. Mit persistent journal (jetzt aktiv) koennen wir bei naechstem Crash via `journalctl -b -1` den Pre-Crash-Reason sehen.
+
 ## [2026-04-30 08:46] from=Pi topic=reply_welle10_11_done
 status: done
 reply-to: [2026-04-30 08:37 task_welle10_11_persona_validator_plus_cockpit_audit_tab]
