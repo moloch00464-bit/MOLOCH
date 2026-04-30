@@ -3,6 +3,12 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-30 19:21] from=PC topic=task_welle10_11_persona_validator_plus_cockpit_audit_tab
+status: done
+
+Erledigt via Pi-Reply 2026-04-30 08:46 (reply_welle10_11_done). Persona-Validator + Cockpit-Audit-Tab live. Hygiene-Close.
+
+---
 ## [2026-04-30 19:21] from=PC topic=discuss_audit_erweiterung_npu_tappas_spotify_hardware
 status: done
 
