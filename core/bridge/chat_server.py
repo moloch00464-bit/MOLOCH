@@ -111,6 +111,72 @@ _YEAR_RE = re.compile(r"\b(19[5-9]\d|20[0-3]\d)\b")
 # Welle 7 PC-Topic 07:44: Playlist-Pattern.
 # Beispiele: "spiel meine Playlist X", "spiel die Playlist Y", "leg Playlist Z auf",
 # "starte Playlist A", "Playlist B abspielen"
+# Welle 12 Bug B: Music-Action-Phrasen (vor music_query) -> direkter IPC.
+# Ordnung: spezifisch vor generisch. Match per Substring (case-insensitive).
+_MUSIC_ACTION_PATTERNS = (
+    # (Phrase, IPC-Action, Antwort-Text)
+    ("naechster track",       "spotify_skip",        "Naechster Track."),
+    ("naechster song",        "spotify_skip",        "Naechster Song."),
+    ("nächster track",        "spotify_skip",        "Naechster Track."),
+    ("nächster song",         "spotify_skip",        "Naechster Song."),
+    ("ueberspringen",         "spotify_skip",        "Skip."),
+    ("ueberspring",           "spotify_skip",        "Skip."),
+    ("überspring",            "spotify_skip",        "Skip."),
+    (" skip ",                "spotify_skip",        "Skip."),
+    ("skip das",              "spotify_skip",        "Skip."),
+    (" weiter",               "spotify_skip",        "Weiter."),
+    ("vorheriger",            "spotify_previous",    "Vorheriger Track."),
+    ("zurueck zum",           "spotify_previous",    "Zurueck."),
+    ("vorigen",               "spotify_previous",    "Voriger Track."),
+    ("pausier",               "spotify_pause",       "Pausiert."),
+    (" pause",                "spotify_pause",       "Pausiert."),
+    ("stop musik",            "spotify_pause",       "Stop."),
+    ("halt musik",            "spotify_pause",       "Stop."),
+    ("musik aus",             "spotify_pause",       "Aus."),
+    ("musik weiter",          "spotify_toggle",      "Laeuft weiter."),
+    ("fortsetzen",            "spotify_toggle",      "Laeuft weiter."),
+    ("wechsel die musik",     "spotify_mood",        "Wechsel auf Mood-Auswahl."),
+    ("wechsel musik",         "spotify_mood",        "Wechsel."),
+    ("musik wechseln",        "spotify_mood",        "Andere Musik."),
+    ("andere musik",          "spotify_mood",        "Andere Musik."),
+    ("was anderes",           "spotify_skip",        "Was anderes."),
+    ("nicht das",             "spotify_skip",        "Skip."),
+    ("top tracks",            "spotify_top_tracks",  "Spiele Top Tracks."),
+    ("meine lieblinge",       "spotify_top_tracks",  "Spiele Lieblinge."),
+    ("meine hits",            "spotify_top_tracks",  "Spiele Hits."),
+    ("top hits",              "spotify_top_tracks",  "Spiele Top Hits."),
+    ("entdecker",             "spotify_new_music",   "Entdecker-Modus."),
+    ("was neues",             "spotify_new_music",   "Neues entdecken."),
+)
+
+
+def _match_music_action(text: str):
+    """Match Phrase -> (action, antwort_text). None wenn kein Match."""
+    t = text.lower()
+    # Padding fuer Wort-Boundary-Schutz bei kurzen Strings wie ' skip '
+    padded = " " + t.strip() + " "
+    for phrase, action, reply in _MUSIC_ACTION_PATTERNS:
+        if phrase in padded or phrase in t:
+            return action, reply
+    return None
+
+
+def _trigger_spotify_action(action: str, params: Dict = None) -> bool:
+    """IPC-Cmd schreiben fuer beliebige Spotify-Action."""
+    try:
+        cmd = {"action": action}
+        if params:
+            cmd.update(params)
+        path = f"/tmp/moloch_cmd_{int(time.time() * 1000)}.json"
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(cmd, f)
+        logger.info(f"[BRIDGE] IPC {action} -> {path}")
+        return True
+    except Exception as e:
+        logger.warning(f"[BRIDGE] IPC-Schreibfehler {action}: {e}")
+        return False
+
+
 _PLAYLIST_RE = re.compile(
     r"(?:spiel(?:e)?(?:\s+mir)?(?:\s+(?:meine|die|den|den))?|leg(?:e)?|starte?)\s+"
     r"(?:die\s+)?playlist\s+(.+?)(?:\s+(?:ab|an|auf)\s*$|$)",
@@ -957,12 +1023,28 @@ def chat(req: ChatRequest):
     except Exception as e:
         logger.warning(f"Memory/Bus user-write Fehler: {e}")
 
-    # Welle 6 Schritt 7 + Welle 7 Schritt 2.3: Music-IPC-Shortcuts.
-    # Wenn music_query mit Year-Match ODER Playlist-Pattern erkannt wird,
-    # triggern wir Spotify direkt via IPC statt durch die LLM-Kaskade.
+    # Welle 6 Schritt 7 + Welle 7 Schritt 2.3 + Welle 12 Bug B: Music-IPC-Shortcuts.
+    # Wenn music_query mit Year-Match ODER Playlist-Pattern ODER Action-Phrase
+    # erkannt wird, triggern wir Spotify direkt via IPC statt durch die LLM-Kaskade.
     if not req.force_local and not req.use_reason:
         _ptype_quick = _classify_prompt_type(req.text)
         if _ptype_quick == "music_query":
+            # 0. Action-Phrasen zuerst (Bug B: 'wechsel die musik', 'naechster track', etc.)
+            _amatch = _match_music_action(req.text)
+            if _amatch:
+                _action, _reply = _amatch
+                if _trigger_spotify_action(_action):
+                    try:
+                        get_memory().save_message("moloch", _reply, source="chat_server")
+                    except Exception:
+                        pass
+                    return {
+                        "text": _reply,
+                        "provider": f"spotify_action_{_action}",
+                        "duration_ms": 50,
+                        "prompt_type": "music_action",
+                        "pi_mood": _get_pi_mood_label(),
+                    }
             # 1. Playlist-Recognition zuerst (spezifischer als Year)
             _pmatch = _PLAYLIST_RE.search(req.text)
             if _pmatch:
