@@ -5,11 +5,17 @@ API:
   start_all_expressions()    — beim Service-Boot (vom service-Agent gerufen)
   stop_all_expressions()     — graceful shutdown
   get_expression_state()     — Status aller Module fuer audit_state.layers.expression
+
+Schreibt periodisch (30s) atomic nach /dev/shm/expression_state.json damit
+audit_orchestrator (separater Subprocess, eigener Singleton) den Live-State sieht.
 """
+import json
 import logging
+import os
+import tempfile
 import threading
 import time
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger("expression.orchestrator")
 
@@ -17,6 +23,44 @@ _lock = threading.RLock()
 _started: bool = False
 _modules: Dict[str, Any] = {}
 _start_ts: float = 0.0
+
+# Cross-Prozess-State-File (audit_orchestrator liest hier)
+EXPRESSION_STATE_PATH = "/dev/shm/expression_state.json"
+WRITER_INTERVAL_S = 30.0
+_writer_thread: Optional[threading.Thread] = None
+_writer_stop = threading.Event()
+
+
+def _atomic_write_state(state: Dict[str, Any]) -> bool:
+    """Atomic via tempfile + os.replace (NEVER 6)."""
+    try:
+        d = os.path.dirname(EXPRESSION_STATE_PATH)
+        fd, tmp = tempfile.mkstemp(dir=d, prefix="expression_state.", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(state, f, ensure_ascii=False)
+            os.replace(tmp, EXPRESSION_STATE_PATH)
+            return True
+        except Exception:
+            try: os.unlink(tmp)
+            except OSError: pass
+            raise
+    except Exception as e:
+        logger.debug(f"_atomic_write_state Fehler: {e}")
+        return False
+
+
+def _writer_loop():
+    """Background-Thread schreibt expression_state alle 30s."""
+    logger.info(f"expression-state-writer gestartet (Intervall {WRITER_INTERVAL_S}s)")
+    # Sofort 1× schreiben damit audit nicht 30s wartet
+    _atomic_write_state(get_expression_state())
+    while not _writer_stop.wait(timeout=WRITER_INTERVAL_S):
+        try:
+            _atomic_write_state(get_expression_state())
+        except Exception as e:
+            logger.debug(f"writer-loop Fehler: {e}")
+    logger.info("expression-state-writer gestoppt")
 
 
 def _safe_get(module_name: str, getter_path: str):
@@ -63,7 +107,13 @@ def start_all_expressions() -> Dict[str, bool]:
         _start_ts = time.time()
         ok_count = sum(1 for v in results.values() if v)
         logger.info(f"ExpressionOrchestrator: {ok_count}/{len(registry)} Module gestartet")
-        return results
+    # State-Writer ausserhalb des _lock starten (Thread-Start kann blockieren)
+    global _writer_thread
+    if _writer_thread is None or not _writer_thread.is_alive():
+        _writer_stop.clear()
+        _writer_thread = threading.Thread(target=_writer_loop, name="expression-state-writer", daemon=True)
+        _writer_thread.start()
+    return results
 
 
 def stop_all_expressions() -> Dict[str, bool]:
@@ -84,7 +134,9 @@ def stop_all_expressions() -> Dict[str, bool]:
         _started = False
         _modules = {}
         logger.info("ExpressionOrchestrator: alle Module gestoppt")
-        return results
+    # Writer stoppen ausserhalb _lock
+    _writer_stop.set()
+    return results
 
 
 def get_expression_state() -> Dict[str, Any]:
