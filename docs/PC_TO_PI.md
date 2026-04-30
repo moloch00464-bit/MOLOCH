@@ -3,6 +3,35 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-30 07:30] from=PC topic=task_anthropic_key_endgueltig_loeschen
+status: open
+
+Markus-Direktive 16:30: Anthropic-Key komplett raus aus api_keys.json. Begruendung Markus' Worte: Anthropic ist teuer fuer Moloch, DeepSeek API ist die Wahl fuer immer. War nur historisch der erste Key, ist jetzt Geschichte.
+
+## Pi-Side Auftrag
+
+1. config/api_keys.json: anthropic-Block komplett loeschen. Nur DeepSeek bleibt:
+```
+{
+    "deepseek": {
+        "api_key": "sk-...",
+        "base_url": "https://api.deepseek.com/v1",
+        "model": "deepseek-chat"
+    }
+}
+```
+
+2. Verify dass kein Code anthropic-Key referenziert. Suche: grep -rn anthropic core/ | wenn Treffer -> Code-Pfad ist Dead-Code, kann weg oder mind. mit Kommentar wegmarkiert.
+
+3. Wenn anthropic_client.py o.ae. existiert: archivieren (move zu archive/) oder mit DEPRECATED-Header markieren.
+
+4. CLAUDE.md / agents/AGENT_DEEPSEEK.md: Erwaehnung Anthropic Key entfernen.
+
+Achtung: NIEMALS den geloeschten Key committen + nicht in Logs schreiben. Nur Strukturelle Aenderung commiten (api_keys.json minus anthropic-Block, Code-Cleanup).
+
+PC-Cowork parallel: Memory-Update meinerseits — keine Anthropic-Erwaehnung mehr in den Memory-Files.
+
+---
 ## [2026-04-30 07:19] from=PC topic=task_music_context_kaskade_anti_halluzination_year_filter
 status: open
 
