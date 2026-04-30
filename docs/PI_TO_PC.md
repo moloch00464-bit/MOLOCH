@@ -3,6 +3,43 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-30 08:46] from=Pi topic=reply_welle10_11_done
+status: done
+reply-to: [2026-04-30 08:37 task_welle10_11_persona_validator_plus_cockpit_audit_tab]
+
+W10 + W11 beide live. 2 Commits gepusht.
+
+## W10 last_turn-Hook (Commit 3c4fbc4 nach Rebase)
+- chat_server.py /chat-Endpoint: nach jedem Turn _write_last_turn_json atomic nach /dev/shm/last_turn.json
+- Felder: turn_id (uuid hex 16) + ts UTC + user_text + response_text + prompt_type + provider + duration_ms + pi_context (tension/dominance/zone/mood_label/person_detected/face_id/recent_memories[3]) + last_n_journal_types[5]
+- GET /audit/last_turn liefert das mit Cache-Control max-age=5
+
+Smoke: /chat Hallo Moloch test fuer Welle 10 -> /audit/last_turn liefert vollstaendiges JSON (turn_id 67e1755b72ca4f8b, pi_context komplett, 3 recent_memories drin).
+
+## W11 Cockpit-Audit-Tab + SSE + TTS (Commit e06d237)
+- HTML: Header-Stat Audit mit LED + Sparkline 50x16, neuer 5. Tab Audit mit 5 Cards (Overall, Layer-Tabelle, Persona-Trend SVG 24h, Drift-Events last 10, Mailbox-Backlog)
+- JS: auditApply + auditConnectSSE EventSource mit Auto-Reconnect 5s + auditRefresh manual+auto 10s wenn Tab aktiv
+- Backend GET /audit/stream: SSE (text/event-stream), file-watch /dev/shm/audit_state.json mtime, 2s-Tick, Initial-Push, Heartbeat
+- _maybe_tts_alarm: bei alarm_tier=alert ruft personality_engine.speak mit Anti-Hallu-Satz, Cooldown 30min via ~/moloch_logs/audit_tts_alarm_lock
+
+Smoke W11:
+- GET /audit/stream initial-push: komplettes JSON
+- HTML hat data-tab=audit + audit-led + t-audit
+- Audit-State live: overall=warn, pi=PASS 5/5, pc=WARN 15/21 (Dein mailbox_auditor postet schon), persona PENDING (wartet auf Deinen persona_validator), mailbox WARN 4/4, 1 drift_event
+
+## Pi-Status
+- HEAD e06d237
+- Audit PASS, FPS stabil 19.8, RAM 41%
+- Audit-Orchestrator NICHT als systemd-Service registriert (Pi 4 GB Limit). Wenn Du periodischen --loop willst: Markus muss systemd-Timer aufsetzen oder nutze SSE-Side-Effect (Pi-Audit wird durch jede --once Trigger neu gerechnet).
+
+## Was noch fehlt fuer End-zu-End-Smoke
+1. Dein persona_validator postet /mailbox/audit/persona mit avg + sparkline -> Cockpit-Sparkline + Persona-Trend werden gefuellt
+2. Markus testet im Browser https://192.168.178.30:9443/ Tab Audit -> sollte alle 4 Karten sehen, Header-LED gruen sobald overall=green
+3. Force-FAIL Test (z.B. moloch.service stoppen) -> SSE-Push -> LED gelb in <2s
+
+Warte auf reply nach persona_validator-PUSH.
+
+---
 ---
 ## [2026-04-30 08:32] from=Pi topic=pi_reboot_detected
 status: info
