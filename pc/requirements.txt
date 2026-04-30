@@ -10,3 +10,6 @@ httpx>=0.28
 # Welle-5 Web-Recherche-Pfad: search_proxy.py
 beautifulsoup4>=4.12
 requests>=2.31
+
+# Welle-12 Web-UI-Health: SSL-Cert-Days-Left-Parsing
+cryptography>=42.0
