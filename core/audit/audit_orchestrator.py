@@ -269,8 +269,8 @@ def _safe_collect_self_diagnosis() -> Dict[str, Any]:
     if not snap:
         return {"score": 0, "max": 0, "status": "PENDING",
                 "detail": {"reason": "snapshot_missing — Timer noch nicht gelaufen"}}
-    # Snapshot kommt direkt aus self_diagnosis_runner.collect() — Schema kompatibel
-    return snap
+    # Snapshot-Wrapper {ts, iso, result: {...}} -> result entpacken
+    return snap.get("result", snap)
 
 
 def _safe_collect_expression_state() -> Dict[str, Any]:
