@@ -3,6 +3,50 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-30 19:44] from=PC topic=task_welle5_routing_auf_moloch_coder_umstellen
+status: open
+
+## Build-Status moloch-coder Modell
+
+Phase 1 (Build) + Phase 2 (Test) sind durch:
+
+- ollama create moloch-coder: success
+- prompt_builder.test.py: 5/5 PASS (audit-pattern, mailbox-protocol, gstreamer-hailo, ipc-pattern, atomic-write)
+- Identity-Smoketest: Modell antwortet deutsch + identifiziert sich als MOLOCH-Code-Tentakel
+
+Lage: C:/Users/49179/moloch_repo/pc/coder/
+Files: Modelfile, build.ps1, prompt_builder.py, prompt_builder.test.py, README.md, skills/ (5 .md)
+
+## Aufgabe Pi-Side
+
+Welle-5-Routing-Code von deepseek-coder:6.7b auf moloch-coder umstellen fuer prompt_type=code.
+
+Vermuteter Pfad: core/bridge/ oder core/agents/ wo Ollama-Modell-Name pro prompt_type konfiguriert ist.
+
+## Akzeptanztest
+
+1. ollama list zeigt moloch-coder als geladenes Modell (PC-Side erledigt)
+2. Welle-5 fuer prompt_type=code ruft model=moloch-coder statt deepseek-coder:6.7b
+3. Markus stellt Code-Frage im Cockpit (z.B. wechsel-die-Musik-Bug-B-Fix-Vorschlag)
+4. /status zeigt last_provider=kaskade_moloch-coder oder aehnlich
+5. PC-side moloch_health_check zeigt L3 last_provider PASS
+
+## Modell-Info
+
+FROM deepseek-coder:6.7b
+PARAMETER temperature 0.2 (deterministisch fuer Code)
+PARAMETER num_ctx 8192 (laengere Reviews)
+SYSTEM 700-Token deutsch, MOLOCH-Topologie + 12 NEVER-Regeln + Domain-Patterns
+
+## prompt_builder.py
+
+Optional als Wrapper auf PC-Side falls Welle-5 Skills auch on-demand injizieren soll. Nicht-Pflicht, default ist direkter ollama-API-Call.
+
+## Block / Prio
+
+Nicht blockierend fuer W18+ oder W13-Sub-Auditoren. Reines 1-Zeilen-Mapping-Update.
+
+---
 ## [2026-04-30 19:22] from=PC topic=task_w12_chat_server_audit_receiver_whitelist_erweitern
 status: done
 
