@@ -39,11 +39,15 @@ Erstellt: 2026-04-29 12:01 (Pi-Session) — Branch `deepseek_architecture_overha
 - [x] **I. /chat Response-Felder** — `prompt_type` + `pi_mood` (zone/tension-bucket) ergaenzt fuer PC Cockpit-Badge (510ca6a).
 - [x] **E.2 Search-Proxy live + dolphin-mistral:7b CPU-only** — Tuning-Kette: `web_research_model=dolphin-mistral:7b` (445181a), `web_research_timeout_sec=180` (d28ebe5), `web_research_num_predict=200` (b9f99ae). PC OLLAMA_NUM_GPU=0 CPU-only. Smoke 14:08 PASS in 107s, 3 URLs referenziert (t3n.de, Reuters.com, Handelsblatt.de).
 - [x] **K. KASKADE-Architektur (Markus 14:50 Endarchitektur)** — Pi-Kleinhirn -> PC-Specialist -> DeepSeek-Cloud Pipeline. Schritt A+B+E (`ae9b9fb`): _generate_kaskade + 3 Specialists + LLM_MODE_KASKADE + ask_external dispatch. Schritt C (`00675d7`): config/coder_skill_prompt.txt. Schritt B-Aktivierung (`c364d6c`): llm_mode=kaskade. Smoke F.3/F.4/F.5 alle PASS — Provider kaskade_deepseek_{complex_smalltalk|code_query|web_research}, Charakter-Stimme + Pi-Live-Kontext sichtbar in Antworten.
+- [x] **M. Welle 6 Music-Context + Anti-Hallu** — `_build_music_context_snippet` (a820ac7 + 489145a fix), `_is_music_query` mit 30+ Keywords + Top-30-Artists-Cache (d4301f2), `web_research_num_predict=600` + `music_num_predict=600` (09c8e28). Anti-Hallu-Klausel in `_build_cloud_prompt`, Specialist-Prompt schaerfer. Smoke WGT-Bands: Suicide Commando referenziert, kein Rammstein erfunden, Anti-Hallu wirkt.
+- [x] **N. Welle 6 Schritt 7 Year-Filter** — `spotify_controller.play_from_year(year, n=20)` echt (639b70d). `chat_server._trigger_spotify_year` + Year-Shortcut in /chat (96586aa). 'Spiel meine Favoriten von 2009' -> provider=spotify_action_year, 50ms IPC, Fallback Top Tracks bei Datenluecke.
+- [x] **O. Anthropic-Cleanup endgueltig** — `config/api_keys.json` nur deepseek (gitignored). voice_pipeline.py Doc-Fix (d682be4). self_diagnosis.py test_claude_api -> DeepSeek API (7c4b24c). Template + agents/deepseek.md (c52b907).
+- [x] **L. Visual-Echo-Validator konservativ** — `_check_visual_context_drift` triggert nur bei face_id-Wechsel A->B oder erkannt->unknown, NICHT mehr bei person_detected-Toggle (68c0a89). Markus' Bug 'Hinweis bei jedem Turn' geloest.
+- [x] **P. Welle 7 Music-Keywords** — _MUSIC_KEYWORDS um hoere/höre/lieblings/playlist/etc erweitert (68c0a89). 'Was hoere ich gerade gerne?' geht jetzt als music_query in Kaskade statt simple_smalltalk.
 
-## Aus KASKADE-Welle offen (Markus' explizite Folge-Punkte)
+## Aktiv noch offen
 
-- [ ] **L. Visual-Echo-Validator zu sensitiv** — `[Hinweis: Bild hat sich waehrend meiner Antwort geaendert.]` triggert bei JEDEM Turn. `core/bridge/chat_server.py::_check_visual_context_drift` muss konservativer (z.B. nur bei `face_id`-Wechsel zu unbekannt, nicht bei kurzem Detection-Drop). Bonus-Fix.
-- [ ] **D. Coder-Audit-Background-Loop** — `core/autonomy/coder_audit_loop.py` neu, alle 6h via systemd-Timer: git diff -> deepseek-coder + skill-prompt -> Befunde nach `logs/coder_audit.jsonl`. Vorerst kein auto-patch, nur Pattern-Erkennung. Markus-Review manuell. Folge-Schritt nach Welle 5.
+- [ ] **Q. Coder-Audit-Background-Loop** — `core/autonomy/coder_audit_loop.py` neu, alle 6h via systemd-Timer: git diff -> deepseek-coder + skill-prompt -> Befunde nach `logs/coder_audit.jsonl`. Vorerst kein auto-patch, nur Pattern-Erkennung. Markus-Review manuell. Folge-Schritt.
 
 ---
 
