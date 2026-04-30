@@ -3,6 +3,106 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-30 08:37] from=PC topic=task_welle10_11_persona_validator_plus_cockpit_audit_tab
+status: open
+
+## LOKOMOTIVE-Pflicht fuer Pi-Opus
+
+1. moloch_session_init() via MCP
+2. Domain-Agents sequenziell (KEIN Mix):
+   - W10 Hook: bridge fuer chat_server.py + deepseek fuer llm_response.py
+   - W11 Cockpit: bridge fuer chat_server.py (HTML/JS Cockpit-Tab + SSE)
+3. Reboot-Check: nur Service-Restart
+4. Pre-Flight: git status clean, python3 import-checks
+5. NEVER 6: alle State-Files atomic
+6. Pi 4 GB: keine zusaetzlichen Services, nur In-Process-Erweiterungen
+
+## Welle 10 — Persona-Validator-Hook (Pi-Side, klein)
+
+PC-Cowork baut den eigentlichen persona_validator.py (PC-Side). Pi-Aufgabe ist NUR den Hook bereitzustellen damit PC die Daten holen kann.
+
+### W10-Aufgabe
+
+**1. Hook in core/chat/llm_response.py:**
+Nach jedem erfolgreichen /chat-Turn: schreibe nach /dev/shm/last_turn.json (atomic):
+- turn_id (uuid oder ts-Hash)
+- ts (ISO)
+- user_text
+- response_text
+- prompt_type (aus _classify_prompt_type)
+- provider (aus _generate_kaskade-Return)
+- duration_ms
+- pi_context: dict mit {tension, dominance, zone, mood_label, person_detected, face_id, recent_memories[3]}
+- last_n_journal_types: Liste der letzten 5 character_journal entry types fuer Memory-Match
+
+**2. HTTP-Endpoint in chat_server.py:**
+GET /audit/last_turn -> liefert /dev/shm/last_turn.json als JSON. Cache-Header: max-age=5.
+
+**3. character_journal-Schema-Erweiterung:**
+Neuer type=persona_score:
+- score (0-10)
+- signals (dict mit ich_form/slang_density/memory_ref/anti_hallu/tension_match Boolean+Detail)
+- drift (Boolean wenn score < 6)
+- turn_id (Verknuepfung)
+
+Keine Code-Aenderung in character_journal.py noetig — das Schema ist append-only + flexibel. Nur Doku-Hinweis im Header.
+
+**4. Smoke W10:**
+- Markus tippt "Hallo Moloch" -> 5s spaeter GET /audit/last_turn liefert valides JSON mit pi_context + recent_memories nicht leer.
+
+## Welle 11 — Cockpit-Tab + Header-Badge + Sparkline + TTS-Alarm (Pi-Side, gross)
+
+Nach W10 done.
+
+### W11-Aufgabe
+
+**1. Header-Badge in chat_server.py HTML:**
+- Ampel-Color (gruen/gelb/rot) basierend auf audit_state.overall
+- Mini-Sparkline rechts vom Provider-Badge: letzte 50 persona-Scores aus audit_state.layers.persona.sparkline
+- SVG inline (50px breit, 16px hoch), polyline mit color je nach avg-Score
+
+**2. Neuer Tab Audit neben Live/Charakter/Sehen/Avatar:**
+- 8-Layer-Health-Tabelle (von audit_state.layers.pc.detail)
+- Persona-Trend-Chart (24h, letzte 100 Eintraege als Line-Chart)
+- Drift-Events-Liste (audit_state.drift_events) mit ts/layer/signal/severity
+- Mailbox-Backlog-Karten (audit_state.layers.mailbox)
+- Manueller Refresh-Button + Auto-Refresh-Toggle
+
+**3. SSE-Endpoint /audit/stream:**
+- File-Watch auf /dev/shm/audit_state.json mtime
+- Bei mtime-change: push event-stream message mit aktuellem JSON
+- Frontend EventSource verbindet automatisch + updated Header-Badge + Tab-Inhalt
+
+**4. TTS-Alarm-Integration:**
+- Bei audit_state.alarm_tier=alert (>=5 FAILs/h ODER persona<3): rufe tts_bridge_client.speak('MOLOCH ist driftend, Audit fehlgeschlagen seit ${ts}')
+- Cooldown: max 1x pro 30 Min via lock-file ~/moloch_logs/audit/tts_alarm_lock
+- Bei alarm_tier=warn: NUR visuell (gelb), kein TTS
+
+**5. Smoke W11:**
+- Audit-Tab im Browser-Cockpit zeigt 4 Sektionen mit echten Daten
+- 3 erzwungene FAILs (z.B. PC-Service stoppen) -> Badge wird gelb in <90s
+- 5 erzwungene FAILs -> Badge rot + TTS spricht Alarm-Satz binnen 60s
+- End-zu-End: Markus tippt 5 prompt_types, alle persona_score>=7, Sparkline durchgehend gruen
+
+## Reihenfolge
+
+W10 -> W11 sequenziell (W11 braucht persona-Daten von W10).
+
+Nach W10 done: kurzer Mailbox-Reply mit Smoke-Bestaetigung. Ich starte parallel pc/persona_validator.py. Dann W11 starten.
+
+## PC-Cowork parallel zu W10
+
+Ich baue jetzt:
+- pc/persona_validator.py: pollt /audit/last_turn alle 10s, scored 5 Coherence-Signale, POSTet /mailbox/audit/persona
+- pc/run_persona_validator_hidden.vbs + Startup-Folder-Shortcut
+- .claude/agents/persona_validator.md
+- Slang-Lexikon aus core/personality/personality_engine.py extrahieren (read-only)
+
+Warte auf Deinen Reply nach W10 done -> dann starte W11.
+
+Markus' Hauptwunsch: 'Das ist Moloch'-Verifikation im Cockpit live sichtbar.
+
+---
 ## [2026-04-30 08:17] from=PC topic=task_welle8_audit_orchestrator_pi
 status: open
 
