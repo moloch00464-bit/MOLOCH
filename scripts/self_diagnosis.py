@@ -326,30 +326,46 @@ def test_tts_piper():
 
 
 # ============================================================
-# TEST 9: Claude API - Echter Request
+# TEST 9: DeepSeek API - Echter Request (Markus 2026-04-30: Anthropic raus)
 # ============================================================
 
 def test_claude_api():
-    """Sende echten Request an Claude API."""
-    from core.console.moloch_console import load_api_key
-    import anthropic
+    """Sende echten Request an DeepSeek API (Funktion-Name aus historischen
+    Gruenden 'claude_api' — wird im Test-Runner referenziert)."""
+    import json as _json
+    api_keys_path = os.path.expanduser("~/moloch/config/api_keys.json")
+    try:
+        with open(api_keys_path, "r", encoding="utf-8") as f:
+            keys = _json.load(f)
+    except Exception as e:
+        return False, f"api_keys.json nicht lesbar: {e}"
 
-    api_key = load_api_key()
+    ds = keys.get("deepseek") or {}
+    api_key = ds.get("api_key")
     if not api_key:
-        return False, "API Key nicht gefunden"
+        return False, "DeepSeek API Key nicht in api_keys.json"
 
-    client = anthropic.Anthropic(api_key=api_key)
-    response = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=20,
-        messages=[{"role": "user", "content": "Antworte nur mit: OK"}]
-    )
-
-    text = response.content[0].text.strip()
-    tokens_in = response.usage.input_tokens
-    tokens_out = response.usage.output_tokens
-
-    return True, f"Antwort: '{text}', Tokens: {tokens_in}in/{tokens_out}out"
+    base_url = ds.get("base_url", "https://api.deepseek.com/v1")
+    model = ds.get("model", "deepseek-chat")
+    try:
+        import requests
+        r = requests.post(
+            f"{base_url}/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={"model": model,
+                  "messages": [{"role": "user", "content": "Antworte nur mit: OK"}],
+                  "max_tokens": 20},
+            timeout=15,
+        )
+        r.raise_for_status()
+        data = r.json()
+        text = (data.get("choices") or [{}])[0].get("message", {}).get("content", "").strip()
+        usage = data.get("usage", {}) or {}
+        tokens_in = usage.get("prompt_tokens", 0)
+        tokens_out = usage.get("completion_tokens", 0)
+        return True, f"Antwort: '{text}', Tokens: {tokens_in}in/{tokens_out}out (deepseek)"
+    except Exception as e:
+        return False, f"DeepSeek API Fehler: {e}"
 
 
 # ============================================================
