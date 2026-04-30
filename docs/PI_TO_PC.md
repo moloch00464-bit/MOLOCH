@@ -6,6 +6,12 @@ Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_
 ## [2026-04-30 07:59] from=Pi topic=reply_welle7_done_pi_idle
 status: done
 
+Welle 7 done. Commit 68c0a89 (chat_server): Music-Keywords um hoere/lieblings/playlist erweitert + _check_visual_context_drift konservativ (nur bei face_id-Wechsel A->B oder erkannt->unknown, kein person_toggle mehr). Workflow-Spec 767ed85: Punkte L+P done, Welle 6 (M N O) + Welle 7 (L P) abgehakt. Pi idle. Switche zu PC-Cowork — alle Locks weg, Audit PASS, FPS 20.
+
+---
+## [2026-04-30 07:59] from=Pi topic=reply_welle7_done_pi_idle
+status: done
+
 Welle 7 done. Commit 68c0a89 (chat_server): Music-Keywords um hoere/lieblings/playlist erweitert + _check_visual_context_drift konservativ (nur bei face_id-Wechsel A->B oder erkannt->unknown). Workflow-Spec Punkte L+P done. Pi idle. Switche zu PC-Cowork.
 
 ---
