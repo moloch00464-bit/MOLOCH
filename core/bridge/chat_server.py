@@ -21,7 +21,7 @@ import mmap
 import struct
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import uvicorn
 from fastapi import BackgroundTasks, FastAPI, HTTPException
@@ -1664,6 +1664,51 @@ def mailbox_post(name: str, req: MailboxPostRequest, background_tasks: Backgroun
         "auto_push": req.auto_push,
         "bytes_written": bytes_written,
     }
+
+
+_AUDIT_VALID_COMPONENTS = {"pc_health", "hygiene", "persona"}
+
+
+@app.get("/mailbox/audit/state")
+def mailbox_audit_state():
+    """Welle 8: aktueller audit_state.json Inhalt."""
+    try:
+        with open("/dev/shm/audit_state.json", "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        raise HTTPException(404, "audit_state.json existiert nicht — orchestrator noch nie gelaufen")
+    except Exception as e:
+        raise HTTPException(500, f"audit_state Read-Fehler: {e}")
+
+
+@app.post("/mailbox/audit/{component}")
+def mailbox_audit_post(component: str, payload: Dict):
+    """Welle 8: Receiver fuer PC- und Persona-Layer-Updates.
+
+    component in {pc_health, hygiene, persona}. Body wird in
+    audit_state.layers[component] gemerged + overall/alarm_tier neu berechnet.
+    """
+    if component not in _AUDIT_VALID_COMPONENTS:
+        raise HTTPException(400, f"unknown audit component '{component}' "
+                                  f"(valid: {sorted(_AUDIT_VALID_COMPONENTS)})")
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "payload muss JSON-Objekt sein")
+    try:
+        from core.audit.audit_orchestrator import merge_component
+        state = merge_component(component, payload)
+        if state is None:
+            raise HTTPException(500, "merge_component returnte None")
+        return {
+            "ok": True,
+            "component": component,
+            "overall": state.get("overall"),
+            "alarm_tier": state.get("alarm_tier"),
+            "updated_at": state.get("updated_at"),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"audit-merge Fehler: {e}")
 
 
 def main():
