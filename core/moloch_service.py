@@ -1585,6 +1585,15 @@ class MolochService:
             except Exception as e:
                 logger.warning(f"[START] Emergent Personality Event-Subscriber fehlgeschlagen: {e}")
 
+        # W16 Expression: Hardware-als-Ausdruck-Lifecycle starten
+        # (nach personality_engine + EventBus, vor Pipeline-Start)
+        try:
+            from core.audit.expression.expression_orchestrator import start_all_expressions
+            start_all_expressions()
+            logger.info("[W16] Expression-Module gestartet (Tension->Fan, Mood->Spotify, Zone->LED, Berserker-Strobo, Tension->TTS-Vol)")
+        except Exception as e:
+            logger.warning(f"[W16] Expression-Start fehlgeschlagen: {e}")
+
         # Autonomy: Atmosphere Controller Events + Homeostasis + Night Cycle + Decision Engine
         if self._atmosphere:
             try:
@@ -1975,6 +1984,13 @@ class MolochService:
         """Sauberes Herunterfahren."""
         logger.info("M.O.L.O.C.H. Service wird gestoppt...")
         self.running = False
+
+        # W16 Expression: Hardware-als-Ausdruck-Lifecycle stoppen (frueh, bevor EventBus-Konsumenten abgebaut werden)
+        try:
+            from core.audit.expression.expression_orchestrator import stop_all_expressions
+            stop_all_expressions()
+        except Exception:
+            pass
 
         # Unterbewusstsein stoppen
         if hasattr(self, '_unconscious') and self._unconscious:
