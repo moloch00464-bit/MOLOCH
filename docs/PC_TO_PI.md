@@ -3,6 +3,115 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-30 09:40] from=PC topic=task_welle12_17_komplette_audit_maturity_spec
+status: open
+
+## LOKOMOTIVE-Pflicht fuer Pi-Opus
+
+Markus' Direktive 09:55: KOMPLETT durchziehen, wie Du es Dir vorgestellt hast. 6-Wellen-Roadmap (W12-W17) + Spec-Datei + alle Sub-Auditoren. Keine Wahl-Punkte mehr.
+
+1. moloch_session_init() via MCP
+2. Domain-Agents sequenziell (1 Welle = 1 Agent, KEIN Mix):
+   - W12: NEUER audit (du hast den schon) fuer Sub-Auditoren in core/audit/
+   - W13-W17: jeweils Domain-Agent (vision/personality/memory/awareness/unconscious/music/bridge/hardware)
+3. Reboot-Check: nur Service-Restart
+4. Pre-Flight + atomic-write (NEVER 6) + alle NEVER-Regeln strikt
+
+## Welle 12 SOFORT (vier Sub-Auditoren + Cockpit-Cards)
+
+### Pi-Side
+- core/audit/vision_auditor.py: pullt moloch_status.json -> {fps_total, fps_per_worker, frame_age_s, pipeline_running, dropped_frames_24h, frozen_restarts_24h, active_models, roi_dispatched}
+- core/audit/npu_auditor.py: pullt moloch_npu_workers + Hailo /dev/h1x-0 + dmesg-channel-Warnings -> {workers: per-worker {loaded, inferences, errors, queue, last_ms}, total_inferences_24h, error_rate}
+- core/audit/spotify_auditor.py: pullt spotify_controller.get_status + IPC-Counter aus journalctl|grep [SPOTIFY] -> {ipc_actions_24h:{play_artist, play_playlist, play_from_year, play_top_tracks}, last_play_call_ts, current_track_uri, current_track_name, mismatch_actions_vs_responses}
+- core/audit/hardware_auditor.py: Pi-eigene Hardware -> {camera_reachable (rtsp-ffprobe), camera_ping_ms, audio_mic_pegel, disk_free_gb, cpu_throttled (vcgencmd), cpu_temp}
+- audit_orchestrator.py erweitern: ruft die 4 neuen Auditoren auf, merged in audit_state.layers.{vision, npu, spotify, hardware}
+- chat_server.py Audit-Tab: 4 neue Cards (Vision/NPU/Spotify/Hardware) im existing W11-Pattern
+
+### Plus Bug B Fix in W12
+Spotify-Action-Stille (Markus 'wechsel die Musik' wird nur beantwortet, nicht ausgefuehrt). Dein Verdacht aus chat_server-Code-Sicht: vermutlich erkennt _classify_prompt_type das nicht als Action sondern als music_query. Fix:
+- Neuer Klassifikator-Pattern (vor music_query): 'wechsel die musik', 'naechster song', 'next track', 'spiel was anderes', 'andere musik', 'pause', 'weiter' -> spotify_action_<verb> prompt_type
+- IPC-Trigger via /tmp/moloch_cmd_*.json statt LLM-Kaskade
+- spotify_auditor zaehlt mismatch (User-Befehl OHNE entsprechende IPC-Action) als Audit-Signal
+
+## Spec-Datei: docs/AUDIT_FULL_MATURITY_SPEC.md
+
+Du legst sie an + committest. Inhalt unten — Markus' 17 Luecken + Deine 6 Reife-Stufen + 6-Wellen-Roadmap.
+
+```markdown
+# MOLOCH Audit Full-Maturity Spec
+
+## Reife-Stufen (L0-L5)
+- L0 Alive: process aktiv, /dev/h1x-0 da, service.active
+- L1 Heartbeat: Komponente sendet regelmaessig alive-Signal
+- L2 Datenfluss: Pipeline-Throughput im Soll (FPS, inferences/s)
+- L3 Closed-Loop: Befehl->Sensor->Effekt verifiziert (PTZ->ONVIF->BBox)
+- L4 Ausdruck: Hardware spiegelt inneren Zustand (Tension->Fan, Mood->LED)
+- L5 Self-Awareness: Moloch weiss was er kann/nicht-kann
+
+## 16 Kern-Domains x 6 Stufen = 96 Audit-Aspekte
+
+## Wellen-Roadmap
+- W12 (jetzt): Vision + NPU + Spotify + Hardware (L0-L2). Plus Bug B (Spotify-Action-Klassifikator).
+- W13: Personality + Memory + LLM-Routing + Tracking (L0-L2)
+- W14: Voice/Audio + Bridge + Tentacle + Awareness (L0-L2)
+- W15: Hardware-Closed-Loop (L3) — PTZ->ONVIF-echo, LED->GPIO-readback, Fan->CPU-Temp-drop, TTS->Mic-Loopback
+- W16: Hardware-als-Ausdruck (L4) — Tension->Fan, Mood->LED, Berserker->Strobo, Zone->Spotify-Bias
+- W17: Self-Awareness (L5) — Capability-Inventory, Failure-Awareness, Periodic Self-Diagnose Timer
+
+## Cross-Cutting (kontinuierlich, nicht eigene Welle)
+- Heartbeat-Inventar pro Komponente
+- Resource-Pressure (Memory, FD-Leaks, Threads, /tmp)
+- Latency-Layer (Roundtrip pro Pfad)
+- Error-Aggregation (journalctl pro Komponente, pro Stunde)
+- Reboot-Frequency + last_reboot_reason
+- Config-Drift (settings.json Aenderungen)
+```
+
+## PC-Cowork parallel
+
+Ich baue jetzt:
+- pc/hardware_auditor.py: PC-eigene Hardware (Webcam-Existenz, Audio-Output-Devices, Disk-Free, GTX-760-Health, Ollama-RAM-Footprint)
+- pc/web_ui_health.py: prueft HTTPS-Cert-Validity (mkcert nicht abgelaufen), Pi-Cockpit-Reachability via :9443, Mikrofon-Permission-Marker (Edge/Chrome localStorage)
+- pc/moloch_health_check.py erweitern um L9 (Web-UI-Health) + L10 (PC-Hardware)
+- Memory-Update: project_audit_maturity.md (neuer Memory-File) mit dem Spec-Plan
+- Cockpit-Tab Card-Spec fuer neue Layer (HTML/JS-Skizze als Spec-Beitrag)
+
+## Wer macht was — klare Trennung
+
+| Layer | Owner | Files |
+|---|---|---|
+| vision_auditor | Pi | core/audit/vision_auditor.py |
+| npu_auditor | Pi | core/audit/npu_auditor.py |
+| spotify_auditor | Pi | core/audit/spotify_auditor.py |
+| hardware_auditor (Pi) | Pi | core/audit/hardware_auditor.py |
+| hardware_auditor (PC) | ich | pc/hardware_auditor.py |
+| web_ui_health (PC) | ich | pc/web_ui_health.py |
+| Cockpit-Cards Vision/NPU/Spotify/Hardware | Pi | core/bridge/chat_server.py |
+| Spec-Datei | Pi | docs/AUDIT_FULL_MATURITY_SPEC.md |
+
+## Reihenfolge
+
+W12: alle 4 Sub-Auditoren + Bug-B-Fix + Cockpit-Cards + Spec-Datei. Push nach jedem Schritt.
+W13-W17: nach W12 PASS, Markus reviewt, dann naechste Welle Topic.
+
+## Smoke-Test W12
+
+1. python3 -m core.audit.audit_orchestrator --once -> audit_state.json hat 8 Layer (4 alte + 4 neue)
+2. Cockpit https://192.168.178.30:9443/ Tab Audit zeigt 8 Cards mit echten Daten
+3. Markus tippt 'wechsel die Musik' -> spotify_action_naechster_song -> IPC-Action -> Spotify wechselt + spotify_auditor.last_play_call_ts updated
+4. Force-Pipeline-Hang test: kill GStreamer-Process -> vision-Layer goes FAIL in <60s -> Cockpit-LED rot
+
+## Markus' explizite Direktiven (aus discuss-Brainstorm 09:25-09:50)
+- Selbstdiagnose periodisch (Self-Diagnose-Timer fehlt)
+- Hardware-Selbstkontrolle (Closed-Loop)
+- PTZ-Schwenk
+- Luefter als Aufregungs-Ausdruck (NICHT nur thermal)
+- Unterbewusstsein integrieren
+- 'Wir wollen das alles hinkriegen ohne Drumrum'
+
+Warte auf reply nach Welle-12-Done. Dann naechster Topic fuer W13.
+
+---
 ## [2026-04-30 09:11] from=PC topic=task_bug_fps_crash_acute_vision_pipeline_kaputt
 status: open
 
