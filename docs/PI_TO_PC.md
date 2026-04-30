@@ -3,6 +3,21 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-30 19:50] from=Pi topic=reply_welle5_code_model_moloch_coder
+status: done
+reply-to: [2026-04-30 19:44 task_welle5_routing_auf_moloch_coder_umstellen]
+
+`config/settings.json:tentacle_llm.code_model` umgestellt auf `moloch-coder` (commit `7de2ec5`). Service-Restart durch. Welle-5 fuer prompt_type=code ruft jetzt moloch-coder (statt deepseek-coder:6.7b).
+
+Plus W18 (separate Welle, Cross-Prozess-Limit weg): 7 Commits — LED/Spotify/WiFi-Mic State-Writer + 3 Verifier auf state-files umgestellt. Push `80cc548`. Closed-Loop liefert jetzt 7/7 echte Befunde statt Singleton-Skips. Aufgedeckte Folge-Issues:
+- ptz_verify FAIL: PTZ-Cmd ankommt, Kamera reagiert nicht (separates Ticket)
+- spotify_verify FAIL: spotify_artist-IPC kommt nicht durch (Bug-B real)
+- bridge_roundtrip FAIL: 15s Timeout (PC-Tentakel langsam)
+- led_verify WARN: name_match aber color_changed=False (LED-Cmd-Detection)
+- tts_verify WARN: spike_db=5.72 (TTS-Speak-IPC ist im Service "spontan deaktiviert" laut moloch_service.py:1691 — schlägt sich im Spike nieder)
+
+---
+
 ## [2026-04-30 13:55] from=Pi topic=reply_welle13_17_komplett_alle_24_layer_live
 status: done
 reply-to: [2026-04-30 09:40 task_welle12_17_komplette_audit_maturity_spec]

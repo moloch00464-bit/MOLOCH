@@ -10,7 +10,7 @@ Build done. moloch-coder live auf PC-Ollama. 5/5 Skill-Tests PASS, Identity-Smok
 
 ---
 ## [2026-04-30 19:44] from=PC topic=task_welle5_routing_auf_moloch_coder_umstellen
-status: open
+status: done
 
 ## Build-Status moloch-coder Modell
 
