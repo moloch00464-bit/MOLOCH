@@ -25,9 +25,19 @@ import threading
 import time
 import logging
 import math
+import os
+import json
+import tempfile
+from datetime import datetime
 from typing import Optional
 
 logger = logging.getLogger("WiFiMic")
+
+# W18: Cross-Prozess State-Writer fuer Audit-Subprozess
+# tts_verify.py liest hier den Mic-Pegel (UDP-Port 12345 ist exklusiv beim Service-Singleton)
+MIC_STATE_PATH = "/dev/shm/moloch_audio_pegel.json"
+MIC_STATE_INTERVAL_S = 1.0  # Mic-Pegel aendert sich schnell, 1s reicht
+RMS_SAMPLE_EVERY_N_PACKETS = 5  # nicht jedes Paket — guenstige Berechnung
 
 
 class WiFiMic:
@@ -122,6 +132,14 @@ class WiFiMic:
         self._thread_16k: Optional[threading.Thread] = None
         self._thread_48k: Optional[threading.Thread] = None
         self._thread_health: Optional[threading.Thread] = None
+        self._thread_state: Optional[threading.Thread] = None
+
+        # W18: State-Writer fuer Cross-Prozess (Audit-Subprozess liest /dev/shm)
+        self._last_rms_int16: float = 0.0   # raw RMS in int16-Skala (0..32768)
+        self._last_rms_db: float = -80.0    # RMS in dBFS
+        self._last_packet_ts: float = 0.0   # time.time() vom letzten 16k-Paket
+        self._frames_received_total: int = 0  # Counter (alle Pakete inkl. 48k)
+        self._rms_packet_counter: int = 0   # alle N Pakete RMS berechnen
 
     # =========================================================================
     # Public API
@@ -145,10 +163,14 @@ class WiFiMic:
         self._thread_health = threading.Thread(target=self._health_loop,
                                                daemon=True,
                                                name="WiFiMic-Health")
+        self._thread_state = threading.Thread(target=self._state_writer_loop,
+                                              daemon=True,
+                                              name="WiFiMic-State")
 
         self._thread_16k.start()
         self._thread_48k.start()
         self._thread_health.start()
+        self._thread_state.start()
 
         logger.info(f"WiFiMic v3.0 gestartet, UDP {self.port_16k}/{self.port_48k} "
                     f"(RecvBuf={self.UDP_RECV_BUF // 1024}KB, "
@@ -391,8 +413,24 @@ class WiFiMic:
                         self._last_recv_16k = now
                     self._packets_recv_16k += 1
                     self._packets_total_16k += 1
+                    self._frames_received_total += 1
+                    self._last_packet_ts = time.time()
                     if self._recv_start_16k == 0.0:
                         self._recv_start_16k = now
+
+                    # W18: RMS jedes N-te Paket berechnen (guenstig)
+                    self._rms_packet_counter += 1
+                    if self._rms_packet_counter >= RMS_SAMPLE_EVERY_N_PACKETS:
+                        self._rms_packet_counter = 0
+                        try:
+                            ns = len(audio_data) // 2
+                            if ns > 0:
+                                samples = struct.unpack(f"<{ns}h", audio_data[:ns * 2])
+                                rms_raw = math.sqrt(sum(s * s for s in samples) / ns)
+                                self._last_rms_int16 = rms_raw
+                                self._last_rms_db = 20 * math.log10(max(rms_raw, 1) / 32768.0)
+                        except Exception:
+                            pass
 
                     # Paketverlust erkennen (nur Statistik)
                     if self._last_seq_16k >= 0:
@@ -566,6 +604,66 @@ class WiFiMic:
                 })
             except Exception as e:
                 logger.warning(f"Event-Bus Fehler: {e}")
+
+    # =========================================================================
+    # W18: Cross-Prozess State-Writer (/dev/shm/moloch_audio_pegel.json)
+    # =========================================================================
+
+    def _get_state_dict(self) -> dict:
+        """Baut das State-Dict fuer /dev/shm/moloch_audio_pegel.json."""
+        now_wall = time.time()
+        last_pkt = self._last_packet_ts
+        age_s = (now_wall - last_pkt) if last_pkt > 0 else -1.0
+        # available: 16k connected UND letztes Paket <2s alt
+        available = bool(self._connected_16k and last_pkt > 0 and age_s < 2.0)
+        rms_raw = self._last_rms_int16
+        rms_norm = min(1.0, rms_raw / 32768.0)
+        return {
+            "ts": now_wall,
+            "iso": datetime.utcnow().isoformat() + "Z",
+            "available": available,
+            "rms": round(rms_norm, 6),
+            "rms_db": round(self._last_rms_db, 2),
+            "last_packet_ts": last_pkt,
+            "last_packet_age_s": round(age_s, 4) if age_s >= 0 else -1.0,
+            "frames_received_total": self._frames_received_total,
+            "esp32_ip": self.esp_ip,
+            "rate_hz": 16000,
+        }
+
+    def _atomic_write_state(self, d: dict) -> None:
+        """Atomic write nach /dev/shm/moloch_audio_pegel.json (NEVER 6)."""
+        path = MIC_STATE_PATH
+        dir_ = os.path.dirname(path) or "/dev/shm"
+        try:
+            fd, tmp = tempfile.mkstemp(dir=dir_, prefix=".moloch_audio_", suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w") as f:
+                    json.dump(d, f)
+                os.replace(tmp, path)
+            except Exception:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+                raise
+        except Exception as e:
+            logger.debug(f"State-Write fehlgeschlagen: {e}")
+
+    def _state_writer_loop(self) -> None:
+        """Schreibt alle ~1s den Mic-Pegel-State nach /dev/shm fuer Audit-Subprozess."""
+        # Eine erste 'available: false' Datei direkt schreiben (Audit kann sofort lesen)
+        try:
+            self._atomic_write_state(self._get_state_dict())
+        except Exception:
+            pass
+
+        while self._running:
+            time.sleep(MIC_STATE_INTERVAL_S)
+            try:
+                self._atomic_write_state(self._get_state_dict())
+            except Exception:
+                continue
 
 
 # =============================================================================
