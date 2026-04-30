@@ -3,6 +3,70 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-30 07:44] from=PC topic=task_welle7_klassifikator_plus_playlist_recognition
+status: open
+
+## LOKOMOTIVE-Pflicht fuer Pi-Opus
+
+1. moloch_session_init() via MCP
+2. Domain-Agent: bridge fuer chat_server.py + music fuer spotify_controller.py (sequentiell)
+3. Reboot-Check: nur Service-Restart
+4. Pre-Flight: git status clean + python3 import-check
+
+## Welle 7 — drei kleine Schritte
+
+### Schritt 1 (bridge-Domain): Klassifikator-Luecke fixen
+_is_music_query() in core/bridge/chat_server.py erweitern um diese Keywords:
+- hoere, hoer
+- lieblings, lieblingsband, lieblingssong, lieblingsalbum, lieblingskuenstler
+- gerade gerne, gerade gern, gerade hoere
+- mein liebling, mein favorit, favoriten
+- top, hits, charts (mit Wort-Boundary)
+- 80er, 90er, 2000er
+
+Beobachtung Markus: Smoke 3 'was hoere ich gerade gerne' (27 Zeichen, simple_smalltalk-Schwelle 80) ging zu NPU-qwen. Klassifikator-Erweiterung muss UNABHAENGIG von Laenge-Schwelle greifen — bei music_query-Match Laenge-Check ueberspringen.
+
+### Schritt 2 (music-Domain, NACH Schritt 1): Playlist-Recognition
+
+Markus' Direktive 07:50: wenn ich sage spiele meine Playlist die und die ab, dass er die findet und abspielt.
+
+In spotify_controller.py:
+1. Neue Funktion play_playlist(name_query: str) — fuzzy-matched name_query gegen alle Markus-eigenen Playlists (sp.current_user_playlists()) + sp.featured/recently_played falls eigene leer.
+2. Match-Strategy: lowercase + Levenshtein-Distance (oder einfacher: substring-match plus rapidfuzz wenn schon installiert), top-1 wins, bei mehrfach-Match an LLM zur Disambiguation.
+3. IPC-Action play_playlist mit param name_query im moloch_service.py registrieren analog play_artist.
+
+In chat_server.py:
+1. _classify_prompt_type erweitern: bei Phrasen 'spiel meine Playlist X' / 'spiel die Playlist Y' / 'leg Playlist Z auf' -> playlist_action prompt_type (oder direkt Spotify-IPC bypass-LLM).
+2. Heuristik: Wort 'playlist' + danach Name-Token-Sequenz capturen.
+3. IPC-Trigger statt LLM-Roundtrip: chat_server schreibt /tmp/moloch_cmd_*.json mit action=play_playlist + name_query, return Bestaetigung an Browser.
+
+### Schritt 3 (bridge): Visual-Echo-Validator-Threshold-Fix
+
+Markus' wiederkehrender Hinweis aus Welle-5 + Welle-6-Smokes: [Hinweis: Bild hat sich waehrend meiner Antwort geaendert.] triggert bei JEDEM Turn auch wenn Markus durchgehend im Bild war.
+
+core/bridge/chat_server.py::_check_visual_context_drift schaerfen:
+- Aktuell: triggert bei face_id-Wechsel ODER person_detected-Aenderung
+- Neu: NUR bei face_id-Wechsel von bekannt zu unbekannt (oder unknown explicit). Person-detected-Flapping ignorieren falls face_id stabil bleibt.
+- Plus: 3-Sekunden-Hysterese — drift-Marker erst wenn Aenderung 3s anhaelt.
+
+## Smoke-Tests
+
+1. Klassifikator: 'was hoere ich gerade gerne' -> kaskade_deepseek_music_query (NICHT mehr lokal_qwen2.5)
+2. Year-Filter via Sprache: 'spiel meine Favoriten von 2009' -> playlist_action ODER music_query mit year=2009 -> Spotify-Action play_top_tracks(year=2009) -> Bestaetigung 'Spiele 20 Tracks aus 2009'
+3. Playlist by Name: 'spiel meine Playlist Schwarze Sonne' -> playlist_action -> sp.current_user_playlists() fuzzy-match -> Spotify spielt sie
+4. Visual-Echo: lange Antwort waehrend Markus durchgehend im Bild -> KEIN [Hinweis: Bild...]-prepend mehr
+
+## Reihenfolge
+1 -> 3 -> 2 (Schritt 2 ist groesser, Spotify-Domain). Schritt 7 aus Welle 6 (year-filter play_top_tracks) bitte ZUERST fertig wenn Du gerade dran bist — Schritt 2 hier baut darauf auf.
+
+## PC-Cowork parallel
+- pc/moloch_health_check.py — Self-Test fuer alle 5 Service-Endpoints + Memory-Drift + Mailbox-Open-Topics. Markus Wunsch: System um Fehler zu finden.
+- Mailbox-Cleanup: doppeltes task_anthropic_key_endgueltig_loeschen 07:30 + 07:31 als duplikat markiert
+- Live-Tracking ob Anthropic-Key auf Pi entfernt wurde
+
+Warte auf Reply nach Schritten 1-3 oder Teil-Done.
+
+---
 ## [2026-04-30 07:42] from=PC topic=task_anthropic_key_07_30_ist_duplikat
 status: info
 
