@@ -3,6 +3,46 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-30 07:34] from=Pi topic=reply_welle6_music_kaskade_PASS
+status: done
+reply-to: [2026-04-30 07:19 task_music_context_kaskade_anti_halluzination_year_filter]
+
+WGT-Hallu-Bug GEFIXT. Welle 6 Schritte 1-6 alle live + verifiziert.
+
+## 4 Commits
+- a820ac7 (autonomy): _build_music_context_snippet + Anti-Hallu in _build_cloud_prompt + _grosshirn_specialist_web schaerfer + music_query in _route_by_type/_generate_kaskade
+- d4301f2 (bridge): _is_music_query mit 30+ Keywords + lazy-cached Top-30-Artists aus spotify_profile.json + Slash-Cmd /music
+- 09c8e28 (config): web_research_num_predict 200->600 + music_num_predict 600
+- 489145a (autonomy bugfix): defensiv gegen variable JSON-Schemata (summary kann String sein, genre_profile.primary_genres sind Dicts, recently_played.json ist Top-Level-Liste)
+
+## Smoke-Ergebnisse
+
+### Smoke 1: WGT-Bands (DER ECHTE TEST)
+Provider: kaskade_deepseek_music_query, 92s
+Antwort: Suicide Commando und Solar Fake stehen auf der Liste -- klingt nach deinem Beuteschema. Weiss nicht, ob Vomito Negro oder Chainreactor live dabei sind, die Vorarbeit schweigt sich aus.
+
+-> Suicide Commando (Markus #1) referenziert. Anti-Hallu-Klausel WIRKT: schweigt-sich-aus statt erfinden. KEIN Rammstein, KEIN Fantastische 5.
+
+### Smoke 2: Year-Filter
+Provider: kaskade_deepseek_music_query, 106s
+Antwort: Markus, dein 2009er Musikgeschmack? Da warst du tief im Dark Electro-Sumpf unterwegs. Suicide Commando, Vomito Negro und ESA haben dich die ganze Zeit begleitet.
+
+-> music_query Klassifikation greift. Aber: KEIN Spotify-Action (Schritt 7 noch ausstehend, ist music-Domain in spotify_controller.py).
+
+### Smoke 3: Was hoere ich gerade gerne
+Provider: lokal_qwen2.5, simple_smalltalk
+Antwort halluziniert zur vorigen Frage.
+
+-> Klassifikator-Luecke: hoere/höre/gern/lieblings fehlen in _MUSIC_KEYWORDS. Plus 27 Zeichen < 80 Schwelle. Tuning-Punkt fuer Welle 7.
+
+## Was offen ist
+- Schritt 7: spotify_controller.play_top_tracks(year=...) + IPC-Action in chat_server. Music-Domain, separater Agent.
+- Klassifikator-Tuning: hoere/lieblings als Music-Keywords. Bridge-Domain, kann ich gleich machen falls gewuenscht.
+- L Visual-Echo-Validator-Bug (aus task_endgueltige_architektur, Markus 14:50). Triggert immer noch (siehe Smoke 1: [Hinweis: Bild hat sich waehrend meiner Antwort geaendert.]).
+
+Schnell loesbar in 5-10min wenn Du gruenes Licht gibst. Sonst Pi idle bis Du wieder switchst.
+
+---
 ## [2026-04-29 15:25] from=Pi topic=reply_kaskade_smoke_F_PASS
 status: done
 reply-to: [2026-04-29 15:10 task_endgueltige_architektur_kaskade_kleinhirn_grosshirn_deepseek]
