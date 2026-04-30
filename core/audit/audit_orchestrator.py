@@ -274,29 +274,38 @@ def _safe_collect_self_diagnosis() -> Dict[str, Any]:
 
 
 def _safe_collect_expression_state() -> Dict[str, Any]:
-    """W16: liest expression_orchestrator-Lifecycle-State."""
-    try:
-        from core.audit.expression.expression_orchestrator import get_expression_state  # type: ignore
-        st = get_expression_state() or {}
-        # Adaption auf Audit-Schema
-        alive_count = int(st.get("alive_count", 0) or 0)
-        modules = st.get("modules", {}) or {}
-        total = len(modules)
-        if total == 0:
+    """W16: liest expression_state primaer aus /dev/shm/expression_state.json
+    (cross-prozess-fix), fallback auf Singleton-Getter."""
+    EXPR_PATH = Path("/dev/shm/expression_state.json")
+    snap = _read_json_safe(EXPR_PATH)
+    if not snap:
+        # Fallback: Singleton-Getter (gibt PENDING wenn audit in eigenem Prozess laeuft)
+        try:
+            from core.audit.expression.expression_orchestrator import get_expression_state  # type: ignore
+            snap = get_expression_state() or {}
+        except Exception as e:
             return {"score": 0, "max": 5, "status": "PENDING",
-                    "detail": {"reason": "expression_orchestrator nicht gestartet"}}
-        if alive_count == total:
-            status = "PASS"
-        elif alive_count >= total // 2:
-            status = "WARN"
-        else:
-            status = "FAIL"
-        return {"score": alive_count, "max": total, "status": status,
-                "alive_count": alive_count, "modules": list(modules.keys()),
-                "detail": st}
-    except Exception as e:
+                    "detail": {"error": str(e)[:200]}}
+        if not snap:
+            return {"score": 0, "max": 5, "status": "PENDING",
+                    "detail": {"reason": "expression_state.json fehlt + Singleton leer"}}
+
+    # Adaption auf Audit-Schema (analog zu vorher)
+    alive_count = int(snap.get("alive_count", 0) or 0)
+    modules = snap.get("modules", {}) or {}
+    total = len(modules)
+    if total == 0:
         return {"score": 0, "max": 5, "status": "PENDING",
-                "detail": {"error": str(e)[:200]}}
+                "detail": {"reason": "expression_orchestrator nicht gestartet"}}
+    if alive_count == total:
+        status = "PASS"
+    elif alive_count >= total // 2:
+        status = "WARN"
+    else:
+        status = "FAIL"
+    return {"score": alive_count, "max": total, "status": status,
+            "alive_count": alive_count, "modules": list(modules.keys()),
+            "detail": snap}
 
 
 def _safe_collect_capabilities() -> Dict[str, Any]:
