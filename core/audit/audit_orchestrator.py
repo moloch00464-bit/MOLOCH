@@ -252,6 +252,17 @@ def _collect_drift_events(prev: Optional[Dict[str, Any]],
     return combined
 
 
+def _safe_collect(module_name: str, fallback_status: str = "PENDING") -> Dict[str, Any]:
+    """Best-effort Sub-Auditor-Aufruf. Bei Fehler: PENDING-Layer mit error-detail."""
+    try:
+        mod = __import__(f"core.audit.{module_name}", fromlist=["collect"])
+        return mod.collect()
+    except Exception as e:
+        logger.warning("[audit] %s collect-Fehler: %s", module_name, e)
+        return {"score": 0, "max": 0, "status": fallback_status,
+                "detail": {"error": str(e)[:200]}}
+
+
 def run_once() -> Dict[str, Any]:
     """Ein Tick — sammelt alle Layer + schreibt audit_state.json atomic."""
     prev = _read_json_safe(AUDIT_STATE_PATH) or {}
@@ -268,11 +279,33 @@ def run_once() -> Dict[str, Any]:
     }
     persona_layer = _read_persona_layer(prev_layers.get("persona"))
 
+    # Welle 12: Pi-Side Sub-Auditoren live (vision/npu/spotify/hardware)
+    vision_layer = _safe_collect("vision_auditor")
+    npu_layer = _safe_collect("npu_auditor")
+    spotify_layer = _safe_collect("spotify_auditor")
+    hardware_layer = _safe_collect("hardware_auditor")
+
+    # PC-Side W12 (PC-Cowork POSTet via /mailbox/audit/{pc_hardware,web_ui})
+    pc_hardware_layer = prev_layers.get("pc_hardware") or {
+        "score": 0, "max": 0, "status": "PENDING", "detail": {}
+    }
+    web_ui_layer = prev_layers.get("web_ui") or {
+        "score": 0, "max": 0, "status": "PENDING", "detail": {}
+    }
+
     layers = {
         "pi": pi_layer,
         "pc": pc_layer,
         "persona": persona_layer,
         "mailbox": mailbox_layer,
+        # W12 Pi-Side
+        "vision": vision_layer,
+        "npu": npu_layer,
+        "spotify": spotify_layer,
+        "hardware": hardware_layer,
+        # W12 PC-Side (von Cowork-POST)
+        "pc_hardware": pc_hardware_layer,
+        "web_ui": web_ui_layer,
     }
     drift_events = _collect_drift_events(prev, layers)
     state = {

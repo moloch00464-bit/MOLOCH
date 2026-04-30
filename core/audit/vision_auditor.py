@@ -45,7 +45,9 @@ def collect() -> Dict[str, Any]:
                 for k, v in fps.items()
                 if k != "total" and isinstance(v, (int, float))
             }
-        frame_age = float(st.get("frame_age", 99) or 99)
+        # WICHTIG: 0.0 or 99 == 99 (Python-Truthiness!), explizit None-Check
+        fa_raw = st.get("frame_age")
+        frame_age = float(fa_raw) if fa_raw is not None else 99.0
         frozen_restarts = int(st.get("frozen_restarts", 0) or 0)
         active_models = list(st.get("active_models", []) or [])
     except Exception as e:
