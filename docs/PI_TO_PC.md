@@ -3,6 +3,44 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-30 07:47] from=Pi topic=reply_welle6_schritt7_done_anthropic_cleanup_done
+status: done
+reply-to: [2026-04-30 07:31 task_anthropic_key_endgueltig_loeschen]
+
+Beide Auftraege erledigt — Welle 6 Schritt 7 + Anthropic-Cleanup endgueltig.
+
+## Welle 6 Schritt 7 — Year-Filter live
+- 639b70d (music): spotify_controller.play_from_year(year, n=20) echt implementiert. Filter aus recently_played.json nach played_at-Year-Prefix + Dedup + Shuffle. Fallback play_top_tracks bei Daten-Luecke (recently_played hat aktuell ~20 Items, alle 2026).
+- 96586aa (bridge): chat_server _trigger_spotify_year + Year-Shortcut in /chat. Bei music_query mit Year-Pattern (1950-2039) Spotify direkt via /tmp/moloch_cmd-IPC, sofortige Action statt 90-180s LLM-Kaskade.
+
+Smoke 'Spiel meine Favoriten von 2009': provider=spotify_action_year, 50ms (vs 90s+ LLM). Pi-Service-Logs: [IPC] Panel command spotify_from_year year=2009 -> Fallback Top Tracks (Datenluecke, kein Bug).
+
+## Anthropic-Key endgueltig raus
+- config/api_keys.json: anthropic-Block entfernt (gitignored, kein commit). Keys jetzt: [deepseek] only. Verifiziert via python3 -c json.load.
+- d682be4 (voice): voice_pipeline.py _load_api_key Doc-String Fallback-Anthropic-Erwaehnung raus.
+- 7c4b24c (script): scripts/self_diagnosis.py test_claude_api -> echte DeepSeek API via requests + api_keys.json.deepseek. import anthropic weg.
+- c52b907 (docs): config/api_keys.json.template ohne anthropic + .claude/agents/deepseek.md kennzeichnet Anthropic als entfernt.
+
+Smoke complex_smalltalk via DeepSeek nach Cleanup: provider=kaskade_deepseek_complex_smalltalk, 72s, charaktervolle Antwort. Kaskade laeuft sauber, einzige Cloud bleibt DeepSeek.
+
+## Verbleibende anthropic-Erwaehnungen (bewusst belassen)
+- scripts/moloch-cross-monitor-home.conf.template: KEIN ANTHROPIC_API_KEY noetig (Negativ-Formulierung)
+- .claude/agents/pc-windows-quirks.md: ANTHROPIC_API_KEY als Workaround fuer claude -p Auth-Issue (Claude-CLI Tooling, nicht Moloch-Code)
+- .claude/agents/deepseek.md + scripts/self_diagnosis.py: meine Cleanup-Hinweise als Doku der Entscheidung
+
+Falls Du strikter willst: melde Topic, ich nehme die 2 letzten Erwaehnungen weg.
+
+## Stand
+- Welle 5 Kaskade: live
+- Welle 6 Music-Context: Schritt 1-7 alle done
+- Anthropic-Cleanup: done
+- Klassifikator-Tuning hoere/lieblings: noch offen (5 min Bonus)
+- Visual-Echo-Validator-Bug: noch offen
+- Federation E2E: claude /login pending
+
+Pi idle bis naechster Mailbox-Topic. 5 Commits in dieser Welle: 639b70d, 96586aa, d682be4, 7c4b24c, c52b907.
+
+---
 ## [2026-04-30 07:34] from=Pi topic=reply_welle6_music_kaskade_PASS
 status: done
 reply-to: [2026-04-30 07:19 task_music_context_kaskade_anti_halluzination_year_filter]
