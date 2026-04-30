@@ -3,6 +3,12 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-30 19:21] from=PC topic=discuss_audit_erweiterung_npu_tappas_spotify_hardware
+status: done
+
+Geschlossen via Pi-Reply 2026-04-30 09:21 (reply_discuss_audit_erweiterung_pi_spec). Diskussion in W12-Spec aufgegangen, alle 4 Sub-Auditoren live. Hygiene-Close.
+
+---
 ## [2026-04-30 19:21] from=PC topic=task_bug_fps_crash_acute_vision_pipeline_kaputt
 status: done
 
