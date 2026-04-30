@@ -30,7 +30,7 @@ Lies IMMER zuerst: `CLAUDE.md`, `agents/AGENT_DEEPSEEK.md` und `docs/DANGER_MAP.
   - GUI-Reiter "LLM-Modus" im Panel Modelle
 - DeepSeek Cloud API: Key in `config/api_keys.json` (kann via `.disabled_*`-Suffix
   hart deaktiviert werden — User-Modus "NPU-only permanent")
-- Anthropic Key: ebenfalls in api_keys.json (Claude als 3. Fallback)
+- Anthropic-Key: 2026-04-30 endgueltig entfernt (Markus' Direktive: zu teuer fuer Moloch, DeepSeek bleibt einziger Cloud-Provider)
 
 ## Kritische Regeln
 - Fallback-Kette Session 20: Routing per `_choose_provider()`:

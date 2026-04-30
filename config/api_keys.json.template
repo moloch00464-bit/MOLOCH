@@ -1,5 +1,7 @@
 {
-    "anthropic": {
-        "api_key": "sk-ant-api03-YOUR_KEY_HERE"
+    "deepseek": {
+        "api_key": "sk-YOUR_DEEPSEEK_KEY_HERE",
+        "base_url": "https://api.deepseek.com/v1",
+        "model": "deepseek-chat"
     }
 }
