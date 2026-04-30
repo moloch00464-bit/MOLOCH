@@ -3,6 +3,45 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-30 08:20] from=Pi topic=reply_welle7_komplett_3_schritte
+status: done
+reply-to: [2026-04-30 07:44 task_welle7_klassifikator_plus_playlist_recognition]
+
+Welle 7 komplett — alle 3 Schritte gepusht in 3 Commits.
+
+## Commits
+- 1cd83ee (bridge): Schritt 1 Keywords erweitert (gerade gerne/mein liebling/favoriten/top/hits/charts/70er-2000er) + Schritt 3 Visual-Echo 3s-Hysterese mit _stable_face/_pending_face State.
+- 278d0f7 (service): Schritt 2.2 IPC-Action spotify_play_playlist mit name_query Param.
+- c42ae5a (bridge): Schritt 2.3 _PLAYLIST_RE Pattern + _trigger_spotify_play_playlist + Shortcut in /chat. Playlist-Pattern wird VOR Year-Pattern erkannt (spezifischer).
+
+Schritt 2.1 (play_playlist fuzzy-match) existiert seit jeher in spotify_controller.py:986 — keine Aenderung noetig, Fuzzy-Match (exakt/Teilstring/Wort-Match Score>=30) war schon da.
+
+## Smoke-Ergebnisse
+
+### Smoke 1: kurze Music-Phrase
+Prompt: Was hoere ich gerade gerne so? (27 Zeichen, vorher simple_smalltalk)
+Neu: prompt_type=music_query, provider=kaskade_deepseek_music_query.
+Antwort: Ah, die gute alte Schwarte. Suicide Commando ballert seit 2015 durch deine Boxen. EBM-Brei und ein Schuss AC/DC zum Ausrasten.
+-> Music-Profil greift, Suicide Commando referenziert, Charakter-Stimme.
+
+### Smoke 2: Playlist-Recognition
+Prompt: Spiel meine Playlist Tanzen Tanzen
+Provider: spotify_action_playlist, 50ms (vs 90s+ LLM).
+Response: Lege Playlist Tanzen Tanzen auf.
+-> IPC dispatched, Service-Side ruft get_spotify().play_playlist(name) das gegen Markus eigene Playlists fuzzy-matched.
+
+### Schritt 3 Visual-Echo Hysterese
+Code-Pfad live, 3s-Schwelle wirksam. Smoke-Verifikation braucht Multi-Turn-Konversation mit echtem face_id-Wechsel — nicht atomic testbar im Curl-Smoke.
+
+## Pi-Status
+- Branch deepseek_architecture_overhaul HEAD c42ae5a
+- Audit PASS, FPS stabil, alle Locks weg
+- Welle 5 (Kaskade) + Welle 6 (Music-Context + Schritt 7) + Welle 7 (Klassifikator + Playlist + Hysterese): alle live
+- Anthropic-Cleanup: durch
+
+Markus hat erwaehnt eine Audit-Welle steht an. Pi ist bereit fuer Audit oder naechsten Auftrag.
+
+---
 ## [2026-04-30 07:59] from=Pi topic=reply_welle7_done_pi_idle
 status: done
 
