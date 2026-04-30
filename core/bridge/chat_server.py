@@ -92,6 +92,11 @@ _MUSIC_KEYWORDS = (
     "vinyl", "gothik", "gothic", " ebm", "industrial", " wave", " wgt",
     "mera luna", "m'era luna", "amphi", "schwarze szene", "darkwave",
     "synthwave", "futurepop", "dark electro",
+    # Welle 7: Reflektions-Phrasen die kurz sind aber Musik meinen
+    "hoere ich", "höre ich", "hoer ich", "hör ich",
+    "gerne hoer", "gerne hör", "gern hoer", "gern hör",
+    "lieblings", "lieblingsband", "lieblingslied", "lieblingsalbum",
+    "lieblingsmusik", "lieblings-song", "playlist",
 )
 
 # Year-Filter fuer music_query (Welle 6 Schritt 7): 1950-2039 sinnvoll
@@ -196,36 +201,36 @@ def _classify_prompt_type(text: str) -> str:
 
 
 def _check_visual_context_drift() -> str:
-    """Phase 3 Task 3d: Visual-Echo-Validator.
+    """Phase 3 Task 3d + Welle 7: Visual-Echo-Validator (konservative Variante).
 
-    Vergleicht aktuellen Status-Snapshot mit dem zuvor gecachten. Bei
-    Diskrepanz (Person verschwunden / face_id gewechselt): kurzer Disclaimer
-    fuer Antwort-Prepend. Kein zweiter LLM-Call. Bei jedem Fehler still "".
+    Triggert NUR bei echten Identitaets-Wechseln, nicht bei kurzen Detection-
+    Drops oder Person-Toggles. Markus' Bug 2026-04-29: Disclaimer kam bei JEDEM
+    Turn auch wenn Markus durchgehend im Bild war (kurzer SCRFD-Drop reichte).
 
-    Aufruf-Pattern:
-      _check_visual_context_drift()      # vor LLM-Call: Snapshot speichern
-      out = bridge.ask(...)
-      pre = _check_visual_context_drift()  # nach LLM-Call: Drift pruefen
-      if pre: out = pre + out
+    Trigger jetzt nur:
+    - face_id-Wechsel von erkannter Person -> ANDERE erkannte Person
+    - face_id-Wechsel von erkannt -> 'unknown' (Eindringling)
+    NICHT mehr:
+    - person_detected True/False Toggle (zu fragil bei kurzem Drop)
+    - face_id erkannt -> None (kann False-Negative sein)
     """
     try:
         import json as _json
         with open("/dev/shm/moloch_status.json", "r") as f:
             current = _json.load(f)
+        cur_face = current.get("face_id")
         cached = getattr(_check_visual_context_drift, "_last_snapshot", None)
         _check_visual_context_drift._last_snapshot = {
-            "person": current.get("person_detected"),
-            "face_id": current.get("face_id"),
+            "face_id": cur_face,
         }
         if cached is None:
             return ""
-        person_changed = cached.get("person") != current.get("person_detected")
-        face_changed = (
-            bool(cached.get("face_id"))
-            and cached.get("face_id") != current.get("face_id")
-        )
-        if person_changed or face_changed:
-            return "[Hinweis: Bild hat sich waehrend meiner Antwort geaendert.] "
+        old_face = cached.get("face_id")
+        # Trigger nur bei wirklichem Identitaets-Wechsel
+        if old_face and cur_face and old_face != cur_face:
+            return "[Hinweis: andere Person im Bild waehrend meiner Antwort.] "
+        if old_face and old_face != "unknown" and cur_face == "unknown":
+            return "[Hinweis: Unbekannter im Bild waehrend meiner Antwort.] "
     except Exception:
         pass
     return ""
