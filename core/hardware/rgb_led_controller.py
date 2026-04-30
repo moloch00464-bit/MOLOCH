@@ -17,7 +17,8 @@ Author: M.O.L.O.C.H. System
 import socket
 import logging
 import threading
-from typing import Optional
+import time
+from typing import Optional, List, Tuple
 
 logger = logging.getLogger("RGBLed")
 
@@ -127,6 +128,81 @@ class RGBLedController:
         """Farbe direkt setzen (fuer Chat-Kommandos)."""
         cmd = f"LED:{farbe} {modus} {geschwindigkeit}"
         self.send_command(cmd)
+
+    # =========================================================================
+    # W16 EXPRESSION API — set_pattern + flash_sequence
+    # =========================================================================
+
+    # Mapping: Pattern-Name → (farbe, modus, geschwindigkeit)
+    _PATTERN_MAP = {
+        "solid_blue":       ("blau",    "statisch",    "mittel"),
+        "solid_red":        ("rot",     "statisch",    "mittel"),
+        "pulsing_magenta":  ("magenta", "pulsierend",  "mittel"),
+        "pulsing_red":      ("rot",     "pulsierend",  "schnell"),
+        "dim_warm_white":   ("weiss",   "statisch",    "langsam"),
+    }
+
+    def set_pattern(self, name: str, params: Optional[dict] = None):
+        """W16 Expression: vordefinierte Pattern via Name setzen.
+        Erlaubte Namen: solid_blue, solid_red, pulsing_magenta, pulsing_red, dim_warm_white.
+        params (optional): {'speed': 'langsam|mittel|schnell'} ueberschreibt Default-Speed.
+        """
+        mapping = self._PATTERN_MAP.get(name)
+        if not mapping:
+            logger.warning(f"[LED] Unbekanntes Pattern: {name}")
+            return
+        farbe, modus, speed = mapping
+        if params and isinstance(params, dict):
+            speed_override = params.get("speed")
+            if speed_override in ("langsam", "mittel", "schnell"):
+                speed = speed_override
+        self.set_color(farbe, modus, speed)
+        logger.debug(f"[LED] set_pattern({name}) -> {farbe} {modus} {speed}")
+
+    def flash_sequence(self, sequence: List[Tuple[Tuple[int, int, int], float]]):
+        """W16 Expression: blockierende Sequenz aus (rgb, dauer_s)-Paaren.
+        Beispiel: [((255,0,0), 0.1), ((0,0,0), 0.1), ((255,0,0), 0.1)] = 3 Blitze rot.
+        RGB wird auf naechstgelegene benannte Farbe gemappt.
+        """
+        if not sequence:
+            return
+        for entry in sequence:
+            try:
+                rgb, dauer = entry
+                farbe = self._rgb_to_color_name(rgb)
+                self.set_color(farbe, "statisch", "mittel")
+                time.sleep(max(0.0, float(dauer)))
+            except (TypeError, ValueError) as e:
+                logger.warning(f"[LED] flash_sequence Eintrag invalid {entry}: {e}")
+                continue
+
+    @staticmethod
+    def _rgb_to_color_name(rgb: Tuple[int, int, int]) -> str:
+        """W16: RGB-Tuple auf naechste benannte Farbe mappen (euklid. Distanz)."""
+        try:
+            r, g, b = int(rgb[0]), int(rgb[1]), int(rgb[2])
+        except (TypeError, IndexError, ValueError):
+            return "aus"
+        # Schwarz/Aus separat
+        if r < 20 and g < 20 and b < 20:
+            return "aus"
+        palette = {
+            "rot":     (255, 0, 0),
+            "gruen":   (0, 255, 0),
+            "blau":    (0, 0, 255),
+            "gelb":    (255, 255, 0),
+            "cyan":    (0, 255, 255),
+            "magenta": (255, 0, 255),
+            "weiss":   (255, 255, 255),
+        }
+        best_name = "weiss"
+        best_dist = 10**9
+        for name, (pr, pg, pb) in palette.items():
+            d = (r - pr) ** 2 + (g - pg) ** 2 + (b - pb) ** 2
+            if d < best_dist:
+                best_dist = d
+                best_name = name
+        return best_name
 
     # =========================================================================
     # Event-Bus Callbacks
