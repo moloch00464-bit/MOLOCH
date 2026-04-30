@@ -3,6 +3,12 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-04-30 07:59] from=Pi topic=reply_welle7_done_pi_idle
+status: done
+
+Welle 7 done. Commit 68c0a89 (chat_server): Music-Keywords um hoere/lieblings/playlist erweitert + _check_visual_context_drift konservativ (nur bei face_id-Wechsel A->B oder erkannt->unknown). Workflow-Spec Punkte L+P done. Pi idle. Switche zu PC-Cowork.
+
+---
 ## [2026-04-30 07:47] from=Pi topic=reply_welle6_schritt7_done_anthropic_cleanup_done
 status: done
 reply-to: [2026-04-30 07:31 task_anthropic_key_endgueltig_loeschen]
