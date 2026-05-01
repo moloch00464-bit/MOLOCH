@@ -66,6 +66,22 @@ _WEB_RESEARCH_KEYWORDS = (
     "neuigkeiten", "online suchen", "was ist heute", "news heute",
 )
 
+# Welle 19 — User-facing Recherche-Klassifikator (broader als _WEB_RESEARCH_KEYWORDS)
+# Triggert prompt_type="web" mit Search-Proxy-Augmentation in /chat-Handler
+# (siehe Specialist-Router unter @app.post("/chat")). MUSS vor _is_music_query
+# pruefen, sonst faengt music_query Phrasen wie "wer spielt" / "welche bands" ab.
+_WEB_LIVE_KEYWORDS = (
+    "recherchier", "such ", "finde heraus", "find heraus",
+    "wieviel", "wie viele", "wer spielt", "lineup", "line-up",
+    "was steht auf", "welche bands", "welche band", "programm",
+    "nachschlag", "schau nach", "schaue nach",
+)
+
+
+def _is_web_live_query(text_low: str) -> bool:
+    """Welle 19: erkennt User-Recherche-Anfragen die Live-Web-Daten brauchen."""
+    return any(kw in text_low for kw in _WEB_LIVE_KEYWORDS)
+
 _CODE_KEYWORDS = (
     # Direkte "schreib X"-Imperative
     "schreib python", "schreib mir python", "schreib code", "schreib mir code",
@@ -271,6 +287,10 @@ def _classify_prompt_type(text: str) -> str:
     if _is_hardware_query(text):
         return "hardware_status"
     text_low = text.lower()
+    # Welle 19: web (Live-Recherche) MUSS vor music_query — sonst faengt
+    # music_query Phrasen wie "wer spielt aufm WGT" als Musik-Trigger ab.
+    if _is_web_live_query(text_low):
+        return "web"
     if _is_music_query(text, text_low):
         return "music_query"
     if _is_web_research_query(text_low):
