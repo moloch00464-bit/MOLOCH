@@ -1341,8 +1341,10 @@ def chat(req: ChatRequest):
                         "prompt_type": "music_query",
                         "pi_mood": _get_pi_mood_label(),
                     }
-            # 2. Year-Filter Shortcut
-            _ymatch = _YEAR_RE.search(req.text)
+            # 2. Year-Filter Shortcut — Welle 19.6: web-prompt hat Vorrang
+            # vor spotify_action_year (Pattern-Konflikt-Fix: "WGT 2026" darf
+            # nicht als Year-Filter triggern, wenn web-Klassifikator greift)
+            _ymatch = _YEAR_RE.search(req.text) if _ptype_quick != "web" else None
             if _ymatch:
                 _year = int(_ymatch.group(1))
                 if _trigger_spotify_year(_year):
