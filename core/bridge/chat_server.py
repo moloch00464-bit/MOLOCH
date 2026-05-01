@@ -21,6 +21,8 @@ import uuid
 import json
 import mmap
 import struct
+
+import requests
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional, Tuple
@@ -1392,9 +1394,58 @@ def chat(req: ChatRequest):
         out = b.reason_internal(req.text)
     else:
         prompt_type = _classify_prompt_type(req.text) if not req.force_local else None
-        out = b.ask_external(req.text, force_local=req.force_local,
-                             force_tentacle=False,
-                             prompt_type=prompt_type)
+        # Welle 19: Specialist-Router fuer prompt_type=web — Search-Proxy
+        # davorschalten + LLM mit echten WEB-RESULTS augmentieren.
+        # Modell-Resolve via tentacle_llm.web_model. Fail-soft: Search-Proxy-
+        # Timeout/Down -> weiter mit Original-Prompt ohne Augmentation.
+        if prompt_type == "web" and not req.force_local:
+            web_ctx = ""
+            try:
+                sr = requests.post(
+                    "http://192.168.178.20:11650/search",
+                    json={"query": req.text, "max_results": 5},
+                    timeout=15,
+                )
+                if sr.ok:
+                    data = sr.json()
+                    results = data.get("results", []) or []
+                    if results:
+                        web_ctx = "WEB-RESULTS:\n" + "\n".join(
+                            f"- {r.get('title')} | {r.get('url')} | {r.get('snippet','')[:200]}"
+                            for r in results[:5]
+                        )
+                        logger.info(f"[W19] search_proxy: {len(results)} results, {len(web_ctx)} chars")
+                else:
+                    logger.warning(f"[W19] search_proxy status={sr.status_code}")
+            except Exception as e:
+                logger.warning(f"[W19] search_proxy timeout/fail: {e}")
+                # fail-soft: weiter mit Original-Prompt ohne Augmentation
+
+            if web_ctx:
+                augmented = (
+                    f"{web_ctx}\n\nFRAGE: {req.text}\n\n"
+                    "Antworte basierend auf den WEB-RESULTS oben. Nutze die echten URLs."
+                )
+            else:
+                augmented = req.text
+
+            # Modell-Resolve: tentacle_llm.web_model entscheidet ueber Pfad.
+            # "api_deepseek" -> DeepSeek-Cloud (b._generate_deepseek).
+            # Sonst -> Tentakel-LLM mit prompt_type=web_research (existing path).
+            cfg = _load_tentacle_cfg() or {}
+            web_model = (cfg.get("web_model") or "").strip()
+            if web_model == "api_deepseek":
+                logger.info("[W19] web -> DeepSeek-Cloud (api_deepseek)")
+                out = b._generate_deepseek(augmented, "", 600)
+            else:
+                logger.info(f"[W19] web -> Tentakel (model={web_model or 'default'})")
+                out = b.ask_external(augmented, force_local=False,
+                                     force_tentacle=False,
+                                     prompt_type="web_research")
+        else:
+            out = b.ask_external(req.text, force_local=req.force_local,
+                                 force_tentacle=False,
+                                 prompt_type=prompt_type)
     dur_ms = int((time.monotonic() - t0) * 1000)
     # Visual-Echo: bei Sicht-Drift waehrend des LLM-Calls -> Disclaimer prepend
     if out:
