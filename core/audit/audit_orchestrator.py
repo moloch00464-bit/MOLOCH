@@ -359,6 +359,11 @@ def run_once() -> Dict[str, Any]:
     web_ui_layer = prev_layers.get("web_ui") or {
         "score": 0, "max": 0, "status": "PENDING", "detail": {}
     }
+    # W19 Web-Pipeline: PC web_pipeline_auditor POSTet alle 5 Min nach
+    # /mailbox/audit/web_search — bleibt PENDING bis erster POST eintrifft.
+    web_search_layer = prev_layers.get("web_search") or {
+        "score": 0, "max": 0, "status": "PENDING", "detail": {}
+    }
 
     # Welle 13: Innere Subsysteme L0-L2
     personality_layer = _safe_collect("personality_auditor")
@@ -395,6 +400,8 @@ def run_once() -> Dict[str, Any]:
         # W12 PC-Side (von Cowork-POST)
         "pc_hardware": pc_hardware_layer,
         "web_ui": web_ui_layer,
+        # W19 Web-Pipeline (von PC-Cowork-POST alle 5 Min)
+        "web_search": web_search_layer,
         # W13
         "personality": personality_layer,
         "memory": memory_layer,
@@ -440,6 +447,8 @@ def merge_component(component: str, data: Dict[str, Any]) -> Optional[Dict[str, 
         "pc_hardware": "pc_hardware", "web_ui": "web_ui",
         "vision": "vision", "npu": "npu",
         "spotify": "spotify", "hardware": "hardware",
+        # W19 — Web-Pipeline-Audit (PC-Cowork web_pipeline_auditor)
+        "web_search": "web_search",
         # W13 — alle Sub-Domains als eigene Layer
         "personality": "personality", "memory": "memory", "tracking": "tracking",
         "autonomy": "autonomy", "awareness": "awareness", "voice": "voice",
