@@ -3,6 +3,73 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-01 10:26] from=PC topic=task_welle19_web_pipeline_fix
+status: open
+
+## Web-Pipeline-Bug — Audit hat gelogen
+
+Markus 2026-04-30 ~19:50: WGT-Recherche-Anfragen fuehren zu LLM-Halluzination (ESA/Chainreactor/Geistform behauptet aufm Lineup, ALLE 3 falsch). Search-Proxy :11650 wurde HEUTE NIE angerufen. Pi-journalctl-Filter fuer search_proxy/11650/duckduckgo: 0 Treffer.
+
+## PC-Side erledigt (Commit f2f8064)
+
+1. pc/search_proxy.py erweitert (v1.1): GET /stats Endpoint mit request_count, last_call_ts, last_query, seconds_since_last_call, uptime_sec. Counter in /search-Hook (cache-hit/miss/error). Service neu gestartet.
+
+2. pc/web_pipeline_auditor.py neu: 3-Layer Audit (health + stats + e2e_search). End-to-End postet Test-Query an Search-Proxy, verifiziert echte URLs. Detail-Output enthaelt pi_routing_active bool. CLI: python pc/web_pipeline_auditor.py --once. Loop-Mode 5min POST an /mailbox/audit/web_search.
+
+Live-Test 19:55: PASS 3/3 fuer Service-Health, pi_routing_active=false als Architektur-Drift-Befund.
+
+## Pi-Side TODOs
+
+### 1. Klassifikator-Patch core/chat/chat_server.py:_classify_prompt_type
+
+Keywords die zu prompt_type=web routen sollen: recherchier, such, find heraus, wieviel, wer spielt, lineup, was steht auf. Aktuell wird Markus WGT-Frage vermutlich als music_query oder smalltalk klassifiziert.
+
+### 2. Specialist-Router-Patch
+
+Vor LLM-Call: Search-Proxy davorschalten. Pseudo-Code:
+
+  if prompt_type == web:
+    sr_response = http_post(http://192.168.178.20:11650/search, query=user_query, max_results=5, timeout=15)
+    web_ctx = format_results(sr_response.results)
+    augmented = WEB-RESULTS + web_ctx + FRAGE + user_query
+    return call_llm(augmented, model=resolved_web_model)
+
+Fail-soft bei Search-Proxy-Timeout: dann Original-Prompt ohne Augmentation.
+
+### 3. Config-Flip config/settings.json
+
+tentacle_llm.web_model: api_deepseek statt dolphin-mistral:7b. Grund: User-facing Recherche-Antworten zu Cloud (echtes Web-Tool), lokale AIs nur intern. Markus 19:50: PC-Rechner laeuft heiss durch lokale LLM-Inferenz fuer User-Antworten.
+
+### 4. Audit-Whitelist erweitern
+
+core/audit/audit_orchestrator.py:merge_component.valid -> web_search Eintrag. Dann nimmt Pi den 5-Minuten-POST von pc/web_pipeline_auditor.py an.
+
+### 5. Closed-Loop-Verifier W15-Pattern
+
+core/audit/closed_loop/web_search_verify.py:
+- Triggert Test-Frage an chat_server-API: Wieviel Bands spielen aufm WGT 2026?
+- Wartet auf last_turn-Antwort
+- Verifiziert: Antwort enthaelt mind. 1 URL ODER Wort festival ODER konkrete Zahl 100-200
+- FAIL wenn Spotify-Stats-Pattern erkannt (Suicide Commando, Vomito Negro, Chainreactor in Antwort)
+- Plus: GET an http://192.168.178.20:11650/stats. Wenn seconds_since_last_call > 30 nach Trigger -> Pipeline broken, FAIL.
+
+In closed_loop_orchestrator integrieren neben den 7 existierenden Verifiern.
+
+## Akzeptanztest
+
+1. Markus stellt Wieviel Bands spielen aufm WGT 2026? im Cockpit
+2. PC-Side curl http://localhost:11650/stats zeigt seconds_since_last_call kleiner 30
+3. Antwort enthaelt echte WGT-Bands aus DDG-Scrape, nicht nur Spotify-Stats
+4. last_provider in /status zeigt entweder kaskade_api_deepseek oder kaskade_dolphin-mistral_with_web_ctx
+5. closed_loop/web_search_verify zeigt PASS
+
+## Aufwand
+
+Klassifikator 5 Zeilen + Specialist-Router 30 Zeilen + Config-Flip 1 Zeile + Whitelist 1 Zeile + Verifier 80 Zeilen. Total 1.5-2 Std Pi-Opus.
+
+Blockt nicht parallel-Arbeit an W18-Folge-Issues (ptz_verify, spotify_verify, bridge_roundtrip, led_verify, tts_verify).
+
+---
 ## [2026-04-30 19:45] from=PC topic=plan_pc_coder_tentakel_moloch_specialist
 status: done
 
