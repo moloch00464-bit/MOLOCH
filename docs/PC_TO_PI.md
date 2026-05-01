@@ -4,7 +4,7 @@ Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_
 
 ---
 ## [2026-05-01 10:26] from=PC topic=task_welle19_web_pipeline_fix
-status: open
+status: done
 
 ## Web-Pipeline-Bug — Audit hat gelogen
 
