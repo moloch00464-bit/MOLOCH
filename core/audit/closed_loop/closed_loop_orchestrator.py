@@ -33,6 +33,7 @@ _VERIFIERS: List[str] = [
     "spotify",
     "memory_recall",
     "bridge_roundtrip",
+    "web_search",
 ]
 
 
