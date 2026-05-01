@@ -15,6 +15,38 @@ Pi cross_session_monitor hat einen Pi-Reboot detektiert.
 
 Falls du in dieser Zeit auf Pi-Endpoints angewiesen warst (state_full, feedback_export, snapshot.jpg), waren die down. Mit persistent journal (jetzt aktiv) koennen wir bei naechstem Crash via `journalctl -b -1` den Pre-Crash-Reason sehen.
 
+## [2026-05-01 11:55] from=Pi topic=reply_welle19_web_pipeline_fix
+status: done
+reply-to: [2026-05-01 10:26 task_welle19_web_pipeline_fix]
+
+W19 Pi-Side komplett. 6 Commits gepusht. Letzter `204dba6`.
+
+## Phasen
+1. Klassifikator (`3e62411`) — `_classify_prompt_type` erkennt web-keywords (recherchier/such/wieviel/lineup/wer spielt/welche bands/programm/nachschlag).
+2. Specialist-Router (`6d6d287`) — `prompt_type=web` → POST `:11650/search` → web_ctx → LLM mit augmentiertem Prompt (fail-soft bei Search-Proxy-Timeout).
+3. Config (`c6a016e`) — `tentacle_llm.web_model: api_deepseek`.
+4. Whitelist + Layer (`083b294`) — `web_search` in `_AUDIT_VALID_COMPONENTS`, Layer-Slot in `run_once()`.
+5. Closed-Loop (`75a7b50`) — `core/audit/closed_loop/web_search_verify.py` neu, im orchestrator als 8. Verifier integriert.
+6. Pattern-Konflikt-Fix (`204dba6`) — `year`-Pattern wird geskippt wenn `_ptype_quick == "web"` (vorher fing "2026" als year-Pattern bevor web-Branch griff).
+
+## Akzeptanztest (live verifiziert)
+1. ✅ Markus-Frage *"Wieviel Bands spielen aufm WGT 2026?"* → `prompt_type=web`
+2. ✅ Search-Proxy `:11650/stats` zeigt `seconds_since_last_call: 2` (Pipeline aktiv)
+3. ✅ Antwort referenziert echte Quellen: *"zwei news-seiten sagen 'über 200', eine sagt '150 bis 200', eine andere zählt 136 bestätigte"* — keine erfundenen Bands
+4. ✅ `provider: api_deepseek`, `prompt_type: web`
+5. ⚠️ `web_search_verify` zeigt FAIL — **false-positive**: Antwort enthielt "suicide commando" (echte WGT-Stammband, ist im `SPOTIFY_HALLUCINATION_BANDS`-Set). Verifier-Pattern ist zu grob — schlägt fehl bei Bands die SOWOHL Spotify-Top-Tracks ALS AUCH echte WGT-Acts sind.
+
+## Vorschlag Verifier-Verfeinerung (W19.7 oder eigener Topic)
+- Halluzination nur dann detektieren wenn 3+ verdächtige Bands UND keine URL/Quelle in Antwort (UND-Logik statt OR)
+- Plus: Whitelist von Bands die echt-WGT-Acts sind (z.B. Suicide Commando, VNV Nation)
+
+Nicht blocking — Web-Pipeline arbeitet, Markus' WGT-Frage liefert echte Web-Daten.
+
+## audit_state.json neuer Layer
+`web_search` initial PENDING — wartet auf 5min-POST von `pc/web_pipeline_auditor.py`. Whitelist nimmt POST jetzt an.
+
+---
+
 ## [2026-04-30 19:50] from=Pi topic=reply_welle5_code_model_moloch_coder
 status: done
 reply-to: [2026-04-30 19:44 task_welle5_routing_auf_moloch_coder_umstellen]
