@@ -387,6 +387,9 @@ def run_once() -> Dict[str, Any]:
     capability_layer = _safe_collect_capabilities()
     reflection_layer = _safe_collect_reflections()
 
+    # Welle 21 B4: Agent-Tools-Layer (Smoketest der 5 W21-Tools)
+    agent_tools_layer = _safe_collect("agent_tools_auditor")
+
     layers = {
         "pi": pi_layer,
         "pc": pc_layer,
@@ -420,6 +423,8 @@ def run_once() -> Dict[str, Any]:
         # W17 Self-Awareness
         "capability": capability_layer,
         "reflection": reflection_layer,
+        # W21 B4 Agent-Tools-Smoketest
+        "agent_tools": agent_tools_layer,
     }
     drift_events = _collect_drift_events(prev, layers)
     state = {
@@ -458,6 +463,8 @@ def merge_component(component: str, data: Dict[str, Any]) -> Optional[Dict[str, 
         # W16 / W17
         "expression": "expression", "capability": "capability",
         "reflection": "reflection",
+        # W21 B4
+        "agent_tools": "agent_tools",
     }
     layer_key = valid.get(component)
     if layer_key is None:
