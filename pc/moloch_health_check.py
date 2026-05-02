@@ -119,11 +119,22 @@ def check_l3_routing() -> list[Result]:
     else:
         out.append(_fail("L3", "llm_mode", f"unbekannt: {llm_mode}"))
 
+    # Drift 1 (2026-05-02): last_provider kann leer sein direkt nach Service-Restart.
+    # 1 Retry mit kurzem Sleep gibt Pi Zeit den persistenten Counter zu laden.
     last_provider = data.get("last_provider", "")
+    if last_provider == "":
+        try:
+            time.sleep(0.5)
+            data2 = requests.get(f"{PI_HOST}/status", timeout=5).json()
+            last_provider = data2.get("last_provider", "")
+        except Exception:
+            pass
     if last_provider.startswith("kaskade_"):
         out.append(_ok("L3", "last_provider", last_provider))
-    elif last_provider in ("lokal_qwen2.5", "stille", ""):
-        out.append(_warn("L3", "last_provider", f"{last_provider} (war evtl. Hardware/Intent)"))
+    elif last_provider in ("lokal_qwen2.5", "none"):
+        out.append(_ok("L3", "last_provider", f"{last_provider} (NPU-bypass oder frisch nach restart)"))
+    elif last_provider in ("stille", ""):
+        out.append(_warn("L3", "last_provider", f"{last_provider or 'leer'} (Pi-Routing nicht aktiv?)"))
     else:
         out.append(_warn("L3", "last_provider", last_provider))
 
@@ -165,8 +176,12 @@ def check_l4_mailbox() -> list[Result]:
                 })
         return entries
 
-    pc_open = [e for e in parse_top(pc_to_pi) if e["status"] == "open"]
-    pi_open = [e for e in parse_top(pi_to_pc) if e["status"] == "open"]
+    # Drift 4 (2026-05-02): plan_*-Topics sind langzeit-Marker, keine pending tasks.
+    # Filter raus aus open-Count damit Backlog nicht falsch alarmiert.
+    pc_open = [e for e in parse_top(pc_to_pi)
+               if e["status"] == "open" and not e["topic"].startswith("plan_")]
+    pi_open = [e for e in parse_top(pi_to_pc)
+               if e["status"] == "open" and not e["topic"].startswith("plan_")]
 
     if len(pc_open) <= 2:
         out.append(_ok("L4", "PC->Pi open topics", f"{len(pc_open)} offen"))
@@ -250,12 +265,12 @@ def check_l6_env() -> list[Result]:
             capture_output=True, text=True, timeout=8,
         ).stdout
         loaded = sum(1 for m in ("deepseek-coder", "dolphin-mistral", "dolphin-llama3") if m in ps_out)
-        if loaded >= 2:
+        # Drift 3 (2026-05-02): 1+ Modelle warm ist OK — Ollama evicted nach Idle-TTL,
+        # erstes Modell laedt automatisch beim naechsten Call. Nur 0/3 ist echtes Problem.
+        if loaded >= 1:
             out.append(_ok("L6", "Pre-warmed Modelle", f"{loaded}/3 in Cache"))
-        elif loaded == 1:
-            out.append(_warn("L6", "Pre-warmed Modelle", "1/3 — Cold-Load-Risk"))
         else:
-            out.append(_warn("L6", "Pre-warmed Modelle", "0/3 — alle cold"))
+            out.append(_warn("L6", "Pre-warmed Modelle", "0/3 — alle cold (erste Anfrage langsam)"))
     except Exception as e:
         out.append(_warn("L6", "ollama ps", str(e)[:60]))
 
