@@ -171,9 +171,13 @@ def moloch_snapshot() -> str:
         return f"FEHLER: {e}"
 
 
+# W20a-A3: alle 3 systemd-Units gemeinsam steuern (Pipeline + chat HTTP + chat HTTPS)
+SERVICE_UNITS = ["moloch", "moloch-chat", "moloch-chat-https"]
+
+
 @mcp.tool()
 def moloch_service(action: str) -> str:
-    """MOLOCH Service steuern.
+    """MOLOCH Service steuern (alle 3 Units: moloch, moloch-chat, moloch-chat-https).
 
     Args:
         action: 'status', 'start', 'stop', 'restart'
@@ -184,20 +188,37 @@ def moloch_service(action: str) -> str:
 
     try:
         if action == "status":
-            r = subprocess.run(
-                ["systemctl", "status", "moloch", "--no-pager", "-l"],
-                capture_output=True, text=True, timeout=10
-            )
-            return r.stdout + r.stderr
-        else:
-            r = subprocess.run(
-                ["sudo", "systemctl", action, "moloch"],
-                capture_output=True, text=True, timeout=30
-            )
-            if r.returncode == 0:
-                return f"OK: Service {action} erfolgreich"
-            else:
-                return f"FEHLER: {r.stderr or r.stdout}"
+            blocks = []
+            for unit in SERVICE_UNITS:
+                r = subprocess.run(
+                    ["systemctl", "status", unit, "--no-pager", "-l"],
+                    capture_output=True, text=True, timeout=10,
+                )
+                blocks.append(f"=== {unit} ===\n{r.stdout}{r.stderr}")
+            return "\n\n".join(blocks)
+
+        # start/stop/restart: alle 3 Units der Reihe nach
+        results: dict[str, str] = {}
+        for unit in SERVICE_UNITS:
+            try:
+                r = subprocess.run(
+                    ["sudo", "-n", "systemctl", action, f"{unit}.service"],
+                    capture_output=True, text=True, timeout=30,
+                )
+                if r.returncode == 0:
+                    results[unit] = f"{action} OK"
+                else:
+                    err = (r.stderr or r.stdout).strip().replace("\n", " ")[:120]
+                    results[unit] = f"FAIL: {err}"
+            except subprocess.TimeoutExpired:
+                results[unit] = "FAIL: timeout 30s"
+            except Exception as e:
+                results[unit] = f"FAIL: {str(e)[:120]}"
+
+        ok_count = sum(1 for v in results.values() if v.endswith("OK"))
+        summary = f"{ok_count}/{len(SERVICE_UNITS)} units {action}ed"
+        detail = "\n".join(f"  {u}: {r}" for u, r in results.items())
+        return f"{summary}\n{detail}"
     except Exception as e:
         return f"FEHLER: {e}"
 
