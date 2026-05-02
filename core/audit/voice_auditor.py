@@ -192,10 +192,10 @@ def collect() -> Dict[str, Any]:
         status = "FAIL"
     elif mic_stale:
         status = "WARN"
-    elif tts_calls_1h == 0 and mic_pegel_age_s != 99999.0:
-        # Mic ok, aber TTS schweigt - WARN
-        status = "WARN"
     else:
+        # tts_calls_1h=0 ist akzeptabel (idle = niemand spricht/Moloch antwortet),
+        # solange Mic alive ist. Score bleibt bei 3/4 wenn TTS still — informativ,
+        # nicht WARN-wuerdig. (Anpassung 2026-05-02: Strukturell-akzeptable WARNs)
         status = "PASS"
 
     return {

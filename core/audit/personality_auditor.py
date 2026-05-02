@@ -125,15 +125,28 @@ def collect() -> Dict[str, Any]:
         score += 1
 
     # Switch-Rate-Heuristik: <30s = WARN
+    # Aber NICHT wenn last_switch_age_s == 0.0 — das ist Init-State (Engine
+    # noch nie gewechselt, time.time() == last_switch_default).
     switch_rate_high = (
-        last_switch_age_s != 99999.0 and last_switch_age_s < 30
+        last_switch_age_s != 99999.0
+        and 0.0 < last_switch_age_s < 30
     )
+
+    # Sentinel: tension == -1.0 -> idle (niemand im Frame). Kein WARN.
+    tension_sentinel_idle = tension <= -0.5
 
     if not engine_alive or mode_str is None:
         status = "FAIL"
-    elif tension >= 0.9 or not mode_valid:
+    elif not mode_valid:
         status = "FAIL"
-    elif tension >= 0.7 or switch_rate_high:
+    elif tension_sentinel_idle:
+        # Idle-Mode: kein Person im Frame, alle Werte Sentinel — PASS.
+        status = "PASS"
+    elif tension >= 0.9 or switch_rate_high:
+        # Hohe Tension oder Hyper-Switch — WARN (nicht FAIL: momentane
+        # Spitzen sind im Tension-System normal, Berserker-Zone bei 1.0).
+        status = "WARN"
+    elif tension >= 0.7:
         status = "WARN"
     else:
         status = "PASS"

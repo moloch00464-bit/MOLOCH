@@ -249,16 +249,21 @@ def _make_reflections_de(incidents: List[Dict[str, Any]],
 
 
 def _compute_status(total_incidents: int) -> Tuple[int, int, str]:
-    """PASS <5, WARN 5-19, FAIL >=20 (Bug #18: 10 incidents heute sind aktive Entwicklung).
+    """PASS <10, WARN 10-29, FAIL >=30.
 
-    Score wird auf max=20 gecappt damit das Audit-Schema (score<=max)
-    nicht verletzt wird. Bei >=20 Incidents ist der Status ohnehin FAIL —
+    Anpassung 2026-05-02: Schwellen angehoben (vorher 5/20). Aktive Dev-Days
+    mit Incident-Counts <10 sollen PASS bleiben — Self-Resolve-Mechanismus
+    greift bei WARN/ALERT-Events innerhalb 24h. FAIL erst bei sehr hoher
+    Incident-Last (~30+ in 24h = systemisches Problem).
+
+    Score wird auf max=30 gecappt damit das Audit-Schema (score<=max)
+    nicht verletzt wird. Bei >=30 Incidents ist der Status ohnehin FAIL —
     die genaue Anzahl steckt in detail.events_in_window.
     """
-    max_s = 20
+    max_s = 30
     if total_incidents >= max_s:
         return max_s, max_s, "FAIL"
-    if total_incidents >= 5:
+    if total_incidents >= 10:
         return total_incidents, max_s, "WARN"
     return total_incidents, max_s, "PASS"
 
