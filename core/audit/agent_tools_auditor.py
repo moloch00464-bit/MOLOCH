@@ -53,6 +53,56 @@ def _smoke_one(tool: str) -> Dict[str, Any]:
     return out
 
 
+def _dispatch_via_http(tool: str, params: Dict[str, Any] | None,
+                       timeout: float = 5.0) -> Dict[str, Any]:
+    """W21 Roundtrip — ruft Pi-Tool via HTTP (wie PC-Orchestrator es taete).
+
+    Cross-Prozess-Pfad: kein in-process dispatch(), sondern echter
+    HTTP-POST an /api/agent/dispatch. Best-effort, crasht nie.
+    """
+    out: Dict[str, Any] = {"status": "SKIP", "error": None, "duration_ms": 0.0}
+    try:
+        import requests  # type: ignore
+    except Exception as e:
+        out["status"] = "FAIL"
+        out["error"] = f"requests_unavailable:{str(e)[:120]}"
+        return out
+
+    try:
+        r = requests.post(
+            "http://localhost:9100/api/agent/dispatch",
+            json={"tool_name": tool, "params": params or {}},
+            timeout=timeout,
+        )
+        if not r.ok:
+            out["status"] = "FAIL"
+            out["error"] = f"http_{r.status_code}"
+            return out
+        try:
+            data = r.json()
+        except Exception as e:
+            out["status"] = "FAIL"
+            out["error"] = f"http_json_decode:{str(e)[:120]}"
+            return out
+        if not isinstance(data, dict):
+            out["status"] = "FAIL"
+            out["error"] = "http_response_not_dict"
+            return out
+        out["duration_ms"] = round(float(data.get("duration_ms", 0.0) or 0.0), 1)
+        if data.get("error"):
+            out["status"] = "FAIL"
+            out["error"] = str(data["error"])[:200]
+        elif data.get("result") is None:
+            out["status"] = "FAIL"
+            out["error"] = "result_none"
+        else:
+            out["status"] = "PASS"
+    except Exception as e:
+        out["status"] = "FAIL"
+        out["error"] = f"http_dispatch_exception:{str(e)[:200]}"
+    return out
+
+
 def collect() -> Dict[str, Any]:
     """Sammelt agent_tools-Layer-Daten. Returns audit_state.layers.agent_tools-Dict."""
     detail: Dict[str, Any] = {}
@@ -85,6 +135,10 @@ def collect() -> Dict[str, Any]:
 
     detail["per_tool"] = per_tool
     detail["skip_count"] = skip_count
+
+    # W21-Roundtrip: ein Tool via HTTP testen (Cross-Prozess-Pfad PC->Pi)
+    # get_mood ist side-effect-frei und schnell -> ideal fuer Roundtrip-Probe
+    detail["roundtrip_via_http"] = _dispatch_via_http("get_mood", {})
 
     return {
         "score": pass_count,
