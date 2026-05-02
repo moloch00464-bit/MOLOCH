@@ -388,12 +388,16 @@ class SpotifyController:
                 if "403" in err_str or "restriction" in err_str:
                     raise
 
-                # Device nicht gefunden — neu suchen
+                # Device nicht gefunden — neu suchen und kwargs aktualisieren
                 if "no active device" in err_str or "404" in err_str or "not found" in err_str:
                     logger.warning(f"[SPOTIFY] Device verloren (Versuch {attempt + 1}): {e}")
+                    self._device_id = None
                     self._ensure_spotifyd()
                     time.sleep(2)
                     self._find_device()
+                    # Neue device_id in kwargs injizieren damit Retry sie nutzt
+                    if self._device_id and "device_id" in kwargs:
+                        kwargs["device_id"] = self._device_id
                     continue
 
                 # Netzwerk/Server-Fehler — kurz warten und retrien
