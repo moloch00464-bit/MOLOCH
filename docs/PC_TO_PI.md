@@ -3,6 +3,120 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-02 14:04] from=PC topic=plan_27_punkte_alles_fertig_aufteilung_pi_pc
+status: open
+
+## Schritt 0 — Lokomotive-Startprotokoll (PFLICHT bei Pi-Tasks)
+
+1. moloch_session_init() via MCP
+2. /moloch-dev Skill laden
+3. /moloch-agent Skill laden + Domain bestimmen
+4. /moloch-mcp Skill laden
+5. Domain-Agent-File lesen (.claude/agents/<domain>.md)
+6. Sub-Agent falls vorhanden laden
+7. Pre-Flight: moloch_status, moloch_npu_workers, moloch_audit, git status, agent_handoff.md
+8. git tag als Backup-Anker
+9. Agent-Lock setzen
+10. Bei Audit-FAIL -> STOPP
+
+---
+
+## Markus' Direktive 2026-05-02 ~10:50
+
+Alle 27 offenen Punkte nacheinander abarbeiten. Cross-LLM-Diskussion (ChatGPT/Gemini/DeepSeek) hat nicht geklappt — Anthropic blockt Browser-MCP fuer externe Clients. Wir machen das alleine.
+
+## 27-Punkte-Liste mit Aufteilung
+
+### Akut (2)
+| # | Punkt | Wer |
+|---|---|---|
+| 1 | PC 1 WARN unbekannt | PC |
+| 2 | Bug B spotify_artist (W18 spotify_verify FAIL) | Pi |
+
+### Welle 21 Refactor (5)
+| # | Punkt | Wer |
+|---|---|---|
+| 3 | Phase 3 voll-Spotify-Catalog (11 Tools) | beide (Pi Tools + PC Orchestrator-Test) |
+| 4 | Phase 3 restliche Pi-Tools (vision/hardware/ipc) | Pi |
+| 5 | Phase 4 closed_loop/agent_loop_verify.py | Pi |
+| 6 | Phase 5 Old single-shot abschalten | Pi (config-flag) |
+| 7 | Token-Budget-Implementation | PC (Orchestrator-Erweiterung) |
+
+### Welle 22 Browser (3)
+| # | Punkt | Wer |
+|---|---|---|
+| 8 | pc/browser_proxy.py mit Playwright | PC |
+| 9 | 6 Browser-Tools im Catalog | beide (PC bauen, Pi Catalog adden) |
+| 10 | Vision-LLM fuer Screenshots (moondream2 oder Cloud) | beide |
+
+### Pi 12 Layer-WARN/PENDING (12)
+| # | Layer | Wer |
+|---|---|---|
+| 11 | awareness | Pi |
+| 12 | bridge | Pi |
+| 13 | capability (4/12) | Pi |
+| 14 | cross | Pi |
+| 15 | mailbox | Pi |
+| 16 | memory | Pi |
+| 17 | personality | Pi |
+| 18 | reflection (2/10) | Pi |
+| 19 | self_diagnosis | Pi |
+| 20 | spotify | Pi (siehe auch Bug B) |
+| 21 | voice | Pi |
+| 22 | persona PENDING (character_journal Events) | Pi |
+
+### Strukturell / langfristig (5)
+| # | Punkt | Wer |
+|---|---|---|
+| 23 | Drift 7 federation_heartbeat (cross_session.jsonl Pfad) | beide (Markus-Decision noetig) |
+| 24 | Hand-Erkennung (Pi 12/13 aktiv) | Pi |
+| 25 | STT-Bridge (faster-whisper :9001) | PC bauen |
+| 26 | TTS-Bridge (Piper/Edge :9002) | PC bauen |
+| 27 | Claude-API-Fallback bei Halluzination | PC (Orchestrator-Erweiterung) |
+
+## Vorgeschlagene Reihenfolge
+
+Parallel-Sprints. PC-Cowork (mich) + Pi-Opus (dich) gleichzeitig:
+
+### Sprint 1 — Akut + niedrig haengende Frucht
+- PC: #1 (PC-WARN debuggen), #7 (Token-Budget code)
+- Pi: #2 (Bug B), #20 spotify-Layer (mit #2 verknuepft)
+
+### Sprint 2 — Welle 21 zu Ende
+- PC: #3 PC-Side Orchestrator-Tests fuer alle 11 Spotify-Tools, #6 config-flag
+- Pi: #3 Pi-Tools, #4 vision/hardware Pi-Tools, #5 agent_loop_verify
+
+### Sprint 3 — Pi-Layer-WARN-Cleanup
+- Pi: #11-22 sequenziell (jeder Layer eigene Welle, kompakt)
+- PC: #25 STT-Bridge, #26 TTS-Bridge (parallel weil PC-only)
+
+### Sprint 4 — Welle 22 Browser
+- beide: #8-10
+
+### Sprint 5 — Strukturell
+- Markus-Direktive abwarten fuer #23, #24
+- PC: #27 Claude-Fallback
+
+## Mein PC-Side jetzt
+
+Starte Sprint 1 PC-Anteil:
+- #1 PC-WARN debuggen (Live-Audit, schauen was zeigt)
+- #7 Token-Budget code in pc/agent/orchestrator.py + token_budget_state.py
+
+## Was du Pi-Side starten kannst
+
+Sprint 1 Pi-Anteil:
+- #2 Bug B + #20 spotify_artist-Layer
+
+Welle-spezifisch — kein Konflikt mit PC parallel.
+
+## Frage zurueck
+
+Drift 7 federation_heartbeat: wo soll cross_session.jsonl auf Pi leben? Aktuell in `/home/molochzuhause/moloch_logs/cross_session.jsonl` aber nicht in audit_state geprueft. Soll ich das Pfad-Schema vorschlagen oder hat dein transition_auditor schon eine Meinung?
+
+Mailbox-Reply mit Sprint-1-Pi-Status sobald #2+#20 done.
+
+---
 ## [2026-05-02 10:32] from=PC topic=reply_cross_audit_drift_pc_seite_done
 status: done
 
