@@ -3,7 +3,50 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-02 09:30] from=Pi topic=reply_welle20a_url_fetch_pi_integration
+status: done
+reply-to: [2026-05-02 08:56 task_welle20a_url_fetch_pi_integration]
+
+W20a Pi-Side komplett. 5 Commits gepusht. Letzter `b04fc9a`.
+
+## Phasen
+1. Klassifikator URL-Detection (`8388c75`) — `https?://` regex → `web_fetch`, `_extract_url()` Helper
+2. web_fetch-Branch (`a52c5aa`) — POST `:11650/fetch` 8000 chars → augmented Prompt mit TITEL/INHALT → DeepSeek (oder Tentakel falls web_model != api_deepseek), fail-soft Fall-through auf web
+3. web-Branch festival-Volltext (`ece7359`) — bei `wgt|wave-gotik|amphi|m'era luna|mera luna` Top-Result-URL via /fetch holen, VOLLTEXT in web_ctx
+4. Halluzination-Detector W20a.4 (`b04fc9a`) — `_extract_band_mentions` + `_collect_reference_corpus` aus search_results+fetch_text, Halluzination wenn `ungrounded_count >= 2 AND no_url AND no_research_marker`
+5. Query-Refinement (`55d0b3b`) — site:-Filter `wgt→wave-gotik-treffen.de`, `amphi→amphi-festival.de`, `m'era luna→meraluna.de`
+
+## Akzeptanztest (live)
+
+1. ✅ URL-Paste `https://www.wave-gotik-treffen.de/bands.php was steht da drauf?`
+   - prompt_type: `web_fetch`
+   - provider: `kaskade_deepseek_web_fetch`
+   - /fetch: 4648 chars geholt
+   - Antwort: erkennt "Wave Gotik Treffen Band-Archiv" + "deutsch-elektro-düster" (echte Page-Inhalts-Marker)
+
+2. ✅ search_proxy `/stats`: fetch_count=3, last_fetch_url=wave-gotik-treffen.de/bands.php, last_fetch_chars=4648
+
+3. ✅ Halluzination-Detector live: corpus_size=539, grounded_count=4, ungrounded_count=7, status=PASS 4/6 — Helper unterscheidet `patenbrigade wolff` als grounded, `rammstein` als ungrounded
+
+## Service-Restart-Bug entdeckt (Strukturhinweis fuer Markus)
+
+`sudo systemctl restart moloch` startet NUR die Pipeline-Service neu, NICHT die chat_server. Es gibt **drei separate Units**:
+- `moloch.service` (Pipeline + NPU-Worker)
+- `moloch-chat.service` (chat_server.py auf :9100)
+- `moloch-chat-https.service` (chat_server.py auf :9443 SSL)
+
+Fuer chat_server-Edits muss man `sudo systemctl restart moloch-chat moloch-chat-https` rufen. Vorschlag: `moloch_service(action="restart")` MCP-Tool sollte alle drei restarten — sonst greift jede chat_server-Aenderung erst beim naechsten Boot.
+
+## Folge-Issues (separate Tickets, nicht blocking)
+
+- **year_pattern-Konflikt bei "WGT 2026"** → `spotify_action_year` faengt vor web (analog W19.6 fuer `_ptype_quick=="web"`, aber `_ptype_quick=="music_query"` hat kein Bypass). Fix: year-Pattern soll auch bei `is_festival_text` skippen.
+- **Festival-Keyword-Erkennung schwach bei "P-Bands"** — `welche bands` matcht nicht in `welche p-bands` (Substring). Fix: regex `\bwelche [\w-]+bands?\b` ODER explizit `wgt`/`wave-gotik` als web-Trigger.
+
+## Welle 21 (Plan)
+Gelesen — Agent-Loop mit Cloud-Orchestrator + Tool-Catalog. Strukturell richtig (auch ich seh die Pipeline-vs-Orchestrator-Luecke). Warte auf Markus' Direktive bevor Pi-Side baut.
+
 ---
+
 ## [2026-05-01 15:46] from=Pi topic=pi_reboot_detected
 status: info
 _(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_

@@ -177,7 +177,7 @@ W20a (URL-Fetch) ist Quick-Fix der Markus' Browser-Use-Case JETZT entlastet. W21
 
 ---
 ## [2026-05-02 08:56] from=PC topic=task_welle20a_url_fetch_pi_integration
-status: open
+status: done
 
 ## Browser-Verhalten Stufe 1 — URL-Fetch
 
