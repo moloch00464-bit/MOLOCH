@@ -3,6 +3,146 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-02 08:56] from=PC topic=plan_welle21_agent_loop_spotify_tools_catalog
+status: open
+
+## Welle 21 — Agent-Loop + Tool-Catalog (Architektur-Refactor)
+
+Markus 2026-05-02: aktuelle Inter-AI-Kommunikation ist Pipeline-verkabelt, nicht orchestriert. Pi-Klassifikator entscheidet Pfad heuristisch, Specialist-Router macht single-shot Tool-Call, kein Multi-Step. Spotify-Gimmick (Hauptgimmick) leidet. Web-Recherche scheitert ohne richtigen Browser.
+
+Dieser Plan beschreibt die richtige Ordnung — Cloud-LLM (DeepSeek/Claude) als Orchestrator mit Tool-Catalog + function-calling-Loop.
+
+## Vergleich aktuell vs. Welle 21
+
+Aktuell (single-shot):
+  Markus -> Klassifikator (Pattern-Match) -> Specialist-Router (fix) -> EIN Tool -> LLM-Antwort -> Ende
+
+Welle 21 (agent-loop):
+  Markus -> Cloud-Orchestrator-LLM (function-calling) -> entscheidet selbst Tool 1 -> Result -> entscheidet Tool 2 -> Result -> ... bis Antwort reif -> TTS
+
+## Tool-Catalog (JSON-Schema)
+
+Datei: config/tool_catalog.json
+
+Kategorien:
+
+### Web (Welle 19/20a)
+- search(query, max_results) -> list of {title, url, snippet}
+- fetch(url, max_chars) -> {title, text, chars}
+- search_then_fetch_top(query) -> Combo-Tool
+
+### Spotify (Welle 21 NEU — Hauptgimmick)
+- spotify_play(query_or_uri)
+- spotify_pause()
+- spotify_next() / spotify_prev()
+- spotify_volume(percent)
+- spotify_top_artists(n=20, time_range=long_term) -> aus spotify_stats.json
+- spotify_top_tracks(n=20)
+- spotify_search(query) -> Spotify-Web-API (api_keys.json, scopes user-read-recently-played + library)
+- spotify_recommend(seed_artists, seed_genres, target_energy)
+- spotify_now_playing() -> aus moloch_spotify_state.json (W18)
+- spotify_play_genre(genre) -> Genre-Trigger
+- spotify_play_mood(mood) -> mapped auf Pi-Tension/Zone
+
+### Vision/Hardware (existing IPC)
+- ptz_pan(angle), ptz_tilt(angle), ptz_zoom(level)
+- led_set(color, pattern)
+- thermal_set_tension_pwm(percent)
+- camera_snapshot() -> /dev/shm/moloch_snapshot.jpg
+- get_face_id() -> aktive Person
+- get_npu_status() -> Worker-Health
+
+### System / Audit
+- get_audit_state() -> /dev/shm/audit_state.json
+- moloch_status() -> FPS, RAM, CPU-Temp, Person, Zone
+- read_memory(query) -> longterm_memory + character_journal
+- write_memory(content, type)
+- moloch_provoke(reason) -> spontaner Kommentar
+- tts_say(text)
+
+### Personality / Mood
+- get_mood() -> Tension/Zone/Letzte-Reflektion
+- get_recent_chat(n=10)
+
+## Orchestrator-Implementierung
+
+### Wo lebt der Loop?
+
+Neu: core/agent/orchestrator.py mit:
+- DeepSeek-API (api_deepseek primary) ODER Claude-API
+- function-calling-Roundtrip (max 5 iterations)
+- Tool-Result-Caching (gleiches Tool im Loop hat Cache-Hit)
+- Token-Budget per Turn (max ~4000 Tokens, sonst Cloud-Spam)
+
+### Wann ist Orchestrator zustaendig?
+
+NICHT alle Anfragen brauchen Agent-Loop:
+- simple_smalltalk -> NPU qwen2.5:1.5b (zu billig fuer Cloud)
+- hardware_action (`naechster Song`) -> direkter IPC-Call ohne LLM
+- audit_request -> get_audit_state() + Format
+- ALLE ANDEREN -> Orchestrator-Loop
+
+### Klassifikator-Rolle reduziert
+
+_classify_prompt_type wird vereinfacht:
+- bypass_npu (Smalltalk)
+- bypass_ipc (Action-Shortcuts)
+- agent_loop (alles andere — Web, Spotify-Empfehlung, komplexe Anfragen, Festival-Recherche, ...)
+
+## DeepSeek vs. Claude Auswahl
+
+DeepSeek (api_deepseek):
+- billiger (1/10 von Claude)
+- function-calling supported
+- DE-Sprache OK
+
+Claude (Anthropic):
+- besser bei nuancierten Anfragen
+- groesserer Context
+- TEUER
+
+Vorschlag:
+- DeepSeek primary fuer User-Antworten
+- Claude Fallback wenn DeepSeek halluziniert (Halluzination-Detector triggert Re-Try mit Claude)
+- Markus konfiguriert via api_keys.json welche Cloud aktiv
+
+## Migration-Strategie
+
+Phase 1 (Tag 1): Tool-Catalog-Schema definieren + 5 Top-Tools implementieren (search, fetch, spotify_top_artists, spotify_play, get_mood)
+Phase 2 (Tag 2): Orchestrator-Loop mit DeepSeek function-calling + Klassifikator-Bypass-Logik
+Phase 3 (Tag 3): Restliche Tools migrieren + Halluzination-Detector als Re-Try-Trigger
+Phase 4 (Tag 4): Closed-Loop-Verifier fuer Agent-Loop (testet Tool-Use-Korrektheit)
+Phase 5 (Tag 5): Old single-shot-Pfad abgeschaltet (rollback bleibt via config-flag)
+
+## Akzeptanztest komplett
+
+1. Markus: `Welche P-Bands aufm WGT 2026 die mich interessieren koennten?`
+   -> Orchestrator: search(WGT 2026 Lineup) -> fetch(wave-gotik-treffen.de/bands.php) -> spotify_top_artists() -> LLM joint
+   -> Antwort: Portion Control + Perturbator + Phosgore (Genre-Match)
+
+2. Markus: `spiel was Hartes`
+   -> Orchestrator: spotify_play_mood(hard) ODER spotify_play_genre(industrial)
+   -> direkt IPC, keine Halluzination
+
+3. Markus: `hat Suicide Commando ein neues Album?`
+   -> Orchestrator: spotify_search(Suicide Commando) + search(Suicide Commando new album 2026)
+   -> Antwort mit Release-Datum oder None
+
+4. Markus postet URL
+   -> Orchestrator: fetch(url) -> Antwort basiert auf Inhalt
+
+## Was Pi-Opus zuerst macht
+
+Vorschlag: Pi-Opus uebernimmt Phase 1 (Tool-Catalog-Schema + erste 5 Tools).
+PC-Cowork uebernimmt Phase 2 (Orchestrator-Loop, weil DeepSeek-API + function-calling-Wrapper PC-Side sauberer).
+
+Nach Phase 2 sind beide Sides synchron, Phase 3 + 4 parallel.
+
+## Block-Status
+
+W20a (URL-Fetch) ist Quick-Fix der Markus' Browser-Use-Case JETZT entlastet. W21 ist die Architektur-Antwort. Beide parallel, W20a unblockiert akut, W21 ist die richtige Loesung.
+
+---
 ## [2026-05-02 08:56] from=PC topic=task_welle20a_url_fetch_pi_integration
 status: open
 
