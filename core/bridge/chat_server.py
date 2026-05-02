@@ -1372,7 +1372,19 @@ def chat(req: ChatRequest):
             # 2. Year-Filter Shortcut — Welle 19.6: web-prompt hat Vorrang
             # vor spotify_action_year (Pattern-Konflikt-Fix: "WGT 2026" darf
             # nicht als Year-Filter triggern, wenn web-Klassifikator greift)
-            _ymatch = _YEAR_RE.search(req.text) if _ptype_quick != "web" else None
+            # W20a-A1: zusaetzlich Festival-Vorpruefung — wenn Festival-Keyword
+            # im Text, year-Pattern ueberspringen unabhaengig von _ptype_quick
+            # (greift fuer music_query-Klassifizierung wie "WGT 2026 lineup",
+            # die nicht als web durchschluepft).
+            _FESTIVAL_KEYWORDS_FOR_YEAR_BYPASS = (
+                "wgt", "wave-gotik", "amphi", "m'era luna", "mera luna", "mera-luna",
+            )
+            _is_festival_text = any(
+                k in req.text.lower() for k in _FESTIVAL_KEYWORDS_FOR_YEAR_BYPASS
+            )
+            _ymatch = (_YEAR_RE.search(req.text)
+                       if (not _is_festival_text and _ptype_quick != "web")
+                       else None)
             if _ymatch:
                 _year = int(_ymatch.group(1))
                 if _trigger_spotify_year(_year):
