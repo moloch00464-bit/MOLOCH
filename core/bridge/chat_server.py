@@ -1405,6 +1405,59 @@ def chat(req: ChatRequest):
         out = b.reason_internal(req.text)
     else:
         prompt_type = _classify_prompt_type(req.text) if not req.force_local else None
+        # Welle 20a: Specialist-Router fuer prompt_type=web_fetch — User
+        # pastet URL -> /fetch holt page-content (BeautifulSoup) -> LLM
+        # antwortet basierend auf TITEL/INHALT. Fail-soft: kein /fetch-Erfolg
+        # -> Fall-through auf web-Branch (Search-Proxy).
+        if prompt_type == "web_fetch" and not req.force_local:
+            url = _extract_url(req.text)
+            fetched = None
+            if url:
+                try:
+                    fr = requests.post(
+                        "http://192.168.178.20:11650/fetch",
+                        json={"url": url, "max_chars": 8000},
+                        timeout=25,
+                    )
+                    if fr.ok:
+                        fetched = fr.json()
+                        logger.info(
+                            f"[W20a] /fetch {url} -> {fetched.get('chars', 0)} chars, "
+                            f"cached={fetched.get('cached', False)}"
+                        )
+                    else:
+                        logger.warning(f"[W20a] /fetch status={fr.status_code} url={url}")
+                except Exception as e:
+                    logger.warning(f"[W20a] /fetch error: {e}")
+            if fetched and fetched.get("text"):
+                question = req.text.replace(url, "").strip() if url else req.text
+                if not question:
+                    question = "Was steht auf dieser Seite?"
+                augmented = (
+                    f"URL: {fetched.get('url', url)}\n"
+                    f"FINAL_URL: {fetched.get('final_url', url)}\n"
+                    f"TITEL: {fetched.get('title', '')}\n"
+                    f"INHALT:\n{fetched.get('text', '')}\n\n"
+                    f"FRAGE: {question}\n\n"
+                    f"Antworte basierend auf den TITEL/INHALT oben. "
+                    f"Erfinde nichts — wenn die Antwort nicht im Text steht, sag das."
+                )
+                cfg = _load_tentacle_cfg() or {}
+                web_model = (cfg.get("web_model") or "").strip()
+                if web_model == "api_deepseek":
+                    logger.info("[W20a] web_fetch -> DeepSeek-Cloud (api_deepseek)")
+                    out = b._generate_deepseek(augmented, "", 600)
+                else:
+                    logger.info(f"[W20a] web_fetch -> Tentakel (model={web_model or 'default'})")
+                    out = b.ask_external(augmented, force_local=False,
+                                         force_tentacle=False,
+                                         prompt_type="web_research")
+            else:
+                # Fail-soft: kein URL gefunden ODER /fetch fehlgeschlagen
+                # -> Fall-through zum web-Branch (Search-Proxy)
+                logger.warning(f"[W20a] web_fetch fail-soft auf web (url={url})")
+                prompt_type = "web"
+
         # Welle 19: Specialist-Router fuer prompt_type=web — Search-Proxy
         # davorschalten + LLM mit echten WEB-RESULTS augmentieren.
         # Modell-Resolve via tentacle_llm.web_model. Fail-soft: Search-Proxy-
