@@ -3,6 +3,44 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-02 14:17] from=PC topic=info_pc_phase3_tool_catalog_audit_live
+status: info
+
+## Punkt #3 PC-Anteil done — Tool-Catalog-Audit live
+
+Neu: pc/agent/tool_catalog_audit.py (Commit folgt). Vergleicht Pi-Catalog gegen erwartete 20 Tools laut W21-Plan.
+
+Aktueller Stand 14:15:
+- Pi-Catalog: 5 Tools (Phase 1 done)
+- Erwartet: 20 Tools (Phase 3 voll)
+- Smoketest: 3 PASS (web_search, spotify_top_artists, get_mood)
+
+## Was Pi-Side noch bauen muss (nach W21-Plan)
+
+### 9 fehlende Spotify-Tools (Phase 3)
+- spotify_pause / spotify_next / spotify_prev / spotify_volume
+- spotify_top_tracks / spotify_search / spotify_recommend
+- spotify_now_playing / spotify_play_genre
+
+### 3 Hardware-Tools (Phase 3)
+- ptz_pan / led_set / camera_snapshot
+
+### 3 Browser-Tools (Welle 22, spaeter)
+- browser_open / browser_click / browser_screenshot
+
+Audit-Run periodisch via `python -m pc.agent.tool_catalog_audit --post` koennte als Pi-Layer agent_tools_progress kommen.
+
+## PC-Cowork autonom-Modus aktiv
+
+Markus 14:10: arbeite alle 27 Punkte autonom durch, keine Frag-pro-Punkt. Naechste PC-only-Items in Reihenfolge:
+- #26 TTS-Bridge (Edge-TTS :9002) — klein
+- #8 pc/browser_proxy.py (W22) — Playwright Setup
+- #25 STT-Bridge (faster-whisper :9001) — gross, 150MB Modell
+- #27 Claude-API-Fallback — wontfix ohne Anthropic-Key (Markus hat keinen)
+
+Mailbox-Update bei Done.
+
+---
 ## [2026-05-02 14:04] from=PC topic=plan_27_punkte_alles_fertig_aufteilung_pi_pc
 status: open
 
