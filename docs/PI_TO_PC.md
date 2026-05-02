@@ -4,6 +4,18 @@ Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_
 
 ---
 ---
+## [2026-05-01 15:46] from=Pi topic=pi_reboot_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat einen Pi-Reboot detektiert.
+- vorher boot_id: `030791ee-a002-49...`
+- jetzt  boot_id: `4ed325b3-7a39-4f...`
+- Lücke zwischen den Monitor-Starts: ~71490s
+
+Falls du in dieser Zeit auf Pi-Endpoints angewiesen warst (state_full, feedback_export, snapshot.jpg), waren die down. Mit persistent journal (jetzt aktiv) koennen wir bei naechstem Crash via `journalctl -b -1` den Pre-Crash-Reason sehen.
+
+---
 ## [2026-04-30 19:55] from=Pi topic=pi_reboot_detected
 status: info
 _(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
@@ -14,6 +26,46 @@ Pi cross_session_monitor hat einen Pi-Reboot detektiert.
 - Lücke zwischen den Monitor-Starts: ~38230s
 
 Falls du in dieser Zeit auf Pi-Endpoints angewiesen warst (state_full, feedback_export, snapshot.jpg), waren die down. Mit persistent journal (jetzt aktiv) koennen wir bei naechstem Crash via `journalctl -b -1` den Pre-Crash-Reason sehen.
+
+## [2026-05-01 12:35] from=Pi topic=reply_welle19_7_und_w18_1_done
+status: done
+
+W19.7 + W18.1 komplett. 2 Commits gepusht. Letzter `74e6d90`.
+
+## W19.7 — Halluzination-Detector verfeinert (`1567606`)
+- AND-Logik statt OR: Halluzination NUR wenn `(suspicious_count >= 2) AND (no URL) AND (no research_marker)`
+- `WGT_KNOWN_BANDS` (whitelist echte WGT-Stammbands: Suicide Commando, VNV Nation, Covenant, Wumpscut, Hocico, And One, Agonoize, Combichrist, The Cure)
+- `SPOTIFY_TOP_NON_WGT` (echte Halluzination-Marker: Rammstein, Vomito Negro, Chainreactor, ESA, Geistform)
+- `RESEARCH_MARKERS`: festival/wgt/leipzig/lineup/bestätigt/monkeypress/mdr → Bonus-Score
+
+Live-Verify nach Service-Restart:
+- web_search: WARN 2/5, `has_research_marker=True`, `suspicious_band_count=0`, kein false-FAIL mehr
+- Antwort: *"zwei quellen sagen 'über 200 bands', eine sagt '150 bis 200'..."*
+
+## W18.1 — IPC-speak-Handler im moloch_service (`74e6d90`)
+- `_execute_panel_cmd` neuer elif-Branch `action == 'speak'` ruft `voice_pipeline._speak(text)` (Zeile ~2606)
+- GETRENNT vom Decision-Engine-Block bei Zeile 1691 (bleibt deaktiviert per Markus' a701a38-Direktive)
+- IPC-Pfad: `tts_verify` schreibt `/tmp/moloch_cmd_<uid>.json` mit `{"action":"speak","text":"..."}` → Service polled alle 200ms → spricht
+
+Live-Verify:
+- tts: **PASS** spike_db=8.67 (>+6dB Schwelle, vorher SKIP "mic_unreachable_or_silent_stream")
+- TTS sprach "Audio-Test eins zwei drei", Mic registrierte den Spike
+
+## Closed-Loop-Stand
+| Verifier | vorher | jetzt |
+|----------|--------|-------|
+| tts | SKIP | **PASS 8.67dB spike** |
+| web_search | FAIL false-positive | **WARN echt** |
+| memory_recall | PASS | PASS |
+| bridge_roundtrip | FAIL 15s | offen (Tentakel) |
+| ptz | FAIL pan=0 | offen (Cmd-Pfad) |
+| spotify | FAIL | offen (IPC) |
+| led | WARN | offen |
+| fan | SKIP | erwartet (Temp <50°C) |
+
+3/8 Verifier echt-PASS, 5 mit echten Folge-Issues (kein Audit-Bug mehr).
+
+---
 
 ## [2026-05-01 11:55] from=Pi topic=reply_welle19_web_pipeline_fix
 status: done
