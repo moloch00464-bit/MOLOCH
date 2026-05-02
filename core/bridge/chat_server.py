@@ -251,6 +251,12 @@ def _is_code_query(text: str, text_low: str) -> bool:
     return any(stripped.startswith(p) for p in _CODE_TOKEN_PREFIXES)
 
 
+def _extract_url(text: str) -> Optional[str]:
+    """Welle 20a: extrahiert erste URL aus user_query (oder None)."""
+    m = re.search(r'https?://[^\s]+', text)
+    return m.group(0) if m else None
+
+
 def _get_pi_mood_label() -> str:
     """Kurzes 'zone/tension'-Label fuer Cockpit-Badge (PC chat_ui)."""
     try:
@@ -289,6 +295,9 @@ def _classify_prompt_type(text: str) -> str:
     if _is_hardware_query(text):
         return "hardware_status"
     text_low = text.lower()
+    # Welle 20a: URL-Erkennung — hoechste Prioritaet fuer Web-Fetch-Pfad
+    if re.search(r'https?://[^\s]+', text):
+        return "web_fetch"
     # Welle 19: web (Live-Recherche) MUSS vor music_query — sonst faengt
     # music_query Phrasen wie "wer spielt aufm WGT" als Musik-Trigger ab.
     if _is_web_live_query(text_low):
