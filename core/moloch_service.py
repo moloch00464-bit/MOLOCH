@@ -2604,6 +2604,20 @@ class MolochService:
                     logger.warning(f"[IPC] wifi_software_gain Fehler: {e}")
             logger.info(f"[IPC] Audio: gain={self._saved_mic_gain:.2f}, "
                         f"gate={self._saved_noise_gate:.0f}dB, agc={self._saved_agc}")
+        elif action == 'speak':
+            # W18.1: Externer IPC-speak fuer Tests (z.B. tts_verify Closed-Loop).
+            # NICHT der Decision-Engine-Speak (Z. ~1691) — der bleibt deaktiviert.
+            text = (cmd.get('text') or '').strip()
+            if not text:
+                logger.warning("[IPC] speak: leerer text — ignoriert")
+            elif self._voice_pipeline and hasattr(self._voice_pipeline, '_speak'):
+                try:
+                    self._voice_pipeline._speak(text)
+                    logger.info(f"[IPC] speak: {text[:80]}")
+                except Exception as e:
+                    logger.warning(f"[IPC] speak Fehler: {e}")
+            else:
+                logger.warning("[IPC] speak: voice_pipeline nicht verfuegbar")
         elif action == 'mic_test':
             # WiFi-Mic: 3s Audio aus Ringpuffer aufnehmen, als WAV speichern
             duration_s = float(cmd.get('duration', 3.0))
