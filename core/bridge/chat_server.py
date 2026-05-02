@@ -2641,6 +2641,26 @@ def mailbox_audit_state():
         raise HTTPException(500, f"audit_state Read-Fehler: {e}")
 
 
+@app.get("/audit/transition")
+def audit_transition_layer():
+    """Liefert audit_state.layers.transition direkt (PC-Side-Convenience-Read).
+
+    PC's web_pipeline_auditor und cross-audit-drift-Discussion brauchen den
+    7-Kanaele-Layer ohne den ganzen audit_state-Blob lesen zu muessen.
+    """
+    try:
+        with open("/dev/shm/audit_state.json", "r", encoding="utf-8") as f:
+            state = json.load(f)
+        layer = (state.get("layers") or {}).get("transition", {})
+        if not layer:
+            return {"status": "PENDING", "alive_count": 0, "channels": {},
+                    "error": "transition_layer_missing"}
+        return layer
+    except Exception as e:
+        return {"status": "FAIL", "alive_count": 0, "channels": {},
+                "error": f"read_failed:{str(e)[:200]}"}
+
+
 @app.post("/mailbox/audit/{component}")
 def mailbox_audit_post(component: str, payload: Dict):
     """Welle 8: Receiver fuer PC- und Persona-Layer-Updates.
