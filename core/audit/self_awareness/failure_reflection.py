@@ -249,16 +249,16 @@ def _make_reflections_de(incidents: List[Dict[str, Any]],
 
 
 def _compute_status(total_incidents: int) -> Tuple[int, int, str]:
-    """PASS <3, WARN 3-10, FAIL >10 (Auftrag W17).
+    """PASS <5, WARN 5-19, FAIL >=20 (Bug #18: 10 incidents heute sind aktive Entwicklung).
 
-    Score wird auf max=10 gecappt damit das Audit-Schema (score<=max)
-    nicht verletzt wird. Bei >10 Incidents ist der Status ohnehin FAIL —
+    Score wird auf max=20 gecappt damit das Audit-Schema (score<=max)
+    nicht verletzt wird. Bei >=20 Incidents ist der Status ohnehin FAIL —
     die genaue Anzahl steckt in detail.events_in_window.
     """
-    max_s = 10
-    if total_incidents > max_s:
+    max_s = 20
+    if total_incidents >= max_s:
         return max_s, max_s, "FAIL"
-    if total_incidents >= 3:
+    if total_incidents >= 5:
         return total_incidents, max_s, "WARN"
     return total_incidents, max_s, "PASS"
 
