@@ -37,8 +37,10 @@ logger = logging.getLogger("web-pipeline-auditor")
 SEARCH_PROXY_URL = "http://localhost:11650"
 PI_AUDIT_ENDPOINT = "http://192.168.178.30:9100/mailbox/audit/web_search"
 TEST_QUERY = "Wave Gotik Treffen Leipzig 2026 Lineup"
+TEST_FETCH_URL = "https://www.wave-gotik-treffen.de/bands.php"  # WGT-Bands-Liste
 LOOP_INTERVAL_S = 300  # 5 min
 HTTP_TIMEOUT_S = 15
+FETCH_TIMEOUT_S = 25
 
 # Audit-relevant: ist last_call zu lang her -> Pi-Routing dead (kein Web-Routing)
 STALE_THRESHOLD_SEC = 3600  # 1h ohne /search-Call = Routing wahrscheinlich kaputt
@@ -89,6 +91,34 @@ def _check_e2e_search() -> tuple[bool, Dict[str, Any]]:
         return False, {"error": str(e)[:120]}
 
 
+def _check_e2e_fetch() -> tuple[bool, Dict[str, Any]]:
+    """Welle 20a: testet /fetch Endpoint mit WGT-Bands-Liste."""
+    try:
+        r = requests.post(
+            f"{SEARCH_PROXY_URL}/fetch",
+            json={"url": TEST_FETCH_URL, "max_chars": 6000},
+            timeout=FETCH_TIMEOUT_S,
+        )
+        if r.status_code != 200:
+            return False, {"error": f"HTTP {r.status_code}"}
+        data = r.json()
+        text = data.get("text", "")
+        chars = data.get("chars", 0)
+        # Sanity: WGT-bands-Seite muss "Wave-Gotik" oder typische Band-Namen enthalten
+        ok_marker = ("Wave-Gotik" in text) or ("Lacrimosa" in text) or ("Suicide Commando" in text)
+        ok = chars > 500 and ok_marker
+        return ok, {
+            "chars": chars,
+            "title": data.get("title", "")[:80],
+            "duration_ms": data.get("duration_ms"),
+            "cached": data.get("cached"),
+            "marker_found": ok_marker,
+            "text_snippet": text[:200] if text else None,
+        }
+    except Exception as e:
+        return False, {"error": str(e)[:120]}
+
+
 def collect() -> Dict[str, Any]:
     """Audit-Sub-Auditor Pattern. Returns {score, max, status, detail}."""
     detail: Dict[str, Any] = {}
@@ -128,11 +158,18 @@ def collect() -> Dict[str, Any]:
     else:
         detail["stats"] = stats_data
 
-    # Layer 3: End-to-End Test
+    # Layer 3: End-to-End Search
     total += 1
     e2e_ok, e2e_data = _check_e2e_search()
     detail["e2e_search"] = e2e_data
     if e2e_ok:
+        score += 1
+
+    # Layer 4: End-to-End Fetch (Welle 20a)
+    total += 1
+    fetch_ok, fetch_data = _check_e2e_fetch()
+    detail["e2e_fetch"] = fetch_data
+    if fetch_ok:
         score += 1
 
     # Status-Mapping
