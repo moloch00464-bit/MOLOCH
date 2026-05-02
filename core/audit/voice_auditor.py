@@ -48,9 +48,11 @@ def collect() -> Dict[str, Any]:
         detail["voice_import_error"] = str(e)[:120]
 
     # 2. WiFiMic singleton (L0, best-effort, KEINE Auto-Init falls noch nicht da)
+    # Hinweis: Auditor laeuft als separater Prozess - In-Process-Singleton ist
+    # IMMER None. Echte Singleton-Health kommt aus status.json (Schritt 3),
+    # das vom Service-Prozess geschrieben wird (connected_16k + packets_recv_16k).
     try:
         import core.audio.wifi_mic as _wm  # type: ignore
-        # Pruefen ob bereits Instanz existiert (kein neuer Init)
         existing = getattr(_wm, "_instance", None) or getattr(
             _wm, "_wifi_mic_singleton", None
         )
@@ -64,8 +66,7 @@ def collect() -> Dict[str, Any]:
                     mic_pegel_age_s = max(0.0, time.time() - last_recv)
             except Exception as ee:
                 detail["wifi_mic_state_error"] = str(ee)[:100]
-        else:
-            detail["wifi_mic_singleton_initialised"] = False
+        # singleton_initialised wird in Schritt 3 aus status.json bestaetigt
     except Exception as e:
         detail["wifi_mic_import_error"] = str(e)[:120]
 
@@ -94,6 +95,17 @@ def collect() -> Dict[str, Any]:
                 # Ohne Singleton: Pegel-Age aus connected_16k true ableiten
                 if mic_pegel_age_s == 99999.0 and wm.get("connected_16k"):
                     mic_pegel_age_s = 0.0
+                # Cross-Process-Singleton-Beweis: status.json wird vom
+                # Service-Prozess geschrieben - wenn da packets_recv > 0
+                # UND connected_16k true ist, lebt die Singleton dort.
+                try:
+                    if wm.get("connected_16k") and int(
+                        wm.get("packets_recv_16k", 0) or 0
+                    ) > 0:
+                        wifi_mic_alive = True
+                        detail["wifi_mic_singleton_initialised"] = True
+                except (TypeError, ValueError):
+                    pass
             # voice_enabled / current_voice / piper_available
             detail["voice_enabled"] = bool(voice.get("voice_enabled"))
             detail["piper_available"] = bool(voice.get("piper_available"))
