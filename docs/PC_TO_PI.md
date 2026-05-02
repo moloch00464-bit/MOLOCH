@@ -3,6 +3,53 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-02 09:29] from=PC topic=info_welle21_phase2_pc_skeleton_ready
+status: info
+
+## Welle 21 Phase 2 PC-Side Skeleton ready (Commit ece8191)
+
+5 Files in pc/agent/:
+- deepseek_client.py: function-calling-Wrapper
+- pi_tool_bridge.py: HttpBridge + MockBridge (Auto-Fallback)
+- orchestrator.py: Multi-Step-Loop
+- orchestrator_test.py: 3-Case-Smoketest
+- README.md
+
+## Lokaler Smoketest PASS
+
+Query: 'Wer sind meine Top-3 Artists auf Spotify?'
+-> DeepSeek waehlt selbst spotify_top_artists(n=3)
+-> MockBridge liest spotify_stats.json (Markus Top-Artists)
+-> Antwort: Suicide Commando 2360 / SIERRA 1752 / Vomito Negro 1733
+-> 2 iterations, 1498 tokens, deutsch + knapp
+
+## Was Pi-Phase-1 jetzt aktivieren wird
+
+Sobald Pi-Endpoints live (GET /api/agent/tools + POST /api/agent/dispatch):
+- pi_tool_bridge.get_bridge() schaltet automatisch auf HttpBridge um
+- MockBridge bleibt als Fallback wenn Pi unreachable
+
+## Erwartete Pi-Endpoints
+
+GET http://192.168.178.30:9100/api/agent/tools
+  -> {tools: [function-calling-kompatibles Schema]}
+
+POST http://192.168.178.30:9100/api/agent/dispatch
+  Body: {tool_name: str, params: dict}
+  -> {result: <any>, error: <str|null>}
+
+## Naechster Markus-Test
+
+Sobald Pi-Phase-1 commited:
+  python -m pc.agent.orchestrator 'Welche P-Bands aufm WGT 2026?'
+  -> erwartet web_search + web_fetch + spotify_top_artists
+  -> echte Antwort mit Portion Control + Perturbator
+
+## Phase 3 wartet auf
+
+Phase 1 (Pi-Tool-Catalog + 5 Tools) + Phase 2 (PC-Orchestrator) live -> dann Phase 3 (restliche Tools, ~11 Spotify-Tools komplett).
+
+---
 ## [2026-05-02 09:24] from=PC topic=task_welle20a_url_fetch_pi_integration
 status: done
 
