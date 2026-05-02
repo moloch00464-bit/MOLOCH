@@ -173,11 +173,14 @@ def moloch_snapshot() -> str:
 
 # W20a-A3: alle 3 systemd-Units gemeinsam steuern (Pipeline + chat HTTP + chat HTTPS)
 SERVICE_UNITS = ["moloch", "moloch-chat", "moloch-chat-https"]
-# W20a Folge-Issue: https-Init braucht >30s wegen SSL-Cert
+# W20a Folge-Issue: https-Init braucht >30s wegen SSL-Cert.
+# 2026-05-02 (PC-Mailbox 15:04): 60s war manchmal zu kurz fuer SSL-Cert-Init
+# (mkcert + Cert-Reload + uvicorn-Bind). Erhoeht auf 120s — kein Risiko, da
+# subprocess.run nur den Worst-Case-Bound setzt; normale Restarts sind <10s.
 SERVICE_TIMEOUTS = {
     "moloch": 30,
     "moloch-chat": 30,
-    "moloch-chat-https": 60,  # SSL-Cert-Init
+    "moloch-chat-https": 120,
 }
 DEFAULT_SERVICE_TIMEOUT = 30
 
