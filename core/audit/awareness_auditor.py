@@ -9,9 +9,12 @@ Schreibt audit_state.layers.awareness:
    score, max, status, detail}
 
 Status-Logik:
-- PASS: state in {alone, working, conversation, party}, recent
+- PASS: state in {alone, working, conversation, party, away}, recent
 - WARN: state=away laenger als 24h ODER stale >5min
 - FAIL: module nicht importierbar
+
+Idle-Toleranz #11: away ist legitimer Idle-State (Markus nicht im Bild).
+Erst nach 24h ohne Update wird's WARN.
 """
 from __future__ import annotations
 
@@ -31,7 +34,11 @@ _HEALTHY_ACTIVITIES = {
     "party",
     "watching",
     "reading",
+    "away",  # #11: away ist legitimer Idle-State (Markus nicht im Bild)
 }
+
+# Schwelle: away laenger als 24h gilt als zu-lange-stale -> WARN
+_AWAY_MAX_AGE_S = 24 * 3600.0
 
 
 def collect() -> Dict[str, Any]:
@@ -139,13 +146,18 @@ def collect() -> Dict[str, Any]:
     stale = (
         last_publish_age_s != 99999.0 and last_publish_age_s > 300
     )
-    away_long = activity_norm == "away"
+    # #11: away nur WARN wenn laenger als 24h (sonst legitimer Idle-State)
+    away_too_long = (
+        activity_norm == "away"
+        and last_publish_age_s != 99999.0
+        and last_publish_age_s > _AWAY_MAX_AGE_S
+    )
 
     if not activity_alive:
         status = "FAIL"
     elif activity_norm is None:
         status = "FAIL"
-    elif stale or away_long:
+    elif stale or away_too_long:
         status = "WARN"
     elif activity_norm in _HEALTHY_ACTIVITIES:
         status = "PASS"
