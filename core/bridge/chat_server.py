@@ -15,6 +15,8 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 import uuid
 
@@ -1270,10 +1272,62 @@ def health():
     return {"status": "ok", "service": "moloch-chat-server"}
 
 
+# ----------------------------------------------------------------------------
+# C) request_count persistent: ueberlebt moloch-chat Service-Restart.
+# /dev/shm/chat_server_counters.json — atomic write (NEVER 6).
+# Lazy restore beim ersten /status-Read, Persist max 1x/5s (anti-thrash).
+# ----------------------------------------------------------------------------
+_COUNTER_FILE = "/dev/shm/chat_server_counters.json"
+_counter_lock = threading.Lock()
+_counter_loaded = False
+_last_persist_ts = 0.0
+_persist_min_interval = 5.0  # sek — anti Cockpit-Poll-Spam
+
+
+def _load_persisted_counter() -> int:
+    try:
+        with open(_COUNTER_FILE, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        return int(d.get("request_count", 0))
+    except Exception:
+        return 0
+
+
+def _persist_counter(value: int) -> None:
+    """Atomic write via tempfile + os.replace (NEVER 6)."""
+    try:
+        d = os.path.dirname(_COUNTER_FILE)
+        fd, tmp = tempfile.mkstemp(dir=d, prefix="chat_server_counters.", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump({"request_count": int(value), "updated_at": time.time()}, f)
+            os.replace(tmp, _COUNTER_FILE)
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+    except Exception as e:
+        logger.warning(f"[BRIDGE] counter persist Fehler: {e}")
+
+
 @app.get("/status")
 def status():
     b = get_llm_bridge()
     cfg = _load_tentacle_cfg()
+    # Lazy restore: beim ersten /status nach Service-Start File-Counter -> in-process max
+    global _counter_loaded, _last_persist_ts
+    with _counter_lock:
+        if not _counter_loaded:
+            persisted = _load_persisted_counter()
+            if persisted > b._request_count:
+                b._request_count = persisted
+            _counter_loaded = True
+        # Throttled persist (max 1x/5s)
+        now = time.time()
+        if now - _last_persist_ts >= _persist_min_interval:
+            _persist_counter(b._request_count)
+            _last_persist_ts = now
     return {
         "llm_mode": b._llm_mode,
         "ollama_available": b._ollama_available,
