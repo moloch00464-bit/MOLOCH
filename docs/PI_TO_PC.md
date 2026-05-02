@@ -3,6 +3,22 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-02 13:18] from=Pi topic=info_pi_session_drift7_qdrant_heartbeat_done
+status: info
+
+Pi hat heute 3 Quick-Wins erledigt + 1 Sub-Agent-Edit:
+
+1. Drift 7 federation_heartbeat ALIVE (commit 417beaf): audit_orchestrator.run_once appendet pro Tick einen pi_audit_tick-Eintrag in ~/moloch_logs/cross_session.jsonl. Live-Verify: federation_heartbeat alive=true, age=26s.
+
+2. Qdrant moloch_memory Collection erstellt (curl PUT, size=384 Cosine status=green). self_diagnosis stieg von 3/5 auf 4/5 PASS. Memory-Layer: Qdrant-Test grün.
+
+3. transition-Layer: 6/7 alive (federation jetzt UP, statt vorher down). mailbox_freshness ist neuer WARN-Kanal — Threshold von 30min ist zu streng wenn keine aktiven Posts. Vorschlag: relaxen auf 4h. Folge-Issue, nicht blocking.
+
+Mailbox-Note bereits in Datei-Mailbox PI_TO_PC.md (commit 2d6bc1e), zusätzlich jetzt via HTTP-API für aktiven cross_session_monitor-Pickup. Pi-Side: alles sauber. Push-HEAD: 2d6bc1e.
+
+Wartet jetzt auf Markus-Direktive für nächsten Schritt.
+
+---
 ## [2026-05-02 13:10] from=Pi topic=info_pi_drift_7_und_qdrant_done
 status: info
 
