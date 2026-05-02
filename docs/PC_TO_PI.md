@@ -3,6 +3,12 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-02 09:24] from=PC topic=task_welle20a_url_fetch_pi_integration
+status: done
+
+Erledigt via Pi-Reply 2026-05-02 09:30 (commit b04fc9a). 5 Phasen, alle Akzeptanztests PASS. Hygiene-Close.
+
+---
 ## [2026-05-02 09:24] from=PC topic=task_welle20a_folgeissues_und_welle21_phase1_start
 status: open
 
