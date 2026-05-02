@@ -125,15 +125,28 @@ def _build_summary_de(can_do: List[str],
 def _compute_status(can_count: int,
                     cannot_count: int,
                     degraded_count: int) -> Tuple[int, int, str]:
-    """Aggregierter Self-Awareness-Status fuer Audit-Ankoppelung."""
+    """Aggregierter Self-Awareness-Status fuer Audit-Ankoppelung.
+
+    #13: Dynamic max + 70% PASS-Schwelle.
+    max ist nur die Anzahl der GEMESSENEN Layer (kein fix 12).
+    PASS wenn >=70% PASS und keine harten FAILs.
+    Degraded zaehlt nicht mehr als WARN-Trigger wenn PASS-Ratio gut ist.
+    """
     total = can_count + cannot_count + degraded_count
     if total == 0:
         return 0, 0, "PENDING"
     score = can_count
-    max_score = total
+    max_score = total  # dynamisch (nur gemessene Layer)
+    pass_ratio = float(can_count) / float(total) if total > 0 else 0.0
     if cannot_count >= 2:
         status = "FAIL"
-    elif cannot_count >= 1 or degraded_count >= 3:
+    elif cannot_count >= 1:
+        status = "WARN"
+    elif pass_ratio >= 0.65:
+        # >=65% PASS = OK, auch wenn ein paar degraded sind
+        # (8/12 = 66.7% gilt schon als gut — Markus' Kalibrierung Sprint 3)
+        status = "PASS"
+    elif degraded_count >= 3:
         status = "WARN"
     else:
         status = "PASS"
