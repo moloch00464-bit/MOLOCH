@@ -18,12 +18,28 @@ Status-Logik:
 """
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import logging
 from typing import Any, Dict
 
 logger = logging.getLogger("npu_auditor")
+
+STATUS_JSON = "/dev/shm/moloch_status.json"
+
+
+def _read_worker_health_from_status() -> Dict[str, Dict[str, Any]]:
+    """Cross-Process: lese worker_health aus moloch_status.json (RAM-Disk).
+
+    Returns leeres Dict wenn Status-JSON fehlt oder kein worker_health-Feld
+    existiert (Pipeline noch nicht initialisiert).
+    """
+    try:
+        with open(STATUS_JSON, "r") as f:
+            return json.load(f).get("worker_health", {}) or {}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
 
 
 def _hailo_device_present() -> bool:
@@ -67,20 +83,20 @@ def collect() -> Dict[str, Any]:
     warnings = _dmesg_channel_warnings()
     detail["dmesg_channel_warnings"] = warnings
 
-    # 3. Worker-Health aus vision_workers
-    try:
-        from core.perception.vision_workers import get_workers  # type: ignore
-        ws = get_workers() or {}
-        for name, worker in ws.items():
-            if not hasattr(worker, "get_health"):
-                continue
+    # 3. Worker-Health aus moloch_status.json (Cross-Process via RAM-Disk)
+    ws = _read_worker_health_from_status()
+    if not ws:
+        detail["worker_import_error"] = "worker_health_missing_in_status_json"
+    else:
+        # _dispatcher-Eintrag hat Sonderformat (kein Worker, sondern ROI-Stats)
+        dispatcher_stats = ws.pop("_dispatcher", None) if isinstance(ws.get("_dispatcher"), dict) else None
+        for name, h in ws.items():
             try:
-                h = worker.get_health() or {}
                 workers[name] = {
-                    "loaded": bool(h.get("loaded", False)),
+                    "loaded": bool(h.get("models_loaded", h.get("loaded", False))),
                     "running": bool(h.get("running", False)),
-                    "inferences": int(h.get("inferences", 0) or 0),
-                    "errors": int(h.get("errors", 0) or 0),
+                    "inferences": int(h.get("total_inferences", h.get("inferences", 0)) or 0),
+                    "errors": int(h.get("total_errors", h.get("errors", 0)) or 0),
                     "queue": int(h.get("queue_size", h.get("queue", 0)) or 0),
                     "last_ms": float(h.get("last_inference_ms", h.get("last", 0)) or 0),
                 }
@@ -88,20 +104,12 @@ def collect() -> Dict[str, Any]:
                 total_err += workers[name]["errors"]
             except Exception as e:
                 workers[name] = {"error": str(e)[:80]}
-    except Exception as e:
-        detail["worker_import_error"] = str(e)[:100]
 
-    # 4. ROI-Dispatcher (best-effort)
-    try:
-        from core.perception.roi_dispatcher import get_dispatcher  # type: ignore
-        d = get_dispatcher()
-        if d is not None and hasattr(d, "get_stats"):
-            stats = d.get_stats() or {}
-            detail["roi_frames"] = int(stats.get("frames", 0) or 0)
-            detail["roi_dispatched"] = int(stats.get("dispatched", 0) or 0)
-            detail["roi_dropped"] = int(stats.get("dropped", 0) or 0)
-    except Exception:
-        pass
+        # 4. ROI-Dispatcher (aus _dispatcher-Eintrag des Status-JSON)
+        if dispatcher_stats:
+            detail["roi_frames"] = int(dispatcher_stats.get("total_frames", 0) or 0)
+            detail["roi_dispatched"] = int(dispatcher_stats.get("dispatched", 0) or 0)
+            detail["roi_dropped"] = int(dispatcher_stats.get("dropped", 0) or 0)
 
     # 5. Status-Berechnung
     score = 0
