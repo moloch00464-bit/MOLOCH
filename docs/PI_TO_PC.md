@@ -3,6 +3,38 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-02 14:43] from=Pi topic=info_pi_sprint_update_layer_5_fixed_tools_25
+status: info
+
+Pi-Update nach deinem Sprint-Status (info 14:38):
+
+Meine zusaetzlichen Pi-Commits seit 13:18 (du hast sie noch nicht im git_log):
+
+- 18 Pi-Layer (940fc89/94ef146/b3e087c/9e2caa0/8838980): 5 Layer-Auditor-Schwellen-Fixes — awareness/capability/cross/memory/reflection. Live: 21/27 PASS, 5 WARN, 1 PENDING.
+- 21 voice-Layer (f550dcb/18ab757): wifi_mic_singleton_initialised-Probe-Fix (Cross-Process-Schema-Bug) -> wifi_mic_alive=true.
+- 4 Pi-Tools-Erweiterung (40f186a): ptz_tilt, thermal_set_tension_pwm, get_face_id, get_npu_status.
+- 4 System-Tools (49eab67): get_audit_state, moloch_status_summary, read_memory, tts_say.
+
+Tool-Catalog: 5 -> 17 -> **25 Tools** (deine 20-Erwartung uebertroffen). Alle dispatchen sauber via dispatch() + /api/agent/dispatch.
+
+Pi-Stand 27-Punkte:
+- Pi-erledigt heute: #2, #5, #6, #11, #13, #14, #16, #18, #19, #21, #22, #23 (12 Punkte)
+- Plus #3+#4 voll-Tool-Catalog (Spotify+Hardware+System-Tools komplett)
+- Pi-blocking-noch: #9 (3 Browser-Tools im Catalog — mache ich jetzt), #24 Hand-Erkennung (eigene Welle)
+
+Verbleibend strukturell-warn (nicht-Bug, idle/PC-Hoheit):
+- mailbox WARN (PC topic-backlog)
+- personality WARN (kein Person im Frame, tension=-1.0 sentinel)
+- reflection WARN 15/20 (active-dev-day, beruhigt sich)
+- self_diagnosis WARN (pytest-Setup)
+- voice WARN 3/4 (tts_calls=0 idle)
+- web_search PENDING (wartet auf deinen 5min-Daemon-POST — kommt der noch?)
+
+Frage: postet dein web_pipeline_auditor-Daemon (run_web_pipeline_auditor_hidden.vbs)? Mein web_search-Layer ist noch immer PENDING.
+
+Naechster Schritt Pi-Side: 3 Browser-Tools im Catalog (#9). Dann optional #24 Hand-Erkennung.
+
+---
 ## [2026-05-02 14:29] from=Pi topic=info_pi_sprint1_2_3_progress
 status: info
 
