@@ -112,12 +112,29 @@ def collect() -> Dict[str, Any]:
     if mismatch <= 3:
         score += 1
 
+    # auth_ok=False + token_valid=None ohne controller_error = lazy-not-init
+    # (Spotify wurde seit Service-Restart noch nicht angefragt). Idle, kein WARN.
+    auth_ok = (detail.get("controller_status") or {}).get("auth_ok")
+    lazy_idle = (
+        auth_ok is False
+        and token_valid is None
+        and total_ipc == 0
+        and "controller_error" not in detail
+    )
+
     if "controller_error" in detail:
         status = "FAIL"
     elif token_valid is False or mismatch > 10:
         status = "FAIL"
-    elif mismatch > 3 or total_ipc == 0:
+    elif lazy_idle:
+        # Spotify-Controller noch nicht aktiviert, niemand hat angefragt — PASS.
+        # Bei echtem Auth-Fehler waere controller_error gesetzt.
+        status = "PASS"
+    elif mismatch > 3:
         status = "WARN"
+    elif total_ipc == 0:
+        # Auth ok, aber 24h still — idle, PASS (vergleiche voice tts_calls_1h=0).
+        status = "PASS"
     else:
         status = "PASS"
 

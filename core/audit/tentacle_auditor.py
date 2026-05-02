@@ -182,10 +182,16 @@ def collect() -> Dict[str, Any]:
     if last_frame_age is not None and last_frame_age < 5:
         score += 1
 
+    # Pi-Side vs ESP32-Side trennen:
+    # - Pi-Side ready (udp_listener) ist die Pflicht. udp_listener weg = FAIL.
+    # - ESP32-Outage (ping fail) ist external — WARN, nicht FAIL. Pi kann
+    #   ESP32-Reboot nicht erzwingen, aber sobald ESP32 wieder online ist,
+    #   wird Audio empfangen.
     if not udp_ok:
         status = "FAIL"
     elif ping_ms is None:
-        status = "FAIL"
+        # ESP32 nicht erreichbar — externe Outage, Pi-Side OK.
+        status = "WARN"
     elif rssi is not None and rssi < -75:
         status = "WARN"
     elif last_frame_age is not None and last_frame_age > 10:

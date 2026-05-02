@@ -140,10 +140,16 @@ def collect() -> Dict[str, Any]:
     if not throttled.get("throttled_now") and (cpu_temp is None or cpu_temp < 70):
         score += 1
 
+    # Pi-essentielle Hardware: Camera + Disk. Bei Verlust = FAIL.
+    # ESP32-Mic ist external (separates WiFi-Gerät, kann selbst rebooten).
+    # Mic-Outage = WARN (bewusst keine FAIL — vergleiche tentacle_auditor).
     if not cam_reachable or not cam_rtsp:
         status = "FAIL"
-    elif not mic_connected or disk_free_gb < 5:
+    elif disk_free_gb < 5:
         status = "FAIL"
+    elif not mic_connected:
+        # ESP32 nicht erreichbar — externe Outage, Pi-Hardware OK.
+        status = "WARN"
     elif throttled.get("throttled_now") or disk_free_gb < 20 or (cpu_temp and cpu_temp >= 65):
         status = "WARN"
     else:
