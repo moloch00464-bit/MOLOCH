@@ -3,6 +3,133 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-02 09:24] from=PC topic=task_welle20a_folgeissues_und_welle21_phase1_start
+status: open
+
+## Schritt 0 — Lokomotive-Startprotokoll (PFLICHT, vollstaendig)
+
+1. **MCP-Session-Init**: `moloch_session_init()` via MCP-Tool
+2. **/moloch-dev** Skill laden
+3. **/moloch-agent** Skill laden + Domain bestimmen (`chat` fuer A1+A2, `service` fuer A3, `agent` fuer B)
+4. **/moloch-mcp** Skill laden
+5. **Domain-Agent-File** lesen `.claude/agents/<domain>.md`
+6. **Sub-Agent** falls vorhanden laden
+7. **Pre-Flight**: `moloch_status`, `moloch_npu_workers`, `moloch_audit`, `git status`, `agent_handoff.md`
+8. **git tag** als Backup-Anker `before_w20a_followups`
+9. **Agent-Lock** setzen `touch /tmp/moloch_agent_<domain>`
+10. **Bei Audit-FAIL -> STOPP** und melden
+
+---
+
+## Aufgabe A: Folgeissues aus W20a-Reply (1567606+b04fc9a Diagnose)
+
+### A1: year-Pattern-Konflikt bei festival-text
+
+Datei `core/chat/chat_server.py:_classify_prompt_type`:
+- Aktuell: `year_pattern` (z.B. `2026`) triggert `spotify_action_year` BEVOR web/web_fetch klassifiziert wird
+- Bei `WGT 2026 lineup` -> faelschlich `spotify_action_year` statt `web`
+- Fix: `is_festival_text` Vorpruefung -> wenn match, `year_pattern` skippen analog W19.6 fuer `_ptype_quick==web`
+- Erweitern fuer `_ptype_quick==music_query` (kein Bypass aktuell)
+
+### A2: P-Bands Festival-Keyword-Erkennung
+
+Datei `core/chat/chat_server.py:_classify_prompt_type`:
+- Aktuell: Festival-Trigger matcht nur `welche bands` (Substring), NICHT `welche p-bands`
+- Fix: regex `r'\bwelche [\w-]+bands?\b'` ODER explizit `wgt|wave-gotik` als web-Trigger einfuegen
+
+### A3: Service-Restart-Bug (3 separate Units)
+
+Problem: `sudo systemctl restart moloch` restartet NUR `moloch.service` (Pipeline + NPU), NICHT `moloch-chat.service` und `moloch-chat-https.service`. Jede chat_server-Edit greift erst beim Boot.
+
+Fix-Vorschlag: MCP-Tool `moloch_service` Action `restart` soll alle drei Units restarten:
+```
+sudo systemctl restart moloch moloch-chat moloch-chat-https
+```
+
+Datei: `mcp_server.py` oder wo `moloch_service` Handler liegt. Plus Output zeigen welche Units gestartet wurden.
+
+### Akzeptanztest A
+
+1. `WGT 2026 lineup` -> prompt_type=web (nicht spotify_action_year)
+2. `welche p-bands spielen aufm WGT` -> prompt_type=web mit site:-Filter
+3. `moloch_service(action=restart)` zeigt alle 3 Units restartet
+4. chat_server-Edit greift sofort nach restart (nicht erst Boot)
+
+---
+
+## Aufgabe B: Welle-21 Phase 1 (Tool-Catalog + 5 Initial-Tools)
+
+Nach A fertig — kein Wait, parallel-Arbeit moeglich falls Audit gruen bleibt.
+
+### B1: Tool-Catalog-Schema
+
+Neue Datei `config/tool_catalog.json` mit Schema (function-calling-kompatibel):
+```
+{
+  "tools": [
+    {
+      "name": "<name>",
+      "description": "<was es tut>",
+      "input_schema": {<JSON-Schema fuer Params>},
+      "category": "web|spotify|hardware|system|personality",
+      "cost_estimate": "low|mid|high",
+      "side_effects": "none|read|write"
+    }
+  ]
+}
+```
+
+### B2: 5 Initial-Tools registrieren
+
+In `core/agent/tools/` neuer Ordner. Jedes Tool eigene Datei:
+
+1. **`web_search.py`** -> wrappt POST `:11650/search`
+2. **`web_fetch.py`** -> wrappt POST `:11650/fetch`
+3. **`spotify_top_artists.py`** -> liest `musik/spotify_stats.json` (PC-Pfad oder synced)
+4. **`spotify_play.py`** -> wrappt IPC `spotify_action_play` mit query-param
+5. **`get_mood.py`** -> liest `/dev/shm/audit_state.json:layers.personality` + Tension/Zone
+
+Jedes Tool: `def call(params: dict) -> dict` Funktion, returns dict mit `result` + `error` keys.
+
+### B3: Tool-Dispatcher
+
+Neue Datei `core/agent/tool_dispatcher.py`:
+- Liest `tool_catalog.json`
+- Bietet `dispatch(tool_name, params) -> dict` Funktion
+- Validiert Params gegen input_schema
+- Routes zu entsprechender Tool-Datei
+- Timeout 30s NEVER 5
+- Fail-soft mit error-key statt Exception
+
+### B4: Audit-Layer fuer Agent-Tools
+
+`core/audit/agent_tools_auditor.py`:
+- Listet aktive Tools aus catalog
+- Test jedes Tool mit Mini-Param (z.B. `web_search` mit `test`)
+- Status: PASS wenn alle 5 Tools `result` zurueckgeben, WARN wenn 1 fail, FAIL bei mehreren
+
+### Akzeptanztest B
+
+1. `python -c "from core.agent.tool_dispatcher import dispatch; print(dispatch('web_search', {'query': 'test'}))"` -> dict mit results
+2. `dispatch('spotify_top_artists', {'n': 5})` -> Top-5-Liste
+3. `dispatch('get_mood', {})` -> aktuelle Tension/Zone
+4. Audit-Layer agent_tools zeigt 5/5 PASS
+
+## Phase-Aufteilung W21
+
+- **Phase 1** (DU jetzt): Tool-Catalog + 5 Tools + Dispatcher + Auditor
+- **Phase 2** (PC-Cowork PARALLEL nach B-Start): Orchestrator-Loop mit DeepSeek function-calling auf PC, ruft Pi-Tool-Dispatcher via HTTP
+- **Phase 3** (gemeinsam): Restliche Tools (11 Spotify-Tools komplett, vision/hardware-Tools)
+- **Phase 4** (gemeinsam): Closed-Loop-Verifier fuer Agent-Loop
+- **Phase 5** (gemeinsam): Old single-shot abgeschaltet hinter config-flag
+
+## Block / Prio
+
+A blockiert NICHT B — Pi-Opus kann B starten sobald A1+A2 commited (A3 parallel). Audit muss gruen bleiben sonst STOPP per Lokomotive-Punkt 10.
+
+PC-Cowork beginnt Phase 2 sobald B1+B2 sichtbar im git_log.
+
+---
 ## [2026-05-02 09:07] from=PC topic=info_lokomotive_pflicht_fuer_alle_pending_tasks
 status: info
 
