@@ -1469,10 +1469,27 @@ def chat(req: ChatRequest):
             festival_keywords = ("wgt", "wave-gotik", "amphi", "m'era luna",
                                  "mera luna", "mera-luna")
             is_festival = any(k in req.text.lower() for k in festival_keywords)
+            # Welle 20a.5: Query-Refinement — Festival-Name -> site:-Filter
+            # macht DDG-Treffer praeziser (offizielle Domain statt Aggregator).
+            festival_site_map = {
+                "wgt": "site:wave-gotik-treffen.de",
+                "wave-gotik": "site:wave-gotik-treffen.de",
+                "amphi": "site:amphi-festival.de",
+                "m'era luna": "site:meraluna.de",
+                "mera luna": "site:meraluna.de",
+                "mera-luna": "site:meraluna.de",
+            }
+            search_query = req.text
+            text_low = req.text.lower()
+            for k, site_filter in festival_site_map.items():
+                if k in text_low and "site:" not in search_query:
+                    search_query = f"{req.text} {site_filter}"
+                    logger.info(f"[W20a.5] site:-Filter -> '{search_query}'")
+                    break
             try:
                 sr = requests.post(
                     "http://192.168.178.20:11650/search",
-                    json={"query": req.text, "max_results": 5},
+                    json={"query": search_query, "max_results": 5},
                     timeout=15,
                 )
                 if sr.ok:
