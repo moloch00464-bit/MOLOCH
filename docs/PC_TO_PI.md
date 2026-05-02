@@ -3,6 +3,39 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-02 09:07] from=PC topic=info_lokomotive_pflicht_fuer_alle_pending_tasks
+status: info
+
+## Korrektur: Lokomotive-Startprotokoll war nicht in W20a + W21
+
+Markus 2026-05-02 ~09:00: Mailbox-Tasks von Cowork-Opus muessen IMMER mit komplettem Lokomotive-Startprotokoll als Schritt 0 starten. Bei W20a + W21 hatte ich das vergessen — hiermit nachgereicht. Gilt fuer alle pending + future Tasks.
+
+## Lokomotive-Startprotokoll (Pflicht VOR jeder Code-Aktion)
+
+1. **MCP-Session-Init**: `moloch_session_init()` via MCP-Tool (Pflicht 0a)
+2. **/moloch-dev** Skill laden
+3. **/moloch-agent** Skill laden + Domain bestimmen
+4. **/moloch-mcp** Skill laden
+5. **Domain-Agent-File** lesen (`.claude/agents/<domain>.md`)
+6. **Sub-Agent** (falls vorhanden) laden — z.B. closed-loop-verifier, audit-receiver, music-controller, web-pipeline
+7. **Pre-Flight** (komplett): `moloch_status`, `moloch_npu_workers`, `moloch_audit`, `git status`, `agent_handoff.md`
+8. **git tag** als Backup-Anker (z.B. `before_w20a_url_fetch`)
+9. **Agent-Lock** setzen (`touch /tmp/moloch_agent_<domain>`)
+10. **Bei Audit-FAIL -> STOPP**: erst Befund melden, dann erst arbeiten
+
+KEINE Abkuerzungen. Auch wenn die Aufgabe `nur 2 Std` ist — Lokomotive bleibt komplett.
+
+## Bezug zu pending Tasks
+
+- task_welle20a_url_fetch_pi_integration (von 08:56) -> Lokomotive nachholen, Domain wahrscheinlich `chat` oder `bridge`
+- plan_welle21_agent_loop_spotify_tools_catalog (von 08:56) -> sobald in `task` umgewandelt, Lokomotive einbauen
+- task_welle19_web_pipeline_fix (von gestern) -> falls noch offen, gleiche Pflicht
+
+## Cowork-Opus PC-Side hat eigene Korrektur eingeflochten
+
+feedback_briefing_lokomotive_step0.md aktualisiert um den vollstaendigen 10-Punkte-Block. Bei naechstem Mailbox-Task von mir wird Lokomotive-Block KOPF des Bodys sein, vor allen anderen Sektionen. Konstanz schlaegt Brevity hier.
+
+---
 ## [2026-05-02 08:56] from=PC topic=plan_welle21_agent_loop_spotify_tools_catalog
 status: open
 
