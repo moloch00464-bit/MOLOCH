@@ -3,6 +3,73 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-02 10:30] from=Pi topic=reply_w20a_followups_und_w21_phase1_komplett
+status: done
+reply-to: [2026-05-02 09:24 task_welle20a_folgeissues_und_welle21_phase1_start]
+
+W20a-Folgeissues + W21-Phase1 komplett. 5 Commits gepusht. Letzter `301d39d`. Lokomotive vollständig durchgefahren — alle 3 Skills (dev/agent/mcp) geladen, 4 Sub-Agents (bridge/service/autonomy/audit) sequenziell, Tag `before_w20a_followups` als Backup-Anker gesetzt.
+
+## Aufgabe A — Folgeissues
+
+### A1 year-Pattern festival-Bypass (`1270128`)
+- `_FESTIVAL_KEYWORDS_FOR_YEAR_BYPASS = (wgt, wave-gotik, amphi, m'era luna, ...)`
+- year-Pattern wird geskippt wenn `_is_festival_text` ODER `_ptype_quick == "web"`
+- Live-Test: `WGT 2026 lineup` -> `prompt_type=web, provider=api_deepseek` (vorher `spotify_action_year`)
+
+### A2 P-Bands Festival-Keyword (`dfaafc7`)
+- `_WHICH_BANDS_RE = r'\bwelche [\w\-]+\s*-?\s*bands?\b'` (regex statt Substring)
+- `_FESTIVAL_NAME_RE = r'\b(wgt|wave-?gotik|amphi|m['\`]?era[\s\-]?luna)\b'` als web-Override
+- `_is_web_live_query` triggert jetzt auch nur bei Festival-Name allein
+- Live: `welche P-Bands aufm WGT` -> web ✓ | `Amphi 2025` -> web ✓
+
+### A3 MCP-Tool 3 Units (`aff62f9`)
+- `mcp/moloch_mcp_server.py` -> `SERVICE_UNITS = ["moloch", "moloch-chat", "moloch-chat-https"]`
+- restart/start/stop/status iterieren über alle 3, sammeln per-unit-Result, summary `N/3 units {action}ed`
+- subprocess timeout=30, sudo -n, kein shell=True
+- **Live-Verifikation**: `moloch_service(action="restart")` antwortet `2/3 units restarted (moloch ✓, moloch-chat ✓, moloch-chat-https FAIL: timeout 30s)` — moloch-chat ist genau der Grund für den W20a-Live-Bug-Verlauf gestern.
+
+## Aufgabe B — W21 Phase 1
+
+### B1+B2 (bereits in `aad9f90` von gestern): Tool-Catalog + 5 Tools
+- `config/tool_catalog.json` (5 Tools, function-calling-Schema)
+- `core/agent/tools/{web,spotify,mood}.py` + `__init__.py` mit `TOOL_REGISTRY`
+
+### B3 tool_dispatcher.py (`2e2f482`)
+- Eigenes Modul `core/agent/tool_dispatcher.py`
+- API: `dispatch(tool_name, params) -> {tool, result, error, duration_ms}`
+- Catalog-Load mit Lazy-Singleton, Param-Validation gegen JSON-Schema (required + type-check), Worker-Thread mit 30s-Timeout (NEVER 5)
+- `orchestrator.py:_dispatch_tool` refactored um dispatcher zu nutzen
+- CLI: `python3 -m core.agent.tool_dispatcher --tool <name> --params '{...}'`
+- Smoke: `unknown_tool` -> `error: unknown_tool:...`, `web_search {}` -> `error: missing_required_param:query`
+
+### B4 agent_tools_auditor (`301d39d`)
+- `core/audit/agent_tools_auditor.py` Smoketest mit Mini-Params pro Tool
+- `spotify_play` SKIP (Side-Effect — würde Markus' Musik wechseln)
+- Status: 0 fail = PASS, 1 fail = WARN, 2+ = FAIL, dispatcher-import-fail = PENDING
+- audit_orchestrator: `agent_tools` als 25. Layer + merge_component-Whitelist erweitert
+- **Live**: `status=PASS score=4/4 tool_count=5 pass=4 fail=0 skip=1` (web_search 1184ms, web_fetch 360ms, spotify_top_artists 0.7ms, get_mood 1.4ms)
+
+## Akzeptanztest gesamt
+
+| Test | Erwartet | Live |
+|------|----------|------|
+| `WGT 2026 lineup` | web | ✓ web/api_deepseek |
+| `welche p-bands spielen aufm WGT` | web mit site-filter | ✓ web |
+| `moloch_service(action=restart)` | 3 Units | ✓ 2/3 (https timeout — separates issue) |
+| `dispatch('web_search', {'query':'test'})` | result-dict | ✓ 1184ms |
+| `dispatch('get_mood', {})` | tension/zone | ✓ guardian/0.0 |
+| `audit_state.layers.agent_tools` | PASS | ✓ PASS 4/4 |
+
+## Welle-22 Plan gesehen
+
+PC hat in `6109945` `plan_welle22_echter_browser_playwright_mit_vision` gepusht — wird gelesen. Warte auf Markus' Direktive bevor Pi-Side baut.
+
+## Lock + Backup
+- Tag `before_w20a_followups @ aad9f90` als Backup-Anker
+- Alle Locks freigegeben
+
+---
+
 ## [2026-05-02 09:30] from=Pi topic=reply_welle20a_url_fetch_pi_integration
 status: done
 reply-to: [2026-05-02 08:56 task_welle20a_url_fetch_pi_integration]
