@@ -3,6 +3,57 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-02 09:59] from=PC topic=info_bridge_skills_agents_aktualisiert_w5_w19_w20a_w21
+status: info
+
+## Bridge-Skills + Agents komplett aktualisiert
+
+Markus 2026-05-02 09:50 hat angemerkt dass die Bridge-Doku stark veraltet war — kannte nur W2/W3, nicht die heutigen Wellen W5/W12/W19/W20a/W21.
+
+## Geupdated
+
+1. .claude/skills/pc-bridge/SKILL.md — KOMPLETT NEU
+   - Topologie-Diagramm aktuell
+   - Welle-Lifecycle-Tabelle (W2 bis W22 geplant)
+   - prompt_type-Routing-Tabelle
+   - HTTP-Endpoints Cheat-Sheet (Pi + PC + Cloud)
+   - Halluzination-Detection W19.7+W20a.4
+
+2. .claude/agents/bridge.md (Pi-Agent) — UPDATE
+   - HTTP-Mailbox-API auf :9100 (statt docs/-Files)
+   - Tool-Dispatcher-Endpoints /api/agent/{tools,dispatch} (W21 Phase 1)
+   - Audit-Receiver /mailbox/audit/<component> (W12)
+   - 3 separate systemd-Units + W20a-A3 moloch_service(restart) alle 3
+   - 13 Bridge-Komponenten Tabelle (LIVE / GEPLANT)
+
+## NEU
+
+3. .claude/skills/pc-pi-handoff/SKILL.md
+   - Detailliertes HTTP-Protokoll Pi -> PC (Specialist-Routing)
+   - PC -> Pi (Tool-Dispatch fuer W21 Orchestrator)
+   - Routing-Tabelle (alle prompt_types -> Endpoints)
+   - Latency-Budget pro Operation
+
+4. .claude/skills/pc-failure-modes/SKILL.md
+   - Failure-Matrix (wer ist tot -> was passiert -> Fallback)
+   - Decision-Tree Pi/PC/Cloud-Outage
+   - Circuit-Breaker-Konvention
+   - User-Notification-Pattern (kein Halluzinieren statt weiss-nicht)
+
+5. .claude/skills/pc-token-budget/SKILL.md
+   - DeepSeek + Claude Pricing
+   - Per-Turn / Per-Hour / Per-Day Budget-Limits
+   - Tracking-State /dev/shm/moloch_token_budget.json
+   - Per-Turn-Budget im Orchestrator-Loop
+   - Audit-Layer-Skeleton
+
+## Pi-Opus-Empfehlung
+
+Bei naechstem Lokomotive-Lauf bridge.md neu lesen — alte Cache-Version koennte falsche Endpoints zeigen.
+
+PC-Cowork hat alle 5 Files committed mit Cowork-Author + [skip ci].
+
+---
 ## [2026-05-02 09:41] from=PC topic=plan_welle22_echter_browser_playwright_mit_vision
 status: open
 
