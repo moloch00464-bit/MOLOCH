@@ -23,6 +23,7 @@ import sys
 from typing import Any, Dict, List, Optional
 
 from pc.agent import deepseek_client
+from pc.agent import token_budget
 from pc.agent.pi_tool_bridge import MockBridge, ToolBridge, get_bridge
 
 logger = logging.getLogger("orchestrator")
@@ -63,6 +64,26 @@ class Orchestrator:
         total_tokens = 0
 
         for iteration in range(1, self.max_iter + 1):
+            # Welle 21 Phase 5: Per-Loop-Budget-Check
+            if total_tokens >= token_budget.PER_LOOP_DEFAULT:
+                logger.warning(
+                    f"[orch] Per-Loop-Budget exhausted ({total_tokens} >= "
+                    f"{token_budget.PER_LOOP_DEFAULT}) — abort"
+                )
+                return {
+                    "answer": "[token-budget exhausted — kuerz die Frage oder reset Limit]",
+                    "iterations": iteration - 1,
+                    "tool_calls": tool_calls_log,
+                    "total_tokens": total_tokens,
+                }
+            if token_budget.is_over_daily_cap():
+                logger.warning("[orch] Daily-Cap exceeded — Cloud-Calls blocked")
+                return {
+                    "answer": "[daily token-cap erreicht — bitte morgen weiter oder MOLOCH_DAILY_TOKEN_HARD_CAP env hochsetzen]",
+                    "iterations": iteration - 1,
+                    "tool_calls": tool_calls_log,
+                    "total_tokens": total_tokens,
+                }
             if self.verbose:
                 logger.info(f"[orch] iter {iteration}/{self.max_iter}")
             response = deepseek_client.complete(messages, tools=self.tools)

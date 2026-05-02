@@ -82,7 +82,19 @@ def complete(
     try:
         r = requests.post(API_URL, headers=headers, json=payload, timeout=timeout)
         r.raise_for_status()
-        return r.json()
+        resp = r.json()
+        # Welle 21 Phase 5: Token-Budget-Tracking
+        try:
+            from pc.agent.token_budget import record_call
+            usage = resp.get("usage", {})
+            record_call(
+                model=model,
+                input_tokens=usage.get("prompt_tokens", 0),
+                output_tokens=usage.get("completion_tokens", 0),
+            )
+        except Exception as e:
+            logger.warning(f"[budget] record_call-Fehler: {e}")
+        return resp
     except requests.HTTPError as e:
         body = ""
         try:
