@@ -23,6 +23,12 @@ from .hardware import (
     get_face_id,
     get_npu_status,
 )
+from .system import (
+    get_audit_state,
+    moloch_status_summary,
+    read_memory,
+    tts_say,
+)
 
 TOOL_REGISTRY = {
     "web_search": web_search,
@@ -46,4 +52,8 @@ TOOL_REGISTRY = {
     "thermal_set_tension_pwm": thermal_set_tension_pwm,
     "get_face_id": get_face_id,
     "get_npu_status": get_npu_status,
+    "get_audit_state": get_audit_state,
+    "moloch_status_summary": moloch_status_summary,
+    "read_memory": read_memory,
+    "tts_say": tts_say,
 }

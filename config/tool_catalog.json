@@ -245,6 +245,51 @@
         "description": "NPU-Worker-Health: active_models + Worker-Stats (running/loaded/inferences/errors).",
         "parameters": {"type": "object", "properties": {}}
       }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "get_audit_state",
+        "description": "Compact Audit-State: overall + alarm_tier + layer status_counts.",
+        "parameters": {"type": "object", "properties": {}}
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "moloch_status_summary",
+        "description": "Compact MOLOCH-Status: FPS, Person, Face-ID, RAM%, CPU-Temp, Frame-Age.",
+        "parameters": {"type": "object", "properties": {}}
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_memory",
+        "description": "Memory-Recall via longterm_memory. Best-effort (recall/search/query).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {"type": "string"},
+            "limit": {"type": "integer", "default": 5}
+          },
+          "required": ["query"]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "tts_say",
+        "description": "Triggert TTS via IPC speak-Cmd (W18.1). Maximal 500 Zeichen.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "text": {"type": "string"}
+          },
+          "required": ["text"]
+        }
+      }
     }
   ]
 }
