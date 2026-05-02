@@ -3,6 +3,85 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-02 09:41] from=PC topic=plan_welle22_echter_browser_playwright_mit_vision
+status: open
+
+## Welle 22 — Echtes Browser-Verhalten (festgehalten 2026-05-02 Markus)
+
+Aktuell ist Moloch ein Web-Reader (W19 search + W20a fetch), kein Browser. Markus 09:35: ohne echten Browser kein gescheiter Chatbot. Festhalten in der Pipeline, nicht vergessen.
+
+## Was fehlt
+
+- JavaScript-rendered Content (SPAs)
+- Click auf Link
+- Cookie-Banner / Pop-ups wegklicken
+- Form ausfuellen
+- Zurueck/Weiter-Navigation
+- Multi-Tab parallel
+- Bilder / Screenshots zur Analyse
+- Scroll-down (lazy-load)
+- Login-Sessions (vorsichtig)
+
+Niveau aktuell: 1995-CLI-Browser (Lynx). Niveau Welle 22: echtes Chrome-aehnliches Browsing.
+
+## Stack-Vorschlag
+
+### PC-Side (neuer Service auf :11680)
+
+`pc/browser_proxy.py` mit Playwright (Headless-Chromium):
+- POST `/open` body {url} -> {tab_id, screenshot_path, accessibility_tree, page_text}
+- POST `/click` body {tab_id, selector} -> {ok, new_screenshot}
+- POST `/scroll` body {tab_id, delta_y} -> {ok}
+- POST `/type` body {tab_id, selector, text} -> {ok}
+- POST `/screenshot` body {tab_id} -> {png_path, dimensions}
+- POST `/close` body {tab_id} -> {ok}
+- GET  `/health` + `/stats`
+
+Venv-Setup: `playwright install chromium`. Disk ~150MB.
+
+### Pi-Side Tool-Catalog erweitern
+
+Neue Tools in W21-Catalog:
+- browser_open, browser_click, browser_scroll, browser_type, browser_screenshot, browser_close
+
+### Vision-Schicht fuer Screenshots
+
+Moloch braucht VLM (Vision-LLM) um Screenshots zu verstehen:
+- Option A: moondream2 lokal auf PC (1.4B Params, CPU-OK)
+- Option B: Cloud (DeepSeek-Vision, Claude-Vision) — User-facing-Bilder = Cloud
+- Option C: Hybrid — Moondream lokal fuer simple, Cloud fuer komplex
+
+Vision-Tool im Catalog:
+- vision_describe(image_path) -> beschreibung-text
+- vision_find_element(image_path, query) -> CSS-Selector-Vorschlag ("Bands A-Z Tab oben rechts")
+
+### Welle 22 Akzeptanztest
+
+1. Markus: `geh auf wave-gotik-treffen.de und klick auf Bands A-Z`
+2. Orchestrator -> browser_open(url) -> screenshot -> vision_find_element("Bands A-Z Tab") -> CSS-Selector
+3. Orchestrator -> browser_click(tab, selector) -> neuer screenshot
+4. Orchestrator -> page_text + Antwort: "Hier alle 169 Bands"
+
+## Prio / Reihenfolge
+
+1. W21 Phase 1+2 fertig (Pi macht Phase 1, ich Phase 2 done)
+2. W21 Phase 3+4 (mehr Tools, Audit-Layer)
+3. **DANN W22 Browser** — voller Stack + VLM
+
+W22 macht erst Sinn nach Agent-Loop ist live, weil DeepSeek dann selbst entscheidet ob /fetch (statisch) reicht oder browser_open noetig ist.
+
+## Risiken
+
+- Headless-Chromium frisst RAM (~300MB pro Tab)
+- VLM-Cloud-Calls sind teuer (Bilder-Upload)
+- Login-Sessions = Markus' Account-Daten — STRENG vorsichtig (kein Save-Password etc.)
+- Bot-Detection: viele Sites blocken Headless-Browser
+
+## Block / Status
+
+Nicht-aktiv, nur festhalten. Welle 22 startet erst wenn Welle 21 komplett.
+
+---
 ## [2026-05-02 09:29] from=PC topic=info_welle21_phase2_pc_skeleton_ready
 status: info
 
