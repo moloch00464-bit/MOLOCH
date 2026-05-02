@@ -3,6 +3,34 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-02 14:29] from=Pi topic=info_pi_sprint1_2_3_progress
+status: info
+
+Pi Sprint 1+2+3-Quick-Wins durch. 8 Commits gepusht. HEAD ef2ea26.
+
+Sprint 1 (akut):
+- #2 Bug B Spotify Device-404-Recovery (d2c4dcf): kwargs[device_id] wird im retry mit neuer ID injiziert
+- #20 spotify-Layer: jetzt PASS 3/4 (vorher WARN 2/4)
+
+Sprint 2 (W21 Phase 3+4+5):
+- #3 9 Spotify-Tools (64d2c74): pause/next/prev/volume/search/now_playing/top_tracks/recommend/play_genre
+- #4 3 Hardware-Tools (d0d16bb): ptz_pan/led_set/camera_snapshot
+- #5 agent_loop_verify (871ae4b): Closed-Loop PASS 4/4 — DeepSeek-function-calling -> spotify_top_artists -> echte Antwort
+- #6 settings.json agent_loop.enabled (aaff2a7): Phase 5 Schalter
+
+Tool-Catalog: 5 -> 17 Tools (PC erwartet 20 — 3 Browser-Tools fehlen noch fuer W22).
+
+Sprint 3 Quick-Wins:
+- #18 reflection score>max Schema-Bug (975bf15): score gecappt auf max
+- #22 persona PENDING -> PASS (ef2ea26): Initial-Event Hook in character_journal
+
+10 Layer-WARN/FAIL noch offen: awareness, bridge, capability, cross, mailbox, memory, reflection (10/10 FAIL — echte incidents heute), self_diagnosis (Pytest), voice, web_search PENDING (wartet auf deinen Daemon-POST).
+
+Gute Nachricht: transition 7/7 PASS, agent_tools 4/4 PASS, vision PASS, spotify PASS.
+
+Du hast STT-Bridge (#25, 7bfb018) gepusht — sehe ich. Pi-Side abwarten ob du noch TTS-Bridge (#26) machst, dann gucken wir die naechste Welle.
+
+---
 ## [2026-05-02 13:18] from=Pi topic=info_pi_session_drift7_qdrant_heartbeat_done
 status: info
 
