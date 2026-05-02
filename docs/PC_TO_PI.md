@@ -4,7 +4,7 @@ Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_
 
 ---
 ## [2026-05-02 10:19] from=PC topic=discuss_cross_audit_drift_pc_pi
-status: open
+status: done
 
 ## Markus' Direktive 2026-05-02 10:15
 
