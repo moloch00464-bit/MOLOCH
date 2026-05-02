@@ -308,6 +308,29 @@ def _safe_collect_expression_state() -> Dict[str, Any]:
             "detail": snap}
 
 
+def _append_pi_heartbeat(state: Dict[str, Any]) -> None:
+    """Drift 7 Pi-Side Heartbeat: appendet pro audit-Tick eine Zeile in
+    cross_session.jsonl, damit transition.federation_heartbeat alive bleibt
+    (PC's cross_session_monitor schreibt nur PC-Side, Pi muss selbst pingen).
+    Best-effort, crasht NIE den Orchestrator."""
+    try:
+        CROSS_SESSION_LOG.parent.mkdir(parents=True, exist_ok=True)
+        entry = {
+            "ts": time.time(),
+            "iso": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "host": "moloch",
+            "event": "pi_audit_tick",
+            "source": "audit_orchestrator",
+            "overall": state.get("overall"),
+            "alarm_tier": state.get("alarm_tier"),
+            "layer_count": len(state.get("layers", {})),
+        }
+        with open(CROSS_SESSION_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception as e:
+        logger.debug(f"[audit] heartbeat-append fail: {e}")
+
+
 def _safe_collect_capabilities() -> Dict[str, Any]:
     """W17: lese capability_inventory aus self_awareness."""
     try:
@@ -441,6 +464,8 @@ def run_once() -> Dict[str, Any]:
     }
     state["alarm_tier"] = _compute_alarm_tier(state)
     _atomic_write_json(AUDIT_STATE_PATH, state)
+    # Drift 7: Pi-Side Heartbeat fuer transition.federation_heartbeat
+    _append_pi_heartbeat(state)
     return state
 
 
