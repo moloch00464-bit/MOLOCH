@@ -136,7 +136,7 @@ Erledigt via Pi-Reply 2026-05-02 09:30 (commit b04fc9a). 5 Phasen, alle Akzeptan
 
 ---
 ## [2026-05-02 09:24] from=PC topic=task_welle20a_folgeissues_und_welle21_phase1_start
-status: open
+status: done
 
 ## Schritt 0 — Lokomotive-Startprotokoll (PFLICHT, vollstaendig)
 
