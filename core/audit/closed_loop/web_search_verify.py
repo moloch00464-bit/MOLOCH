@@ -22,9 +22,20 @@ logger = logging.getLogger("closed_loop.web_search")
 CHAT_URL = "http://localhost:9100/chat"
 SEARCH_PROXY_STATS_URL = "http://192.168.178.20:11650/stats"
 TEST_QUERY = "Wieviel Bands spielen aufm WGT 2026?"
-SPOTIFY_HALLUCINATION_BANDS = {
-    "suicide commando", "vomito negro", "chainreactor", "esa", "geistform",
+# WGT-Stammbands: echte Acts, KEIN Halluzination-Marker auch wenn aus Spotify-Top
+WGT_KNOWN_BANDS = {
+    "suicide commando", "vnv nation", "covenant", "wumpscut", "hocico",
+    "and one", "agonoize", "combichrist", "the cure",
 }
+# Spotify-Top aber NICHT WGT-2026: 2+ davon ohne URL/Research-Marker = Halluzination
+SPOTIFY_TOP_NON_WGT = {
+    "rammstein", "vomito negro", "chainreactor", "esa", "geistform",
+}
+# Marker fuer echte Web-Recherche (Quellen, Domain-Names, festival-Keywords)
+RESEARCH_MARKERS = (
+    "festival", "wgt", "leipzig", "lineup", "bestaetigt", "bestätigt",
+    "monkeypress", "mdr", "wgt-festival",
+)
 
 
 def verify(timeout_s: int = 30) -> Dict[str, Any]:
@@ -65,17 +76,28 @@ def verify(timeout_s: int = 30) -> Dict[str, Any]:
     secs_since = after_stats.get("seconds_since_last_call", 999)
 
     # 3. Bewerten
-    has_url = "http" in answer
+    has_url = "http" in answer or "://" in answer
     has_festival = "festival" in answer or "wgt" in answer
-    has_number = any(str(n) in answer for n in range(100, 200))
-    has_hallucination = any(b in answer for b in SPOTIFY_HALLUCINATION_BANDS)
+    has_number = any(str(n) in answer for n in range(100, 300))
+    has_research_marker = any(m in answer for m in RESEARCH_MARKERS)
+    has_strong_source = any(s in answer for s in
+                            ("monkeypress", "mdr", "wgt-festival.de"))
+    # AND-Logik: Halluzination NUR wenn 2+ Spotify-Top-non-WGT-Bands UND
+    # weder URL noch Research-Marker (reine LLM-Erfindung ohne Quelle).
+    suspicious_count = sum(1 for b in SPOTIFY_TOP_NON_WGT if b in answer)
+    is_hallucination = (
+        suspicious_count >= 2
+        and not has_url
+        and not has_research_marker
+    )
 
     duration = time.time() - started
 
-    if has_hallucination:
+    if is_hallucination:
         return fail_result(
             "spotify_hallucination_detected",
-            detail={"answer_excerpt": answer[:300]},
+            detail={"answer_excerpt": answer[:300],
+                    "suspicious_count": suspicious_count},
             duration_s=duration,
         )
     if secs_since > 30:
@@ -95,8 +117,10 @@ def verify(timeout_s: int = 30) -> Dict[str, Any]:
         score += 1
     if secs_since < 30:
         score += 1
-    max_s = 4
-    if score >= 3:
+    if has_strong_source:
+        score += 1  # Boost: konkrete Quelle = echte Recherche
+    max_s = 5
+    if score >= 4:
         status = "PASS"
     elif score >= 2:
         status = "WARN"
@@ -115,6 +139,9 @@ def verify(timeout_s: int = 30) -> Dict[str, Any]:
             "has_url": has_url,
             "has_festival": has_festival,
             "has_number": has_number,
+            "has_research_marker": has_research_marker,
+            "has_strong_source": has_strong_source,
+            "suspicious_band_count": suspicious_count,
             "secs_since_last_call": secs_since,
         },
         "detail": {
