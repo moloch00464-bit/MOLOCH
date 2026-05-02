@@ -29,6 +29,11 @@ from .system import (
     read_memory,
     tts_say,
 )
+from .browser import (
+    browser_open,
+    browser_click,
+    browser_screenshot,
+)
 
 TOOL_REGISTRY = {
     "web_search": web_search,
@@ -56,4 +61,7 @@ TOOL_REGISTRY = {
     "moloch_status_summary": moloch_status_summary,
     "read_memory": read_memory,
     "tts_say": tts_say,
+    "browser_open": browser_open,
+    "browser_click": browser_click,
+    "browser_screenshot": browser_screenshot,
 }
