@@ -44,6 +44,9 @@ STATE_PATH = os.path.join(JOURNAL_DIR, "_state.json")
 ALLOWED_TYPES = frozenset({
     "camera", "audio", "tension", "mode_switch",
     "spotify", "chat", "protective",
+    # W22 — Persona-Drift-Score (vom audit_orchestrator gelesen).
+    # tags-Feld traegt den Score-Wert; tension_delta dokumentiert die Drift.
+    "persona_score",
 })
 
 MAX_CONTEXT_LEN = 200
@@ -220,6 +223,98 @@ class CharacterJournal:
             self._save_last_id(new_id)
             return event_id
 
+    def get_recent_events(
+        self,
+        type_filter: Optional[str] = None,
+        limit: int = 50,
+    ) -> List[Dict]:
+        """Letzte N Events optional gefiltert nach type. W22-Helper fuer
+        audit_orchestrator._read_persona_layer (sucht type='persona_score').
+
+        Liest bis zu 14 Tagesfiles damit auch seltene persona_score-Events
+        gefunden werden (taegliche Init-Events reichen fuer Sparkline=50).
+        Score-Wert wird vom Audit aus Feld 'score' (legacy) oder 'tags'
+        (Liste mit numerischem Eintrag) extrahiert — beide Wege werden
+        unten unterstuetzt durch zusaetzliches Feld 'score' im Result.
+
+        Args:
+            type_filter: Wenn gesetzt, nur Events dieses type zurueckgeben.
+            limit: Maximale Anzahl Eintraege (juengste zuletzt).
+        """
+        results: List[Dict] = []
+        # Bis zu 14 Tage zurueckblicken — billig wenn Files leer/inexistent.
+        for days_back in range(14):
+            date = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
+            path = os.path.join(JOURNAL_DIR, f"{date}.jsonl")
+            if not os.path.exists(path):
+                continue
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    day_entries = []
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            entry = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        if type_filter and entry.get("type") != type_filter:
+                            continue
+                        # Score-Convenience: persona_score-Events tragen den
+                        # Wert in tension_delta ODER importance ODER tags[0].
+                        if "score" not in entry:
+                            score_val = entry.get("importance")
+                            if score_val is None:
+                                td = entry.get("tension_delta")
+                                if isinstance(td, (int, float)) and td != 0.0:
+                                    score_val = td
+                            if score_val is None:
+                                tags = entry.get("tags") or []
+                                if tags and isinstance(tags[0], (int, float)):
+                                    score_val = tags[0]
+                            if isinstance(score_val, (int, float)):
+                                entry["score"] = float(score_val)
+                        day_entries.append(entry)
+                    # Aelterer Tag voran, juengster zuletzt
+                    results = day_entries + results
+            except Exception as e:
+                logger.error(f"[JOURNAL] get_recent_events lesen fehlgeschlagen ({path}): {e}")
+            if len(results) >= limit * 2:
+                # Genug Material — abbrechen (juengste sind im aktuellen Result vorne)
+                break
+        return results[-limit:]
+
+    def ensure_initial_persona_score(self, default_score: float = 7.0) -> Optional[str]:
+        """W22 Init-Hook: schreibt einen persona_score-Event wenn keiner
+        in den letzten 14 Tagen existiert. So geht der persona-Layer von
+        PENDING auf PASS/WARN.
+
+        Default-Score 7.0 = neutral-hoch (Markus' Stil-Treue). Das erste
+        Event taucht in der Sparkline auf, der Distiller (Phase 4) wird
+        spaeter echte Persona-Drifts schreiben.
+
+        Returns event_id bei Schreiben, None wenn bereits Events vorhanden.
+        """
+        try:
+            existing = self.get_recent_events(type_filter="persona_score", limit=1)
+            if existing:
+                logger.info(
+                    f"[JOURNAL] persona_score Initial-Event nicht noetig — "
+                    f"{len(existing)} Eintrag(e) bereits vorhanden"
+                )
+                return None
+        except Exception as e:
+            logger.warning(f"[JOURNAL] persona_score Pruefung fehlgeschlagen: {e}")
+        return self.write_event(
+            type="persona_score",
+            interpretation=f"Initial persona_score (Audit W22 Bootstrap): {default_score}",
+            tension_delta=0.0,
+            context="audit-bootstrap",
+            tags=["init", "persona"],
+            importance=float(default_score),
+        )
+
     def read_recent(self, n: int = 50) -> List[Dict]:
         """Letzte N Eintraege ueber bis zu 3 Tagesfiles zurueckgeben.
 
@@ -268,12 +363,22 @@ def get_journal() -> CharacterJournal:
 
 
 # =============================================================================
-# Self-Test — `python3 -m core.memory.character_journal`
+# Self-Test / CLI — `python3 -m core.memory.character_journal [--init-persona]`
 # =============================================================================
 
 if __name__ == "__main__":
+    import sys as _sys
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s")
     j = get_journal()
+
+    if "--init-persona" in _sys.argv:
+        eid = j.ensure_initial_persona_score(default_score=7.0)
+        if eid:
+            print(f"persona_score Initial-Event geschrieben: {eid}")
+        else:
+            print("persona_score Events bereits vorhanden — nichts zu tun.")
+        raise SystemExit(0)
+
     start_id = j._last_id
 
     samples = [
