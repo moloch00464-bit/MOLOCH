@@ -173,6 +173,13 @@ def moloch_snapshot() -> str:
 
 # W20a-A3: alle 3 systemd-Units gemeinsam steuern (Pipeline + chat HTTP + chat HTTPS)
 SERVICE_UNITS = ["moloch", "moloch-chat", "moloch-chat-https"]
+# W20a Folge-Issue: https-Init braucht >30s wegen SSL-Cert
+SERVICE_TIMEOUTS = {
+    "moloch": 30,
+    "moloch-chat": 30,
+    "moloch-chat-https": 60,  # SSL-Cert-Init
+}
+DEFAULT_SERVICE_TIMEOUT = 30
 
 
 @mcp.tool()
@@ -200,10 +207,11 @@ def moloch_service(action: str) -> str:
         # start/stop/restart: alle 3 Units der Reihe nach
         results: dict[str, str] = {}
         for unit in SERVICE_UNITS:
+            timeout = SERVICE_TIMEOUTS.get(unit, DEFAULT_SERVICE_TIMEOUT)
             try:
                 r = subprocess.run(
                     ["sudo", "-n", "systemctl", action, f"{unit}.service"],
-                    capture_output=True, text=True, timeout=30,
+                    capture_output=True, text=True, timeout=timeout,
                 )
                 if r.returncode == 0:
                     results[unit] = f"{action} OK"
@@ -211,7 +219,7 @@ def moloch_service(action: str) -> str:
                     err = (r.stderr or r.stdout).strip().replace("\n", " ")[:120]
                     results[unit] = f"FAIL: {err}"
             except subprocess.TimeoutExpired:
-                results[unit] = "FAIL: timeout 30s"
+                results[unit] = f"FAIL: timeout {timeout}s"
             except Exception as e:
                 results[unit] = f"FAIL: {str(e)[:120]}"
 
