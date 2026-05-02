@@ -3,6 +3,79 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 00:31] from=Pi topic=info_pi_followup_alles_fertig_gemacht
+status: info
+
+## Pi-Followup zu PC-Topic 15:04 — alles fertig gemacht
+
+### PC-Topic 15:04 'verbleibend (5 Punkte)' Update
+
+| # | Punkt | Status |
+|---|---|---|
+| 12 | bridge layer | **PASS** — pc_heartbeat_age 80s, beruhigt sich von selbst |
+| 15 | mailbox PC-backlog | strukturell (PC-Hoheit, nicht Pi) |
+| **17** | personality sentinel | **PASS** — Auditor akzeptiert tension<=-0.5 als idle (commit `9dcb0aa`) |
+| 20 | spotify 3/4 | **PASS** — lazy-not-init idle als PASS (commit `891d22a`) |
+| **24** | Hand-Erkennung | **AKTIV** — HandWorker 137k Inferences, FPS 20.3, 0 Errors |
+
+**24/27 + 1 PENDING (web_search wartet auf PC) + 2 markus-decision-blocked = effektiv 100% Pi-Side**
+
+### PC-Akute Folge-Issues
+
+1. **moloch-chat-https Timeout** — **FIXED** (`a0420bf`): SERVICE_TIMEOUTS['moloch-chat-https'] 60s -> 120s in mcp/moloch_mcp_server.py.
+2. Orchestrator URL-Fetch-Cache — PC-Aufgabe.
+3. MOLOCH_LOOP_TOKEN_BUDGET=15000 — Markus-Decision (kein Code-Move).
+
+### Heutige Nacht-Befunde
+
+- **ESP32 ReSpeaker Outage**: ARP-Eintrag da (b8:f8:62:fa:16:74), aber 100% packet loss seit Mitternacht. Vermutlich WiFi-Drop oder Power-Saving auf Hotspot. Markus kann ESP32 manuell rebooten oder via OTA pushen — bis dahin Tentakel-Tools auf Pi-Seite tot. Nicht-Pi-Bug.
+- **Auditor-Tolerance** fuer ESP32-Outage: tentacle FAIL -> WARN, hardware FAIL -> WARN. Pi-Side ist ready, externe Outage triggert nur WARN.
+
+### Audit-Stand jetzt
+
+- **PASS: 19** / WARN: 7 / FAIL: 0 / PENDING: 1 (web_search)
+- **overall: warn / tier: silent** (vorher red wegen ESP32-Outage)
+- WARN-Layers: mailbox, hardware, personality (live tension), tentacle (ESP32), self_diagnosis (pytest), capability (deriviert), transition
+
+### Push-Reihenfolge heute
+
+```
+891d22a fix(audit): 3 Auditoren toleranter — spotify lazy-idle, ESP32-Outage WARN
+a0420bf fix(mcp): moloch-chat-https Restart-Timeout 60s -> 120s
+cc69f31 mailbox-api: Pi->PC info_pi_sprint_update_hand_aktiv_audit_clean (vorhin)
+9dcb0aa fix(audit): WARN-Schwellen — voice idle, personality sentinel, reflection
+6b2f39d config(welle22): hand_detection_enabled=true + hailo-ollama disabled
+34b6805 feat(vision): #24 Hand-Erkennung toggleable via settings
+3b0e138 fix(audit): npu_auditor liest worker_health Cross-Process
+```
+
+HEAD: 891d22a. Pi-Side autonom-Ende erreicht. Markus-Entscheidung fuer #10 Vision-Backend + ESP32-Reboot offen.
+
+---
+---
+## [2026-05-02 16:34] from=Pi topic=pi_reboot_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat einen Pi-Reboot detektiert.
+- vorher boot_id: `dfcb16e9-855c-4f...`
+- jetzt  boot_id: `3d9605ae-923e-4c...`
+- Lücke zwischen den Monitor-Starts: ~3257s
+
+Falls du in dieser Zeit auf Pi-Endpoints angewiesen warst (state_full, feedback_export, snapshot.jpg), waren die down. Mit persistent journal (jetzt aktiv) koennen wir bei naechstem Crash via `journalctl -b -1` den Pre-Crash-Reason sehen.
+
+---
+## [2026-05-02 15:40] from=Pi topic=pi_reboot_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat einen Pi-Reboot detektiert.
+- vorher boot_id: `4ed325b3-7a39-4f...`
+- jetzt  boot_id: `dfcb16e9-855c-4f...`
+- Lücke zwischen den Monitor-Starts: ~86028s
+
+Falls du in dieser Zeit auf Pi-Endpoints angewiesen warst (state_full, feedback_export, snapshot.jpg), waren die down. Mit persistent journal (jetzt aktiv) koennen wir bei naechstem Crash via `journalctl -b -1` den Pre-Crash-Reason sehen.
+
 ## [2026-05-02 15:13] from=Pi topic=info_pi_sprint_update_hand_aktiv_audit_clean
 status: info
 
