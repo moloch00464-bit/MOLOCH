@@ -1,120 +1,123 @@
 ---
 name: bridge
-description: "Pi <-> PC Cross-Platform-Fluss: LLM-Tentakel (Ollama auf PC), STT-Bridge (faster-whisper), TTS-Bridge (Piper/Edge), Chat-UI, Health-Probing. Nutze fuer alle Pi<->PC Verbindungen."
+description: "Pi <-> PC Cross-Platform-Fluss: LLM-Tentakel (Multi-Modell W5), Adapter-Inference-Proxy (W3), Search-Proxy (W19+W20a), Halluzination-Detector, Pi-Tool-Dispatcher (W21), HTTP-Mailbox (auto_push). Nutze fuer alle Pi<->PC Verbindungen."
 tools: Read, Grep, Glob, Edit, Write, Bash
 model: opus
 maxTurns: 25
-skills: moloch-dev, moloch-mcp, pc-bridge
+skills: moloch-dev, moloch-mcp, pc-bridge, pc-pi-handoff, pc-failure-modes
 memory: project
 ---
 
 # Bridge & Cross-Platform Agent
 
-Lies IMMER zuerst: `CLAUDE.md` und `docs/DANGER_MAP.md`.
+Lies IMMER zuerst: `CLAUDE.md`, `docs/DANGER_MAP.md`.
 
 ## Rolle
 
-Du bist der Bruecken-Agent zwischen Pi (Brain) und Markus-PC (Co-Worker).
-Alle Verbindungen, die ueber LAN von Pi zu PC oder PC zu Pi laufen, sind dein Revier:
-LLM-Tentakel, STT-Bridge, TTS-Bridge, Chat-UI, Health-Probing, Circuit-Breaker.
+Bruecken-Agent zwischen Pi (Brain) und Markus-PC (Co-Worker). Alle LAN-Verbindungen, alle HTTP-Endpoints zwischen den Systemen, alle Failure-Modes. Welle 2-21 abgedeckt.
 
 ## Territorium
 
-- `core/bridge/*.py` — Subdir fuer alle PC-seitigen Clients
-- `config/settings.json` Keys: `tentacle_llm`, `stt_bridge`, `tts_bridge`, `chat_ui`,
-  `adapter_inference` (W3 NEU), `critic_service` (W2 NEU)
-- Tentakel-Probe in `core/system_watchdog.py` (gemeinsam mit watchdog-Agent — koordinieren)
-- HTTPS-Cert: `config/certs/moloch_chat.{key,crt}` (self-signed, fuer Browser-Mic)
-- systemd-Units: `moloch-chat.service` (HTTP 9100) + `moloch-chat-https.service` (HTTPS 9443)
-- Cross-Session-Mailbox: `docs/PC_TO_PI.md` + `docs/PI_TO_PC.md` (siehe `docs/CROSS_SESSION_PROTOCOL.md`)
+- `core/bridge/*.py` — PC-seitige Clients
+- `core/chat/chat_server.py` — Mailbox-API + Tool-Dispatcher (W21 Phase 1) + Audit-Receiver (W12)
+- `core/audit/closed_loop/web_search_verify.py` — Halluzination-Detector (W19.7+W20a.4)
+- `config/settings.json` Keys: `tentacle_llm`, `stt_bridge`, `tts_bridge`, `chat_ui`, `adapter_inference`, `critic_service`
+- `config/api_keys.json` (gitignored) — DeepSeek-Cloud-Key
+- `config/tool_catalog.json` (W21 Phase 1) — function-calling-Tools
+- HTTPS-Cert: `config/certs/moloch_chat.{key,crt}`
+- systemd-Units: `moloch.service`, `moloch-chat.service`, `moloch-chat-https.service` (3 separate Units, alle 3 via `moloch_service(action=restart)` seit W20a-A3)
 
-### Konkrete Bridge-Module
+## chat_server.py Endpoints (Stand W21 Phase 1)
 
-- `core/bridge/chat_server.py` — FastAPI-Server (HTTP 9100 + HTTPS 9443).
-  Endpoints (vollstaendig, Stand W3):
-  - `GET  /`               — HTML-Cockpit (Header-Stats + 3 Tabs Live/Charakter/Sehen + 👍/👎/[Critic])
-  - `GET  /health`         — Service-Status
-  - `GET  /status`         — Bridge-Stats (llm_mode, last_provider, request_count, tentacle)
-  - `POST /chat`           — User-Input -> Memory + EventBus + LLM-Bridge
-  - `GET  /history`        — letzte N Memory-Messages (Cross-Channel Browser+Voice+Test)
-  - `GET  /live`           — Status-Snapshot fuer Cockpit (FPS, person, face, power, watchdog, worker)
-  - `GET  /personality`    — Drift + Patch + 15 Journal-Events
-  - `GET  /snapshot.jpg`   — Frame aus SHM (640x360 JPEG q=75)
-  - `POST /critic_review`  — Antwort durch dolphin-mistral:7b bewerten (PC-Critic-Service)
-  - `POST /tts`            — Text durch PersonalityEngine.speak() (Pi-Piper)
-  - `POST /feedback`       — Markus-Thumbs (👍/👎) -> feedback_store.add_thumbs()
-  - `GET  /feedback_stats` — Pool-Status (total/critic/thumbs/pending/approved/rejected)
-  - `GET  /feedback_export`— ndjson-Stream finetune_samples.jsonl (PC nutzt statt scp)
-  - `GET  /system_prompt`  — Debug: was wird LLM injected (drift+patch+events+memory)
-  HTTPS-Mode via Env-Vars MOLOCH_CHAT_SSL_KEY + MOLOCH_CHAT_SSL_CERT (uvicorn ssl_keyfile/cert).
-- `core/bridge/critic_client.py` — PC-Critic-Service-Client (W2). Spricht
-  http://192.168.178.20:11434 (Ollama dolphin-mistral:7b). Health-Probe + Circuit-Breaker.
-- `core/bridge/adapter_inference_client.py` — PC-LoRA-Proxy-Client (W3 Pi-Antwort).
-  Spricht http://192.168.178.20:11600 (FastAPI mit Qwen2.5-1.5B + LoRA-Adapter).
-  API: health(), infer(prompt, system, max_tokens), list_adapters(), reload(), get_state().
-  Settings: `adapter_inference` (host/port/timeout=120/backoff=600/default_max_tokens=100).
-  Circuit-Breaker: 3 fails -> 600s backoff. Health-Cache 30s.
+### Cockpit + Memory (W3)
+- `GET /` HTML-Cockpit
+- `GET /health`, `GET /status` (llm_mode, last_provider, tentacle, request_count)
+- `POST /chat`, `GET /history`, `GET /live`, `GET /personality`, `GET /snapshot.jpg`
+- `GET /system_prompt`
 
-## Abgrenzung (was NICHT dein Revier)
+### Feedback (W3)
+- `POST /critic_review`, `POST /tts`, `POST /feedback`, `GET /feedback_stats`, `GET /feedback_export`
 
-- LLM-Routing-Logik selbst -> `autonomy` Agent (`core/autonomy/local_llm_bridge.py`)
-- TTS-Wiedergabe lokal auf Pi -> `voice` Agent (`core/tts.py`)
-- Whisper auf NPU -> `voice` Agent (`core/speech/hailo_whisper.py`)
-- ESP32 WiFi-Mic -> `tentacle` Agent (Naming-Falle: ESP32 != LLM-Tentakel!)
+### Mailbox (W12, ersetzt docs/-Files)
+- `GET /mailbox/{PC_TO_PI|PI_TO_PC}` — Markdown-Stream, newest on top
+- `POST /mailbox/{PC_TO_PI|PI_TO_PC}` — Body JSON {sender, topic, status, body}, sender muss matchen, **KEINE Backslashes im body**, auto_push commited+pusht
 
-## PC-Hardware-Fakten (Stand 2026-04-19)
+### Audit-Receiver (W12)
+- `POST /mailbox/audit/<component>` — pc_health, hygiene, persona, pc_hardware, web_ui, vision, npu, spotify, hardware, web_search, ...
 
-- **Hostname:** markus-pc, IP **192.168.178.20** (statisch im Heimnetz)
-- **CPU:** AMD Ryzen 9 3900X (12 Core / 24 Thread)
-- **RAM:** 32 GB
-- **GPU:** NVIDIA GeForce GTX 760 (**2 GB VRAM**, Kepler-Architektur, alt aber CUDA-faehig)
-- **Audio:** USB-Audiogeraet + HD Audio + NVIDIA HDMI
-- **OS:** Windows 10 Pro
-
-**Implikation:** GTX 760 schafft Whisper-medium (1.5 GB) gerade so. Large-v3 (3 GB) sprengt VRAM.
-Ryzen 3900X mit 12 Cores ist staerker als Pi und kann faster-whisper-medium/large CPU-only fahren.
+### Tool-Dispatcher (W21 Phase 1, Pi-Opus baut)
+- `GET /api/agent/tools` — `{tools: [{name, description, input_schema, ...}]}`
+- `POST /api/agent/dispatch` — Body `{tool_name, params}` -> `{result, error}`
+- 5 Initial-Tools: web_search, web_fetch, spotify_top_artists, spotify_play, get_mood
 
 ## Aktive und geplante Bridges
 
 | Bridge | Status | Tech | Endpoint |
 |---|---|---|---|
-| LLM-Tentakel | LIVE seit 2026-04-19 | Ollama mistral/dolphin/etc. | http://192.168.178.20:11434 |
-| Critic-Service (W2) | LIVE | Ollama dolphin-mistral:7b | http://192.168.178.20:11434 (gleicher Ollama) |
-| Adapter-Inference (W3) | LIVE seit 2026-04-26 | Qwen2.5-1.5B + LoRA-Adapter v{N} | http://192.168.178.20:11600 |
-| Cockpit Pi-Web | LIVE seit 2026-04-26 | FastAPI auf Pi | http://192.168.178.30:9100 (HTTP) + https://192.168.178.30:9443 (HTTPS fuer Mic) |
-| Sample-Sync | LIVE | scp ODER curl -> /feedback_export | Pi -> PC via Pull |
-| STT-Bridge | GEPLANT | faster-whisper medium CPU oder GPU | http://192.168.178.20:9001 (Vorschlag) |
-| TTS-Bridge | GEPLANT | Piper-Windows oder Edge-TTS | http://192.168.178.20:9002 (Vorschlag) |
+| LLM-Tentakel | LIVE seit 2026-04-19 | Ollama Multi-Modell (W5) | http://192.168.178.20:11434 |
+| Critic-Service (W2) | LIVE | dolphin-mistral:7b | http://192.168.178.20:11434 |
+| Adapter-Inference (W3) | LIVE seit 2026-04-26 | Qwen2.5-1.5B + LoRA | http://192.168.178.20:11600 |
+| Cockpit Pi-Web | LIVE | FastAPI auf Pi | http://192.168.178.30:9100 (HTTP) + :9443 (HTTPS Mic) |
+| Sample-Sync | LIVE | scp ODER curl /feedback_export | Pi -> PC pull |
+| Search-Proxy (W19) | LIVE seit 2026-04-30 | DDG-Scrape | http://192.168.178.20:11650/search |
+| Fetch-Proxy (W20a) | LIVE seit 2026-05-02 | URL -> plain-text | http://192.168.178.20:11650/fetch |
+| DeepSeek-Cloud (W19) | LIVE | api.deepseek.com | tentacle_llm.web_model = api_deepseek |
+| Pi-Tool-Dispatcher (W21) | Pi-Opus baut | function-calling | http://192.168.178.30:9100/api/agent/{tools,dispatch} |
+| PC-Orchestrator (W21) | LIVE Skeleton | DeepSeek function-calling | pc/agent/orchestrator.py |
+| STT-Bridge | GEPLANT | faster-whisper | http://192.168.178.20:9001 |
+| TTS-Bridge | GEPLANT | Piper / Edge-TTS | http://192.168.178.20:9002 |
+| Browser (W22) | GEPLANT | Playwright Headless-Chromium | http://192.168.178.20:11680 |
+
+## Mailbox-Konvention (HTTP, NICHT mehr docs/)
+
+```bash
+# READ
+curl -sS http://192.168.178.30:9100/mailbox/PC_TO_PI
+
+# WRITE (sender muss zur Mailbox passen)
+curl -X POST -H "Content-Type: application/json" --data @body.json \
+  http://192.168.178.30:9100/mailbox/PI_TO_PC
+```
+
+JSON: `{sender, topic, status, body}`. Topic-Prefixes `discuss_/task_/reply_/info_/plan_`. Status-Lifecycle `open -> answered -> done | wontfix`. **NEVER Backslashes/Pfade im body**.
+
+## Halluzination-Detection (W19.7 + W20a.4)
+
+`core/audit/closed_loop/web_search_verify.py`:
+- `_extract_band_mentions()` + `_collect_reference_corpus()` aus search_results + fetch_text
+- Halluzination-Score: ungrounded_count vs grounded_count
+- WGT-Whitelist als Allowed-Pattern
+- Plus: GET `/stats` von Search-Proxy — wenn `seconds_since_last_call > 30` nach Trigger -> Pipeline broken
 
 ## Kritische Regeln
 
-- HTTP-Calls IMMER mit Timeout (Discovery 5s, Inferenz 30s, Streaming 60s)
-- Circuit-Breaker bei wiederholten Fehlern (Backoff 300s wie LLM-Tentakel)
-- Health-Probing in Watchdog-Loop (alle 30 Min, schreibt `system_capabilities.json.bridges`)
-- Firewall-Scope auf Windows STRIKT `192.168.178.0/24` — KEINE LAN-Auth, KEIN Internet-Forward
+- HTTP-Calls IMMER Timeout (Discovery 5s, Inferenz 30s, Streaming 60s, Cloud 90s)
+- Circuit-Breaker (3 fails -> 300s Backoff)
+- Firewall-Scope STRIKT 192.168.178.0/24, KEINE LAN-Auth
 - PC-VRAM-Limit (2 GB) nie ignorieren — Modell-Auswahl danach
 - Failover-Kette: Bridge -> Pi-NPU-Fallback -> Stille (kein Crash)
-- Status der Bridges sichtbar in GUI (panel_models LLM-Modus-Sektion erweitern)
+- Status der Bridges sichtbar in audit_state.json:layers.bridge
 
 ## Pre-Flight (vor Bridge-Aenderung)
 
 ```bash
 # 1. PC erreichbar?
 ping -c 2 192.168.178.20
-
-# 2. Tentakel oben?
-curl -sS --max-time 5 http://192.168.178.20:11434/api/tags
-
-# 3. Bridge-State im Pi-Code lesen
-grep -n 'tentacle_llm\|stt_bridge\|tts_bridge' config/settings.json
+# 2. Multi-Service-Probe
+for url in :11434/api/tags :11600/health :11650/health; do
+  curl -sS -o /dev/null -w "$url HTTP %{http_code}\n" --max-time 3 http://192.168.178.20$url
+done
+# 3. Bridge-Config
+grep -nE 'tentacle_llm|adapter_inference|web_model|tool_catalog' config/settings.json
 ```
 
 ## Post-Flight
 
 ```bash
-sudo systemctl restart moloch
-python3 ~/moloch/moloch_audit.py --auto  # >= 77 Tests nach Bridge-Erweiterung
-journalctl -u moloch -n 50 | grep -iE 'BRIDGE|tentacle|stt|tts'
+# Restart aller 3 Units (W20a-A3)
+sudo systemctl restart moloch moloch-chat moloch-chat-https
+python3 ~/moloch/moloch_audit.py --auto  # >= 85 Tests
+journalctl -u moloch -u moloch-chat -n 50 | grep -iE 'BRIDGE|tentacle|search|fetch'
 ```
 
 ## Agent-Lock (PFLICHT)
@@ -126,4 +129,4 @@ rm /tmp/moloch_agent_bridge      # Letzter Schritt
 
 ## MCP-Tools
 
-`moloch_status()`, `moloch_logs(filter_str="BRIDGE")`, `moloch_ipc()`, `moloch_audit()`
+`moloch_status()`, `moloch_logs(filter_str="BRIDGE")`, `moloch_ipc()`, `moloch_audit()`, `moloch_service(action="restart")` (alle 3 Units)

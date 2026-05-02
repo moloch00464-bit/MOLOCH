@@ -1,10 +1,10 @@
 ---
 name: pc-cowork-startup
-description: Session-Start-Routine fuer Cowork PC-Side Claude-Code Session. Fuehrt LOKOMOTIVE-Schritt-0 vollstaendig durch (git fetch, smoke, mailbox-tail, status-summary). Nutze ZUERST in jeder neuen Session bevor du andere Aufgaben angehst.
+description: Session-Start-Routine fuer Cowork PC-Side Claude-Code Session. Fuehrt LOKOMOTIVE-Schritt-0 vollstaendig durch (MCP-session-init, working-dir-check, Mailbox, Audits, Service-Health). Nutze ZUERST in jeder neuen Session bevor du andere Aufgaben angehst.
 user-invocable: true
 ---
 
-# PC-Cowork-Startup — Session-Start-Routine
+# PC-Cowork-Startup — Lokomotive-Startprotokoll
 
 Vollstaendiger LOKOMOTIVE-Schritt-0 fuer PC-Side Claude-Code-Sessions. Nicht ueberspringen ausser bei trivialen Single-File-Reads.
 
@@ -14,81 +14,113 @@ Vollstaendiger LOKOMOTIVE-Schritt-0 fuer PC-Side Claude-Code-Sessions. Nicht ueb
 bash pc/lokomotive_check.sh
 ```
 
-Fuehrt alle 10 Schritte automatisiert durch (10 = 8 Standard + Auto-Pipeline-Detection + Federation-Status). Strukturierter Output mit ✓/⚠/✗. Ende: Summary mit HEAD, Mailbox-Tops, Open-Counts, Auto-Pipeline-Aktivitaet 24h.
+Strukturierter Output mit ✓/⚠/✗. Macht alle Schritte automatisiert.
 
-## Manuelle Schritte (sequenziell, falls Skript nicht laufbar)
+## Manuelle Schritte (PC-Cowork-Variante 2026-05-02)
 
-### 1. Identitaet ankuendigen
-Sag in der Antwort: `LOKOMOTIVE aktiv.`
+### 0. Identitaet ankuendigen
 
-### 2. Agent-File laden
+In der ersten Antwort auf einen Code-Auftrag:
+```
+LOKOMOTIVE aktiv.
+Pre-Flight: Domain / Datei-Ampel / Reboot
+```
+
+### 1. MCP-Session-Init (Pi-Health)
+
+```
+mcp__moloch__moloch_session_init()
+```
+
+→ FPS, RAM, last commit, ERROR/CRITICAL-Logs, agent_handoff. Bei FAIL: STOPP.
+
+### 2. Working-Dir-Check
+
+```bash
+pwd  # sollte C:\Users\49179\moloch_repo sein
+```
+
+Wenn Working-Dir woanders (z.B. Cowork-Mirror Desktop\Kleine Moloch\...): warnen, weil dann werden `.claude/skills/` und `.claude/agents/` NICHT geladen. Empfehlung: `cd C:\Users\49179\moloch_repo` oder neu starten.
+
+### 3. Agent-File laden
+
 ```
 Read .claude/agents/pc.md
 ```
+
 Antwort: `Agent pc geladen.`
 
-### 3. Master-Briefing laden
-```
-Read docs/LOKOMOTIVE_PC_COWORK.md
-```
-Antwort: `Cowork-Briefing geladen.`
+### 4. Repo-Sync (PC-Side)
 
-### 4. Repo-Sync
 ```bash
-cd C:\Users\49179\moloch_repo && \
-  git fetch && \
-  git status && \
-  git log --oneline -5
-```
-Wenn behind origin: `git pull --rebase`. Bei untracked files: notieren, NICHT spontan committen.
-
-### 5. Smoke-Test
-```bash
-pc\smoke.cmd
-```
-Muss `[smoke] OK` ausgeben. Bei FAIL: nicht weiter, debug zuerst.
-
-### 6. Mailbox-Top lesen
-```bash
-echo "=== PI_TO_PC top ===" && \
-grep -nE "^## \[" docs/PI_TO_PC.md | head -5 && \
-echo "" && echo "=== PC_TO_PI top ===" && \
-grep -nE "^## \[" docs/PC_TO_PI.md | head -5
+cd C:/Users/49179/moloch_repo
+git fetch
+git status
+git log --oneline -5
 ```
 
-### 7. Service-Health (optional, ~5s)
+Bei behind origin: `git -c user.email=cowork@moloch.local -c user.name="Cowork PC-Side" pull --rebase`. Untracked files notieren — NICHT spontan committen.
+
+### 5. Pi-Status (MCP)
+
+```
+mcp__moloch__moloch_status()
+mcp__moloch__moloch_npu_workers()
+mcp__moloch__moloch_git_log(n=15)
+```
+
+Ergibt: FPS, Worker-Health, was Pi-Opus zuletzt gepusht hat.
+
+### 6. Mailbox-Top (HTTP-API)
+
 ```bash
-for url in ":11600/health" ":11700/api/state" ":11800/api/state" ":9000/feedback_stats" ":11434/api/tags"; do
+curl -s http://192.168.178.30:9100/mailbox/PI_TO_PC | head -100
+curl -s http://192.168.178.30:9100/mailbox/PC_TO_PI | head -100
+```
+
+Newest-on-top. Suche nach `topic=reply_*` Pi-Antworten + offene `task_*` von mir.
+
+### 7. PC-Service-Health
+
+```bash
+for url in ":11600/health" ":11650/health" ":11650/stats" ":11434/api/tags" ":9000"; do
   curl -sS -o /dev/null -w "$url HTTP %{http_code}\n" --max-time 3 "http://localhost$url"
 done
 ```
 
-### 8. Auto-Pipeline-Detection (NEU 2026-04-27 — Heute-Lehre)
+Erwartet: 200 fuer alle. :9000 ist SSH-Tunnel, kann 200 oder timeout sein.
+
+### 8. Audits
+
 ```bash
+python pc/moloch_health_check.py     # 8-Layer Self-Test (~5s)
+python pc/web_pipeline_auditor.py --once  # 4-Layer Web-Pipeline
+```
+
+Ergebnis: PASS-WARN-FAIL Counts. Bei FAIL → erst beheben dann arbeiten.
+
+### 9. Auto-Pipeline-Detection
+
+```bash
+git log --since="1 day ago" --author="Cowork" --oneline
 git log --since="1 day ago" --author="cowork-monitor\|cowork-claude-auto" --oneline
-grep -c '"kind": "federation_reply"' ~/moloch_logs/cross_session.jsonl
-```
-Was hat der Daemon ohne dich gemacht? Auto-Trigger v_next_ready_to_train? Federation-Replies (sollte 0 sein da fed_kill aktiv).
-
-### 9. Pool + Adapter
-```bash
-curl -sS http://localhost:9000/feedback_stats   # Pool: total/approved/pending/rejected
-curl -sS http://localhost:11600/list            # active adapter + alle versions
 ```
 
-### 10. Status-Summary an Markus
-1-2 Saetze: was ist Stand? Was ist letzter Pi-Topic? Was sind offene PC-Topics? Letzter Commit. Was laeuft / ist down. **Auch: was hat Daemon autonom gemacht (heute war v2 live ohne dass ich's wusste).**
+Was hat Daemon ohne dich gemacht (Federation-Replies, Auto-Trigger)?
 
-Format-Beispiel:
-```
-Bereit. HEAD: <sha> "<msg>". Auto-Pipeline 24h: <N> commits (<Beispiel>).
-Pi-Topic offen: <topic>. Open: PC=X PI=Y. Services: alle UP / X DOWN.
-Pool: <approved>/<total>. Adapter: <active>. Was tun?
-```
+### 10. Status-Summary
+
+In 1-2 Saetzen an Markus:
+- HEAD: <sha> "<msg>"
+- Pi-Opus letzte Aktion: <commit-msg-erste-Zeile>
+- Mailbox: PC=<open-count>, PI=<open-count>, neueste reply: <topic>
+- Audits: PC=<P/W/F>, Web-Pipeline=<P/W/F>
+- Was tun?
 
 ## Anti-Pattern
 
-- LOKOMOTIVE-Schritt-0 ueberspringen weil "ich weiss schon was Sache ist" → falsch, repo-state aendert sich oft (Pi pusht parallel)
+- LOKOMOTIVE-Schritt-0 ueberspringen weil "ich weiss schon was Sache ist" → falsch, Pi-Opus pusht parallel
+- Working-Dir nicht pruefen → Skills/Agents werden nicht geladen, Tabelle inkonsistent
 - Mailbox nicht lesen → Pi-Reply auf vorherige Anfrage verpasst
-- Smoke skippen → Bugs schleichen sich ein
+- Audit skippen → Bugs schleichen sich ein
 - Status-Summary auslassen → Markus weiss nicht was du weisst

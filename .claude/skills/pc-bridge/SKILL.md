@@ -1,113 +1,137 @@
 ---
 name: pc-bridge
-description: Cross-Platform-Setup und Debug fuer Pi <-> Markus-PC Bruecken (LLM-Tentakel, STT, TTS, Chat-UI). Nutze bei Bridge-Aufgaben oder PC-Erreichbarkeits-Problemen.
+description: Cross-Platform Pi <-> Markus-PC Bruecken-Skill. Aktueller Stand 2026-05-02 (W3+W5+W19+W20a+W21). LLM-Tentakel Multi-Modell, Adapter-Proxy, Search-Proxy mit /search + /fetch, Halluzination-Detector, Pi-Tool-Dispatcher, PC-Orchestrator. Nutze bei Bridge-Aufgaben oder Erreichbarkeits-Problemen.
 user-invocable: true
 ---
 
-# PC-Bridge — Pi <-> Markus-PC
+# PC-Bridge — Pi <-> Markus-PC (Stand 2026-05-02)
 
-**Topologie:**
+## Topologie aktuell
+
 ```
 Pi (192.168.178.30, Brain)
-   |
-   +-- LAN --+ Markus-PC (192.168.178.20, Co-Worker)
-                |
-                +-- Ollama   :11434  (LLM-Tentakel, LIVE)
-                +-- Whisper  :9001   (STT-Bridge, GEPLANT)
-                +-- Piper    :9002   (TTS-Bridge, GEPLANT)
-                +-- Chat-UI  :9000   (Web/Desktop, GEPLANT)
+  | Klassifikator (chat_server._classify_prompt_type)
+  | Specialist-Router
+  ↓ HTTP
+PC (192.168.178.20, Co-Worker)
+  ├── Ollama          :11434  Multi-Modell (W5)
+  │   ├── moloch-coder      (code, Layer ueber deepseek-coder:6.7b)
+  │   ├── dolphin-llama3:8b (complex)
+  │   └── dolphin-mistral:7b (web, falls nicht api_deepseek)
+  ├── Adapter-Proxy   :11600  Qwen2.5-1.5B + LoRA (W3)
+  ├── Search-Proxy    :11650  /search + /fetch + /stats (W19+W20a)
+  ├── Agent-Orch.     (W21 PC-Side Skeleton in pc/agent/)
+  ├── Avatar          :11800
+  └── Dashboard       :11700
+
+Pi-Mailbox-API     :9100/mailbox/{PC_TO_PI,PI_TO_PC} (HTTP, auto_push)
+Pi-Tool-Dispatch   :9100/api/agent/{tools,dispatch} (W21 Phase 1)
+Pi-Cockpit         :9100/ HTTP + :9443/ HTTPS
+PC SSH-Tunnel      :9000 -> Pi-Cockpit
+
+DeepSeek-Cloud     api.deepseek.com (api_keys.json:deepseek)
+                   = web_model in tentacle_llm.web_model (W19)
+                   = Orchestrator-LLM mit function-calling (W21)
 ```
 
-## PC-Hardware (2026-04-19)
+## Welle-Lifecycle der Bridges
 
-- **CPU:** AMD Ryzen 9 3900X (12C/24T) — stark, CPU-Whisper-medium machbar
-- **RAM:** 32 GB
-- **GPU:** NVIDIA GTX 760 (**2 GB VRAM**, Kepler) — Whisper-medium ja, large-v3 zu wenig VRAM
-- **Audio:** USB-Audiogeraet + HD Audio + NVIDIA HDMI
-- **OS:** Windows 10 Pro, statische IP 192.168.178.20
+| Welle | Was | Stand |
+|---|---|---|
+| W2 | Critic-Service (Ollama dolphin-mistral) | LIVE |
+| W3 | Adapter-Inference-Proxy :11600 (LoRA) | LIVE |
+| W3 | chat_server :9100/:9443 (HTTP/HTTPS Cockpit) | LIVE |
+| W3 | Sample-Sync via /feedback_export | LIVE |
+| W5 | Multi-Modell-Routing (3 Ollama-Modelle pro prompt_type) | LIVE |
+| W12 | PC-Side-Audit-Layer (5 Auditoren POSTen via /mailbox/audit/*) | LIVE |
+| W19 | Search-Proxy `/search` + Augmentation-Schritt vor LLM | LIVE |
+| W19 | web_model -> api_deepseek (User-facing-Recherche zu Cloud) | LIVE |
+| W20a | Search-Proxy `/fetch` (URL -> plain-text) | LIVE |
+| W20a | Halluzination-Detector mit Band-Mentions vs Corpus | LIVE |
+| W20a-A3 | `moloch_service(restart)` restartet alle 3 Units | LIVE |
+| W21 P1 | Pi-Tool-Dispatcher + 5 Tools + Catalog | Pi-Opus baut |
+| W21 P2 | PC-Orchestrator-Loop (DeepSeek function-calling) | LIVE Skeleton, MockBridge -> HttpBridge auto-fallback |
+| W22 | Echter Browser (Playwright) | geplant, noch nicht gebaut |
 
-## Aktive Bridge: LLM-Tentakel
+## Pi-Klassifikator -> PC-Routing-Tabelle
 
-**Setup (Windows, einmalig, Admin):**
-```powershell
-[Environment]::SetEnvironmentVariable('OLLAMA_HOST', '0.0.0.0:11434', 'Machine')
-New-NetFirewallRule -DisplayName 'Ollama LAN (MOLOCH)' -Direction Inbound `
-  -Protocol TCP -LocalPort 11434 -Action Allow -RemoteAddress 192.168.178.0/24
-```
-
-**Pi-Config (`~/moloch/config/settings.json`):**
-```json
-"tentacle_llm": {
-  "enabled": true,
-  "host": "192.168.178.20",
-  "port": 11434,
-  "model": "",
-  "complexity_threshold": 120,
-  "timeout_sec": 30,
-  "backoff_sec": 300
-}
-```
-
-**Routing (in `local_llm_bridge.py`):**
-- Prompt+System >= 120 Zeichen oder caller="reason" -> Tentakel (mistral 7B)
-- Sonst -> NPU (qwen2.5:1.5b)
-- Bei 3 Tentakel-Fails -> 300s Backoff -> NPU faengt ab
-- Auto-Discovery wenn `model: ""` -> erstes /api/tags-Result wird gecached
-
-## Geplante Bridges
-
-| Bridge | Modell-Vorschlag | Endpoint | Aufwand |
+| prompt_type | Pi entscheidet | PC erhaelt | Modell/Tool |
 |---|---|---|---|
-| STT-Bridge | faster-whisper medium (CPU) oder large-v3 (GPU wenn moeglich) | POST :9001/transcribe | mittel — Bash-Wrapper + FastAPI |
-| TTS-Bridge | Piper-Windows (gleich wie Pi) oder Edge-TTS (besser) | POST :9002/speak | klein — fertige Tools |
-| Chat-UI | Browser-UI mit WebSocket zu Pi-IPC | http://192.168.178.20:9000 | gross — eigenes Frontend |
+| `simple_smalltalk` | NPU-Bypass | — (bleibt Pi) | qwen2.5:1.5b lokal |
+| `hardware_action` | IPC-Bypass | — (bleibt Pi) | direkt IPC, kein LLM |
+| `code` | Welle 5 -> PC | Ollama `moloch-coder` | code-Specialist |
+| `complex` | Welle 5 -> PC | Ollama `dolphin-llama3:8b` | reasoning |
+| `web` (W19) | search_proxy + Cloud | search:11650 -> api_deepseek | recherche |
+| `web_fetch` (W20a) | fetch_proxy + Cloud | fetch:11650 -> api_deepseek | URL-Inhalt |
+| `recommendation` (W21+) | Orchestrator | DeepSeek function-calling Loop | multi-tool |
 
-## Debug-Befehle (vom Pi)
+## HTTP-Endpoints Cheat-Sheet
+
+### Pi-seitig (von PC aufgerufen)
+
+```
+GET  http://192.168.178.30:9100/health
+GET  http://192.168.178.30:9100/status
+GET  http://192.168.178.30:9100/mailbox/PI_TO_PC
+GET  http://192.168.178.30:9100/mailbox/PC_TO_PI
+POST http://192.168.178.30:9100/mailbox/PC_TO_PI         (Body JSON {sender, topic, status, body})
+POST http://192.168.178.30:9100/mailbox/audit/<component> (Audit-Receiver, W12)
+
+# W21 Phase 1 (Pi-Opus baut grad)
+GET  http://192.168.178.30:9100/api/agent/tools          -> {tools: [function-calling-Schema]}
+POST http://192.168.178.30:9100/api/agent/dispatch       (Body {tool_name, params})
+```
+
+### PC-seitig (von Pi aufgerufen)
+
+```
+GET  http://192.168.178.20:11434/api/tags                # Ollama-Modelle
+POST http://192.168.178.20:11434/api/generate            # LLM-Inferenz
+POST http://192.168.178.20:11434/api/chat                # function-calling-Format
+GET  http://192.168.178.20:11600/health                  # Adapter-Proxy
+POST http://192.168.178.20:11600/infer                   # LoRA-Inferenz
+POST http://192.168.178.20:11650/search                  # DDG-Suche
+POST http://192.168.178.20:11650/fetch                   # URL-Fetch
+GET  http://192.168.178.20:11650/stats                   # Audit-Indikator
+```
+
+## Halluzination-Detection (W19.7 + W20a.4)
+
+Pi-Side closed_loop/web_search_verify.py prueft:
+- Genannte Band-Namen in LLM-Antwort vs Corpus aus search_results + fetch_text
+- ungrounded_count >= 2 AND no_url AND no_research_marker -> FAIL
+- W19.7 grouped_count vs ungrounded_count
+
+Bei FAIL: re-try mit Cloud (Claude oder DeepSeek mit hoeherer temperature) — geplant W21+.
+
+## NEVER-Regeln Bridge
+
+- HTTP-Calls IMMER Timeout: Discovery 5s, Inferenz 30s, Streaming 60s, Cloud 90s
+- Circuit-Breaker bei wiederholten Fehlern (3 fails -> 300s Backoff)
+- Firewall-Scope STRIKT 192.168.178.0/24, KEINE LAN-Auth
+- Failover-Kette IMMER bis Stille (kein Crash)
+- Tokens loggen NIE (only counts)
+- API-Keys NIE in Logs
+- KEIN shell=True
+
+## Debug-Befehle
 
 ```bash
-# Erreichbarkeit
+# PC-Erreichbarkeit von Pi
 ping -c 3 192.168.178.20
-curl -sS --max-time 5 http://192.168.178.20:11434/api/tags
+
+# Multi-Service-Health
+for url in :11434/api/tags :11600/health :11650/health :11650/stats :11800/api/state; do
+  curl -sS -o /dev/null -w "$url HTTP %{http_code}\n" --max-time 3 http://192.168.178.20$url
+done
+
+# Search-Proxy Activity-Indikator (zeigt ob Pi-Routing /search nutzt)
+curl -sS http://192.168.178.20:11650/stats | python -m json.tool
 
 # Bridge-Logs
-journalctl -u moloch -n 100 | grep -iE 'BRIDGE|tentacle'
-
-# Live-Test (Reasoning -> Tentakel)
-cd ~/moloch && python3 -c "
-from core.autonomy.local_llm_bridge import get_llm_bridge
-b = get_llm_bridge()
-out = b.reason_internal('Erklaere kurz wie ein Ringpuffer funktioniert.')
-print('Provider:', b._last_provider)
-print('Out:', out[:200])
-"
-
-# Bridge-State im Bridge-Singleton
-python3 -c "
-from core.autonomy.local_llm_bridge import get_llm_bridge, _load_tentacle_cfg
-b = get_llm_bridge()
-print('mode:', b._llm_mode)
-print('cfg:', _load_tentacle_cfg())
-print('fail:', b._tentacle_fail_count, 'backoff_until:', b._tentacle_backoff_until)
-"
+journalctl -u moloch -u moloch-chat -u moloch-chat-https -n 100 | grep -iE 'BRIDGE|tentacle|search|fetch|kaskade'
 ```
 
-## Troubleshooting
+## Watchdog
 
-| Symptom | Erste Schritte |
-|---|---|
-| curl /api/tags hangt | Windows: Ollama Tray-App laeuft? netstat findstr 11434 zeigt 0.0.0.0? Firewall-Regel da? |
-| Pi sagt 'PROVIDER=lokal_qwen2.5' obwohl Tentakel erwartet | Prompt war kurz (<120 Zeichen) -> Routing ist korrekt. Oder backoff_until > 0 -> warte 5 Min. |
-| tentacle_fail_count > 0 | Letzte journalctl-Zeile mit '[LLM-BRIDGE]' lesen — Connection Error vs Timeout vs Schema-Mismatch |
-| Tentakel laeuft, aber Antwort ist Mist | model='' nutzt erstes /api/tags-Result. Setze model: 'mistral:latest' explizit. |
-
-## Watchdog-Probe
-
-`core/system_watchdog.py` probed alle 30 Min die Bridges.
-Status-Pfad: `config/system_capabilities.json.bridges` (nach Erweiterung).
-
-## Wichtige Regeln
-
-- LAN-Calls IMMER mit Timeout
-- Firewall-Scope STRIKT 192.168.178.0/24
-- KEINE Auth-Header (LAN ist unsecured) — nicht ins Internet exponieren
-- Failover-Kette IMMER bis Stille (kein Crash)
+`core/system_watchdog.py` probed Bridges alle 30 Min. Status in `/dev/shm/audit_state.json:layers.bridge` (W14).
