@@ -25,7 +25,7 @@ import struct
 import requests
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import uvicorn
 from fastapi import BackgroundTasks, FastAPI, HTTPException
@@ -2669,6 +2669,59 @@ def mailbox_audit_post(component: str, payload: Dict):
         raise
     except Exception as e:
         raise HTTPException(500, f"audit-merge Fehler: {e}")
+
+
+# ============================================================================
+# W21 Phase 2 — Pi-Side Tool-API fuer PC-Orchestrator (DeepSeek function-calling)
+# ============================================================================
+
+
+class AgentDispatchRequest(BaseModel):
+    tool_name: str
+    params: Optional[Dict[str, Any]] = None
+
+
+@app.get("/api/agent/tools")
+def agent_tools_catalog():
+    """W21 Phase 2 — Tool-Catalog fuer PC-Side Orchestrator (DeepSeek function-calling)."""
+    try:
+        from core.agent.tool_dispatcher import get_catalog, list_tools
+        cat = get_catalog()
+        tools_list = []
+        for name in list_tools():
+            tdef = cat.get(name) or {}
+            if tdef:
+                tools_list.append(tdef)
+        return {"tools": tools_list, "count": len(tools_list)}
+    except Exception as e:
+        logger.warning(f"[W21] /api/agent/tools error: {e}")
+        return {"tools": [], "count": 0, "error": str(e)[:200]}
+
+
+@app.post("/api/agent/dispatch")
+def agent_dispatch(req: AgentDispatchRequest):
+    """W21 Phase 2 — PC-Orchestrator dispatchet Pi-Tool via HTTP.
+
+    Body: {"tool_name": str, "params": dict}
+    Returns: {tool, result, error, duration_ms}
+    """
+    try:
+        from core.agent.tool_dispatcher import dispatch
+        result = dispatch(req.tool_name, req.params or {})
+        logger.info(
+            f"[W21] dispatch tool={req.tool_name} "
+            f"duration={result.get('duration_ms', 0):.1f}ms "
+            f"err={result.get('error')}"
+        )
+        return result
+    except Exception as e:
+        logger.warning(f"[W21] /api/agent/dispatch error: {e}")
+        return {
+            "tool": req.tool_name,
+            "result": None,
+            "error": f"dispatch_endpoint_error:{str(e)[:200]}",
+            "duration_ms": 0.0,
+        }
 
 
 # ============================================================================
