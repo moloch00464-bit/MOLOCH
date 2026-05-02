@@ -79,10 +79,29 @@ _WEB_LIVE_KEYWORDS = (
     "nachschlag", "schau nach", "schaue nach",
 )
 
+# W20a-A2: regex fuer "welche P-Bands" / "welche X-Bands" (Bindestrich-Komposita)
+# matcht "welche P-Bands", "welche metal bands", "welche dark-bands" etc.
+_WHICH_BANDS_RE = re.compile(r'\bwelche [\w\-]+\s*-?\s*bands?\b', re.IGNORECASE)
+# W20a-A2: Festival-Namen allein triggern web (vor music_query-Klassifizierung)
+_FESTIVAL_NAME_RE = re.compile(
+    r"\b(wgt|wave-?gotik|amphi|m['`]?era[\s\-]?luna)\b", re.IGNORECASE
+)
+
 
 def _is_web_live_query(text_low: str) -> bool:
-    """Welle 19: erkennt User-Recherche-Anfragen die Live-Web-Daten brauchen."""
-    return any(kw in text_low for kw in _WEB_LIVE_KEYWORDS)
+    """Welle 19: erkennt User-Recherche-Anfragen die Live-Web-Daten brauchen.
+
+    W20a-A2: zusaetzlich regex-basierte Erkennung fuer "welche P-Bands" und
+    Festival-Namen (WGT/Amphi/M'era Luna), die als reine Substrings nicht
+    in _WEB_LIVE_KEYWORDS abgedeckt sind.
+    """
+    if any(kw in text_low for kw in _WEB_LIVE_KEYWORDS):
+        return True
+    if _WHICH_BANDS_RE.search(text_low):
+        return True
+    if _FESTIVAL_NAME_RE.search(text_low):
+        return True
+    return False
 
 _CODE_KEYWORDS = (
     # Direkte "schreib X"-Imperative
