@@ -3,6 +3,97 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-02 08:56] from=PC topic=task_welle20a_url_fetch_pi_integration
+status: open
+
+## Browser-Verhalten Stufe 1 — URL-Fetch
+
+Markus 2026-05-02: Bug aus Chatverlauf — er gibt Link `https://www.wave-gotik-treffen.de/bands.php`, Moloch antwortet `Link ist lang, hab ich gesehen — aber ich hab keinen Browser, Boss`. Tool-Lücke geschlossen.
+
+## PC-Side erledigt
+
+`pc/search_proxy.py` v1.2:
+- POST /fetch Endpoint: body {url, max_chars} -> {url, final_url, title, text, chars, truncated, duration_ms, cached}
+- HTTP-GET mit Redirect-Follow + BeautifulSoup-Text-Extraktion (script/style/iframe gestrippt, main/article bevorzugt)
+- 32-Slot Cache (180s Cooldown)
+- /stats erweitert um fetch_count, fetch_cache_hit/miss, fetch_error_count, last_fetch_url, last_fetch_chars
+
+`pc/web_pipeline_auditor.py`:
+- Layer 4 (e2e_fetch) hinzugefuegt: postet WGT-bands.php, prueft chars > 500 + Marker (Wave-Gotik / Lacrimosa / Suicide Commando)
+
+Live-Test 2026-05-02: 4/4 PASS (4648 chars von WGT-Seite, Title korrekt, marker_found true).
+
+Commit folgt mit Cowork-Author.
+
+## Pi-Side TODOs
+
+### 1. Klassifikator URL-Erkennung core/chat/chat_server.py:_classify_prompt_type
+
+Prueft auf URL im user_query:
+- regex r'https?://[^\s]+' findet match -> prompt_type = web_fetch
+- Plus extrahiert die URL als separater query-param
+
+Prioritaet: web_fetch HOEHER als web (search), HOEHER als spotify_action.
+
+### 2. Specialist-Router web_fetch-Branch
+
+```
+if prompt_type == web_fetch:
+    url = extracted_url
+    fetched = http_post(http://192.168.178.20:11650/fetch,
+                          {url, max_chars: 8000}, timeout=25)
+    augmented = `URL: {url}\nTITEL: {fetched.title}\nINHALT:\n{fetched.text}\n\nFRAGE: {user_query_ohne_url}`
+    return call_llm(augmented, model=api_deepseek)
+```
+
+Fail-soft: bei /fetch-Fehler (404/timeout/...) -> normal /search machen.
+
+### 3. Specialist-Router web-Branch erweitern
+
+Aktuell: /search liefert URLs + Snippets, LLM antwortet ohne in-depth Inhalt.
+Verbessert: Top-Result URL extra mit /fetch holen, vollen Text in Prompt.
+
+```
+if prompt_type == web:
+    search_results = http_post(/search, ...).json()
+    augmented_ctx = format(search_results.results)
+    if user_query enthaelt Festival-Schluesselwoerter (WGT, Amphi, M era Luna):
+        top_url = search_results.results[0].url
+        fetched = http_post(/fetch, {url: top_url, max_chars: 6000})
+        augmented_ctx += `VOLLTEXT TOP-RESULT:\n{fetched.text}`
+    return call_llm(augmented_ctx + FRAGE + user_query, model=api_deepseek)
+```
+
+### 4. Halluzination-Detector erweitern (W19.7 patch)
+
+core/audit/closed_loop/web_search_verify.py:
+- Aktuell: prueft auf Spotify-Stats-Pattern in Antwort
+- NEU: prueft ob in Antwort genannte Band-Namen im /search-results ODER /fetch-text vorkommen
+- FAIL wenn Antwort Band X erwaehnt aber X NICHT in Search-Results UND NICHT in Fetched-Text
+
+### 5. Specialist-Router Query-Refinement
+
+Wenn user_query enthaelt Festival-Name + Recherche-Keyword, automatisch site:-Filter:
+- WGT/Wave-Gotik -> site:wave-gotik-treffen.de
+- Amphi -> site:amphi-festival.de
+- Bands.php Link in Antwort enthalten
+
+## Akzeptanztest
+
+1. Markus postet `https://www.wave-gotik-treffen.de/bands.php` als Frage
+2. Pi-Side Klassifikator: prompt_type=web_fetch
+3. PC-Side curl http://localhost:11650/stats zeigt fetch_count erhoeht + last_fetch_url=wave-gotik-treffen.de
+4. Antwort enthaelt echte Band-Namen aus der Seite
+5. Markus fragt `welche P-Bands aufm WGT 2026?` -> /search + /fetch von wave-gotik-treffen.de -> echte Liste (Pahl, Pankow, Panzer AG, Patenbrigade Wolff, Patty Gurdy, Perturbator, Phosgore, Pink Turns Blue, Pol, Portion Control, Prager Handgriff)
+6. closed_loop/web_search_verify zeigt PASS
+
+## Aufwand
+
+Klassifikator URL-detection 10 Zeilen + web_fetch-Branch 25 Zeilen + web-Branch-Erweiterung 15 Zeilen + Halluzination-Detector-patch 30 Zeilen + Query-Refinement 20 Zeilen. Total ~2 Std Pi-Opus.
+
+W20a ist Quick-Fix vor Welle-21 Agent-Loop-Refactor. Beide parallel sinnvoll, W20a unblockiert Markus' Browser-Use-Case sofort.
+
+---
 ## [2026-05-01 10:26] from=PC topic=task_welle19_web_pipeline_fix
 status: done
 
