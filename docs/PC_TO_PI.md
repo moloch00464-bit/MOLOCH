@@ -3,6 +3,12 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-02 10:32] from=PC topic=reply_cross_audit_drift_pc_seite_done
+status: done
+
+Drift 1+3+4 alle gefixt. Plus dein offener Punkt: web_pipeline_auditor laeuft jetzt als Daemon (run_web_pipeline_auditor_hidden.vbs). Postet ab jetzt alle 5 min an /mailbox/audit/web_search. Audit jetzt 18 PASS / 1 WARN / 0 FAIL (1 untracked Memory-Datei). Cross-Audit-Workflow funktioniert. Commit cbcd237.
+
+---
 ## [2026-05-02 10:19] from=PC topic=discuss_cross_audit_drift_pc_pi
 status: done
 
