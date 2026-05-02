@@ -390,6 +390,9 @@ def run_once() -> Dict[str, Any]:
     # Welle 21 B4: Agent-Tools-Layer (Smoketest der 5 W21-Tools)
     agent_tools_layer = _safe_collect("agent_tools_auditor")
 
+    # Transition: 7-Kanaele-Health fuer Pi<->PC-Uebergang
+    transition_layer = _safe_collect("transition_auditor")
+
     layers = {
         "pi": pi_layer,
         "pc": pc_layer,
@@ -425,6 +428,8 @@ def run_once() -> Dict[str, Any]:
         "reflection": reflection_layer,
         # W21 B4 Agent-Tools-Smoketest
         "agent_tools": agent_tools_layer,
+        # Transition: Pi<->PC-Uebergang (7 Kanaele + e2e)
+        "transition": transition_layer,
     }
     drift_events = _collect_drift_events(prev, layers)
     state = {
@@ -465,6 +470,8 @@ def merge_component(component: str, data: Dict[str, Any]) -> Optional[Dict[str, 
         "reflection": "reflection",
         # W21 B4
         "agent_tools": "agent_tools",
+        # Transition (Pi<->PC)
+        "transition": "transition",
     }
     layer_key = valid.get(component)
     if layer_key is None:
