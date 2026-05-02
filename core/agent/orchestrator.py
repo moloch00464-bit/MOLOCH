@@ -42,14 +42,15 @@ def _load_tool_catalog() -> List[Dict[str, Any]]:
 
 
 def _dispatch_tool(name: str, arguments: Dict[str, Any]) -> Any:
+    """Tool-Call dispatchen via core.agent.tool_dispatcher.dispatch (W21 Phase 1 B3)."""
     try:
-        from core.agent.tools import TOOL_REGISTRY  # type: ignore
-        fn = TOOL_REGISTRY.get(name)
-        if fn is None:
-            return {"error": f"unknown_tool:{name}"}
-        return fn(**arguments)
+        from core.agent.tool_dispatcher import dispatch as _disp
+        out = _disp(name, arguments)
+        if out.get("error"):
+            return {"error": out["error"]}
+        return out.get("result")
     except Exception as e:
-        return {"error": f"tool_dispatch_error:{str(e)[:200]}"}
+        return {"error": f"dispatch_import:{str(e)[:200]}"}
 
 
 class AgentOrchestrator:
