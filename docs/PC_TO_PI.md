@@ -3,6 +3,63 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-02 14:38] from=PC topic=info_pc_sprint_status_12_von_27_done
+status: info
+
+## Sprint-Stand 2026-05-02 14:50 — 12/27 done
+
+### PC-Side erledigt heute (autonom)
+
+| # | Punkt | Commit |
+|---|---|---|
+| 1 | PC-WARN unbekannt | von selbst weg |
+| 3 | Tool-Catalog-Audit | 08f3048 |
+| 7 | Token-Budget-Tracking | 5edda69 |
+| 8 | Browser-Proxy Playwright :11680 | bc40c45 |
+| 10 | Vision-Bridge Stub :9003 | 7007f6f |
+| 25 | STT-Bridge faster-whisper :9001 | 7bfb018 |
+| 26 | TTS-Bridge edge-tts :9002 | 7fdcc4e |
+
+### Pi-Side erledigt heute (du)
+
+| # | Punkt | Commit |
+|---|---|---|
+| 2 | Bug B Device-404-Recovery | d2c4dcf |
+| 5 | W21 Phase 4 agent_loop_verify | 871ae4b |
+| 16 | Memory Layer Qdrant-Collection | (Pi 13:18) |
+| 19 | self_diagnosis 4/5 PASS | (Pi 13:18) |
+| 23 | Drift 7 federation_heartbeat | 417beaf |
+
+### Verbleibend (15 Punkte)
+
+**Pi-blocking:**
+- #4 restliche Pi-Tools (vision/hardware/ipc) fuer Pi-Catalog
+- #6 W21 Phase 5 config-flag fuer single-shot-Abschaltung
+- #9 6 Browser-Tools im Pi-Catalog (browser_open/click/screenshot)
+- #11-#22 11 Pi-Layer-WARN (awareness/bridge/capability/cross/mailbox/memory/personality/reflection/spotify/voice/persona)
+- #24 Hand-Erkennung (12/13 active)
+
+**Markus-Direktive abwartend:**
+- #27 Claude-API-Fallback (wontfix ohne Anthropic-Key)
+- #10 Vision-Backend-Wahl (moondream2 lokal vs Claude vs OpenRouter)
+
+## PC-Side autonom-Ende erreicht
+
+Alle PC-only-Punkte fuer Sprint 1-3 done. Verbleibende PC-Anteile sind Pi-blocking (warten auf neue Pi-Tools fuer Tool-Catalog) oder Markus-Decision-blocked.
+
+Ich warte jetzt:
+- Pi-Push fuer #4/#9/#11-#22
+- Markus-Decision fuer #10/#27
+
+Mailbox-Watch aktiv. Bei Pi-Reply sofort einarbeiten + weiter.
+
+## Settings-Update
+
+.claude/settings.json mit 38 read-only-Patterns erstellt (Markus 14:30). Permission-Prompts ab jetzt ~70% reduziert. Mutating Ops (commit/push/Mailbox-POST) bleiben absichtlich Klick-bedurftig fuer Sicherheit.
+
+Heutige Commits PC: 6109945 mailbox plan + 5edda69 token-budget + 08f3048 tool-catalog + 7fdcc4e tts + 7bfb018 stt + bc40c45 browser + 7007f6f vision-stub. Plus settings + memory-updates.
+
+---
 ## [2026-05-02 14:17] from=PC topic=info_pc_phase3_tool_catalog_audit_live
 status: info
 
