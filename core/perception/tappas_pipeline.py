@@ -404,11 +404,33 @@ class TappasPipeline:
             # HAILO_RESOURCE_EXHAUSTED(81) beim Qwen-Load.
             # Abgeschaltet: 4 Worker mit offenen Bugs A1-A3 + Hand (SEGV-Race).
             # Re-aktivieren: Block einkommentieren, Qwen-Koexistenz testen.
-            # Kandidat fuer spaeter: toggleable via settings.multi_person_tracking.
             #
-            # self._hand_worker = HandWorker()
-            # self._result_collector.register_worker(self._hand_worker)
-            # self._roi_dispatcher.register_worker(self._hand_worker, every_n_frames=4)
+            # Hand-Erkennung (#24, 2026-05-02): toggleable via settings.hand_detection_enabled.
+            # WARNUNG: Aktiviert Hand-Worker (+1 Network-Group). Ggf. anderen
+            # Worker (z.B. Depth) deaktivieren oder Qwen2.5 entladen, sonst
+            # HAILO_RESOURCE_EXHAUSTED(81) beim naechsten Modell-Load.
+            self._hand_worker = None
+            try:
+                _hand_enabled = False
+                try:
+                    import json as _json2
+                    _spath = os.path.join(
+                        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                        "config", "settings.json")
+                    with open(_spath, "r", encoding="utf-8") as _sf:
+                        _hand_enabled = bool(_json2.load(_sf).get("hand_detection_enabled", False))
+                except Exception as _se:
+                    logger.warning(f"[WORKERS] hand_detection_enabled nicht lesbar: {_se}")
+                if _hand_enabled:
+                    self._hand_worker = HandWorker()
+                    self._result_collector.register_worker(self._hand_worker)
+                    self._roi_dispatcher.register_worker(self._hand_worker, every_n_frames=4)
+                    logger.info("[WORKERS] HandWorker AKTIV (settings.hand_detection_enabled=true)")
+                else:
+                    logger.info("[WORKERS] HandWorker INAKTIV (settings.hand_detection_enabled=false)")
+            except Exception as _he:
+                logger.error(f"[WORKERS] HandWorker-Init fehlgeschlagen: {_he}")
+                self._hand_worker = None
             #
             # self._person_attr_worker = PersonAttrWorker()
             # self._result_collector.register_worker(self._person_attr_worker)
