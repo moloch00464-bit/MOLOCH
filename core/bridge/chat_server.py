@@ -1464,6 +1464,11 @@ def chat(req: ChatRequest):
         # Timeout/Down -> weiter mit Original-Prompt ohne Augmentation.
         if prompt_type == "web" and not req.force_local:
             web_ctx = ""
+            # Welle 20a: Festival-Anfragen brauchen Volltext (Bands/Lineup
+            # stehen meist nur auf der Festival-Seite, nicht im Snippet).
+            festival_keywords = ("wgt", "wave-gotik", "amphi", "m'era luna",
+                                 "mera luna", "mera-luna")
+            is_festival = any(k in req.text.lower() for k in festival_keywords)
             try:
                 sr = requests.post(
                     "http://192.168.178.20:11650/search",
@@ -1479,6 +1484,29 @@ def chat(req: ChatRequest):
                             for r in results[:5]
                         )
                         logger.info(f"[W19] search_proxy: {len(results)} results, {len(web_ctx)} chars")
+                        # Welle 20a: bei Festival-Anfrage Top-Result-URL via /fetch
+                        # holen und als VOLLTEXT anhaengen
+                        if is_festival and results[0].get("url"):
+                            try:
+                                fr = requests.post(
+                                    "http://192.168.178.20:11650/fetch",
+                                    json={"url": results[0]["url"], "max_chars": 6000},
+                                    timeout=25,
+                                )
+                                if fr.ok:
+                                    fetched_top = fr.json()
+                                    if fetched_top.get("text"):
+                                        web_ctx += (
+                                            f"\n\nVOLLTEXT TOP-RESULT "
+                                            f"({fetched_top.get('title', '')}):\n"
+                                            f"{fetched_top.get('text', '')}"
+                                        )
+                                        logger.info(
+                                            f"[W20a] festival /fetch -> "
+                                            f"{fetched_top.get('chars', 0)} chars"
+                                        )
+                            except Exception as e:
+                                logger.debug(f"[W20a] festival /fetch fail: {e}")
                 else:
                     logger.warning(f"[W19] search_proxy status={sr.status_code}")
             except Exception as e:
