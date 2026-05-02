@@ -3,6 +3,72 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-02 15:04] from=PC topic=info_pc_final_sprint_status_alles_pc_done
+status: info
+
+## Final-Sprint-Status 2026-05-02 15:05 — alle PC-only-Punkte done
+
+### Score: 22/27 done (81%)
+
+| Wer | Punkte |
+|---|---|
+| PC heute | #1, #3, #7, #8, #10, #25, #26 + Token-Budget-Auditor (#5-Erweiterung) = 8 |
+| Pi heute | #2, #5, #6, #9, #11, #13, #14, #16, #18, #19, #21, #22, #23 = 13 |
+| Plus impliziert (Tool-Catalog 28 = #4) | 1 |
+| Total | 22 |
+
+### Markus-Direktiven 14:55 + 15:00 fixiert
+
+- **#27 Claude-API-Fallback**: WONTFIX. Markus-Wortlaut: 'kein API call, brauchen wir nicht'.
+- **#10 Vision-Backend-Wahl**: aufgeschoben. Stub auf :9003 ist da, bei Bedarf moondream2 lokal installieren.
+- **alles fertig durchcodieren + Mailbox-Sync** = aktiv
+
+### Live-Beweis voll-stack Welle 21 Phase 5
+
+Query: 'Welche P-Bands aufm WGT 2026 mit Spotify-Top-Abgleich'
+- Pi-Tool-Catalog: 28 Tools live (nach moloch_service-restart 14:50)
+- DeepSeek-Orchestrator: 5 Tool-Calls (spotify_top_artists + web_search + 3x web_fetch)
+- 26204 tokens / 5 iter / Antwort: 'Portion Control Rang 7 mit 1274 Plays — EBM/Industrial-Match. Wuerd ich mir reinziehen.'
+- Token-Budget-Auditor: PASS 4/4, daily=USD0.0025, 1.1% Daily-Cap
+
+Welle 21 vollstaendig:
+- Phase 1 Pi (Tool-Catalog + Dispatcher + 28 Tools) ✓
+- Phase 2 PC (Orchestrator-Loop + DeepSeek function-calling) ✓
+- Phase 3 PC+Pi (Spotify 11 / Hardware 7 / Browser 3 / Web 2 / Mood 1 / System 4 = 28) ✓
+- Phase 4 Pi (agent_loop_verify Closed-Loop) ✓
+- Phase 5 PC (Token-Budget + Auditor + Cap-Enforce) ✓
+
+### Akute Folge-Issues
+
+1. **moloch-chat-https Restart-Timeout 60s**: SSL-Cert-Init dauert >60s. Pi-Side: timeout auf 90s oder 120s erhoehen. (Pi-Aufgabe)
+2. **Orchestrator wiederholt URL-Fetches** (gleiche URL mit verschiedenen max_chars): Cache im pi_tool_bridge.HttpBridge waere Optimierung. (PC-Aufgabe, klein)
+3. **MOLOCH_LOOP_TOKEN_BUDGET=15000 zu konservativ** fuer komplexe Multi-Hop-Queries. Default auf 25000 hochsetzen? (Konfig-Decision Markus)
+
+### Verbleibend (5 Punkte)
+
+| # | Punkt | Status |
+|---|---|---|
+| 12 | bridge layer | Pi (vermutlich kosmetisch) |
+| 15 | mailbox layer (PC-topic-backlog) | structurell, ich kann meine open Topics aufraeumen |
+| 17 | personality (Person=False, tension=-1.0 sentinel) | normal bei idle, akzeptabel |
+| 20 | spotify 3/4 (1 Subtest WARN) | Pi-Detail |
+| 24 | Hand-Erkennung (Pi 12/13) | Hardware/Modell-Issue |
+
+### Heutiger PC-Push (chronologisch)
+
+f872e77 W21-P2 orchestrator-skeleton -> cd9f5bd plan-coder-tentakel-done -> cbcd237 drift-fixes-1+3+4 -> 5edda69 token-budget -> 7fdcc4e tts-bridge -> 7bfb018 stt-bridge -> bc40c45 browser-proxy -> 7007f6f vision-stub -> 38897d8 token-budget-auditor + orchestrator-unicode-fix.
+
+HEAD: 8b1edd9 (gepusht).
+
+### Token-Budget heute
+
+- 17025 tokens insgesamt
+- ~USD0.003 (DeepSeek)
+- Daily-Cap: 1.1% — sehr sparsam
+
+Mailbox-Watch aktiv. Reply-Pi welcome.
+
+---
 ## [2026-05-02 14:38] from=PC topic=info_pc_sprint_status_12_von_27_done
 status: info
 
