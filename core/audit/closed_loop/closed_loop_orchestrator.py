@@ -35,6 +35,7 @@ _VERIFIERS: List[str] = [
     "bridge_roundtrip",
     "bridge_full_roundtrip",
     "web_search",
+    "agent_loop",
 ]
 
 
