@@ -61,6 +61,107 @@
     {
       "type": "function",
       "function": {
+        "name": "spotify_top_tracks",
+        "description": "Markus' Top-Tracks aus Spotify-Profil. Returnt Liste mit name/artist/play_count.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "n": {"type": "integer", "default": 20}
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "spotify_pause",
+        "description": "Pausiert die aktuelle Wiedergabe.",
+        "parameters": {"type": "object", "properties": {}}
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "spotify_next",
+        "description": "Skip zum naechsten Track.",
+        "parameters": {"type": "object", "properties": {}}
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "spotify_prev",
+        "description": "Vorheriger Track.",
+        "parameters": {"type": "object", "properties": {}}
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "spotify_volume",
+        "description": "Setzt Lautstaerke 0-100 (Prozent).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "percent": {"type": "integer"}
+          },
+          "required": ["percent"]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "spotify_search",
+        "description": "Suche nach Track/Artist/Album im lokalen Index (KEIN Spotify-API).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {"type": "string"}
+          },
+          "required": ["query"]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "spotify_now_playing",
+        "description": "Aktueller Track + playing-Status aus state-file.",
+        "parameters": {"type": "object", "properties": {}}
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "spotify_recommend",
+        "description": "Empfehlung aus lokalem Index — best-effort zonen-basiert. KEIN Spotify-API.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "seed_genre": {"type": "string"},
+            "target_energy": {"type": "number"}
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "spotify_play_genre",
+        "description": "Spielt zonen-passendes Genre (z.B. 'futurepop', 'aggrotech', 'dark electro').",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "genre": {"type": "string"}
+          },
+          "required": ["genre"]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
         "name": "get_mood",
         "description": "Aktuelle Persoenlichkeits-Zone (guardian/shadow/berserker) + Tension. Hilft dem LLM Tonfall zu waehlen.",
         "parameters": {"type": "object", "properties": {}}
