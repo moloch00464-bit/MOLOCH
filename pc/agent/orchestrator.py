@@ -131,6 +131,13 @@ class Orchestrator:
 
 
 def main(argv: List[str]) -> int:
+    # Windows-cp1252-Fallback: stdout auf UTF-8 reconfigure damit Emojis
+    # (✅, etc.) nicht UnicodeEncodeError werfen
+    if sys.platform == "win32":
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
     parser = argparse.ArgumentParser(description="MOLOCH Orchestrator (Welle 21)")
     parser.add_argument("query", nargs="+", help="User-Query")
     parser.add_argument("--mock", action="store_true",
