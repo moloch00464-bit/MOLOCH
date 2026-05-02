@@ -172,5 +172,6 @@
     "timeout_sec": 120,
     "backoff_sec": 600,
     "default_max_tokens": 100
-  }
+  },
+  "hand_detection_enabled": true
 }
