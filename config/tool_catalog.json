@@ -166,6 +166,41 @@
         "description": "Aktuelle Persoenlichkeits-Zone (guardian/shadow/berserker) + Tension. Hilft dem LLM Tonfall zu waehlen.",
         "parameters": {"type": "object", "properties": {}}
       }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "ptz_pan",
+        "description": "Pan-Bewegung der Kamera in Grad (-180..+180). NEVER 2: positive=LINKS bei Sonoff.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "angle": {"type": "number"}
+          },
+          "required": ["angle"]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "led_set",
+        "description": "Setzt LED-Farbe (red/green/blue/yellow/magenta/cyan/white/off).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "color": {"type": "string"}
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "camera_snapshot",
+        "description": "Snapshot-Info des aktuellen Frames in /dev/shm — Pfad/Groesse/Alter.",
+        "parameters": {"type": "object", "properties": {}}
+      }
     }
   ]
 }

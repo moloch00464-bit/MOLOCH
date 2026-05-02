@@ -14,6 +14,7 @@ from .spotify import (
     spotify_play_genre,
 )
 from .mood import get_mood
+from .hardware import ptz_pan, led_set, camera_snapshot
 
 TOOL_REGISTRY = {
     "web_search": web_search,
@@ -30,4 +31,7 @@ TOOL_REGISTRY = {
     "spotify_recommend": spotify_recommend,
     "spotify_play_genre": spotify_play_genre,
     "get_mood": get_mood,
+    "ptz_pan": ptz_pan,
+    "led_set": led_set,
+    "camera_snapshot": camera_snapshot,
 }
