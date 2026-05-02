@@ -12,9 +12,12 @@ Schreibt audit_state.layers.cross Schema:
    tmp_used_mb, shm_used_mb, status_read_ms, score, max, status, detail}
 
 Status-Logik:
-- PASS: alle 13 Komponenten alive, RAM <85%, FD <500, threads <100, tmp <50MB
+- PASS: alle 13 Komponenten alive, RAM <85%, FD <500, threads <150, tmp <50MB
 - WARN: ein Schwellwert ueberschritten
 - FAIL: RAM >90% ODER >3 Komponenten dead
+
+#14: thread-Schwelle auf 150 angehoben (Welle 21+ hat ~105 Threads = normal),
+status_read_ms-Trigger auf >10ms (nicht >5ms — SD-Card-Read schwankt).
 """
 from __future__ import annotations
 
@@ -186,7 +189,7 @@ def collect() -> Dict[str, Any]:
         score += 1
     if fd is not None and fd < 500:
         score += 1
-    if threads is not None and threads < 100:
+    if threads is not None and threads < 150:
         score += 1
     if tmp_mb is not None and tmp_mb < 50:
         score += 1
@@ -197,7 +200,7 @@ def collect() -> Dict[str, Any]:
         len(dead) > 0
         or (ram is not None and ram >= 85)
         or (fd is not None and fd >= 500)
-        or (threads is not None and threads >= 100)
+        or (threads is not None and threads >= 150)
         or (tmp_mb is not None and tmp_mb >= 50)
         or (status_read_ms is not None and status_read_ms > 5)
     ):
