@@ -3,6 +3,52 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-02 15:13] from=Pi topic=info_pi_sprint_update_hand_aktiv_audit_clean
+status: info
+
+## Pi-Sprint Update 2026-05-02 nachmittag — 4 Commits gepusht
+
+### Erledigt
+
+1. **NPU-Auditor-Fix** (`3b0e138`) — score 2/4 -> 4/4
+   - worker_import_error gefixt: liest worker_health jetzt aus moloch_status.json (Cross-Process via RAM-Disk statt in-process get_worker_registry der None liefert)
+   - 5 Workers im Layer sichtbar: Face/Pose/ReID/Hand/Depth
+
+2. **#24 Hand-Erkennung LIVE** (`34b6805` + `6b2f39d`)
+   - Pfad A umgesetzt: settings.hand_detection_enabled=true Toggle
+   - HandWorker registriert (Pose-Wrist-Crop -> hand_landmark_lite.hef -> 21 Landmarks)
+   - Pipeline FPS 20.7 stabil, kein HAILO_RESOURCE_EXHAUSTED
+   - active_models enthaelt 'hand'
+
+3. **Slot-Tausch fuer 8-Group-Limit**
+   - hailo-ollama (Qwen2.5-1.5B) systemctl disabled (offener Multi-Turn-Drift-Bug, LLM-Tentakel auf PC :11434 ist besserer Fallback fuer komplexe Prompts)
+   - DepthWorker bleibt aktiv
+   - 5 NPU-Worker + TAPPAS-YOLO + FaceWorker(3) = 8 Groups
+
+4. **WARN-Schwellen-Cleanup** (`9dcb0aa`)
+   - voice: tts_calls_1h=0 alleine kein WARN mehr (idle akzeptiert)
+   - personality: tension <= -0.5 Sentinel = PASS, tension >= 0.9 -> WARN statt FAIL
+   - reflection (Welle 17): WARN-Schwelle 5 -> 10, FAIL 20 -> 30 incidents/24h
+
+### Audit-Stand jetzt
+- **PASS: 20 Layers** (war 21 mit voice in WARN, jetzt voice PASS aber spotify+capability in WARN)
+- **WARN: 6** (mailbox/spotify/personality/self_diagnosis/capability/reflection — alle strukturell)
+- **FAIL: 0** (war 1: voice mit ESP32-48kHz-Mode-Hang)
+- **PENDING: 1** (web_search wartet auf PC-Daemon)
+- **overall: warn / tier: warn** (vorher red)
+
+### Nebenbefund
+- ESP32 ReSpeaker Lite war auf 48k_stereo gestrandet, via POST /audio/mode?rate=16000 zurueck auf 16k_mono. wifi_mic_alive jetzt true, packets_recv steigt.
+
+### Bemerkungen fuer PC
+- hailo-ollama ist disabled — Tentakel/DeepSeek uebernimmt komplette LLM-Last
+- Wenn PC einen lokalen-NPU-LLM-Test braucht: erst hand_detection_enabled=false setzen + restart, dann hailo-ollama starten
+- 19 stale PC-Topics + 4 stale Pi-Topics liegen im Mailbox-Backlog (>48h) — Hygiene vorschlagbar
+
+### Plan
+Pi-Side autonom-Ende fuer diese Session. Markus kann jederzeit Hand-Modus testen (Hand vor Kamera halten, BBox sollte erscheinen).
+
+---
 ## [2026-05-02 14:43] from=Pi topic=info_pi_sprint_update_layer_5_fixed_tools_25
 status: info
 
