@@ -1,0 +1,70 @@
+{
+  "version": "1.0",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "web_search",
+        "description": "Suche im Web via DuckDuckGo. Returnt Liste von Treffern mit Title, URL, Snippet.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {"type": "string", "description": "Suchanfrage"},
+            "max_results": {"type": "integer", "default": 5}
+          },
+          "required": ["query"]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "web_fetch",
+        "description": "Hole HTML-Seite und extrahiere Text. Returnt {title, text, chars}.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "url": {"type": "string"},
+            "max_chars": {"type": "integer", "default": 8000}
+          },
+          "required": ["url"]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "spotify_top_artists",
+        "description": "Markus' Top-Artists aus Spotify-Profil. Returnt Liste mit name + play_count.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "n": {"type": "integer", "default": 20}
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "spotify_play",
+        "description": "Spielt einen Track/Artist/Playlist. Akzeptiert Spotify-URI ODER Suchstring.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query_or_uri": {"type": "string"}
+          },
+          "required": ["query_or_uri"]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "get_mood",
+        "description": "Aktuelle Persoenlichkeits-Zone (guardian/shadow/berserker) + Tension. Hilft dem LLM Tonfall zu waehlen.",
+        "parameters": {"type": "object", "properties": {}}
+      }
+    }
+  ]
+}
