@@ -14,7 +14,15 @@ from .spotify import (
     spotify_play_genre,
 )
 from .mood import get_mood
-from .hardware import ptz_pan, led_set, camera_snapshot
+from .hardware import (
+    ptz_pan,
+    led_set,
+    camera_snapshot,
+    ptz_tilt,
+    thermal_set_tension_pwm,
+    get_face_id,
+    get_npu_status,
+)
 
 TOOL_REGISTRY = {
     "web_search": web_search,
@@ -34,4 +42,8 @@ TOOL_REGISTRY = {
     "ptz_pan": ptz_pan,
     "led_set": led_set,
     "camera_snapshot": camera_snapshot,
+    "ptz_tilt": ptz_tilt,
+    "thermal_set_tension_pwm": thermal_set_tension_pwm,
+    "get_face_id": get_face_id,
+    "get_npu_status": get_npu_status,
 }

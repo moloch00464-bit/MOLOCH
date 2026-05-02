@@ -201,6 +201,50 @@
         "description": "Snapshot-Info des aktuellen Frames in /dev/shm — Pfad/Groesse/Alter.",
         "parameters": {"type": "object", "properties": {}}
       }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "ptz_tilt",
+        "description": "Tilt-Bewegung der Kamera in Grad (-90..+90).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "angle": {"type": "number"}
+          },
+          "required": ["angle"]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "thermal_set_tension_pwm",
+        "description": "W16 Tension-PWM 0..100 (Luefter-Boost). Best-effort via thermal_manager.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "percent": {"type": "integer"}
+          },
+          "required": ["percent"]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "get_face_id",
+        "description": "Aktuell erkannte Person (face_id, person, face_match) aus moloch_status.json.",
+        "parameters": {"type": "object", "properties": {}}
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "get_npu_status",
+        "description": "NPU-Worker-Health: active_models + Worker-Stats (running/loaded/inferences/errors).",
+        "parameters": {"type": "object", "properties": {}}
+      }
     }
   ]
 }

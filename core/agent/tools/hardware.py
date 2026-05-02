@@ -66,3 +66,59 @@ def camera_snapshot() -> Dict[str, Any]:
         }
     except Exception as e:
         return {"exists": False, "error": str(e)[:200]}
+
+
+def ptz_tilt(angle: float) -> Dict[str, Any]:
+    """Tilt-Bewegung (-90..+90 Grad)."""
+    try:
+        ok = _atomic_ipc_cmd("ptz_tilt", {"angle": float(angle)})
+        return {"ok": ok, "angle": float(angle)}
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def thermal_set_tension_pwm(percent: int) -> Dict[str, Any]:
+    """W16: Tension-PWM 0..100 (Luefter-Boost). Best-effort via thermal_manager."""
+    try:
+        from core.hardware.thermal_manager import get_thermal_manager
+        get_thermal_manager().set_tension_pwm(int(percent))
+        return {"ok": True, "pwm_pct": int(percent)}
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def get_face_id() -> Dict[str, Any]:
+    """Aktuell erkannte Person aus moloch_status.json."""
+    try:
+        with open("/dev/shm/moloch_status.json") as f:
+            st = json.load(f)
+        return {
+            "face_id": st.get("face_id"),
+            "person": bool(st.get("person")),
+            "face_match": st.get("face_match"),
+            "face_detect": st.get("face_detect"),
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def get_npu_status() -> Dict[str, Any]:
+    """NPU-Worker-Health aus moloch_status.json."""
+    try:
+        with open("/dev/shm/moloch_status.json") as f:
+            st = json.load(f)
+        wh = st.get("worker_health", {})
+        active = st.get("active_models", [])
+        out: Dict[str, Any] = {"active_models": active, "workers": {}}
+        for name, w in (wh or {}).items():
+            if isinstance(w, dict):
+                out["workers"][name] = {
+                    "running": w.get("running"),
+                    "loaded": w.get("models_loaded"),
+                    "inferences": w.get("total_inferences"),
+                    "errors": w.get("total_errors"),
+                    "last_ms": w.get("last_inference_ms"),
+                }
+        return out
+    except Exception as e:
+        return {"error": str(e)[:200]}
