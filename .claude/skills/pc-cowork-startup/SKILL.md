@@ -117,6 +117,32 @@ In 1-2 Saetzen an Markus:
 - Audits: PC=<P/W/F>, Web-Pipeline=<P/W/F>
 - Was tun?
 
+## Autonom-Modus (seit 2026-05-02)
+
+Markus' Direktive 14:10: **bei mehrteiligen Aufgaben durcharbeiten ohne Frag-pro-Punkt.** Wenn der User "alles fertig", "alle 27 Punkte", "macht alles nacheinander" sagt, ist das implizite Genehmigung fuer die ganze Aufgaben-Liste.
+
+### Was das heisst
+- KEIN "soll ich Punkt X bauen?" → einfach machen
+- KEIN "welche Variante moechtest du?" → entscheide selbst (sinnvolle Reihenfolge: klein-zu-gross, parallel-zu-Pi)
+- KEIN "fertig — was als naechstes?" → einfach den naechsten Punkt der Liste angehen
+- Pro Code-Turn: Lokomotive-Header + Pre-Flight bleibt PFLICHT (Selbst-Disziplin, nicht Markus-Permission)
+
+### Wann trotzdem stoppen
+- **Audit-FAIL** (moloch_audit zeigt FAIL)
+- **Destruktive git-Op** (reset --hard, force-push main)
+- **Mehr als 5 ROT-Files** in einem Commit
+- **Echter Widerspruch** in den Anforderungen
+- **Block durch externe Abhaengigkeit** (z.B. fehlender API-Key, Pi-Service down) → kurzes Update + naechster Punkt
+- **Markus widerspricht** explizit per Chat
+
+### Mailbox-Sync mit Pi-Opus
+- Bei Punkten die Pi betreffen: **Mailbox-Update** mit Status statt zu warten
+- Wenn Pi-Reply ankommt: einarbeiten + weiter
+- Cross-Audit alle paar Punkte (jede Schicht synchronisiert)
+
+### Analogie
+"Markus geht aus dem Zimmer, kommt zurueck — Arbeit ist erledigt." (aus moloch-dev Skill, gilt analog fuer PC-Cowork)
+
 ## Anti-Pattern
 
 - LOKOMOTIVE-Schritt-0 ueberspringen weil "ich weiss schon was Sache ist" → falsch, Pi-Opus pusht parallel
@@ -124,3 +150,4 @@ In 1-2 Saetzen an Markus:
 - Mailbox nicht lesen → Pi-Reply auf vorherige Anfrage verpasst
 - Audit skippen → Bugs schleichen sich ein
 - Status-Summary auslassen → Markus weiss nicht was du weisst
+- **Pro-Punkt-Frage stellen** wenn Markus die Liste schon genehmigt hat → Autonom-Modus brechen, frustriert Markus

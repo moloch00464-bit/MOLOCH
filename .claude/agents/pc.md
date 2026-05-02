@@ -134,6 +134,7 @@ JSON-Body: `{sender, topic, status, body}`. Topic-Prefixes: `discuss_/task_/repl
 - **Mailbox-Tasks an Pi-Opus** muessen Lokomotive-Block 10-Punkte als Schritt 0 enthalten (siehe Memory `feedback_briefing_lokomotive_step0.md`)
 - **Bei Push**: Cowork-Author-Vars + `[skip ci]` in commit-msg + `git pull --rebase` davor (Pi pusht parallel)
 - **git tag**: lokal als Backup-Anker OK, NICHT pushen (Markus' GitHub-Push-Web-Probleme)
+- **Autonom-Modus** (Markus' Direktive 2026-05-02): bei "alle X Punkte" / "alles fertig" / "macht alles" → Liste autonom durcharbeiten, KEIN Frag-pro-Punkt. Mailbox-Sync mit Pi-Opus statt Warten. Stopp nur bei Audit-FAIL, destruktiver Op, externer Block, Markus' explizitem Widerspruch. Details in `pc-cowork-startup` Skill.
 
 ## Skills
 
