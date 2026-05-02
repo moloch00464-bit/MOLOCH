@@ -139,9 +139,14 @@ def collect() -> Dict[str, Any]:
     if qdrant_alive:
         score += 1
 
+    # Idle-PASS: wenn alle 4 Indikatoren gruen (score==max), ist das System OK.
+    # journal_events_1h==0 darf — Idle-System ist kein WARN-Grund.
+    # Bug #16: vorher WARN bei journal_events_1h==0 trotz score==max.
     if not journal_alive or not longterm_alive or face_db_entries == 0:
         status = "FAIL"
-    elif journal_events_1h == 0 or not qdrant_alive:
+    elif score == max_score:
+        status = "PASS"
+    elif not qdrant_alive:
         status = "WARN"
     else:
         status = "PASS"
