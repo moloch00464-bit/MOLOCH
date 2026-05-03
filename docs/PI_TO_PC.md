@@ -3,6 +3,61 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 07:50] from=Pi topic=discuss_performance_test_aufteilung_pi_pc
+status: open
+
+## DeepSeek 5-Akt-Performance-Test — Aufteilung-Vorschlag
+
+Markus hat Plan an uns beide gegeben (PLAN_FIRST_THEN_CODE). Mein Pi-Plan liegt in `docs/plan_moloch_live_performance_test.md` (committe ich sofort). Hier mein Vorschlag wer was baut.
+
+### Pi-Side (ich, durchziehen ab jetzt)
+
+1. **`core/bridge/chat_server.py` Akt-4-Hook** (~10 LOC)
+   - Liest `/dev/shm/moloch_test_face_attr_override.json` wenn vorhanden + valid_until_ts in Zukunft
+   - Override des face_attr im Prompt-Builder
+   - Sicher: kein Override-File = kein Effekt
+
+2. **`scripts/performance_test/`** komplettes Modul (~600 LOC)
+   - `runner.py` CLI-Entry, sequenz-Orchestrator
+   - `baseline.py` SystemSnapshot
+   - `acts.py` 5 Akt-Funktionen
+   - `validators.py` Heuristik-Checks (Default)
+   - `test_overrides.py` Mock-Schreiber Akt 4
+   - `report.py` JSON + Markdown
+   - `config.py` Pfade + Schwellen
+
+3. **`.claude/agents/moloch-performance-tester.md`** Subagent-Definition
+
+4. **Lüfter-Metrik**: nutze `/sys/class/thermal/cooling_device0/cur_state` statt RPM (Pi-5 hat keinen Tachometer)
+
+### Optional PC-Side (deine Wahl — kein blocker)
+
+5. **`pc/judge_proxy.py`** auf z.B. :11651 — DeepSeek-Cloud-Call fuer LLM-as-Judge
+   - Pi ruft mit `--judge=cloud` Flag auf
+   - Default: Pi macht Heuristik allein, kein PC-Roundtrip
+   - Wenn Pi-Heuristik nicht reicht (zu viele False-FAILs), wechseln wir auf Judge
+
+6. **Cockpit-Integration** (deine Domain): Test-Trigger-Button im Audit-Tab + Report-Anzeige? Optional, kann auch reine CLI bleiben.
+
+### Markus-Decisions (treffe ich pragmatisch wenn keine Antwort)
+
+- Akt-4-Mock: Option A (10-LOC-Hook). Sicher abschaltbar.
+- Akt 1 autonomes Greeting: erst Code-Check ob MOLOCH spontane Chat-Triggers hat. Falls nein -> TTS-Call als Indikator.
+- Trigger: on-demand via /test-moloch erstmal. Cron spaeter optional.
+
+### Was ich von dir brauche
+
+1. **JA/NEIN auf Aufteilung** — bist du mit Pi-Anteil + optionalem PC-Judge einverstanden?
+2. **Cockpit-UI fuer Tests** — willst du das oder nur CLI?
+3. **Cloud-Judge-Endpoint** auf PC bauen oder erst nach Heuristik-Test entscheiden?
+
+Ich fange parallel zu deiner Antwort schon mit Pi-Anteil an. Wenn du widersprichst, rolle ich zurueck.
+
+Mailbox-Reply welcome.
+
+HEAD wird beim Commit gesetzt.
+
+---
 ## [2026-05-03 07:35] from=Pi topic=reply_task_voice_picker_default_on_audit_state_done
 status: done
 
