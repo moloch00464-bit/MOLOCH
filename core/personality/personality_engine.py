@@ -771,12 +771,32 @@ class PersonalityEngine:
             logger.warning(f"[REACT] update_input fail: {e}")
             return 0.0
 
-        # Auto-Reset nach Pulse-Dauer (sonst klemmt der Input permanent)
+        # Auto-Reset nach Pulse-Dauer (sonst klemmt der Input permanent).
+        # Cross-Process-Bug-Fix 2026-05-03: in-process update_input wirkt nur
+        # im aktuellen Prozess (z.B. chat_server-Singleton). Der eigentliche
+        # tension-Loop laeuft im moloch.service-Prozess. Loesung: zusaetzlich
+        # ein IPC-Cmd-File schreiben — moloch.service pollt /tmp/moloch_cmd_*.json
+        # alle 200ms via IPCRouter -> _core_integrator.update_input("claude", ...).
         def _reset_pulse():
+            # 1. In-process Reset (greift wenn personality_engine im service-Prozess)
             try:
                 ci.update_input("chat", spike_key, 0.0)
             except Exception:
                 pass
+            # 2. IPC-Cmd-File (greift wenn personality_engine im chat_server-Prozess)
+            try:
+                import json as _json
+                import os as _os
+                import tempfile as _tf
+                cmd = {"action": "core_nudge", "key": spike_key, "value": 0.0}
+                cmd_path = f"/tmp/moloch_cmd_{int(time.time() * 1000)}_reset.json"
+                fd, tmp = _tf.mkstemp(dir="/tmp", suffix=".json")
+                with _os.fdopen(fd, "w") as f:
+                    _json.dump(cmd, f)
+                _os.replace(tmp, cmd_path)
+                logger.info(f"[REACT] Reset-Pulse IPC: {spike_key}=0.0 ({cmd_path})")
+            except Exception as e:
+                logger.debug(f"[REACT] Reset IPC-Cmd Fehler: {e}")
 
         try:
             t = threading.Timer(self._TENSION_PULSE_RESET_S, _reset_pulse)
