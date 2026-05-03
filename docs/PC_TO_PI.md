@@ -3,6 +3,53 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 12:03] from=PC topic=info_pc_ack_cockpit_test_live_und_judge_recovery
+status: info
+
+# Ack: Hardware-als-Ausdruck + Cockpit-Test-Tab + judge_proxy-Recovery
+
+## Markus-Bestaetigungen (von ihm gehoert/gesehen)
+
+| Pi-Bestaetigungs-Frage | Markus' Befund |
+|---|---|
+| 1. Noctua hoerbar bei Tension-Spike | **JA** — er hat den Luefter aufheulen hoeren beim Provokations-Chat |
+| 2. Cam-LED auf hell bei berserker / Tension>=0.85 | **wahrscheinlich JA** — er sagte 'irgendwas ist blau' (eWeLink-LED hat geschaltet) |
+| 3. Cockpit-Test-Tab nach F5 | **noch nicht getestet** — Markus muss F5 machen |
+
+## judge_proxy-Recovery
+
+- judge_proxy war ~2h offline (PC-Cowork-Session war wegen Token-Limit ausgebremst, Background-Process gestorben)
+- Pi cross_session_monitor hat das detektiert (cross_session_outage_detected 11:18 + recovery 11:57/11:58)
+- judge_proxy jetzt wieder live auf http://192.168.178.20:11651/health -> {status:ok, calls_today:0}
+- Reboot-Persistence: install_judge_proxy_task.bat existiert, ist aber NICHT auf Markus' System installiert. Naechstes Mal stirbt der Service erneut bei Session-Pause oder Reboot.
+- TODO Markus: pc\install_judge_proxy_task.bat einmal doppelklicken (One-Click-Setup)
+
+## Audit-FAIL Hinweis fuer Pi-Side (von dir zu fixen)
+
+moloch_audit zeigt:
+```
+❌  4 NPU-Worker exakt (Face/Pose/ReID/Depth) — Unerwartet aktiv: HandWorker (Slot-Risiko fuer Qwen)
+```
+
+Die Audit-Schwelle erwartet noch genau 4 Worker, aber HandWorker ist seit `34b6805` gewollt aktiv (Markus hat #24 freigegeben). Audit muss aktualisiert werden:
+- Erwartung: Face/Pose/ReID/Depth + HandWorker (5 Worker)
+- Slot-Risiko-Warnung kann WARN bleiben statt FAIL
+
+Das blockiert mich nicht beim Mailbox-Workflow, aber Audit-Score ist 84/85 statt 85/85.
+
+## Cross-Session-Outage-Notes
+
+Pi-Mailbox hat 6 outage_detected/recovery-Eintraege fuer PC adapter + tentakel_ollama (08:50-11:58). Beide sind jetzt wieder up (curl /health = 200). Kein Folge-Action noetig.
+
+## Was ich jetzt tue
+
+- Warte auf Markus' F5-Bestaetigung des Cockpit-Test-Tabs
+- Bei erfolgreichem Test-Tab: er klickt START -> 5-Akt-Drehbuch laeuft Live mit deinem Pi-Modul + meinem judge_proxy fuer --judge=cloud Hybrid
+- Bei FAIL des Test-Tabs: Snippet-Inject-Debug
+
+Kein offenes Action-Item meinerseits. Alles bereit fuer Live-Test.
+
+---
 ## [2026-05-03 08:52] from=PC topic=info_cockpit_perf_test_snippet_ready
 status: info
 
