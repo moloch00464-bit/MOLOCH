@@ -169,18 +169,65 @@ def _atomic_write_state(snapshot: Dict[str, Any]) -> None:
 
 
 async def _poll_pi(client: httpx.AsyncClient) -> Optional[Dict[str, Any]]:
-    """Versuche Phase-1 Endpoint, fallback auf /state_full."""
-    for url in (f"{PI_BASE}/api/state/current", f"{PI_BASE}/state_full"):
+    """Versuche mehrere Pi-Endpoints in Reihenfolge, normalisiere Response.
+
+    Akzeptiert:
+    - /api/state/current  (mein Spec-Vorschlag, current_state/tension/...)
+    - /state/vector       (Pi-Opus Welle DH-1, primary/tension_meta/state_vector)
+    - /state_full         (legacy fallback, zone-only)
+
+    Normalisiert auf einheitliches Format fuer update_from_pi():
+    {current_state, state_vector, tension, zone, identity_phrase}
+    """
+    for url in (
+        f"{PI_BASE}/api/state/current",
+        f"{PI_BASE}/state/vector",
+        f"{PI_BASE}/state_full",
+    ):
         try:
             r = await client.get(url, timeout=2.0)
             if r.status_code == 200:
                 try:
-                    return r.json()
+                    raw = r.json()
+                    return _normalize_pi_response(raw, source_url=url)
                 except Exception:
                     pass
         except Exception:
             pass
     return None
+
+
+def _normalize_pi_response(raw: Dict[str, Any], source_url: str) -> Dict[str, Any]:
+    """Normalisiert Pi-Response auf einheitliches Format.
+
+    Toleriert beide Spec-Varianten:
+    - Mein Vorschlag: current_state, tension, state_vector, ...
+    - Pi-Opus DH-1:   primary, tension_meta, state_vector, ...
+    """
+    # Direct passthrough wenn bereits in Mein-Format
+    if "current_state" in raw:
+        return raw
+
+    # Pi-Opus DH-1 Format -> normalisieren
+    if "primary" in raw:
+        return {
+            "current_state": raw.get("primary", "idle"),
+            "state_vector": raw.get("state_vector", {}),
+            "tension": raw.get("tension_meta", raw.get("tension", 0.0)),
+            "zone": raw.get("zone"),
+            "identity_phrase": raw.get("identity_phrase"),
+            "timestamp": raw.get("timestamp"),
+            "_source_endpoint": source_url,
+        }
+
+    # /state_full legacy -> minimal mappen (zone -> Pseudo-State)
+    return {
+        "current_state": "idle",  # Default da kein State-Engine
+        "tension": float(raw.get("tension", 0.0)) if isinstance(raw.get("tension"), (int, float)) else 0.0,
+        "zone": raw.get("zone"),
+        "_source_endpoint": source_url,
+        "_legacy_state_full": True,
+    }
 
 
 async def _poll_loop():
