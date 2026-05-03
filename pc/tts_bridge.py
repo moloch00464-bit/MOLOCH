@@ -18,16 +18,28 @@ API-Keys: keine — Edge-TTS nutzt kostenlose Microsoft-Edge-Backend-API.
 Reboot-persistent via pc/run_tts_bridge_hidden.vbs (Startup-Folder-Shortcut).
 """
 import asyncio
+import json
 import logging
 import os
+import tempfile
 import time
-from typing import Optional
+from pathlib import Path
+from typing import Dict, Optional
 
 import edge_tts
 import uvicorn
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
+
+# Persistent state fuer Voice-Picker-Auswahl
+_LOCAL_APPDATA = os.environ.get("LOCALAPPDATA")
+if _LOCAL_APPDATA:
+    _STATE_DIR = Path(_LOCAL_APPDATA) / "moloch_pc_state"
+else:
+    _STATE_DIR = Path.home() / "moloch_pc_state"
+_STATE_DIR.mkdir(parents=True, exist_ok=True)
+VOICES_STATE_PATH = _STATE_DIR / "voices.json"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -124,14 +136,173 @@ ALL_GERMAN_VOICES = [
 ]
 
 
+def _load_persisted_presets() -> Dict[str, str]:
+    if not VOICES_STATE_PATH.exists():
+        return dict(EMOTION_VOICE_PRESETS)
+    try:
+        d = json.loads(VOICES_STATE_PATH.read_text(encoding="utf-8"))
+        return d.get("presets", dict(EMOTION_VOICE_PRESETS))
+    except Exception:
+        return dict(EMOTION_VOICE_PRESETS)
+
+
+def _atomic_write_voices(data: Dict) -> bool:
+    try:
+        fd, tmp = tempfile.mkstemp(dir=str(_STATE_DIR), prefix="voices.", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            os.replace(tmp, str(VOICES_STATE_PATH))
+            return True
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            return False
+    except Exception:
+        return False
+
+
 @app.get("/presets")
 def presets():
-    """Voice-Presets fuer Emotionen — Cockpit-Voice-Picker liest das."""
+    """Voice-Presets fuer Emotionen — gespeicherte oder Default."""
     return {
-        "presets": EMOTION_VOICE_PRESETS,
+        "presets": _load_persisted_presets(),
         "default_voice": DEFAULT_VOICE,
-        "switch_via": "env MOLOCH_TTS_VOICE oder POST /speak {voice: ...}",
+        "all_german_voices": ALL_GERMAN_VOICES,
+        "state_path": str(VOICES_STATE_PATH),
     }
+
+
+class PresetsRequest(BaseModel):
+    neutral: str = Field(..., max_length=80)
+    aufgeregt: str = Field(..., max_length=80)
+    ruhig: str = Field(..., max_length=80)
+
+
+@app.post("/presets")
+def presets_set(req: PresetsRequest):
+    """Markus' Voice-Picker-Auswahl speichern (persistent)."""
+    presets_dict = {
+        "neutral": req.neutral,
+        "aufgeregt": req.aufgeregt,
+        "ruhig": req.ruhig,
+    }
+    ok = _atomic_write_voices({
+        "presets": presets_dict,
+        "saved_at": time.time(),
+    })
+    if not ok:
+        raise HTTPException(500, "save failed")
+    return {"ok": True, "presets": presets_dict, "state_path": str(VOICES_STATE_PATH)}
+
+
+@app.get("/picker", response_class=HTMLResponse)
+def picker():
+    """Standalone Voice-Picker-UI. Markus oeffnet im Browser, hoert, waehlt, speichert."""
+    voices_options = "".join(
+        f'<option value="{v}">{v}</option>' for v in ALL_GERMAN_VOICES
+    )
+    saved = _load_persisted_presets()
+    return f"""<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>MOLOCH Voice-Picker</title>
+<style>
+  body {{ font-family: system-ui, sans-serif; background: #1a1a1a; color: #ddd;
+          max-width: 900px; margin: 2em auto; padding: 1em; }}
+  h1 {{ color: #6cf; }}
+  .slot {{ background: #2a2a2a; padding: 1em; margin: 1em 0; border-radius: 8px;
+           border-left: 4px solid #6cf; }}
+  .slot h3 {{ margin-top: 0; color: #fc6; }}
+  select {{ background: #333; color: #ddd; padding: 0.5em; font-size: 1em;
+            border: 1px solid #555; min-width: 320px; }}
+  button {{ background: #6cf; color: #111; border: 0; padding: 0.5em 1em;
+            margin-left: 0.5em; cursor: pointer; font-weight: bold; border-radius: 4px; }}
+  button.secondary {{ background: #555; color: #ddd; }}
+  button.save {{ background: #6f6; font-size: 1.2em; padding: 0.8em 2em; }}
+  audio {{ display: block; margin-top: 0.5em; width: 100%; }}
+  .desc {{ color: #999; font-size: 0.9em; margin: 0.3em 0 0.7em 0; }}
+  #status {{ margin-top: 1em; padding: 0.5em; border-radius: 4px; }}
+  #status.ok {{ background: #2a4; color: #fff; }}
+  #status.err {{ background: #a24; color: #fff; }}
+</style>
+</head>
+<body>
+<h1>🎙 MOLOCH Voice-Picker</h1>
+<p>Stimme pro Emotion auswählen. Play um anzuhören. Speichern macht's persistent.</p>
+
+<div class="slot">
+  <h3>🟢 Neutral (Default — sachlich, ruhig)</h3>
+  <p class="desc">Wird genutzt wenn keine Emotion getriggert wird.</p>
+  <select id="neutral">{voices_options}</select>
+  <button onclick="play('neutral')">▶ Play</button>
+</div>
+
+<div class="slot">
+  <h3>🟡 Aufgeregt (hohe Tension, alert-Zone)</h3>
+  <p class="desc">Wird genutzt wenn Pi-Personality Tension >= 0.7 oder Zone=alert.</p>
+  <select id="aufgeregt">{voices_options}</select>
+  <button onclick="play('aufgeregt')">▶ Play</button>
+</div>
+
+<div class="slot">
+  <h3>🔵 Ruhig (niedrige Tension, calm-Zone)</h3>
+  <p class="desc">Wird genutzt wenn Tension <= 0.3 oder Zone=calm.</p>
+  <select id="ruhig">{voices_options}</select>
+  <button onclick="play('ruhig')">▶ Play</button>
+</div>
+
+<button class="save" onclick="save()">💾 Auswahl speichern</button>
+<button class="secondary" onclick="reset()">↺ Default zurücksetzen</button>
+
+<audio id="player" controls></audio>
+<div id="status"></div>
+
+<script>
+const SAVED = {json.dumps(saved)};
+document.getElementById('neutral').value = SAVED.neutral || '{EMOTION_VOICE_PRESETS["neutral"]}';
+document.getElementById('aufgeregt').value = SAVED.aufgeregt || '{EMOTION_VOICE_PRESETS["aufgeregt"]}';
+document.getElementById('ruhig').value = SAVED.ruhig || '{EMOTION_VOICE_PRESETS["ruhig"]}';
+
+function play(slot) {{
+  const voice = document.getElementById(slot).value;
+  const player = document.getElementById('player');
+  const text = encodeURIComponent('Hallo Markus, ich bin Moloch. So klinge ich für ' + slot + '.');
+  player.src = '/sample/' + voice + '?text=' + text;
+  player.play();
+}}
+
+function save() {{
+  const data = {{
+    neutral: document.getElementById('neutral').value,
+    aufgeregt: document.getElementById('aufgeregt').value,
+    ruhig: document.getElementById('ruhig').value,
+  }};
+  fetch('/presets', {{
+    method: 'POST',
+    headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify(data),
+  }}).then(r => r.json()).then(d => {{
+    const s = document.getElementById('status');
+    if (d.ok) {{ s.className = 'ok'; s.textContent = 'Gespeichert: ' + JSON.stringify(d.presets); }}
+    else {{ s.className = 'err'; s.textContent = 'Fehler: ' + JSON.stringify(d); }}
+  }}).catch(e => {{
+    const s = document.getElementById('status');
+    s.className = 'err'; s.textContent = 'Netzwerk-Fehler: ' + e;
+  }});
+}}
+
+function reset() {{
+  document.getElementById('neutral').value = '{EMOTION_VOICE_PRESETS["neutral"]}';
+  document.getElementById('aufgeregt').value = '{EMOTION_VOICE_PRESETS["aufgeregt"]}';
+  document.getElementById('ruhig').value = '{EMOTION_VOICE_PRESETS["ruhig"]}';
+}}
+</script>
+</body>
+</html>"""
 
 
 @app.get("/voices")
