@@ -89,6 +89,7 @@ def start_all_expressions() -> Dict[str, bool]:
             ("zone_to_led", "get_zone_to_led"),
             ("berserker_strobo", "get_berserker_strobo"),
             ("tension_to_tts_volume", "get_tension_to_tts_volume"),
+            ("cam_led_to_state", "get_cam_led_to_state"),  # Sonoff-Cam-LED via eWeLink
         ]
         results: Dict[str, bool] = {}
         for module_name, getter in registry:

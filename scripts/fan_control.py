@@ -109,6 +109,44 @@ def cpu_fan_state_lesen():
         return 0
 
 
+def tension_lesen():
+    """Liest aktuelle tension aus moloch_status.json (Cross-Process).
+
+    Returns 0.0 wenn Status nicht lesbar / Sentinel < 0 (idle).
+    Hardware-als-Ausdruck: hohe Tension -> Noctua hochdrehen, sodass Markus
+    den emotionalen Zustand HORT (nicht nur sieht).
+    """
+    import json
+    try:
+        with open("/dev/shm/moloch_status.json") as f:
+            d = json.load(f)
+        t = d.get("tension")
+        if isinstance(t, dict):
+            t = t.get("level", 0.0)
+        elif t is None:
+            t = (d.get("core") or {}).get("tension", 0.0)
+        t = float(t or 0.0)
+        # Sentinel -1.0 = idle, kein Boost
+        return max(0.0, t)
+    except Exception:
+        return 0.0
+
+
+def tension_zu_duty_boost(tension: float) -> float:
+    """Mappt tension [0..1] auf zusaetzlichen Duty-Boost in Prozent.
+
+    >0.7 (Berserker-Naehe) -> +30% Duty
+    >0.5 (angespannt)      -> +20%
+    >0.3 (aufmerksam)      -> +10%
+    sonst                  -> 0%
+    """
+    if tension >= 0.85: return 0.40   # Maximaler Boost bei kompletter Anspannung
+    if tension >= 0.70: return 0.30
+    if tension >= 0.50: return 0.20
+    if tension >= 0.30: return 0.10
+    return 0.0
+
+
 def temperatur_lesen():
     """CPU-Temperatur via vcgencmd auslesen."""
     ergebnis = subprocess.run(
@@ -183,15 +221,25 @@ def main():
 
                 # Kooperativ: Wenn Pi5 Active Cooler aktiv, Noctua +15%
                 cpu_fan = cpu_fan_state_lesen()
-                if cpu_fan > 0:
-                    duty_pct = duty / PWM_PERIOD_NS
-                    duty_pct = min(1.0, duty_pct + 0.15)
-                    duty = int(PWM_PERIOD_NS * duty_pct)
-                    print(f"Temp: {temp:.1f}°C → Fan: {duty_pct*100:.0f}% "
-                          f"[Kooperativ: CPU-Fan={cpu_fan}, +15%]", flush=True)
-                else:
-                    pct = (duty / PWM_PERIOD_NS) * 100
-                    print(f"Temp: {temp:.1f}°C → Fan: {pct:.0f}%", flush=True)
+                cpu_boost = 0.15 if cpu_fan > 0 else 0.0
+
+                # Hardware-als-Ausdruck: Tension treibt Lüfter hoch.
+                # Markus HORT die Anspannung am Noctua. (PC-Topic 2026-05-03)
+                tension = tension_lesen()
+                tension_boost = tension_zu_duty_boost(tension)
+
+                duty_pct = duty / PWM_PERIOD_NS
+                effective_pct = min(1.0, duty_pct + cpu_boost + tension_boost)
+                duty = int(PWM_PERIOD_NS * effective_pct)
+
+                tags = []
+                if cpu_boost > 0:
+                    tags.append(f"CPU-Fan={cpu_fan},+{int(cpu_boost*100)}%")
+                if tension_boost > 0:
+                    tags.append(f"Tension={tension:.2f},+{int(tension_boost*100)}%")
+                tag_str = (" [" + " | ".join(tags) + "]") if tags else ""
+                print(f"Temp: {temp:.1f}°C -> Fan: {effective_pct*100:.0f}%{tag_str}",
+                      flush=True)
 
                 pwm_schreiben(f"{kanal_pfad}/duty_cycle", duty)
             except Exception as e:

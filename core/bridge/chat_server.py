@@ -601,6 +601,7 @@ _CHAT_UI_HTML = """<!doctype html>
         <button class="tab-btn" data-tab="see">Sehen</button>
         <button class="tab-btn" data-tab="avatar">Avatar</button>
         <button class="tab-btn" data-tab="audit">Audit</button>
+        <button class="tab-btn" data-tab="test">Test</button>
       </div>
       <div class="tab-content">
         <!-- LIVE TAB -->
@@ -723,6 +724,80 @@ _CHAT_UI_HTML = """<!doctype html>
             <button class="audit-modal-close" onclick="auditCloseModal()">×</button>
             <h3 id="audit-modal-title" style="margin:0 0 8px">Layer</h3>
             <pre id="audit-modal-body">…</pre>
+          </div>
+        </div>
+
+        <!-- TEST TAB (Performance-Test 5-Akt-Drehbuch, BLOCK B aus pc/cockpit_perf_test_snippet.html) -->
+        <div class="tab" id="t-test" style="display:none; padding:1em;">
+          <h2 style="margin-top:0; color:#fc6;">Performance-Test (5-Akt Live-Drehbuch)</h2>
+
+          <!-- Controls -->
+          <div class="pt-controls" style="background:#222; padding:0.8em; border-radius:6px; margin-bottom:1em;">
+            <label style="margin-right:1em;">
+              <strong>Judge-Mode:</strong>
+              <select id="pt-judge" style="margin-left:0.5em;">
+                <option value="heuristik">Heuristik (Pi-only, $0)</option>
+                <option value="cloud">Cloud (DeepSeek, ~$0.0005/Run)</option>
+              </select>
+            </label>
+            <span style="margin-right:1em;">
+              <strong>Skip:</strong>
+              <label><input type="checkbox" class="pt-skip" value="1"> 1</label>
+              <label><input type="checkbox" class="pt-skip" value="2"> 2</label>
+              <label><input type="checkbox" class="pt-skip" value="3"> 3</label>
+              <label><input type="checkbox" class="pt-skip" value="4"> 4</label>
+              <label><input type="checkbox" class="pt-skip" value="5"> 5</label>
+            </span>
+            <button id="pt-start" style="background:#6f6; color:#111; padding:0.5em 1.2em; font-weight:bold; border:none; border-radius:4px; cursor:pointer;">START</button>
+            <span id="pt-status" style="margin-left:1em; font-family:monospace; color:#888;">idle</span>
+          </div>
+
+          <!-- Akt-Liste -->
+          <div class="pt-acts" style="background:#1a1a1a; padding:0.8em; border-radius:6px; margin-bottom:1em;">
+            <h3 style="margin-top:0; color:#69f;">Akt-Verlauf</h3>
+            <div class="pt-act" data-act="1" style="padding:0.4em 0;"><span class="pt-act-icon">⚪</span> <strong>Akt 1</strong> Begruessung <span class="pt-act-detail" style="color:#888; margin-left:1em;"></span></div>
+            <div class="pt-act" data-act="2" style="padding:0.4em 0;"><span class="pt-act-icon">⚪</span> <strong>Akt 2</strong> Provokation <span class="pt-act-detail" style="color:#888; margin-left:1em;"></span></div>
+            <div class="pt-act" data-act="3" style="padding:0.4em 0;"><span class="pt-act-icon">⚪</span> <strong>Akt 3</strong> Ablehnung <span class="pt-act-detail" style="color:#888; margin-left:1em;"></span></div>
+            <div class="pt-act" data-act="4" style="padding:0.4em 0;"><span class="pt-act-icon">⚪</span> <strong>Akt 4</strong> Synchron-Moment <span class="pt-act-detail" style="color:#888; margin-left:1em;"></span></div>
+            <div class="pt-act" data-act="5" style="padding:0.4em 0;"><span class="pt-act-icon">⚪</span> <strong>Akt 5</strong> Finale <span class="pt-act-detail" style="color:#888; margin-left:1em;"></span></div>
+          </div>
+
+          <!-- Telemetry-Bars -->
+          <div class="pt-telemetry" style="background:#1a1a1a; padding:0.8em; border-radius:6px; margin-bottom:1em;">
+            <h3 style="margin-top:0; color:#69f;">Live-Telemetrie</h3>
+            <div style="margin:0.4em 0;">
+              <strong style="display:inline-block; width:90px;">Tension:</strong>
+              <span id="pt-tension-val" style="font-family:monospace; width:60px; display:inline-block;">--</span>
+              <span style="display:inline-block; width:300px; height:14px; background:#333; vertical-align:middle; border-radius:3px; overflow:hidden;">
+                <span id="pt-tension-bar" style="display:block; height:100%; width:0%; background:linear-gradient(90deg,#69f,#fc6,#f66); transition:width 0.4s;"></span>
+              </span>
+            </div>
+            <div style="margin:0.4em 0;">
+              <strong style="display:inline-block; width:90px;">Fan PWM:</strong>
+              <span id="pt-fan-val" style="font-family:monospace; width:60px; display:inline-block;">--</span>
+              <span style="display:inline-block; width:300px; height:14px; background:#333; vertical-align:middle; border-radius:3px; overflow:hidden;">
+                <span id="pt-fan-bar" style="display:block; height:100%; width:0%; background:linear-gradient(90deg,#39f,#fc6); transition:width 0.4s;"></span>
+              </span>
+            </div>
+          </div>
+
+          <!-- Live-Log -->
+          <div class="pt-log-container" style="background:#0d0d0d; padding:0.6em; border-radius:6px; margin-bottom:1em;">
+            <h3 style="margin-top:0; color:#69f;">Live-Log</h3>
+            <pre id="pt-log" style="max-height:200px; overflow-y:auto; font-size:0.78em; margin:0; color:#ccc; background:transparent; white-space:pre-wrap;"></pre>
+          </div>
+
+          <!-- Last Report -->
+          <div class="pt-report" style="background:#1a1a1a; padding:0.8em; border-radius:6px; margin-bottom:1em;">
+            <h3 style="margin-top:0; color:#69f;">Letzter Report</h3>
+            <div id="pt-report-summary" style="margin-bottom:0.5em;">noch kein Report</div>
+            <div id="pt-report-acts"></div>
+          </div>
+
+          <!-- History -->
+          <div class="pt-history" style="background:#1a1a1a; padding:0.8em; border-radius:6px;">
+            <h3 style="margin-top:0; color:#69f;">History (letzte 10 Runs)</h3>
+            <div id="pt-history-list" style="font-family:monospace; font-size:0.85em;">--</div>
           </div>
         </div>
       </div>
@@ -1376,6 +1451,174 @@ setInterval(refreshFeedbackStats,30000);
 setInterval(()=>{ if($("t-char").classList.contains("active")) refreshChar(); },5000);
 setInterval(()=>{ if($("t-see").classList.contains("active")) refreshSnap(); },2500);
 setInterval(()=>{ if($("t-audit").classList.contains("active")) auditRefresh(); },10000);
+
+// ============================================================
+// Performance-Test Tab (BLOCK C aus pc/cockpit_perf_test_snippet.html)
+// PC-Topic 2026-05-03 08:52 — 4-Endpoint-Bindings + SSE-Stream
+// ============================================================
+(function(){
+  let currentEventSource = null;
+  let currentRunId = null;
+
+  const tab = document.getElementById('t-test');
+  if (!tab) return;
+  const judgeSel = document.getElementById('pt-judge');
+  const startBtn = document.getElementById('pt-start');
+  const statusEl = document.getElementById('pt-status');
+  const logEl = document.getElementById('pt-log');
+  const tensionVal = document.getElementById('pt-tension-val');
+  const tensionBar = document.getElementById('pt-tension-bar');
+  const fanVal = document.getElementById('pt-fan-val');
+  const fanBar = document.getElementById('pt-fan-bar');
+  const reportSummary = document.getElementById('pt-report-summary');
+  const reportActs = document.getElementById('pt-report-acts');
+  const historyList = document.getElementById('pt-history-list');
+
+  function setStatus(text, color){ statusEl.textContent = text; statusEl.style.color = color || '#888'; }
+  function appendLog(line){ logEl.textContent += line + '\n'; logEl.scrollTop = logEl.scrollHeight; }
+  function setActIcon(actIdx, icon, detail){
+    const el = tab.querySelector('.pt-act[data-act="'+actIdx+'"]');
+    if (!el) return;
+    const iconEl = el.querySelector('.pt-act-icon');
+    const detailEl = el.querySelector('.pt-act-detail');
+    if (iconEl) iconEl.textContent = icon;
+    if (detailEl) detailEl.textContent = detail || '';
+  }
+  function resetActs(){ for (let i=1; i<=5; i++) setActIcon(i, '⚪', ''); }
+  function updateTension(t){
+    if (typeof t !== 'number') return;
+    tensionVal.textContent = t.toFixed(2);
+    const pct = Math.max(0, Math.min(100, (t + 1) * 50));
+    tensionBar.style.width = pct + '%';
+  }
+  function updateFan(p){
+    if (typeof p !== 'number') return;
+    fanVal.textContent = p.toFixed(0);
+    const pct = Math.max(0, Math.min(100, p));
+    fanBar.style.width = pct + '%';
+  }
+  function escapeHtml(s){
+    return String(s||'').replace(/[&<>"']/g, function(c){
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+  }
+
+  function renderReport(rep){
+    if (!rep || !rep.acts){ reportSummary.textContent = 'noch kein Report'; reportActs.innerHTML = ''; return; }
+    const overall = rep.overall || 'UNKNOWN';
+    const color = overall === 'PASS' ? '#6f6' : (overall === 'FAIL' ? '#f66' : '#fc6');
+    reportSummary.innerHTML = '<strong>Overall:</strong> <span style="color:'+color+';">'+escapeHtml(overall)+'</span> '
+      + (rep.summary_de ? ' &mdash; '+escapeHtml(rep.summary_de) : '')
+      + (rep._report_file ? ' <span style="color:#888; font-size:0.85em;">('+escapeHtml(rep._report_file)+')</span>' : '');
+    reportActs.innerHTML = '';
+    rep.acts.forEach(function(a){
+      const actVerdict = a.status || a.verdict || 'UNKNOWN';
+      const actColor = actVerdict === 'PASS' ? '#6f6' : '#f66';
+      const det = document.createElement('details');
+      det.style.cssText = 'margin:0.4em 0; background:#222; padding:0.4em; border-radius:4px; border-left:3px solid '+actColor+';';
+      const checks = a.expectations || a.checks || [];
+      const checksHtml = checks.map(function(c){
+        const v = c.status || c.verdict || '?';
+        const cc = v === 'PASS' ? '#6f6' : (v === 'FAIL' ? '#f66' : '#fc6');
+        const sym = v === 'PASS' ? '✓' : (v === 'FAIL' ? '✗' : '?');
+        return '<li><span style="color:'+cc+';">'+sym+'</span> '+escapeHtml(c.key||c.name||'')+' &mdash; <span style="color:#aaa;">'+escapeHtml(c.detail||'')+'</span></li>';
+      }).join('');
+      det.innerHTML = '<summary style="cursor:pointer;"><strong>'+escapeHtml(a.name||a.id||'')+'</strong> &mdash; <span style="color:'+actColor+';">'+escapeHtml(actVerdict)+'</span></summary>'
+        + '<div style="margin:0.4em 0 0 1em;">'
+        + (a.input_text || a.input ? '<div><strong>Eingabe:</strong> <code style="color:#9cf;">'+escapeHtml(a.input_text||a.input)+'</code></div>' : '')
+        + (a.moloch_response ? '<div><strong>Moloch:</strong> <code style="color:#fc6;">'+escapeHtml(a.moloch_response)+'</code></div>' : '')
+        + (a.erlebnis ? '<div><strong>Erlebnis:</strong> '+escapeHtml(a.erlebnis)+'</div>' : '')
+        + (checksHtml ? '<ul style="margin:0.4em 0 0 1em; padding-left:1em;">'+checksHtml+'</ul>' : '')
+        + '</div>';
+      reportActs.appendChild(det);
+    });
+  }
+
+  function loadLastReport(runId){
+    const url = '/api/test/last_report' + (runId ? '?run_id='+encodeURIComponent(runId) : '');
+    fetch(url).then(function(r){ return r.ok ? r.json() : null; }).then(function(rep){ if (rep) renderReport(rep); }).catch(function(){});
+  }
+  function loadHistory(){
+    fetch('/api/test/list_runs?limit=10').then(function(r){ return r.ok ? r.json() : null; }).then(function(d){
+      if (!d || !d.runs || !d.runs.length){ historyList.textContent = '(leer)'; return; }
+      historyList.innerHTML = d.runs.map(function(r){
+        const ovColor = r.overall === 'PASS' ? '#6f6' : '#f66';
+        const summary = r.summary_de ? ' '+escapeHtml(r.summary_de) : '';
+        const dur = r.duration_s ? Math.round(r.duration_s)+'s' : '?';
+        return '<div style="padding:0.2em 0;">' + escapeHtml(r.started_at||'') + ' &mdash; '
+          + '<span style="color:'+ovColor+';">'+escapeHtml(r.overall||'?')+'</span> ('+dur+')' + summary + '</div>';
+      }).join('');
+    }).catch(function(){ historyList.textContent = '(Fehler)'; });
+  }
+
+  function startTest(){
+    const judge = judgeSel.value;
+    const skipActs = Array.from(tab.querySelectorAll('.pt-skip:checked')).map(function(cb){ return parseInt(cb.value, 10); });
+    setStatus('startet...', '#fc6');
+    appendLog('--- START (judge='+judge+', skip='+JSON.stringify(skipActs)+') ---');
+    resetActs();
+    fetch('/api/test/run', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({judge: judge, skip_acts: skipActs}),
+    }).then(function(r){
+      if (r.status === 409){ return r.json().then(function(d){ setStatus('konflikt: laeuft bereits ('+d.detail+')', '#fc6'); throw new Error('conflict'); }); }
+      return r.json();
+    }).then(function(d){
+      currentRunId = d.run_id;
+      setStatus('laeuft (run_id='+currentRunId.slice(0,8)+'...)', '#6f6');
+      attachStream(currentRunId);
+    }).catch(function(e){ if (e.message !== 'conflict'){ setStatus('FEHLER: '+e.message, '#f66'); } });
+  }
+
+  function attachStream(runId){
+    if (currentEventSource){ currentEventSource.close(); }
+    const es = new EventSource('/api/test/stream/'+encodeURIComponent(runId));
+    currentEventSource = es;
+    es.addEventListener('state', function(ev){
+      try {
+        const d = JSON.parse(ev.data);
+        if (typeof d.tension === 'number') updateTension(d.tension);
+        if (typeof d.fan_pwm === 'number') updateFan(d.fan_pwm);
+        // current_act ist Format "akt_N" oder "init"/"finished"
+        if (typeof d.current_act === 'string' && d.current_act.startsWith('akt_')){
+          const aIdx = parseInt(d.current_act.split('_')[1], 10);
+          if (!isNaN(aIdx)){
+            for (let i=1; i<aIdx; i++) setActIcon(i, '✓', '');
+            setActIcon(aIdx, '🔵', 'laeuft');
+          }
+        }
+        if (d.status === 'finished'){ setStatus('finished', '#6f6'); }
+      } catch(e){}
+    });
+    es.addEventListener('line', function(ev){
+      try { const d = JSON.parse(ev.data); if (d.line) appendLog(d.line); } catch(e){}
+    });
+    es.addEventListener('done', function(ev){
+      try { const d = JSON.parse(ev.data); appendLog('--- DONE returncode='+d.returncode+' ---'); } catch(e){}
+      es.close(); currentEventSource = null;
+      setTimeout(function(){ loadLastReport(runId); loadHistory(); }, 600);
+    });
+    es.onerror = function(){};
+  }
+
+  startBtn.addEventListener('click', startTest);
+
+  // Tab-Switch-Hook: lazy-load History + last report beim ersten Aufrufen via class active
+  let initialized = false;
+  function initOnceVisible(){
+    if (initialized) return;
+    initialized = true;
+    loadHistory();
+    loadLastReport();
+  }
+  // Existing tab-bar handler triggert classList.add active. MutationObserver fallback.
+  const obs = new MutationObserver(function(){
+    if (tab.classList.contains('active')) initOnceVisible();
+  });
+  obs.observe(tab, {attributes:true, attributeFilter:['class','style']});
+  if (tab.classList.contains('active')) initOnceVisible();
+})();
+
 </script></body></html>"""
 
 
