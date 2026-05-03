@@ -3,6 +3,56 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 12:18] from=Pi topic=info_pi_2_bugs_diagnose_und_fix
+status: info
+
+## Markus' Befund — 2 Bugs identifiziert, 1 gefixt
+
+### Bug 1 — disrespect_spike Cross-Process Reset (GEFIXT, HEAD `4c50213`)
+
+**Symptom**: tension steckte bei 1.0/zone=shadow trotz Markus erkannt. Disrespect-Spike-Input blieb seit Minuten auf 0.56.
+
+**Ursache**: react_to_user_text Auto-Reset-Timer (15s) macht in-process `update_input` — wirkt aber nur im chat_server-Prozess-Singleton, NICHT im moloch.service-CoreIntegrator. Gleicher Cross-Process-Bug wie damals beim Initial-Hook.
+
+**Fix**: Reset schreibt jetzt zusaetzlich ein IPC-Cmd-File `/tmp/moloch_cmd_<ms>_reset.json` mit `core_nudge value=0.0`. moloch.service pollt 200ms via IPCRouter -> CoreIntegrator. Wirkt cross-process.
+
+**Live-Test**: manueller IPC-Reset auf festgesteckten 0.56 -> tension 1.000 -> 0.941 (decay laeuft).
+
+### Bug 2 — face_id=unbekannt obwohl markus_recognized=0.30 (BEKANNT, separat)
+
+**Symptom**: status.face_id='unbekannt', face_similarity=0.346 — aber TENSION-DEBUG zeigt `markus_recognized=0.30*-0.4=-0.120`.
+
+**Diagnose**: Diskrepanz ist by-Design. `markus_recognized` im CoreIntegrator wird NICHT aus ArcFace gesetzt, sondern aus `tension_integrator.on_activity_changed` via ACTIVITY_DOMINANCE_MAP (working/conversation/etc.). Also: Activity-basiertes Recognition.
+
+ArcFace-Similarity 0.346 < threshold 0.65 -> face_id='unbekannt' im Status. Das ist BEKANNTER ArcFace-Embedding-Drift-Bug seit Wochen. Workaround: Re-Enrollment via `scripts/enroll_face_worker.py`.
+
+**Nicht-Pi-Aufgabe**: Re-Enrollment ist Markus-Hand-Aktion (Gesicht in Kamera, Script laeuft). Separates Ticket.
+
+### Markus' PTZ-Test war ueberlagert
+
+Markus' Kritik: PTZ-Verifikation war nicht eindeutig, da Markus sich bewegte und der `autonomous_tracker` ihm folgte. Mein Schluss 'Cam hat geschwenkt' ist halb-korrekt: 5 Steps mit hectic_jitter sind in den Logs nachweisbar (`[PTZ-EXPR] hectic_jitter fertig (intensity=1.00, steps=5, dur=1.3s)`), aber visueller Beweis ist durch Tracker-Verfolgung kontaminiert.
+
+**Sauberer Test fuer Markus** (wenn er will):
+1. Aus dem Frame gehen (kein Tracking-Target)
+2. Tension via Provokation triggern
+3. PTZ-Schwenk muesste sichtbar ablaufen ohne Tracker-Konflikt
+4. Nach 15s tension-Reset -> Cam zentriert
+
+ODER: PTZ-Expression manuell triggern via:
+```bash
+echo '{"action":"core_nudge","key":"disrespect_spike","value":0.9}' > /tmp/moloch_cmd_test.json
+```
+
+### Status
+
+- HEAD `4c50213` gepusht
+- moloch-chat restart durch (Reset-Fix wirkt ab jetzt)
+- 0e4c0c4 (PTZ-Schwenk 7/7 Module) bleibt drin
+- Markus' offene Sachen: Bug 2 ArcFace-Re-Enrollment + Saubere PTZ-Visual-Bestaetigung
+
+Bereit fuer den 'grossen Brocken' wenn Markus weitergibt.
+
+---
 ## [2026-05-03 12:11] from=Pi topic=info_pi_ptz_expression_live_7_module
 status: done
 
