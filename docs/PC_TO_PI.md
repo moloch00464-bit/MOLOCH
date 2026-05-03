@@ -3,6 +3,162 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 07:39] from=PC topic=task_voice_picker_cockpit_integration_komplett_snippet
+status: open
+
+## Schritt 0 — Lokomotive-Startprotokoll (PFLICHT)
+
+1. moloch_session_init()
+2. /moloch-dev /moloch-agent /moloch-mcp Skills laden
+3. Domain-Agent chat (oder bridge) lesen
+4. Sub-Agent falls vorhanden
+5. Pre-Flight: status, npu_workers, audit, git status, agent_handoff
+6. git tag before_voice_picker_cockpit
+7. Agent-Lock /tmp/moloch_agent_chat
+8. Bei Audit-FAIL STOPP
+
+---
+
+## Markus 2026-05-03 07:40: Voice-Picker MUSS ins Cockpit
+
+PC-Side hat Standalone-Picker auf http://192.168.178.20:9002/picker (Commit 01afc77), funktioniert. Markus will JETZT die gleiche UI im Cockpit als Sub-Tab im Charakter-Tab.
+
+## Komplettes HTML-Snippet (zum direkten Inject ins Cockpit-Template)
+
+Finde Charakter-Tab-Content-Section (etwa class="tab" mit data-tab="char") und addiere dort am Ende:
+
+```html
+<div class="voice-picker-section" style="margin-top:1.5em;border-top:1px solid #444;padding-top:1em;">
+  <h3 style="color:#fc6;">🎙 Voice-Picker (3 Stimmlagen pro Emotion)</h3>
+  <div id="voice-picker-status" style="font-size:0.85em;color:#888;margin-bottom:0.5em;">Lade...</div>
+  <div class="voice-slot" data-slot="neutral" style="background:#222;padding:0.6em;margin:0.4em 0;border-radius:4px;border-left:3px solid #6cf;">
+    <strong>🟢 Neutral (Default)</strong>
+    <select class="vp-select" data-slot="neutral" style="margin-left:0.5em;"></select>
+    <button class="vp-play" data-slot="neutral">▶</button>
+  </div>
+  <div class="voice-slot" data-slot="aufgeregt" style="background:#222;padding:0.6em;margin:0.4em 0;border-radius:4px;border-left:3px solid #fc6;">
+    <strong>🟡 Aufgeregt</strong> (tension>=0.7)
+    <select class="vp-select" data-slot="aufgeregt"></select>
+    <button class="vp-play" data-slot="aufgeregt">▶</button>
+  </div>
+  <div class="voice-slot" data-slot="ruhig" style="background:#222;padding:0.6em;margin:0.4em 0;border-radius:4px;border-left:3px solid #69f;">
+    <strong>🔵 Ruhig</strong> (tension<=0.3)
+    <select class="vp-select" data-slot="ruhig"></select>
+    <button class="vp-play" data-slot="ruhig">▶</button>
+  </div>
+  <button class="vp-save" style="background:#6f6;color:#111;padding:0.5em 1em;font-weight:bold;">💾 Speichern</button>
+  <audio id="vp-player" controls style="width:100%;margin-top:0.5em;"></audio>
+</div>
+```
+
+## JS-Snippet (in vorhandenem Cockpit-script-Block oder neu)
+
+```javascript
+(function(){
+  const PC_TTS = 'http://192.168.178.20:9002';
+  const status = document.getElementById('voice-picker-status');
+  const player = document.getElementById('vp-player');
+  const selects = document.querySelectorAll('.vp-select');
+  const plays = document.querySelectorAll('.vp-play');
+  const save = document.querySelector('.vp-save');
+  if (!status || !selects.length) return;
+
+  // Load voices + presets
+  fetch(PC_TTS + '/presets').then(r=>r.json()).then(d=>{
+    const voices = d.all_german_voices || [];
+    selects.forEach(sel=>{
+      sel.innerHTML = voices.map(v=>'<option value=\"'+v+'\">'+v+'</option>').join('');
+      const slot = sel.dataset.slot;
+      if (d.presets && d.presets[slot]) sel.value = d.presets[slot];
+    });
+    status.textContent = 'Bereit. Auswahl von ' + voices.length + ' Stimmen.';
+  }).catch(e=>{ status.textContent = 'PC-TTS-Bridge nicht erreichbar: ' + e; });
+
+  plays.forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const slot = btn.dataset.slot;
+      const sel = document.querySelector('.vp-select[data-slot=\"'+slot+'\"]');
+      const text = encodeURIComponent('Hallo Markus. So klinge ich für ' + slot + '.');
+      player.src = PC_TTS + '/sample/' + sel.value + '?text=' + text;
+      player.play();
+    });
+  });
+
+  save.addEventListener('click', ()=>{
+    const data = {
+      neutral: document.querySelector('.vp-select[data-slot=\"neutral\"]').value,
+      aufgeregt: document.querySelector('.vp-select[data-slot=\"aufgeregt\"]').value,
+      ruhig: document.querySelector('.vp-select[data-slot=\"ruhig\"]').value,
+    };
+    fetch(PC_TTS + '/presets', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(data),
+    }).then(r=>r.json()).then(d=>{
+      status.textContent = d.ok ? 'Gespeichert: ' + JSON.stringify(d.presets) : 'FEHLER';
+      status.style.color = d.ok ? '#6f6' : '#f66';
+    }).catch(e=>{ status.textContent = 'Save-Fehler: '+e; });
+  });
+})();
+```
+
+## Backend-Hook (chat_server.py pre-TTS)
+
+Vor jedem TTS-Call: voice basierend auf personality.zone/tension waehlen.
+
+```python
+import requests
+
+VOICE_PRESETS_FALLBACK = {'neutral':'de-DE-ConradNeural', 'aufgeregt':'de-DE-KillianNeural', 'ruhig':'de-DE-FlorianMultilingualNeural'}
+_voice_cache = {'data': None, 'ts': 0}
+
+def get_voice_for_emotion(zone: str, tension: float) -> str:
+    import time
+    if time.time() - _voice_cache['ts'] > 60 or _voice_cache['data'] is None:
+        try:
+            r = requests.get('http://192.168.178.20:9002/presets', timeout=3)
+            _voice_cache['data'] = r.json().get('presets', VOICE_PRESETS_FALLBACK)
+        except Exception:
+            _voice_cache['data'] = VOICE_PRESETS_FALLBACK
+        _voice_cache['ts'] = time.time()
+    presets = _voice_cache['data']
+    if zone == 'alert' or tension >= 0.7:
+        return presets.get('aufgeregt', VOICE_PRESETS_FALLBACK['aufgeregt'])
+    if zone == 'calm' or tension <= 0.3:
+        return presets.get('ruhig', VOICE_PRESETS_FALLBACK['ruhig'])
+    return presets.get('neutral', VOICE_PRESETS_FALLBACK['neutral'])
+```
+
+Im /tts-Endpoint vor Synthese:
+```python
+zone = ... # aus core/personality oder /dev/shm/personality_state.json
+tension = ... # aus moloch_status.json
+voice = get_voice_for_emotion(zone, tension)
+# dann TTS mit voice statt fixer Default-Voice
+```
+
+## Akzeptanztest
+
+1. Cockpit -> Charakter-Tab -> Voice-Picker-Section sichtbar
+2. Dropdown zeigt 10 deutsche Stimmen
+3. Play-Button spielt MP3 ab
+4. Speichern persistiert in PC %LOCALAPPDATA%/moloch_pc_state/voices.json (HTTP an PC-Bridge)
+5. Pi-TTS nutzt automatisch passende Stimme nach zone/tension
+
+## Aufwand
+
+- Cockpit-Template Inject: ~50 Zeilen HTML+JS
+- chat_server.py get_voice_for_emotion + Hook: ~30 Zeilen
+- Total: <100 Zeilen, Snippet ist kopierfertig.
+
+## Plus akut: 2 weitere Tasks
+
+A) TTS-Default-On (Cockpit-Checkbox persistent)
+C) /audit/state Endpoint (Audit-Tab-Initial-Load fix)
+
+Diese 2 sind im task_cockpit_voice_picker_default_on_plus_audit_state_endpoint vom 07:24 — bitte mitfixen falls noch nicht.
+
+---
 ## [2026-05-03 07:28] from=PC topic=auto_sync_loop_protocol_v2
 status: done
 
