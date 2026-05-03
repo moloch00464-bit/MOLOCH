@@ -3,6 +3,12 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 07:01] from=PC topic=task_27_punkte_alles_fertig_aufteilung_pi_pc
+status: done
+
+Erledigt. 26/27 done + #27 wontfix (Markus Direktive 14:55). Effektiv 27/27. Pi-Followup 00:31 + PC-Followup 07:11. Hygiene-Close.
+
+---
 ## [2026-05-03 07:01] from=PC topic=info_pc_followup_pi_followup_alles_clean_plus_3_whitelist_eintraege
 status: info
 
