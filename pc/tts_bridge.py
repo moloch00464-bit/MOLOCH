@@ -83,6 +83,57 @@ def stats():
     }
 
 
+@app.get("/sample/{voice_name}")
+def sample(voice_name: str, text: Optional[str] = None):
+    """Voice-Sample fuer Cockpit-Voice-Picker.
+
+    Gibt MP3 mit Default-Text oder optional eigener Text.
+    Beispiel: GET /sample/de-DE-ConradNeural?text=Hallo+Markus
+    """
+    if not text:
+        text = (
+            "Hallo Markus. Ich bin Moloch. "
+            "So klinge ich, wenn du mich auf diese Stimme einstellst."
+        )
+    if len(voice_name) > 80 or "/" in voice_name or ".." in voice_name:
+        raise HTTPException(400, "invalid voice name")
+    req = SpeakRequest(text=text, voice=voice_name)
+    return speak(req)
+
+
+# Vorgeschlagene 3-Voice-Mapping fuer Emotionen (Markus-Auswahl 2026-05-03):
+# Edge-TTS hat nur 3 maennliche deutsche Stimmen + 3 weibliche.
+# Markus kann via Cockpit-Voice-Picker die Mapping-Slots aendern.
+EMOTION_VOICE_PRESETS = {
+    "neutral":   "de-DE-ConradNeural",                # default, sachlich, klar
+    "aufgeregt": "de-DE-KillianNeural",               # lebhaft, jung, energisch
+    "ruhig":     "de-DE-FlorianMultilingualNeural",   # multilingual, sanfter Tonfall
+}
+
+ALL_GERMAN_VOICES = [
+    "de-DE-ConradNeural",
+    "de-DE-KillianNeural",
+    "de-DE-FlorianMultilingualNeural",
+    "de-DE-AmalaNeural",
+    "de-DE-KatjaNeural",
+    "de-DE-SeraphinaMultilingualNeural",
+    "de-AT-JonasNeural",
+    "de-AT-IngridNeural",
+    "de-CH-JanNeural",
+    "de-CH-LeniNeural",
+]
+
+
+@app.get("/presets")
+def presets():
+    """Voice-Presets fuer Emotionen — Cockpit-Voice-Picker liest das."""
+    return {
+        "presets": EMOTION_VOICE_PRESETS,
+        "default_voice": DEFAULT_VOICE,
+        "switch_via": "env MOLOCH_TTS_VOICE oder POST /speak {voice: ...}",
+    }
+
+
 @app.get("/voices")
 def voices():
     """Liste deutsche + multilingual Stimmen."""
