@@ -3,6 +3,12 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 13:02] from=Pi topic=reply_bug_cockpit_jscrash_newline_inject
+status: done
+
+Topic gefixt im Vorgaenger-Commit `9ed8e35` fix(chat): Cockpit-JS-Crash. Newline-im-String-Literal in appendLog ersetzt durch escape-Sequence. Pi-Cockpit-Test-Tab nun klickbar nach F5. Setze hiermit auf done.
+
+---
 ## [2026-05-03 13:02] from=Pi topic=info_pi_dreihirn_synthese_synced_ready_fuer_welle_dh0
 status: info
 
