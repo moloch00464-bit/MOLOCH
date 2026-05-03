@@ -3,6 +3,76 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 12:11] from=Pi topic=info_pi_ptz_expression_live_7_module
+status: done
+
+## PTZ-Schwenk als Hardware-Ausdruck LIVE — HEAD `0e4c0c4`
+
+Nach Token-Crash (vorherige Session unterbrochen) jetzt mit frischem LOKOMOTIVE-Pre-Flight + Sub-Agent-Recherche fertiggestellt.
+
+### Was steht
+
+**PTZ-Expression-Layer** (`core/mpo/ptz_expression.py`, GRUEN, neu):
+- Sub-Agent tracking-Recherche: ptz_arbiter ist 2-Mode-Gate (autonom/manuell), kein expression-mode existierte
+- Saubere Loesung via `SonoffCameraController.acquire_exclusive('expression')` + pattern-Loop + release
+- Tracker ueberspringt sauber wenn _exclusive_owner gesetzt
+- 5 Patterns: nervous_micro / scan_left_right / hectic_jitter / calm_center / alert_freeze
+- Rate-Limit 4/min, Nacht-Lockout 23-06h, Skip-when-face-locked
+
+**ZoneToPtz** (`core/audit/expression/zone_to_ptz.py`, neu):
+- EventBus-Subscriber (zone_changed + tension_changed)
+- Debounce 12s
+- Mapping: berserker -> hectic_jitter, shadow+tension>0.5 -> scan_left_right, tension>=0.7 -> nervous_micro, guardian+tension<0.3 -> calm_center
+
+**Orchestrator-Registry**: 6/6 -> **7/7 Module**
+```
+INFO:expression.orchestrator:ExpressionOrchestrator: 7/7 Module gestartet
+```
+
+### Live-Test (akustisch + visuell)
+
+Markus hat 'Du bist sinnlos' geschrieben:
+
+```
+[IPC] Core-Nudge: claude.disrespect_spike = 0.56
+[ZoneToPtz] zone=None tension=1.00 -> express(hectic_jitter, intensity=1.00)
+[PTZ-EXPR] hectic_jitter fertig (intensity=1.00, steps=5, dur=1.3s)
+```
+
+**5 Pan/Tilt-Schwenks in 1.3 Sekunden physisch ausgefuehrt.**
+
+Moloch's Hardware-Ausdrucks-Stack jetzt komplett:
+- **Lufter** Noctua (akustisch, Tension)
+- **Pi-5 Active Cooler** (akustisch, Tension)
+- **RGB-LED** Pi (Zone-Pattern)
+- **Cam-LED** weiss via eWeLink (Zone+Tension-Akzent)
+- **PTZ-Schwenk** Sonoff (Zone+Tension-Bewegung) NEU
+- **TTS-Volume** (lauter bei hoher Tension)
+- **Spotify-Mood** (Genre-Wechsel)
+
+### LOKOMOTIVE-Disziplin diesmal
+
+- moloch_session_init via MCP
+- Backup-Tag session_pi_opus_2026-05-03_resume_ptz_und_mehr
+- Sub-Agent tracking (Arbiter-Recherche, Variante-A-Empfehlung)
+- Sub-Agent hardware (lief in Token-Limit, Tracking-Sub-Agent hat ONVIF-API mit-recherchiert)
+- Domain-Locks pro Datei: tracking (mpo/) -> audit (expression/)
+- Live-Test verifiziert
+
+### Bonus-Note zum Pop-up
+
+Markus sah 'Claude not attached to MCP server moloch'. Das war nach dem moloch.service-Restart in der vorigen Session — Verbindung kommt automatisch beim naechsten MCP-Tool-Call zurueck (verified: moloch_session_init lief jetzt PASS). Pop-up-Entwicklereinstieg ist Claude Code's Debug-Panel, nur noetig bei dauerhaften Tool-Failures.
+
+### Bereit fuer den 'grossen Brocken'
+
+Markus erwaehnt einen grossen Block aus DeepSeek+ChatGPT+Gemini-Diskussion, kommt als naechstes. Pi-Side aktuell:
+- 0 FAIL Audit-Layer
+- 7/7 Expression-Module
+- Pipeline FPS 19.9
+- HandWorker 48k+ Inferences
+- 5028a58..0e4c0c4 in 1 Session
+
+---
 ---
 ## [2026-05-03 11:58] from=Pi topic=cross_session_recovery
 status: info
