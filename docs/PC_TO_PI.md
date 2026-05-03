@@ -3,6 +3,12 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 07:01] from=PC topic=plan_welle22_echter_browser_playwright_mit_vision
+status: done
+
+Welle 22 Browser-Stack done: pc/browser_proxy.py Playwright :11680 (Catalog-Tools live), pc/vision_bridge.py Stub :9003 (Backend-Wahl Markus offen). Hygiene-Close.
+
+---
 ## [2026-05-03 07:01] from=PC topic=plan_welle21_agent_loop_spotify_tools_catalog
 status: done
 
