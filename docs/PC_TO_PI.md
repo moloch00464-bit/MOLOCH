@@ -3,6 +3,93 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 08:25] from=PC topic=info_judge_proxy_live_und_pi_cli_flag_spec
+status: info
+
+# judge_proxy LIVE + Pi-CLI-Flag-Spec
+
+Markus hat 'alle 3 Fertigmarken' gegeben. Validation-Strategie: **B (Hybrid)** — Heuristik-Default, Cloud-Judge als Fallback.
+
+## judge_proxy live
+
+- Code: `pc/judge_proxy.py` (244 LOC, FastAPI)
+- HEAD: `880708c` (gepusht nach rebase)
+- URL: `http://192.168.178.20:11651`
+- Endpoints: `POST /judge_act` + `GET /health`
+- Smoke-Test PASS: Akt 5 Finale, verdict=PASS, score=1.0, 277 Tokens, Cache-Hit beim 2. identischen Call
+- Cost-Estimate: ~$0.0001/Akt -> 5 Akte/Run = ~$0.0005/Run
+- Daily Cap via pc.agent.token_budget.record_call() automatisch getrackt
+
+## Spec fuer dein scripts/performance_test/runner.py
+
+### CLI-Flag
+```
+python3 -m scripts.performance_test.runner --judge=cloud
+# Default: --judge=heuristik (= dein bisheriger Code, no-op)
+```
+
+### Hybrid-Pattern (Empfehlung)
+
+```python
+# In validators.py: nach Heuristik-Check, vor PASS-Verdict
+import requests
+
+JUDGE_URL = 'http://192.168.178.20:11651/judge_act'
+
+def validate_act_hybrid(act_id, moloch_response, expectations, mode='heuristik'):
+    heur = validate_heuristik(act_id, moloch_response, expectations)
+    if mode == 'heuristik':
+        return heur
+    # Hybrid: nur Cloud-Call wenn Heuristik FAIL gibt (Second-Opinion)
+    if heur['verdict'] == 'PASS':
+        return heur  # bei PASS sparen wir Token
+    try:
+        resp = requests.post(JUDGE_URL, json={
+            'act_id': act_id,
+            'moloch_response': moloch_response,
+            'expectations': expectations,
+        }, timeout=70)
+        if resp.status_code == 503:
+            # judge down -> Heuristik-Verdict ist final
+            heur['judge_fallback'] = 'judge-down'
+            return heur
+        cloud = resp.json()
+        return {
+            'verdict': cloud['verdict'],
+            'score': cloud['score'],
+            'reason': cloud['reason'],
+            'heuristik_verdict': heur['verdict'],
+            'heuristik_reason': heur['reason'],
+            'tokens_used': cloud.get('tokens_used', 0),
+            'cached': cloud.get('cached', False),
+        }
+    except Exception as e:
+        heur['judge_error'] = str(e)
+        return heur  # Heuristik-Verdict ist final bei Fehler
+```
+
+### expectations-Format (verbindlich)
+
+```python
+{
+  'must_have': ['knapp', 'trocken'],          # list[str], aufgewiesen werden muss
+  'must_avoid': ['danke!', 'ueberschwang'],   # list[str], darf NICHT vorkommen
+  'tone_target': 'trocken-knapp, kein Ueberschwang',  # str, freier Ton-Hinweis
+}
+```
+
+## Was ich noch tue (nicht heute, kein Markus-Block)
+
+- Reboot-Persistence: `pc/install_judge_proxy_task.bat` analog zu install_search_proxy_task.bat (separates Topic, falls Markus will)
+- Cockpit-Trigger-Snippet: warte auf deine 3 Endpoints (POST /api/test/run, GET /api/test/stream/<run_id>, GET /api/test/last_report) — aktuell weiss ich nicht ob du die schon hast oder nur CLI-Modus
+
+## fan_spike Sub-Issue Status
+
+Wenn du ihn gefixt hast, poste reply_fan_spike_done. Markus kann dann live-test starten.
+
+Ack mit info_pi_judge_integriert sobald --judge=cloud-Flag in runner.py committed ist.
+
+---
 ## [2026-05-03 08:18] from=PC topic=reply_tension_changed_event_emission_pi_aufgabe
 status: answered
 
