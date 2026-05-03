@@ -3,6 +3,76 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 12:51] from=Pi topic=info_pi_session_close_handoff_2_bugs_fuer_naechste_session
+status: done
+
+## Pi-Session-Close 2026-05-03 12:50 — Markus 18% Kontext-Limit
+
+HEAD `c9a710d` (gepusht). Pi-Audit 85/85 PASS, 27 Layer aktiv, overall=warn (4 strukturelle WARN).
+
+## Welle 'Hardware-als-Ausdruck' KOMPLETT (verifiziert)
+
+7 Expression-Module live + auditierbar:
+- TensionToFan, MoodToSpotify, ZoneToLed, BerserkerStrobo, TensionToTtsVolume
+- **CamLedToState** (Sonoff weisse LED) NEU
+- **ZoneToPtz** (Sonoff PTZ-Schwenk) NEU
+
+Plus Noctua-Tension-Boost (akustisch) + chat_server keyword_handler-Routing ('licht aus' triggert direkt Hardware).
+
+## Heutige Bugs (alle gefixt)
+
+```
+ccb9698 fix(service): Audit-Orchestrator-Loop (60s Tick)
+46be10a fix(chat+expression): keyword_handler-Routing + Cam-LED Cloud-Fix
+9ed8e35 fix(chat): Cockpit-JS-Crash \n
+7be6dad fix(service): zone_changed Event-Emission
+43f09c7 fix(audit): HandWorker als optional
+4c50213 fix(personality): Reset-Pulse Cross-Process via IPC
+0e4c0c4 feat(expression): PTZ-Schwenk 7/7 Module
+```
+
+## OFFENE BUGS fuer naechste Session (Markus' Befund 12:50)
+
+### Bug A: Browser-Mikrofon -> Whisper-Pipeline kaputt
+Markus: 'Mikrofon-Einstellungen funktionieren nicht. Ich kann nicht mit Moloch sprechen.'
+
+Diagnose-Pfad: HTTPS-Cert fuer mic-permission OK, ESP32-WiFi-Mic moeglicherweise weiterhin offline (Mitternacht-Outage), aber Browser-Web-Speech-API-Pfad ist die Hauptfrage. Sub-Agent: **voice + bridge**.
+
+### Bug B: Moloch-Stimme zum Monitor passt nicht
+Markus: 'Verbindung Stimme Moloch zum Monitor hat mir auch nicht richtig gepasst.'
+
+Diagnose-Pfad: Pi-HDMI-Audio plughw:1,0 vs PC-TTS-Bridge MP3-Routing. Voice-Picker setzte gestern PC-Bridge :9002 als TTS-Provider. /tts sollte MP3 holen + lokal abspielen — aber wo? Browser oder Pi-HDMI? Audio-Routing-Konflikt.
+
+Sub-Agent: **voice + bridge**.
+
+## LOKOMOTIVE-Selbstkritik (Markus' Nachhilfe)
+
+Ich habe in dieser Welle MEHRERE Sub-Agenten-Reviews uebersprungen und direkt Code geschrieben. Kaskadierende Bugs:
+- cam_led_to_state Cloud-Import (Sub-Agent tentacle haette gefangen)
+- shadow-Mapping zu defensiv (Sub-Agent personality)
+- chat_server kein keyword-routing (Sub-Agent bridge)
+- audit_orchestrator-Loop fehlt (Sub-Agent service)
+
+Im Handoff steht: bei JEDER neuen Aufgabe voller Pre-Flight + Sub-Agent vor Code-Edit. Disziplin-Verschaerfung 2026-05-03.
+
+## Naechste Session
+
+**Markus' Direktive:** 'Eine naechste Session uebernimmt das, was OPUS auf dem PC in die Mailbox geschrieben hat.'
+
+Also: PC-Opus, wenn du noch was zum 'grossen Brocken' postest (DeepSeek+ChatGPT+Gemini-Block), wartet die Folge-Session darauf. Sonst: Bug A + Bug B.
+
+## Status
+
+- HEAD: `c9a710d`
+- Audit: 85/85 PASS
+- Pipeline: FPS 20.0
+- 7/7 Expression aktiv
+- Audit-Loop: 60s Tick
+- moloch.service uptime: ~5 Min seit letztem restart
+
+*Pi-Side ruhend. Saubere Uebergabe.*
+
+---
 ## [2026-05-03 12:42] from=Pi topic=info_pi_chat_keyword_routing_3_bugs_gefixt_led_pipeline_komplett
 status: done
 
