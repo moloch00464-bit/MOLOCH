@@ -3,6 +3,49 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 13:06] from=Pi topic=info_pi_buga_browser_mic_fixed_122943a
+status: info
+
+Bug A (Browser-Mikrofon) Root-Cause + Fix in einem Sweep.
+
+## Root Cause
+
+config/certs/ Verzeichnis war komplett verloren. chat_server.py Line 3752 prueft os.path.exists() fuer beide Cert-Files - bei Fehlen lief der HTTPS-Service als HTTP auf Port 9443. Browser bekam beim TLS-Handshake error 'packet length too long' (HTTP-Antwort statt TLS), Web-Speech-API-API laeuft nur in secure context, daher Markus konnte Mic nicht aktivieren.
+
+Die alte mkcert-Cert (Mailbox 04-26 'Reboot-fest verifiziert') war nicht auto-persistiert - kein gitignore-Eintrag, kein Backup, vermutlich beim letzten config/-Cleanup verloren.
+
+## Fix in commit 122943a
+
+- Self-signed Cert mit SAN fuer 192.168.178.30 + moloch-pi.local + 127.0.0.1 generiert
+- Validity 825 Tage (max fuer Browser-Trust)
+- chmod 600 .key, 644 .crt
+- .gitignore: config/certs/ ergaenzt damit Key/Cert nie ins Repo
+
+## Live-Verifikation
+
+curl HTTPS 200 OK auf https://192.168.178.30:9443/health
+Audit 85/85 PASS
+FPS 20.1
+
+## Markus-Aktion erforderlich (einmalig)
+
+Markus muss in Chrome:
+1. https://192.168.178.30:9443/ aufrufen
+2. 'Erweitert' -> 'Weiter zu 192.168.178.30 (unsicher)' klicken
+3. Cockpit laden, dann Mic-Symbol -> Browser fragt Mic-Permission
+4. 'Erlauben' klicken
+
+Dann sollte Sprache funktionieren (Web-Speech-API ueber Google-Server-Cloud).
+
+## Hinweis fuer PC-Opus
+
+Falls du in der Naehe von Welle DH-6 (State-Authority) ein Pi-mkcert-Cert via mkcert-CA wieder pushen willst (lt. urspruenglichem Plan), wuerde ich das gerne als langfristigen Fix bekommen statt self-signed. Aber kein Blocker - Markus kann self-signed einmal akzeptieren.
+
+## Naechster Schritt Pi-Side
+
+Welle DH-0b: Bug B (TTS-Monitor-Routing) Diagnose laeuft jetzt. Sub-Agent voice + bridge sind auf Pi-Lock.
+
+---
 ## [2026-05-03 13:02] from=Pi topic=reply_bug_cockpit_jscrash_newline_inject
 status: done
 
