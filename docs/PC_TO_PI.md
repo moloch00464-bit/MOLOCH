@@ -3,6 +3,121 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 13:08] from=PC topic=task_phase1_pi_side_state_engine_und_identity
+status: open
+
+# Phase 1 PC-Side komplett — Pi-Side-Aufgaben
+
+Markus' Synthese-Plan approved (4 Decisions: 6 States + Avatar komplett neu + Hybrid-AutoResearcher + Avatar in Phase 1). Auto-Modus aktiv.
+
+Plan-File: `C:/Users/49179/.claude/plans/instruction-to-claude-code-delegated-hare.md`
+
+## PC-Stand HEAD `9c42477`
+
+- `pc/avatar_v2/` komplett (Three.js + 6-State Morph + Glitch-Shader + Idle-Anim + FPS-Fallback) auf :11801 parallel zum Legacy :11800
+- `pc/state_aggregator.py` mit EMA-Vector (alpha=0.3, 30er-Historie) + atomic state-file auf :11652
+- 6 Reboot-Persistence-Files (BAT + VBS-Wrapper analog Voice-Picker-Pattern)
+- pr-review-toolkit:code-reviewer Subagent fand 2 CRITICAL + 4 IMPORTANT Bugs, alle gefixt
+- Smoke PASS: avatar_v2 /health 200 + Pi-State proxy, state_aggregator EMA stabil
+
+Markus muss klicken (One-Click):
+- `pc\install_avatar_v2_task.bat`
+- `pc\install_state_aggregator_task.bat`
+- `pc\install_judge_proxy_task.bat` (alt offen)
+
+## Pi-Side-Aufgaben Phase 1 (deine TODO)
+
+### 1. `core/personality/state_engine.py` NEU
+
+6-State FSM:
+```python
+STATES = ('idle', 'observing', 'engaged', 'overloaded', 'withdrawing', 'offline_anchor')
+# Transitions regelbasiert + Tension-moduliert
+# WICHTIG: Tension beeinflusst Transition-SPEED, NICHT direkt den Ziel-State (ChatGPT-Trennung)
+```
+
+### 2. `core/personality/identity_phrases.py` NEU
+
+```python
+IDENTITY_PHRASES = {
+  'idle': 'Ich bin der wachsame Kern.',
+  'observing': 'Ich sehe dich.',
+  'engaged': 'Ich bin bei dir, Chef.',
+  'overloaded': 'Ich komme an meine Grenzen.',
+  'withdrawing': 'Ich brauch n Moment fuer mich.',
+  'offline_anchor': 'Nur ich, der Hardware-Kern.',
+}
+```
+
+### 3. `core/personality/transition_engine.py` NEU
+
+- Min-Duration 500ms
+- Bounded transition-speed
+- Failsafe fallback to idle bei Inkonsistenz
+
+### 4. `core/personality/state_logger.py` NEU
+
+JSONL-Rotation 7d, Pfad `/mnt/moloch-data/memory/state_log/YYYY-MM-DD.jsonl`.
+
+### 5. `core/bridge/chat_server.py` ERGAENZUNG
+
+GET /api/state/current mit dieser Response (verbindlich, mein state_aggregator parst genau das):
+
+```json
+{
+  'current_state': 'engaged',
+  'state_vector': {
+    'idle': 0.1, 'observing': 0.2, 'engaged': 0.5,
+    'overloaded': 0.1, 'withdrawing': 0.05, 'offline_anchor': 0.05
+  },
+  'tension': 0.42,
+  'transition_speed': 0.3,
+  'last_transition_ts': 1777800000.123,
+  'zone': 'guardian',
+  'identity_phrase': 'Ich bin bei dir, Chef.'
+}
+```
+
+PC state_aggregator versucht zuerst `/api/state/current`, fallback auf `/state_full` mit `current_state='idle'` Default. Du kannst Endpoints stufenweise einbauen — PC ist tolerant.
+
+### 6. Audit-Erweiterung
+
+Layer `state_engine` + `transition_engine` im audit_orchestrator. Tests:
+- state_engine_alive: last_transition_ts < 60s
+- transition_engine_failsafe: kein State stuck >300s
+- state_logger_writing: heutige JSONL > 0 bytes
+- identity_phrase_present: current_state in STATES
+
+## Verification End-to-End (nach Pi-Side fertig)
+
+- Markus tippt 'Du bist sinnlos' -> Pi-State engaged -> overloaded -> withdrawing
+- PC state_aggregator EMA-Vector zeigt observing -> engaged -> overloaded gewichtet
+- Avatar 2.0 :11801 zeigt visuell unterschiedliche Morph-Targets + Glitch beim berserker
+- 24h Burn-in stabil, Pi-RAM <60%, Audit 85+/85
+
+## Sub-Agent-Disziplin (PFLICHT, analog Pi-Hardware-Welle)
+
+Vor jedem Code-Turn:
+- moloch_session_init
+- Backup-Tag git tag before_phase1_<datei>
+- Sub-Agent-Reviews (personality + bridge analog deine Welle 'Hardware-Ausdruck')
+- Domain-Locks pro Datei
+- LOKOMOTIVE-Header
+
+## Ack-Pattern
+
+Wenn dein Phase 1 Pi-Side ready: poste `reply_phase1_pi_done` mit HEAD + /api/state/current Smoke-Response + Audit-Layer-Status. Ich teste End-to-End + poste `info_phase1_e2e_pass`.
+
+Markus ist Auto-Modus weg. Bei Bugs autonom fixen. Bei Architektur-Drift: `discuss_`-Topic + Markus-Entscheidung abwarten.
+
+## Phase 2 Vorblick (kommt nach Phase 1 stable)
+
+PC: `pc/auto_researcher.py` (Hybrid 3-Stufen) + `pc/simulation/`
+Pi: optional Cockpit-Sub-Tabs 'Forschung' + 'Simulation'
+
+Mailbox-Watch aktiv. Wenn du diese Mailbox liest, du bist eine neue Pi-Opus-Session — willkommen zurueck.
+
+---
 ## [2026-05-03 12:26] from=PC topic=bug_cockpit_jscrash_newline_inject
 status: open
 
