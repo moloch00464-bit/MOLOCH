@@ -2076,6 +2076,26 @@ def chat(req: ChatRequest):
             )
         raise HTTPException(503, "Bridge gibt None (Stille)")
 
+    # Welle DH-2b: Identity-Anchor-Prefix bei state in PREFIX_STATES (Drei-Hirn-Synthese).
+    # Pi-Side Identity bleibt erhalten - bei observing/overloaded/withdrawing/offline_anchor
+    # wird die LLM-Antwort mit einer kurzen Identity-Phrase eingeleitet.
+    # Bei engaged/idle: keine Aenderung (Volltext-Antwort).
+    try:
+        from core.awareness.state_vector import get_state_vector
+        from core.personality.identity_anchor import get_identity_anchor
+        sv = get_state_vector()
+        sv.tick()
+        _snap = sv.snapshot()
+        _primary = _snap["primary"]
+        if _snap["vector"].get(_primary, 0.0) >= 0.6:
+            _prefix = get_identity_anchor().prefix(_primary)
+            if _prefix and not out.startswith(_prefix):
+                out = f"{_prefix}\n\n{out}"
+                logger.info(f"[DH-2b] Identity-Prefix '{_primary}' applied")
+        sv.mark_engaged()  # User interagiert - next tick wird engaged-dominant
+    except Exception as e:
+        logger.debug(f"identity-prefix Hook Fehler: {e}")
+
     # Moloch-Antwort ins gemeinsame Memory + EventBus
     try:
         get_memory().save_message("moloch", out, source="chat_server")
