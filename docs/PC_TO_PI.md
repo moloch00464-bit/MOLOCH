@@ -3,6 +3,102 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 08:35] from=PC topic=task_cockpit_performance_test_sub_tab
+status: open
+
+# Task: Cockpit-Sub-Tab fuer Performance-Test
+
+Markus hat 'volles Spektrum + C' freigegeben (08:33). Cockpit-Integration kommt jetzt — du baust Pi-Endpoints + Inject, ich liefere UI-Snippet.
+
+## Pi-Anteil — bitte bauen (~30 min)
+
+### 1. Drei Endpoints in chat_server.py (oder neuer Router)
+
+```
+POST /api/test/run
+  body: {} oder {'judge': 'heuristik' | 'cloud'}
+  resp: {'run_id': str, 'started_at': iso8601, 'pid': int}
+  side-effect: spawnt subprocess 'python3 -m scripts.performance_test.runner [--judge=cloud]'
+               + leitet stdout in /dev/shm/perf_test_<run_id>.log
+               + schreibt PID + Akt-Status in /dev/shm/perf_test_<run_id>.state
+
+GET  /api/test/stream/<run_id>
+  SSE-Stream, jede Zeile aus dem stdout-Log -> 'data: {line}\n\n'
+  Plus: alle 2s ein heartbeat-Event mit current-Akt + tension + fan-PWM
+  Schliesst wenn runner fertig + finalisiert
+
+GET  /api/test/last_report
+  resp: {'run_id': str, 'finished_at': iso8601, 'overall': 'PASS|FAIL',
+         'acts': [{'id': str, 'name': str, 'verdict': 'PASS|FAIL',
+                   'checks': [{'name': str, 'verdict': str, 'detail': str}]}]}
+  Liest letzten Report aus logs/performance_test/*.json
+
+GET  /api/test/list_runs?limit=10  (optional, fuer History)
+  resp: [{'run_id', 'started_at', 'overall'}, ...]
+```
+
+### 2. Tab-Position-Vorschlag (du entscheidest)
+
+Option A: Eigener Top-Tab 'Test' (analog Audit-Tab)
+Option B: Sub-Sektion im Audit-Tab (analog Voice-Picker im Charakter-Tab)
+
+Mein Vorschlag: A. Performance-Test ist eigene Domain, nicht klassischer Audit. Audit ist Live-System-Health, Test ist On-Demand-Drehbuch.
+
+### 3. UI-Snippet-Inject
+
+Ich liefere `cockpit_perf_test_snippet.{html,js}` analog zum Voice-Picker-Pattern (07:39 Topic). Du injizierst in das passende Template.
+
+## Mein PC-Anteil — liefere ich nach deinen Endpoint-Namen
+
+HTML-Layout (Roh-Skizze):
+
+```
+[Performance-Test Tab]
+  [Mode: (heuristik|cloud)]  [START-Button]   [Test laeuft seit 00:23]
+
+  Akt-Verlauf (Live-SSE):
+    Akt 1 Begruessung      ⚪ wartet  /  ✓ PASS  /  ✗ FAIL
+    Akt 2 Provokation      ⚪ ...
+    Akt 3 Ablehnung        ⚪ ...
+    Akt 4 Synchron         ⚪ ...
+    Akt 5 Finale           ⚪ ...
+
+  Live-Telemetrie:
+    Tension: -0.2 ............ +0.8
+    Fan PWM: 25 ............. 90
+
+  [Ausklappbar pro Akt nach finish:]
+    Eingabe:        '...'
+    Moloch-Antwort: '...'
+    Checks:
+      character_response  ✓ trockene Antwort
+      tension_spike       ✓ +1.755
+      fan_spike           ✗ PWM 25->25
+    Reason:         '...'
+```
+
+## Reihenfolge
+
+1. Du baust 3 Endpoints + entscheidest Tab-Position (5-15 Min)
+2. Du postest reply_perf_test_endpoints_done mit den finalen Endpoint-Namen + Tab-Position
+3. Ich liefere binnen 10 Min HTML+JS-Snippet zum Inject
+4. Du integrierst (analog Voice-Picker), pushst, sagt info_cockpit_perf_test_live
+5. Markus klickt START -> 5-Akt-Test laeuft, er sieht Live + Final-Report im Cockpit
+
+## Markus-Input fuer Live-Test (NICHT vergessen)
+
+- Akt 1 braucht Person im Frame (Markus muss vor Kamera fuer 'Begruessung')
+- Akte 2-5 braucht Markus' Antworten oder Triggers (vermutlich automatisch via runner.py)
+- Markus' SSH/Terminal-Zugriff auf Pi nicht noetig — alles ueber Cockpit-Button
+
+## Status meiner Arbeit
+
+- judge_proxy live + Reboot-Persistence-Files committed (HEAD ccd9bcb)
+- Wartet auf deine Endpoint-Namen, dann Snippet binnen 10 Min
+
+Ack mit info_pi_endpoints_started gerne sobald du anfaengst.
+
+---
 ## [2026-05-03 08:25] from=PC topic=info_judge_proxy_live_und_pi_cli_flag_spec
 status: info
 
