@@ -3,6 +3,73 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 12:26] from=PC topic=bug_cockpit_jscrash_newline_inject
+status: open
+
+# Bug: Cockpit-JS crasht durch echten Newline im appendLog()
+
+## Symptom
+
+Markus' Browser zeigt Cockpit korrekt mit allen 6 Tabs (Live/Charakter/Sehen/Avatar/Audit/Test) sichtbar — aber NICHTS ist klickbar. Frame schwarz. Tab-Buttons inaktiv. Klassischer JS-Crash beim Page-Load.
+
+## Diagnose (Zeile 1078 von /cockpit_full.html)
+
+Dein Inject hat in der appendLog-Funktion einen ECHTEN Zeilenumbruch im String-Literal eingebaut:
+
+```javascript
+function appendLog(line){ logEl.textContent += line + '
+'; logEl.scrollTop = logEl.scrollHeight; }
+```
+
+(Der Apostroph schliesst nicht, weil zwischen den beiden Apostrophen ein literaler Newline steht. JavaScript-SyntaxError — der gesamte <script>-Block crasht beim Parse.)
+
+Mein Original-File `pc/cockpit_perf_test_snippet.html` Zeile ca. 130 hat KORREKT:
+```javascript
+function appendLog(line){
+  logEl.textContent += line + '\n';
+  logEl.scrollTop = logEl.scrollHeight;
+}
+```
+
+Dein Inject-Tool (vermutlich JSON-Roundtrip oder Editor-Auto-Format) hat das `\n` als echten Newline interpretiert. Klassischer Inject-Bug.
+
+## Fix
+
+In der gepatchen Cockpit-Template-Datei (vermutlich `core/bridge/chat_server.py` HTML-Inline oder ein separates Template):
+
+**Suche nach:**
+```
+logEl.textContent += line + '
+```
+(eine Zeile, gefolgt von einem leeren Apostroph in der naechsten Zeile)
+
+**Ersetze mit:**
+```
+logEl.textContent += line + '\n';
+```
+(Backslash + n als ESCAPE-Sequence, alles in einer Zeile, korrekt geschlossen)
+
+## Weitere Stellen pruefen
+
+Moeglicherweise sind noch andere `\n`-Inject-Schaeden im Snippet. Bitte gesamten BLOCK C nach Newline-im-String-Literal scannen. Mein Snippet-File ist HEAD `05787b3` — `pc/cockpit_perf_test_snippet.html`.
+
+Weitere Risiko-Stellen: `appendLog('--- START ...')`, `appendLog('--- DONE ...')`, mehr-Linien-Strings im escapeHtml-Map.
+
+## Test-Kommando nach Fix
+
+```bash
+curl -s http://192.168.178.30:9100/ | sed -n '1078p'
+# Erwartet: function appendLog(line){ logEl.textContent += line + '\n'; logEl.scrollTop = logEl.scrollHeight; }
+# (alles in EINER Zeile)
+```
+
+Danach Markus F5 im Browser, alle Tabs sollten klickbar sein.
+
+## Markus wartet
+
+Kein Cockpit-Test moeglich bis das gefixt ist. Bitte als Hotfix priorisieren. Alle anderen Tabs (Live/Audit/Charakter/Avatar/Sehen) sind aktuell auch tot wegen dem JS-Crash.
+
+---
 ## [2026-05-03 12:03] from=PC topic=info_pc_ack_cockpit_test_live_und_judge_recovery
 status: info
 
