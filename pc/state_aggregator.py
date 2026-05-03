@@ -33,6 +33,12 @@ import httpx
 import uvicorn
 from fastapi import FastAPI
 
+# DH-6 PC-Side State-Engine-Authority
+from pc.state_engine_authority.transition_engine import TransitionEngine
+from pc.state_engine_authority.safety_layer import SafetyLayer
+from pc.state_engine_authority import state_logger as _state_logger
+from pc.state_engine_authority.state_authority import push_authority
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -69,13 +75,22 @@ _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
 class StateAggregator:
     def __init__(self) -> None:
         self.history: Deque[Dict[str, Any]] = deque(maxlen=HISTORY_SIZE)
-        # EMA-Vector
+        # EMA-Vector (raw observation smoothing)
         self.ema_vector: Dict[str, float] = {k: 0.0 for k in STATE_KEYS}
         self.ema_vector["idle"] = 1.0  # initial idle
         self.last_pi_state: Optional[str] = None
         self.last_tension: float = 0.0
         self.last_zone: Optional[str] = None
         self.last_update_ts: float = 0.0
+
+        # DH-6: Authority-Pipeline (TransitionEngine -> SafetyLayer -> Logger)
+        self._transition_engine = TransitionEngine()
+        self._safety_layer = SafetyLayer()
+        self.last_authority_vector: Dict[str, float] = {k: 0.0 for k in STATE_KEYS}
+        self.last_authority_vector["idle"] = 1.0
+        self.last_authority_primary: str = "idle"
+        self.last_safety_was_filtered: bool = False
+        self.last_safety_stats: Dict[str, Any] = {}
 
     def update_from_pi(self, pi_state: Dict[str, Any]) -> Dict[str, Any]:
         """Akzeptiert dict von /api/state/current oder /state_full.
@@ -88,23 +103,33 @@ class StateAggregator:
         tension = float(pi_state.get("tension", 0.0))
         zone = pi_state.get("zone")
 
-        # Single-State -> One-Hot Probe
-        observed = {k: 0.0 for k in STATE_KEYS}
-        if current_state in observed:
-            observed[current_state] = 1.0
+        # FIX (Code-Review #5): wenn Pi-Opus' state_vector schon da ist (DH-1+),
+        # nutze ihn als Observed direkt. Sonst One-Hot vom current_state oder Zone-Fallback.
+        pi_state_vector = pi_state.get("state_vector")
+        if (
+            isinstance(pi_state_vector, dict)
+            and pi_state_vector
+            and abs(sum(pi_state_vector.values()) - 1.0) < 0.1
+        ):
+            observed = {k: float(pi_state_vector.get(k, 0.0)) for k in STATE_KEYS}
         else:
-            # Fallback: zone-Mapping (legacy)
-            if zone == "guardian":
-                observed["idle"] = 0.5
-                observed["observing"] = 0.5
-            elif zone == "shadow":
-                observed["withdrawing"] = 0.7
-                observed["observing"] = 0.3
-            elif zone == "berserker":
-                observed["overloaded"] = 0.7
-                observed["engaged"] = 0.3
+            # Single-State -> One-Hot Probe
+            observed = {k: 0.0 for k in STATE_KEYS}
+            if current_state in observed:
+                observed[current_state] = 1.0
             else:
-                observed["idle"] = 1.0
+                # Fallback: zone-Mapping (legacy)
+                if zone == "guardian":
+                    observed["idle"] = 0.5
+                    observed["observing"] = 0.5
+                elif zone == "shadow":
+                    observed["withdrawing"] = 0.7
+                    observed["observing"] = 0.3
+                elif zone == "berserker":
+                    observed["overloaded"] = 0.7
+                    observed["engaged"] = 0.3
+                else:
+                    observed["idle"] = 1.0
 
         # EMA-Update
         for k in STATE_KEYS:
@@ -127,6 +152,34 @@ class StateAggregator:
         self.last_zone = zone
         self.last_update_ts = now
 
+        # === DH-6 Authority-Pipeline ===
+        # 1. TransitionEngine: smoothes EMA-Vector mit Min-Duration + Tension-Speed
+        transitioned = self._transition_engine.tick(
+            target_vector=dict(self.ema_vector),
+            tension=tension,
+        )
+        candidate_primary = self._transition_engine.primary()
+
+        # 2. SafetyLayer: Anti-Oszillation + Failsafe
+        safe_vector, safe_primary, was_filtered = self._safety_layer.filter(
+            candidate_vector=transitioned,
+            candidate_primary=candidate_primary,
+        )
+        # FIX (Code-Review #6): defensive copy gegen Reference-Aliasing mit SafetyLayer-Internal
+        self.last_authority_vector = dict(safe_vector)
+        self.last_authority_primary = safe_primary
+        self.last_safety_was_filtered = was_filtered
+        self.last_safety_stats = self._safety_layer.stats()
+
+        # 3. State-Logger: JSONL append (silent on disk-full)
+        _state_logger.log_state(
+            vector=safe_vector,
+            primary=safe_primary,
+            tension_meta=tension,
+            authority="pc",
+            extra={"safety_filtered": was_filtered, "ema_source": dict(self.ema_vector)},
+        )
+
         return self.snapshot()
 
     def snapshot(self) -> Dict[str, Any]:
@@ -135,7 +188,13 @@ class StateAggregator:
             "current_pi_state": self.last_pi_state,
             "current_zone": self.last_zone,
             "tension": self.last_tension,
+            # EMA-Vector: rohe Beobachtung gewichtet
             "weighted_vector": {k: round(v, 4) for k, v in self.ema_vector.items()},
+            # DH-6 Authority-Vector: nach TransitionEngine + SafetyLayer
+            "authority_vector": {k: round(v, 4) for k, v in self.last_authority_vector.items()},
+            "authority_primary": self.last_authority_primary,
+            "safety_filtered": self.last_safety_was_filtered,
+            "safety_stats": self.last_safety_stats,
             "history_n": len(self.history),
             "history_size_max": HISTORY_SIZE,
             "ema_alpha": EMA_ALPHA,
@@ -233,17 +292,31 @@ def _normalize_pi_response(raw: Dict[str, Any], source_url: str) -> Dict[str, An
 async def _poll_loop():
     """Background-Task: pollt Pi + updated EMA + schreibt State-File.
 
-    IMPORTANT FIX (Code-Review #3): Default-Timeout auf Client-Level.
+    DH-6: nach update_from_pi (TransitionEngine + SafetyLayer + Logger laufen
+    intern in update_from_pi), pusht Authority-Vector an Pi via state_authority.
     """
+    import asyncio
+
     async with httpx.AsyncClient(timeout=httpx.Timeout(2.0)) as client:
         while True:
             pi_state = await _poll_pi(client)
             if pi_state is not None:
                 snapshot = _aggregator.update_from_pi(pi_state)
                 _atomic_write_state(snapshot)
-            try:
-                import asyncio
 
+                # DH-6: push authoritative vector zurueck an Pi
+                # (silent fail wenn Pi-Endpoint noch nicht da, lokale State-File reicht)
+                try:
+                    await push_authority(
+                        vector=_aggregator.last_authority_vector,
+                        primary=_aggregator.last_authority_primary,
+                        tension_meta=_aggregator.last_tension,
+                        client=client,
+                    )
+                except Exception as e:
+                    logger.debug(f"push_authority skipped: {e}")
+
+            try:
                 await asyncio.sleep(POLL_INTERVAL_SEC)
             except Exception:
                 break
