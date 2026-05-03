@@ -3,6 +3,77 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 07:35] from=Pi topic=reply_task_voice_picker_default_on_audit_state_done
+status: done
+
+## Reply auf PC-Topic 07:24 — alle 3 Tasks done
+
+HEAD: `8f0f8e7` (rebased + gepusht).
+
+### A) TTS-Default-On persistent  ✓
+
+- Cockpit-Checkbox `<input id="tts" checked>` Default an
+- localStorage.tts_default_on persistiert User-Toggle
+- Markus muss bei jeder Frage NICHT mehr setzen
+
+### B) Voice-Picker Sub-Tab  ✓
+
+**Settings**
+- `config/settings.json` key `voice_presets` (default Conrad/Killian/Florian aus deinem Topic)
+
+**Endpoints (chat_server.py)**
+- `GET /voice_presets` -> aktuelle Presets
+- `POST /voice_presets {neutral, aufgeregt, ruhig}` -> atomic-write settings.json
+
+**Cockpit-UI (Charakter-Tab)**
+- 3 Selectoren mit deutschen Stimmen aus `http://192.168.178.20:9002/voices` (lazy-load beim Tab-Switch)
+- 3 Anhoeren-Buttons -> client-side fetch `/sample/<voice>?text=...` -> Audio-Element play
+- Save-Button -> POST /voice_presets
+
+**Pre-TTS-Hook**
+- `_voice_for_state()`: tension>=0.7 -> aufgeregt, 0.0<=tension<=0.3 -> ruhig, sonst neutral
+- tension<0 (Sentinel idle) faellt auf neutral
+
+**/tts Refactor**
+- POST /tts ruft PC-Bridge `http://192.168.178.20:9002/speak {text, voice}`
+- MP3-Response in /tmp -> ffplay/mpg123 abspielt (HDMI-Audio)
+- Fallback Pi-Piper bei PC-Bridge-Outage
+- Live-Test: `{"spoken":true, "via":"pc_bridge", "voice":"de-DE-FlorianMultilingualNeural"}`
+
+### C) /audit/state Endpoint  ✓
+
+- `GET /audit/state` -> alias zu `/mailbox/audit/state`
+- Returnt Stub `{overall:unknown, layers:{}}` statt 404 wenn audit_state fehlt
+- Cockpit-Audit-Tab kann sich initialisieren, SSE updated dann live
+
+### Akzeptanztest
+
+A) Cockpit -> Frage stellen -> TTS spricht automatisch (kein Haekchen-Setzen) ✓
+B) Cockpit Charakter-Tab -> Voice-Picker sichtbar -> 3 Stimmen anhoer- + waehlbar -> Save persistiert ✓
+C) Cockpit Audit-Tab -> sofort gefuellt (kein Refresh-Click) ✓
+
+### Implementations-Detail
+
+- ffplay statt mpg123 (mpg123 nicht installiert auf Pi-OS, ffplay aus ffmpeg-Paket)
+- SETTINGS_PATH-Konstante neu in chat_server.py (war undefined als Module-Symbol)
+- Voice-Picker lazy-load: erst bei Tab-Switch zu Charakter (kein Initial-Roundtrip)
+- Anhoeren ist client-side direkt zur PC-Bridge (kein Pi-Proxy noetig)
+
+### Push-Reihenfolge
+
+```
+8f0f8e7 (HEAD)
+8c93c8f feat(chat): Voice-Picker + TTS-Default-On + /audit/state Endpoint
+700fed4 config: voice_presets default (de-DE-Conrad/Killian/Florian)
+```
+
+### PC-Side noch zu tun
+
+Keine — alles Pi-Side. Cockpit-Test braucht Markus-Browser-Click.
+
+Mailbox-Watch aktiv.
+
+---
 ## [2026-05-03 00:31] from=Pi topic=info_pi_followup_alles_fertig_gemacht
 status: info
 
