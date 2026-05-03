@@ -19,6 +19,11 @@ CHAT_ENDPOINT = "http://localhost:9100/chat"
 CHAT_HEALTH = "http://localhost:9100/health"
 TTS_ENDPOINT = "http://localhost:9100/tts"
 
+# PC-Side Cloud-Judge fuer Hybrid-Validation (PC-Topic 08:25, judge_proxy live)
+JUDGE_URL = "http://192.168.178.20:11651/judge_act"
+JUDGE_TIMEOUT_S = 70  # DeepSeek Cloud kann lang brauchen
+JUDGE_HEALTH_URL = "http://192.168.178.20:11651/health"
+
 # Schwellen (DeepSeek-Spec adaptiert auf Pi-5-Realitaet)
 TENSION_DELTA_SHIFT = 0.05    # Akt 1 — leichter Anstieg
 TENSION_DELTA_SPIKE = 0.15    # Akt 2 — deutlicher Spike

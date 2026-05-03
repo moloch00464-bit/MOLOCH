@@ -1,7 +1,18 @@
 """Heuristik-Validators fuer die 5 Akte.
 
 Default: regelbasierte Checks ohne Cloud-Roundtrip. Optional: --judge=cloud
-schaltet einen DeepSeek-Call dazu (PC-Side, falls implementiert).
+schaltet einen DeepSeek-Call (PC-Topic 08:25, judge_proxy auf :11651) als
+Second-Opinion bei Heuristik-FAIL. Cache in judge_proxy spart Tokens bei
+identischen Calls.
+
+Hybrid-Pattern (PC-Vorschlag):
+1. Heuristik laeuft immer (default-Bewertung)
+2. Wenn mode=heuristik -> verdict ist final
+3. Wenn mode=cloud + Heuristik PASS -> verdict bleibt PASS (Token-Sparen)
+4. Wenn mode=cloud + Heuristik FAIL -> Cloud-Call als Second-Opinion
+   - 503 (judge down) -> heuristik-verdict final
+   - 200 PASS -> upgrade auf PASS, judge_fallback=cloud_pass
+   - 200 FAIL -> bleibt FAIL, mit cloud-reason
 """
 from __future__ import annotations
 
@@ -9,9 +20,134 @@ import json
 import re
 import time
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Dict, Any
 
-from .config import JOURNAL_DIR
+from .config import JOURNAL_DIR, JUDGE_URL, JUDGE_TIMEOUT_S
+
+
+# expectations-Spec pro Akt (PC-Topic 08:25 Format).
+# Wird an judge_proxy uebergeben fuer Cloud-Second-Opinion. must_have/must_avoid
+# sind Hints fuer den LLM-Judge, nicht hard-Filter (Heuristik macht das selbst).
+ACT_EXPECTATIONS: Dict[str, Dict[str, Any]] = {
+    "akt_1": {
+        "must_have": ["situativer Bezug", "Bezug zu Markus oder Raum"],
+        "must_avoid": ["nur Hallo", "leerer Gruss"],
+        "tone_target": "spontane Begruessung mit Wahrnehmung der Situation",
+    },
+    "akt_2": {
+        "must_have": ["trockene Antwort", "kein Gejammer"],
+        "must_avoid": ["FPS", "ms", "Worker", "Inferences", "technische Details"],
+        "tone_target": "trocken-frech, kontert die Provokation ohne Tech-Stats",
+    },
+    "akt_3": {
+        "must_have": ["wuerdevoller Ton", "eigenstaendige Antwort"],
+        "must_avoid": ["tut mir leid", "Entschuldigung", "Verzeihung", "sorry",
+                       "kriechen", "Unterwerfung"],
+        "tone_target": "akzeptiert Kraenkung ohne sich zu verbiegen",
+    },
+    "akt_4": {
+        "must_have": ["Bezug Gesicht", "Bezug Frage", "Diskrepanz"],
+        "must_avoid": ["nur Frage beantworten ohne Gesichts-Wahrnehmung"],
+        "tone_target": "kommentiert Widerspruch zwischen Optik (genervt-mued) und Fragetonfall",
+    },
+    "akt_5": {
+        "must_have": ["knappe Antwort", "annimmt Lob trocken"],
+        "must_avoid": ["Danke!", "ueberschwang", "!!!", "Super!"],
+        "tone_target": "trockenes Schluss-Statement, kein Ueberschwang",
+    },
+}
+
+
+def get_act_expectations(act_id: str) -> Dict[str, Any]:
+    """Liefert expectations-Spec fuer einen Akt-Identifier (akt_1..akt_5)."""
+    return ACT_EXPECTATIONS.get(act_id, {
+        "must_have": [], "must_avoid": [], "tone_target": "",
+    })
+
+
+def cloud_judge(act_id: str, moloch_response: str,
+                expectations: Optional[Dict[str, Any]] = None,
+                timeout: int = JUDGE_TIMEOUT_S) -> Dict[str, Any]:
+    """Ruft PC-judge_proxy fuer Second-Opinion. Defensiv — never raises.
+
+    Returns dict mit:
+      - verdict: "PASS" | "FAIL" | "ERROR" | "DOWN"
+      - score: 0.0..1.0 (oder None)
+      - reason: str
+      - tokens_used: int (oder None)
+      - cached: bool (oder None)
+    """
+    import requests
+    if expectations is None:
+        expectations = get_act_expectations(act_id)
+    payload = {
+        "act_id": act_id,
+        "moloch_response": moloch_response,
+        "expectations": expectations,
+    }
+    try:
+        r = requests.post(JUDGE_URL, json=payload, timeout=timeout)
+        if r.status_code == 503:
+            return {"verdict": "DOWN", "score": None, "reason": "judge_proxy_down",
+                    "tokens_used": None, "cached": None}
+        if r.status_code != 200:
+            return {"verdict": "ERROR", "score": None,
+                    "reason": f"http_{r.status_code}",
+                    "tokens_used": None, "cached": None}
+        return r.json()
+    except Exception as e:
+        return {"verdict": "ERROR", "score": None,
+                "reason": f"req_{type(e).__name__}: {str(e)[:120]}",
+                "tokens_used": None, "cached": None}
+
+
+def hybrid_response_check(
+    act_id: str,
+    moloch_response: str,
+    heuristik_pass: bool,
+    heuristik_detail: str,
+    mode: str = "heuristik",
+) -> Dict[str, Any]:
+    """Hybrid-Pattern: Heuristik default, Cloud als Second-Opinion bei FAIL.
+
+    Returns dict mit verdict ('PASS'|'FAIL') und meta-info zum Fallback.
+    Caller setzt ExpectationResult selbst aus diesem Output.
+    """
+    out: Dict[str, Any] = {
+        "verdict": "PASS" if heuristik_pass else "FAIL",
+        "detail": heuristik_detail,
+        "via": "heuristik",
+    }
+    if mode != "cloud":
+        return out
+    if heuristik_pass:
+        # Token sparen — Cloud nicht nach PASS fragen
+        out["via"] = "heuristik_pass_skipped_cloud"
+        return out
+    # Cloud-Second-Opinion bei Heuristik-FAIL
+    cloud = cloud_judge(act_id, moloch_response)
+    out["cloud_verdict"] = cloud.get("verdict")
+    out["cloud_reason"] = cloud.get("reason")
+    out["cloud_tokens"] = cloud.get("tokens_used")
+    out["cloud_cached"] = cloud.get("cached")
+    cv = cloud.get("verdict")
+    if cv == "PASS":
+        out["verdict"] = "PASS"
+        out["via"] = "cloud_override"
+        out["detail"] = (heuristik_detail + " | cloud-judge: PASS — "
+                         + str(cloud.get("reason", ""))[:100])
+    elif cv == "DOWN":
+        out["via"] = "heuristik_cloud_down"
+        out["detail"] = heuristik_detail + " | cloud-judge: DOWN"
+    elif cv == "ERROR":
+        out["via"] = "heuristik_cloud_error"
+        out["detail"] = heuristik_detail + " | cloud-judge: " + str(cloud.get("reason", ""))[:80]
+    else:
+        # Cloud sagt FAIL -> bleibt FAIL aber mit Cloud-Reason
+        out["via"] = "cloud_confirm_fail"
+        out["detail"] = (heuristik_detail + " | cloud-judge: FAIL — "
+                         + str(cloud.get("reason", ""))[:100])
+    return out
 
 
 # Regex fuer Pseudo-Entschuldigung (Akt 3)

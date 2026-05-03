@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 import uvicorn
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
@@ -3152,6 +3152,330 @@ def audit_verify_status():
             return json.load(f)
     except Exception as e:
         raise HTTPException(500, f"closed_loop_state Read-Fehler: {e}")
+
+
+# ============================================================
+# Performance-Test (DeepSeek 5-Akt-Drehbuch) — Cockpit-Trigger
+# ============================================================
+# PC-Topic 08:35: 4 Endpoints fuer Cockpit-Sub-Tab "Test".
+#   POST /api/test/run               -> spawned subprocess, returnt run_id
+#   GET  /api/test/stream/<run_id>   -> SSE-Stream stdout + 2s heartbeat
+#   GET  /api/test/last_report       -> letzter logs/performance_test/*.json
+#   GET  /api/test/list_runs?limit=N -> History (default 10)
+# Architektur (Sub-Agent bridge): subprocess.Popen + threading drain ->
+#   /dev/shm/perf_test_<run_id>.{log,state}, in-process _test_runs dict
+#   mit Lock fuer 409-Conflict bei parallelen Runs.
+
+import uuid as _uuid
+
+_PERF_TEST_RUNS: Dict[str, Dict[str, Any]] = {}  # run_id -> {proc, started_at, log_path, state_path}
+_PERF_TEST_LOCK = threading.Lock()
+_PERF_TEST_LOG_DIR = Path(os.path.expanduser("~/moloch/logs/performance_test"))
+_PERF_TEST_STATE_POINTER = Path("/dev/shm/moloch_test_run.json")
+_PERF_TEST_MOLOCH_DIR = Path(os.path.expanduser("~/moloch"))
+
+
+def _perf_test_active_run_id() -> Optional[str]:
+    """Liefert run_id des aktuell laufenden Tests, oder None.
+
+    Cleanup: aufgegebene Eintraege (proc.poll() not None) werden NICHT geloescht
+    (history-relevant). Hier nur live-check.
+    """
+    with _PERF_TEST_LOCK:
+        for rid, info in _PERF_TEST_RUNS.items():
+            proc = info.get("proc")
+            if proc is not None and proc.poll() is None:
+                return rid
+    return None
+
+
+def _perf_test_drain_proc(run_id: str) -> None:
+    """Liest stdout des Test-Subprocess Zeile fuer Zeile in /dev/shm/...log.
+
+    Updated state-File alle paar Zeilen mit current_act + tension + fan_pwm.
+    Markiert finished beim proc-Exit.
+    """
+    try:
+        info = _PERF_TEST_RUNS.get(run_id)
+        if not info:
+            return
+        proc = info["proc"]
+        log_path: Path = info["log_path"]
+        state_path: Path = info["state_path"]
+        current_act = "init"
+        line_count = 0
+        with open(log_path, "w", encoding="utf-8", buffering=1) as logf:
+            for line in proc.stdout:
+                logf.write(line)
+                line_count += 1
+                # Akt-Marker erkennen (runner.py print: "Akt N: STATUS (Xs)" oder
+                # "Akt N — wartet" oder "  Akt N: STATUS")
+                stripped = line.strip()
+                m = re.match(r"^Akt\s+(\d+).*?(?:\(|$)", stripped) or re.match(
+                    r"^Akt\s+(\d+)[^:]*:\s*(\w+)", stripped
+                )
+                if m:
+                    current_act = f"akt_{m.group(1)}"
+                # State-Update alle 5 Zeilen oder bei Akt-Wechsel
+                if line_count % 5 == 0 or m:
+                    try:
+                        _perf_test_write_state(
+                            state_path, run_id, info["started_at"],
+                            "running", current_act, line_count, proc.pid,
+                        )
+                    except Exception:
+                        pass
+        rc = proc.wait()
+        finished_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        _perf_test_write_state(
+            state_path, run_id, info["started_at"],
+            "finished", current_act, line_count, proc.pid,
+            finished_at=finished_at, returncode=rc,
+        )
+        info["finished_at"] = finished_at
+        info["returncode"] = rc
+        # Pointer-File auf "kein aktiver Run" zuruecksetzen
+        try:
+            active = _perf_test_active_run_id()
+            if active is None:
+                pointer = {"current_run_id": None, "last_run_id": run_id,
+                           "last_finished_at": finished_at, "last_returncode": rc}
+                _perf_test_atomic_write(_PERF_TEST_STATE_POINTER, pointer)
+        except Exception:
+            pass
+    except Exception as e:
+        logger.warning(f"[perf-test] drain {run_id} fehler: {e}")
+
+
+def _perf_test_atomic_write(path: Path, payload: Dict[str, Any]) -> None:
+    """Atomic JSON-Write (NEVER 6)."""
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, ensure_ascii=False, default=str)
+        os.replace(tmp, str(path))
+    except Exception:
+        try: os.unlink(tmp)
+        except OSError: pass
+        raise
+
+
+def _perf_test_write_state(state_path: Path, run_id: str, started_at: str,
+                           status: str, current_act: str, line_count: int,
+                           pid: int, finished_at: Optional[str] = None,
+                           returncode: Optional[int] = None) -> None:
+    """Atomic Schreiben des per-Run-State."""
+    payload = {
+        "run_id": run_id, "started_at": started_at, "status": status,
+        "current_act": current_act, "lines": line_count, "pid": pid,
+    }
+    if finished_at:
+        payload["finished_at"] = finished_at
+    if returncode is not None:
+        payload["returncode"] = returncode
+    # Tension + Fan-PWM aus moloch_status / audit_state lesen (best-effort)
+    try:
+        with open("/dev/shm/moloch_status.json", "r", encoding="utf-8") as f:
+            st = json.load(f)
+        t_raw = st.get("tension")
+        if isinstance(t_raw, dict):
+            payload["tension"] = float(t_raw.get("level", 0.0) or 0.0)
+        elif t_raw is not None:
+            payload["tension"] = float(t_raw)
+    except Exception:
+        pass
+    try:
+        with open("/dev/shm/audit_state.json", "r", encoding="utf-8") as f:
+            ast = json.load(f)
+        modules = (ast.get("layers", {}).get("expression", {}).get("detail", {})
+                   .get("modules", {}))
+        payload["fan_pwm"] = int(modules.get("tension_to_fan", {}).get("last_pwm", 0) or 0)
+    except Exception:
+        pass
+    _perf_test_atomic_write(state_path, payload)
+
+
+@app.post("/api/test/run")
+def api_test_run(req: Optional[Dict[str, Any]] = Body(default=None)):
+    """Spawnt den Performance-Test-Subprocess.
+
+    Body (optional): {"judge": "heuristik"|"cloud", "skip_acts": [1,3]}
+    """
+    body = req or {}
+    judge = body.get("judge", "heuristik")
+    skip_acts = body.get("skip_acts") or []
+
+    # 409 wenn schon ein Run laeuft
+    active = _perf_test_active_run_id()
+    if active:
+        raise HTTPException(409, f"Test laeuft bereits: run_id={active}")
+
+    run_id = str(_uuid.uuid4())
+    log_path = Path(f"/dev/shm/perf_test_{run_id}.log")
+    state_path = Path(f"/dev/shm/perf_test_{run_id}.state")
+
+    cmd = ["python3", "-u", "-m", "scripts.performance_test.runner"]
+    if judge == "cloud":
+        cmd += ["--judge=cloud"]
+    if skip_acts:
+        cmd += ["--skip-act=" + ",".join(str(int(n)) for n in skip_acts)]
+
+    started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    try:
+        proc = subprocess.Popen(
+            cmd, cwd=str(_PERF_TEST_MOLOCH_DIR),
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            bufsize=1, text=True,
+        )
+    except Exception as e:
+        raise HTTPException(500, f"Subprocess-Spawn-Fehler: {e}")
+
+    info = {
+        "proc": proc, "run_id": run_id, "started_at": started_at,
+        "log_path": log_path, "state_path": state_path, "cmd": cmd,
+        "judge": judge, "skip_acts": skip_acts,
+    }
+    with _PERF_TEST_LOCK:
+        _PERF_TEST_RUNS[run_id] = info
+
+    # Initial-State + Pointer
+    try:
+        _perf_test_write_state(state_path, run_id, started_at, "running",
+                               "init", 0, proc.pid)
+        _perf_test_atomic_write(_PERF_TEST_STATE_POINTER, {
+            "current_run_id": run_id, "started_at": started_at, "pid": proc.pid,
+            "status": "running", "judge": judge, "skip_acts": skip_acts,
+        })
+    except Exception as e:
+        logger.warning(f"[perf-test] state-write Fehler: {e}")
+
+    # Drain-Thread starten
+    t = threading.Thread(target=_perf_test_drain_proc, args=(run_id,), daemon=True)
+    t.start()
+
+    return {"run_id": run_id, "started_at": started_at, "pid": proc.pid,
+            "judge": judge}
+
+
+@app.get("/api/test/stream/{run_id}")
+async def api_test_stream(run_id: str):
+    """SSE-Stream fuer einen Performance-Test-Run.
+
+    Liefert stdout-Lines als SSE-Events + alle 2s heartbeat mit current state.
+    Schliesst sobald Subprocess fertig.
+    """
+    info = _PERF_TEST_RUNS.get(run_id)
+    if not info:
+        raise HTTPException(404, f"run_id {run_id} unbekannt")
+
+    log_path: Path = info["log_path"]
+    state_path: Path = info["state_path"]
+
+    async def gen():
+        last_pos = 0
+        last_heartbeat = 0.0
+        # Initial-State-Push
+        try:
+            if state_path.exists():
+                yield f"event: state\ndata: {state_path.read_text(encoding='utf-8')}\n\n"
+        except Exception:
+            pass
+        while True:
+            try:
+                # Stdout-Lines neu lesen
+                if log_path.exists():
+                    with open(log_path, "r", encoding="utf-8") as f:
+                        f.seek(last_pos)
+                        new = f.read()
+                        last_pos = f.tell()
+                    if new:
+                        for line in new.splitlines():
+                            if not line.strip():
+                                continue
+                            payload = json.dumps({"line": line})
+                            yield f"event: line\ndata: {payload}\n\n"
+                # Heartbeat alle 2s mit aktuellem State
+                now = time.time()
+                if now - last_heartbeat >= 2.0:
+                    last_heartbeat = now
+                    try:
+                        if state_path.exists():
+                            yield f"event: state\ndata: {state_path.read_text(encoding='utf-8')}\n\n"
+                        else:
+                            yield ": heartbeat\n\n"
+                    except Exception:
+                        yield ": heartbeat\n\n"
+                # Done?
+                proc = info.get("proc")
+                if proc is not None and proc.poll() is not None:
+                    yield f"event: done\ndata: {{\"run_id\": \"{run_id}\", \"returncode\": {proc.returncode}}}\n\n"
+                    break
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.debug(f"[perf-test stream] {e}")
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache",
+                                      "X-Accel-Buffering": "no"})
+
+
+@app.get("/api/test/last_report")
+def api_test_last_report(run_id: Optional[str] = None):
+    """Liefert letzten oder spezifischen Performance-Test-Report.
+
+    Sucht in logs/performance_test/*_performance_test.json.
+    """
+    if not _PERF_TEST_LOG_DIR.exists():
+        raise HTTPException(404, "Noch kein Test gelaufen")
+    candidates = sorted(_PERF_TEST_LOG_DIR.glob("*_performance_test.json"),
+                        key=lambda p: p.stat().st_mtime, reverse=True)
+    if not candidates:
+        raise HTTPException(404, "Noch kein Report")
+    target = candidates[0]
+    if run_id:
+        # Optional: filter nach started_at-Substring
+        for c in candidates:
+            try:
+                with open(c, "r", encoding="utf-8") as f:
+                    d = json.load(f)
+                if d.get("run_id") == run_id or run_id in c.name:
+                    target = c
+                    break
+            except Exception:
+                continue
+    try:
+        with open(target, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        data["_report_file"] = target.name
+        return data
+    except Exception as e:
+        raise HTTPException(500, f"Report-Read-Fehler: {e}")
+
+
+@app.get("/api/test/list_runs")
+def api_test_list_runs(limit: int = 10):
+    """Liefert History der letzten N Test-Runs."""
+    if not _PERF_TEST_LOG_DIR.exists():
+        return {"runs": []}
+    candidates = sorted(_PERF_TEST_LOG_DIR.glob("*_performance_test.json"),
+                        key=lambda p: p.stat().st_mtime, reverse=True)
+    out: List[Dict[str, Any]] = []
+    for c in candidates[: max(1, min(limit, 100))]:
+        try:
+            with open(c, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            out.append({
+                "started_at": d.get("started_at"),
+                "duration_s": d.get("duration_s"),
+                "overall": d.get("overall"),
+                "summary_de": (d.get("summary_de") or "")[:200],
+                "report_file": c.name,
+            })
+        except Exception:
+            continue
+    return {"runs": out, "count": len(out)}
 
 
 def main():

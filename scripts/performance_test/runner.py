@@ -21,7 +21,7 @@ import requests
 from .acts import (
     act_1_greeting, act_2_provocation, act_3_rejection,
     act_4_contradiction, act_5_finale,
-    ActResult,
+    ActResult, set_judge_mode,
 )
 from .baseline import take_snapshot
 from .config import CHAT_HEALTH
@@ -63,7 +63,8 @@ def _print_summary(run: TestRun) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--judge", choices=["heuristik", "cloud"], default="heuristik",
-                        help="Antwort-Validierung. cloud nutzt PC-DeepSeek (nicht implementiert)")
+                        help="Antwort-Validierung. cloud nutzt PC-judge_proxy "
+                             "(:11651) als Second-Opinion bei Heuristik-FAIL")
     parser.add_argument("--skip-act", type=str, default="",
                         help="Komma-Liste von Akt-Nummern zum Skippen (z.B. '1,4')")
     parser.add_argument("--print-md", action="store_true",
@@ -76,8 +77,8 @@ def main() -> int:
         if s.isdigit():
             skip.add(int(s))
 
-    if args.judge == "cloud":
-        print("WARN: --judge=cloud ist noch nicht implementiert — fallback auf heuristik")
+    set_judge_mode(args.judge)
+    print(f"Judge-Modus: {args.judge}")
 
     if not _preflight():
         print(f"FAIL Pre-Flight: chat-Server {CHAT_HEALTH} nicht erreichbar.")

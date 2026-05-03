@@ -2984,17 +2984,19 @@ class MolochService:
                     self._core_integrator.update_input("claude", key, val)
                     logger.info(f"[IPC] Core-Nudge: claude.{key} = {val:.2f}")
                     # tension_changed publishen -> TensionToFan/TTS-Volume reagieren
-                    # auf core_nudge-Inputs (vorher kein Publisher fuer das Event,
-                    # Subscriber lauschten ins Leere). Sub-Agent service+bridge 2026-05-03.
+                    # auf core_nudge-Inputs. INFO-level damit der Pfad sichtbar ist.
                     try:
                         from core.moloch_event_bus import get_event_bus
                         _t_now = self._core_integrator.get_tension()
-                        get_event_bus().publish(
+                        _bus = get_event_bus()
+                        _ok = _bus.publish(
                             "tension_changed",
                             {"value": _t_now, "source": "core_nudge", "key": key},
+                            source="core_nudge",
                         )
+                        logger.info(f"[IPC] tension_changed published value={_t_now:.3f} ok={_ok}")
                     except Exception as _e:
-                        logger.debug(f"[IPC] tension_changed publish skipped: {_e}")
+                        logger.warning(f"[IPC] tension_changed publish FAIL: {type(_e).__name__}: {_e}")
                     # Im Chat sichtbar machen
                     if self._voice_pipeline:
                         self._voice_pipeline._emit_message(

@@ -57,14 +57,28 @@ def _read_fan_state() -> int:
         return -1
 
 
-def _read_fan_pwm() -> int:
+def _read_fan_pwm(force_audit_refresh: bool = False) -> int:
     """Liest TensionToFan-PWM aus audit_state expression-Layer.
 
     Moloch-eigene Tension-PWM (separat von kernel-thermal cur_state).
     Returns 0 falls Expression-Layer fehlt.
+
+    audit_state.json wird vom audit_orchestrator alle ~60s geschrieben — bei
+    schnellen Tests ist der Wert stale. force_audit_refresh=True triggert
+    einen one-shot-Tick (subprocess, ~5s) damit TensionToFan-State frisch ist.
+    Wird im Akt-2/5 fan-Validator genutzt nachdem die Tension geaendert wurde.
     """
+    if force_audit_refresh:
+        try:
+            import subprocess
+            subprocess.run(
+                ["python3", "-m", "core.audit.audit_orchestrator", "--once"],
+                cwd="/home/molochzuhause/moloch",
+                capture_output=True, timeout=12,
+            )
+        except Exception:
+            pass
     try:
-        from .config import MOLOCH_DIR
         audit_path = "/dev/shm/audit_state.json"
         with open(audit_path) as f:
             d = json.load(f)
@@ -73,6 +87,14 @@ def _read_fan_pwm() -> int:
         return int(modules.get("tension_to_fan", {}).get("last_pwm", 0) or 0)
     except Exception:
         return 0
+
+
+def take_snapshot_with_fan_refresh() -> "SystemSnapshot":
+    """Snapshot mit forciertem audit_orchestrator-Tick (fuer fan_pwm-Reads)."""
+    s = take_snapshot()
+    # Frischen fan_pwm holen (audit-orchestrator-Tick + Re-Read)
+    s.fan_pwm = _read_fan_pwm(force_audit_refresh=True)
+    return s
 
 
 def _read_status() -> Dict[str, Any]:

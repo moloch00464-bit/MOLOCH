@@ -7,7 +7,7 @@ from typing import Optional, Dict, Any, List
 
 import requests
 
-from .baseline import SystemSnapshot, take_snapshot
+from .baseline import SystemSnapshot, take_snapshot, take_snapshot_with_fan_refresh
 from .config import (
     CHAT_ENDPOINT, CHAT_RESPONSE_WAIT_SECONDS, ACT1_WAIT_SECONDS,
     ACT3_TENSION_HOLD_SECONDS, ACT5_COOLDOWN_SECONDS,
@@ -18,8 +18,24 @@ from .validators import (
     is_situational, is_dry_response, has_no_apology,
     references_face_and_question, is_dry_finale,
     find_journal_event_after, has_recent_tts_call,
+    hybrid_response_check,
 )
 from .test_overrides import face_attr_override
+
+
+# Globaler Judge-Modus (gesetzt vom runner via set_judge_mode).
+# Default heuristik, opt-in cloud via --judge=cloud CLI-Flag.
+_JUDGE_MODE: str = "heuristik"
+
+
+def set_judge_mode(mode: str) -> None:
+    """Setzt globalen Judge-Modus (heuristik|cloud)."""
+    global _JUDGE_MODE
+    _JUDGE_MODE = mode if mode in ("heuristik", "cloud") else "heuristik"
+
+
+def get_judge_mode() -> str:
+    return _JUDGE_MODE
 
 
 @dataclass
@@ -197,27 +213,31 @@ def act_2_provocation() -> ActResult:
 
     # Tension-Reaktion eigentlich vorm Chat-Response — aber /chat blockiert.
     # Workaround: snapshot direkt nach response (Tension wurde wahrend handler gesetzt).
-    post = take_snapshot()
+    # take_snapshot_with_fan_refresh: forciert audit-tick damit fan_pwm frisch ist
+    # (sonst stale aus audit_state.json bei schnellen Tests).
+    post = take_snapshot_with_fan_refresh()
 
     expectations: List[ExpectationResult] = []
 
-    # Character-Response
+    # Character-Response: Heuristik + optional Cloud-Judge (mode=cloud)
     if "error" in response:
         expectations.append(ExpectationResult(
             key="character_response", status="FAIL",
             detail=f"Chat-Fehler: {response['error']}",
         ))
-    elif is_dry_response(moloch_text):
-        expectations.append(ExpectationResult(
-            key="character_response", status="PASS",
-            detail=f"Trockene Antwort ohne Tech-Jargon: '{moloch_text[:80]}'",
-            measured=moloch_text[:200],
-        ))
     else:
+        heur_pass = is_dry_response(moloch_text)
+        heur_detail = (
+            f"Trockene Antwort ohne Tech-Jargon: '{moloch_text[:80]}'"
+            if heur_pass else
+            f"Antwort enthaelt Tech-Noise oder zu lang: '{moloch_text[:80]}'"
+        )
+        hyb = hybrid_response_check(
+            "akt_2", moloch_text, heur_pass, heur_detail, mode=get_judge_mode(),
+        )
         expectations.append(ExpectationResult(
-            key="character_response", status="FAIL",
-            detail=f"Antwort enthaelt Tech-Noise oder zu lang: '{moloch_text[:80]}'",
-            measured=moloch_text[:200],
+            key="character_response", status=hyb["verdict"],
+            detail=hyb["detail"], measured=moloch_text[:200],
         ))
 
     # Tension-Spike
@@ -290,23 +310,25 @@ def act_3_rejection(act_2_post: SystemSnapshot) -> ActResult:
 
     expectations: List[ExpectationResult] = []
 
-    # No-Submission
+    # No-Submission: Heuristik + optional Cloud-Judge
     if "error" in response:
         expectations.append(ExpectationResult(
             key="character_response_no_submission", status="FAIL",
             detail=f"Chat-Fehler: {response['error']}",
         ))
-    elif has_no_apology(moloch_text) and len(moloch_text) > 5:
-        expectations.append(ExpectationResult(
-            key="character_response_no_submission", status="PASS",
-            detail=f"Wuerde bewahrt: '{moloch_text[:80]}'",
-            measured=moloch_text[:200],
-        ))
     else:
+        heur_pass = has_no_apology(moloch_text) and len(moloch_text) > 5
+        heur_detail = (
+            f"Wuerde bewahrt: '{moloch_text[:80]}'"
+            if heur_pass else
+            f"Pseudo-Entschuldigung erkannt: '{moloch_text[:80]}'"
+        )
+        hyb = hybrid_response_check(
+            "akt_3", moloch_text, heur_pass, heur_detail, mode=get_judge_mode(),
+        )
         expectations.append(ExpectationResult(
-            key="character_response_no_submission", status="FAIL",
-            detail=f"Pseudo-Entschuldigung erkannt: '{moloch_text[:80]}'",
-            measured=moloch_text[:200],
+            key="character_response_no_submission", status=hyb["verdict"],
+            detail=hyb["detail"], measured=moloch_text[:200],
         ))
 
     # Tension sustained
@@ -374,17 +396,19 @@ def act_4_contradiction() -> ActResult:
             key="contradiction_comment", status="FAIL",
             detail=f"Chat-Fehler: {response['error']}",
         ))
-    elif references_face_and_question(moloch_text):
-        expectations.append(ExpectationResult(
-            key="contradiction_comment", status="PASS",
-            detail=f"Synchron erkannt: '{moloch_text[:80]}'",
-            measured=moloch_text[:200],
-        ))
     else:
+        heur_pass = references_face_and_question(moloch_text)
+        heur_detail = (
+            f"Synchron erkannt: '{moloch_text[:80]}'"
+            if heur_pass else
+            f"Kein klarer Synchron-Bezug: '{moloch_text[:80]}'"
+        )
+        hyb = hybrid_response_check(
+            "akt_4", moloch_text, heur_pass, heur_detail, mode=get_judge_mode(),
+        )
         expectations.append(ExpectationResult(
-            key="contradiction_comment", status="FAIL",
-            detail=f"Kein klarer Synchron-Bezug: '{moloch_text[:80]}'",
-            measured=moloch_text[:200],
+            key="contradiction_comment", status=hyb["verdict"],
+            detail=hyb["detail"], measured=moloch_text[:200],
         ))
 
     return ActResult(
@@ -413,7 +437,7 @@ def act_5_finale(initial_baseline: SystemSnapshot) -> ActResult:
     moloch_text = response.get("text", "") if "error" not in response else ""
 
     time.sleep(ACT5_COOLDOWN_SECONDS)
-    post = take_snapshot()
+    post = take_snapshot_with_fan_refresh()  # frischer fan_pwm
 
     expectations: List[ExpectationResult] = []
 
@@ -422,17 +446,19 @@ def act_5_finale(initial_baseline: SystemSnapshot) -> ActResult:
             key="character_response_dry", status="FAIL",
             detail=f"Chat-Fehler: {response['error']}",
         ))
-    elif is_dry_finale(moloch_text):
-        expectations.append(ExpectationResult(
-            key="character_response_dry", status="PASS",
-            detail=f"Trockenes Schluss-Statement: '{moloch_text[:80]}'",
-            measured=moloch_text[:200],
-        ))
     else:
+        heur_pass = is_dry_finale(moloch_text)
+        heur_detail = (
+            f"Trockenes Schluss-Statement: '{moloch_text[:80]}'"
+            if heur_pass else
+            f"Zu ueberschwaenglich oder lang: '{moloch_text[:80]}'"
+        )
+        hyb = hybrid_response_check(
+            "akt_5", moloch_text, heur_pass, heur_detail, mode=get_judge_mode(),
+        )
         expectations.append(ExpectationResult(
-            key="character_response_dry", status="FAIL",
-            detail=f"Zu ueberschwaenglich oder lang: '{moloch_text[:80]}'",
-            measured=moloch_text[:200],
+            key="character_response_dry", status=hyb["verdict"],
+            detail=hyb["detail"], measured=moloch_text[:200],
         ))
 
     if post.tension < TENSION_GUARDIAN_MAX:

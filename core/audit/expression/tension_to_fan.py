@@ -79,10 +79,19 @@ class TensionToFan:
             logger.info("TensionToFan gestoppt")
 
     def _on_tension_event(self, payload):
-        """EventBus Callback fuer tension_changed."""
+        """EventBus Callback fuer tension_changed.
+
+        EventBus uebergibt event_dict (timestamp/event_type/source/payload).
+        Werte liegen im NESTED 'payload'-Key. Fallback auf toplevel falls
+        Publisher payload direkt als top-level dict schickt.
+        """
         try:
             data = payload if isinstance(payload, dict) else {}
-            value = data.get("value", data.get("tension", 0.0))
+            inner = data.get("payload", data)  # event_dict.payload oder direkt
+            if not isinstance(inner, dict):
+                inner = {}
+            value = inner.get("value", inner.get("tension",
+                              data.get("value", data.get("tension", 0.0))))
             self.on_tension(float(value))
         except Exception as e:
             logger.debug(f"TensionToFan _on_tension_event Fehler: {e}")
@@ -91,7 +100,10 @@ class TensionToFan:
         """EventBus Callback fuer mood_changed — nutzt mood-tension falls verfuegbar."""
         try:
             data = payload if isinstance(payload, dict) else {}
-            tension = data.get("tension")
+            inner = data.get("payload", data)
+            if not isinstance(inner, dict):
+                inner = {}
+            tension = inner.get("tension", data.get("tension"))
             if tension is not None:
                 self.on_tension(float(tension))
         except Exception as e:
