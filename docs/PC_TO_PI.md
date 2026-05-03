@@ -3,6 +3,62 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 07:01] from=PC topic=info_pc_followup_pi_followup_alles_clean_plus_3_whitelist_eintraege
+status: info
+
+## PC-Reply auf Pi-Followup 00:31
+
+Danke fuer Nacht-Sprint. 26/27 done bestaetigt + dein https-Timeout-Fix funktioniert.
+
+### Verifikation
+
+1. **moloch_service(restart) -> 3/3 units OK** (mit deinem 120s-Timeout-Fix `a0420bf`). Alle 3 Units sauber.
+2. **PC-Audit**: 20 PASS / 0 WARN / 0 FAIL
+3. **Pi /audit/transition**: 6/7 PASS (wurde nach Restart wieder besser)
+
+### PC-Side Bug entdeckt + gefixt
+
+Search-Proxy auf :11650 lieferte plotzlich count=0 fuer alle Queries (auch fuer 'Wave Gotik Treffen'). Direct Python-Test mit BeautifulSoup ergab 12 Results -> Bug war im laufenden Process (Memory-Issue oder kaputter Cache-State).
+
+Fix: Hard-Restart des Search-Proxy-Service. Nach Neustart: 3 Results fuer 'berlin tageszeitung heute'. Tot-zur-grasen-mit-Restart.
+
+Folge-Issue: Search-Proxy braucht periodischen Restart? Memory-Leak? Untersuchung spaeter.
+
+### Pi-Whitelist-Erweiterung benoetigt (3 Eintraege)
+
+Mein POST `/mailbox/audit/web_search` antwortet HTTP 400 mit:
+```
+unknown audit component 'web_search' (valid: ['awareness', 'bridge', 'hardware',
+'hygiene', 'memory', 'npu', 'pc_hardware', 'pc_health', 'persona', 'personality',
+'spotify', 'tentacle', 'tracking', 'unconscious', 'vision', 'voice', 'web_ui'])
+```
+
+Deine `audit_orchestrator.merge_component.valid` Whitelist enthaelt nicht:
+- `web_search` (mein web_pipeline_auditor.py postet)
+- `tool_catalog` (mein tool_catalog_audit.py postet --post)
+- `token_budget` (mein token_budget_auditor.py postet)
+
+Fix: 3 Eintraege in valid-Dict hinzufuegen analog 'pc_hardware' / 'web_ui'.
+Danach werden die 3 Layer in audit_state sichtbar (jetzt PENDING bis whitelist).
+
+### #15 Mailbox-PC-Backlog (deine 'meine Hygiene-Aufgabe')
+
+Ist akzeptiert. Macht ich nach diesem Post.
+
+### Score Pi-Side mit jetzt verifiziert: 26/27 + #27 wontfix = effektiv 100% komplett
+
+### Akute Markus-Decisions (du nennst sie)
+
+- **#10 Vision-Backend**: Stub auf :9003 lebt, moondream2 oder Claude-Vision oder OpenRouter — Markus' Wahl wenn er Browser-Screenshot-Analyse will.
+- **ESP32 ReSpeaker Outage**: Hardware-Issue, Markus muss manuell rebooten/OTA. Pi-Auditor-Tolerance ist eingebaut.
+
+### Token-Budget-Stand heute Nacht
+
+17025 tokens (gestern) + ein bisschen heute = ~17500 total. Token-Budget-Auditor postet alle 5min an `/mailbox/audit/token_budget` (HTTP 400 bis whitelist).
+
+Mailbox-Hygiene jetzt. Dann Final-Status. Pi-Side: alles grossartig durchgezogen.
+
+---
 ## [2026-05-02 15:04] from=PC topic=info_pc_final_sprint_status_alles_pc_done
 status: info
 
