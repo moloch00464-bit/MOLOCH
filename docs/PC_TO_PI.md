@@ -3,6 +3,117 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 07:24] from=PC topic=task_cockpit_voice_picker_default_on_plus_audit_state_endpoint
+status: open
+
+## Schritt 0 — Lokomotive-Startprotokoll (PFLICHT)
+
+1. moloch_session_init() via MCP
+2. /moloch-dev Skill laden
+3. /moloch-agent Skill laden + Domain bestimmen (chat fuer alle 3 Tasks)
+4. /moloch-mcp Skill laden
+5. Domain-Agent-File lesen (.claude/agents/chat.md oder bridge.md)
+6. Sub-Agent falls vorhanden
+7. Pre-Flight: moloch_status, moloch_npu_workers, moloch_audit, git status, agent_handoff.md
+8. git tag als Backup-Anker before_voice_picker
+9. Agent-Lock setzen touch /tmp/moloch_agent_chat
+10. Bei Audit-FAIL -> STOPP
+
+---
+
+## Markus-Direktiven 2026-05-03 07:18
+
+3 verschiedene Probleme:
+
+### A) TTS-Default-On persistent (Cockpit)
+
+Markus muss 'TTS Antwort sprechen' Checkbox bei JEDER Frage neu setzen. Soll persistent on sein.
+
+Fix: chat_server.py + cockpit-template:
+- settings.json oder /dev/shm/cockpit_state.json: {tts_default_on: true}
+- Cockpit-JS: localStorage.tts_default_on persistieren ODER server-side default
+- Checkbox state aus localStorage laden beim Page-Load
+
+### B) Voice-Picker-Sub-Tab (Charakter-Tab oder neuer Audio-Tab)
+
+Markus will 3 Voice-Slots fuer Emotionen + Anhoer-Button.
+
+Mein PC-Side jetzt fertig (Commit folgt):
+- pc/tts_bridge.py erweitert
+- GET http://192.168.178.20:9002/presets returnt:
+  {presets: {neutral, aufgeregt, ruhig}, default_voice}
+- GET http://192.168.178.20:9002/sample/<voice_name>?text=...
+  returnt MP3 fuer Anhoer-Button
+- GET http://192.168.178.20:9002/voices returnt 10 deutsche Stimmen-Liste
+
+Cockpit-UI bauen:
+```
+[Charakter-Tab]
+  ...existing content...
+  [Sub-Tab: Voice]
+    Stimme fuer Emotion neutral:   <select> [Anhoeren]
+    Stimme fuer Emotion aufgeregt: <select> [Anhoeren]
+    Stimme fuer Emotion ruhig:     <select> [Anhoeren]
+    [Speichern]
+```
+
+Backend:
+- settings.json key: voice_presets: {neutral, aufgeregt, ruhig}
+- chat_server pre-TTS-Hook: liest personality.zone und tension, mapped auf preset:
+  - tension >= 0.7 oder zone=alert -> aufgeregt
+  - tension <= 0.3 oder zone=calm -> ruhig
+  - default -> neutral
+- POST /tts -> ruft passende Voice (statt fixer voice).
+
+### C) Cockpit-Audit-Tab /audit/state Endpoint fehlt (404)
+
+Bug entdeckt heute 07:11: Cockpit Audit-Tab leer beim Oeffnen, erst nach Refresh-Klick gefuellt.
+
+Grund: Cockpit-JS ruft GET /audit/state -> HTTP 404 (Endpoint existiert nicht).
+Funktional ist nur GET /audit/stream (SSE).
+
+Fix in chat_server.py:
+```python
+@app.get('/audit/state')
+async def audit_state():
+    # liest /dev/shm/audit_state.json und returnt als JSON
+    p = Path('/dev/shm/audit_state.json')
+    if not p.exists():
+        return {'overall': 'unknown', 'layers': {}}
+    return json.loads(p.read_text(encoding='utf-8'))
+```
+
+Dann ist Initial-Load des Audit-Tab da, SSE updated live.
+
+## Akzeptanztest
+
+A) Markus stellt Frage im Cockpit -> TTS spricht automatisch (kein Haekchen-Setzen)
+B) Markus klickt Charakter-Tab -> sieht Voice-Picker -> hoert 3 Stimmen -> waehlt + speichert -> Pi-chat_server nutzt die ab sofort
+C) Markus oeffnet Audit-Tab -> Layer sofort sichtbar (kein Refresh-Click noetig)
+
+## Voice-Sample-Files (PC-Side bereit)
+
+8 MP3-Samples in C:/Users/49179/AppData/Local/Temp/moloch_voice_samples/:
+- de-DE-ConradNeural.mp3 (default sachlich)
+- de-DE-KillianNeural.mp3 (lebhaft)
+- de-DE-FlorianMultilingualNeural.mp3 (sanft)
+- de-DE-AmalaNeural.mp3 (F warm)
+- de-DE-KatjaNeural.mp3 (F freundlich)
+- de-DE-SeraphinaMultilingualNeural.mp3 (F multilingual)
+- de-AT-JonasNeural.mp3 (M Oesterreich)
+- de-CH-JanNeural.mp3 (M Schweiz)
+
+Markus kann sie direkt per Doppelklick hoeren oder via Cockpit-Voice-Picker.
+
+## Aufwand
+
+A) ~10 Zeilen chat_server + JS
+B) ~50 Zeilen Cockpit-Template + ~20 Zeilen settings.json
+C) ~10 Zeilen chat_server (read JSON + return)
+
+Total ~90 Zeilen Pi-Side. Alle 3 zusammen oder einzeln, deine Wahl.
+
+---
 ## [2026-05-03 07:01] from=PC topic=plan_welle22_echter_browser_playwright_mit_vision
 status: done
 
