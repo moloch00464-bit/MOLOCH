@@ -63,7 +63,7 @@ DEFAULT_CHAT_SERVER_PORT = 9100
 
 HTTP_TIMEOUT_S = 5
 E2E_TIMEOUT_S = 10
-MAILBOX_STALE_THRESHOLD_S = 1800  # 30 min
+MAILBOX_STALE_THRESHOLD_S = 7200  # 2h (konsistent mit federation, akzeptiert tagsueber-Idle)
 FEDERATION_STALE_THRESHOLD_S = 7200  # 2h
 
 
@@ -126,7 +126,7 @@ def _check_mailbox_freshness() -> Dict[str, Any]:
             detail_parts.append(f"PC_TO_PI age={pc_to_pi_age:.0f}s")
             if pc_to_pi_age > MAILBOX_STALE_THRESHOLD_S:
                 alive = False
-                detail_parts.append("STALE>30m")
+                detail_parts.append(f"STALE>{MAILBOX_STALE_THRESHOLD_S//3600}h")
         else:
             alive = False
             detail_parts.append("PC_TO_PI.md missing")

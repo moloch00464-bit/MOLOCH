@@ -143,6 +143,10 @@ def collect() -> Dict[str, Any]:
     detail["tentakel_status_code"] = tentakel_code
 
     # Status-Berechnung
+    # PC_HEARTBEAT_STALE_THRESHOLD_S: 7200s (2h). Konsistent mit transition_auditor.
+    # Frueher 300s (5min) — zu aggressiv fuer nachts-aus-PC. PC kann mehrere
+    # Stunden idle sein ohne dass das ein Bug ist.
+    PC_HEARTBEAT_STALE = 7200
     score = 0
     max_score = 4
     if chat_alive:
@@ -156,7 +160,7 @@ def collect() -> Dict[str, Any]:
 
     if not chat_alive:
         status = "FAIL"
-    elif not tentakel_reachable or (pc_age is not None and pc_age > 300):
+    elif not tentakel_reachable or (pc_age is not None and pc_age > PC_HEARTBEAT_STALE):
         status = "WARN"
     elif pc_age is None:
         status = "WARN"
