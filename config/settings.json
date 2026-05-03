@@ -173,5 +173,10 @@
     "backoff_sec": 600,
     "default_max_tokens": 100
   },
-  "hand_detection_enabled": true
+  "hand_detection_enabled": true,
+  "voice_presets": {
+    "neutral": "de-DE-ConradNeural",
+    "aufgeregt": "de-DE-KillianNeural",
+    "ruhig": "de-DE-FlorianMultilingualNeural"
+  }
 }
