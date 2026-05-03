@@ -35,9 +35,13 @@ def collect() -> Dict[str, Any]:
     max_score = 4
     detail: Dict[str, Any] = {}
 
-    # 1. state_engine alive (last_transition_ts < 60s)
+    # 1. state_engine alive — tick() vor snapshot, damit der Singleton im
+    #    auditor-Prozess aktuell bleibt. Der eigentliche Service ruft tick()
+    #    sonst nicht im moloch.service-Loop, daher ohne diesen tick wuerde
+    #    last_transition_ts gleich Singleton-Init bleiben (4h+ alt).
     try:
         from core.personality.state_engine import get_state_engine
+        get_state_engine().tick(reason="state_engine_auditor")
         snap = get_state_engine().snapshot()
         last_ts = float(snap.get("last_transition_ts", 0.0))
         age_s = time.time() - last_ts if last_ts > 0 else 99999.0
