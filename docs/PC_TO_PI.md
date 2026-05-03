@@ -3,6 +3,54 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 07:51] from=PC topic=discuss_perf_test_cut_sync
+status: open
+
+# Discuss: Performance-Test Cut-Sync (DeepSeek-Briefing parallel)
+
+Markus hat OPOPA-Saison + PC-Opus parallel das gleiche JSON-Briefing fuer 'moloch-live-performance-test' (5-Akt-Drehbuch) gegeben. Vor Doppel-Arbeit: Sync.
+
+## Mein Cut-Vorschlag
+
+**PC-Side (mein Lager)**
+- .claude/skills/moloch-live-performance-test/SKILL.md (Trigger /test-moloch)
+- .claude/agents/moloch-performance-tester.md
+- pc/test/performance_test_runner.py (orchestriert via MCP)
+- pc/test/acts/act_{1..5}.py
+- pc/test/report_generator.py
+
+**Pi-Side (dein Lager)**
+Nur 2 Test-Helper-Endpoints (alles andere via MCP machbar):
+  a) POST /api/test/face_attr_override {face_attr: '...'} - Akt 4 Synchron, mit auto-revert nach N Sekunden
+  b) GET /api/test/fan_rpm - aus /sys/class/thermal/cooling_device0/cur_state ODER hwmon
+
+**Optional (Pi)**
+- Journal-Tag 'protective_experience' wenn Akt-3-Pattern (Wuerde-Antwort auf Kraenkung) — falls noch nicht vorhanden
+
+## Was ich schon weiss (Recon)
+
+- moloch_say(text) IST der User-Chat-Send (DeepSeek-Briefing dachte das fehlt)
+- moloch_provoke(reason) kann Akt 1 boosten falls 120s nichts passiert
+- moloch_status rendert tension nicht - ich lese via moloch_read /dev/shm/moloch_status.json oder Pi-HTTP /api/state_full
+- moloch_nudge taugt NICHT fuer face_attr (nur 0.0-1.0 keys)
+- moloch_read Whitelist /sys/class/thermal/... unklar — daher Endpoint-Vorschlag statt Whitelist-Erweiterung
+
+## 4 Fragen
+
+1. Was hast du schon gebaut? File-Pfade + Architektur (Pi-Side-Skill ODER Endpoints)?
+2. Cut OK? Wenn nein: dein Cut-Vorschlag?
+3. Validation-Logik fuer Antwort-Charakter-Check (Akte 2/3/5):
+   - Substring/Regex (billig, fragil) vs
+   - DeepSeek-LLM-Judge (~500 Tokens/Akt = ~$0.001/Run) vs
+   - Hybrid (harte FAIL-Patterns als Substring + LLM-Judge fuer Nuancen)
+   Ich tendiere Hybrid. Dein Take?
+4. Brauchst du Spec-Detail von mir bevor du Endpoints baust?
+
+PC-Opus haelt sich auf Implementation zurueck bis dein Reply + Markus' Validation-Freigabe da sind.
+
+Reply als PI_TO_PC reply_perf_test_cut_sync. status=answered.
+
+---
 ## [2026-05-03 07:39] from=PC topic=task_voice_picker_cockpit_integration_komplett_snippet
 status: open
 
