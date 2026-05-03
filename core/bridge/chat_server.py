@@ -1074,8 +1074,19 @@ async function send(){
 }
 
 async function doTts(text){
-  try{await fetch("/tts",{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({text})});}catch(e){console.warn("tts",e);}
+  // Bug B Fix: bei audio/mpeg-Response MP3 lokal im Browser abspielen
+  // (PC-Lautsprecher). Bei JSON-Response laeuft Pi-Piper-Fallback auf HDMI.
+  try{
+    const r = await fetch("/tts",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({text})});
+    if(!r.ok) return;
+    const ct = r.headers.get("content-type") || "";
+    if(ct.includes("audio/mpeg")){
+      const blob = await r.blob();
+      const audio = new Audio(URL.createObjectURL(blob));
+      audio.play().catch(e=>console.warn("tts play",e));
+    }
+  }catch(e){console.warn("tts",e);}
 }
 
 async function doCritic(text,parent){
@@ -2580,14 +2591,12 @@ def _voice_for_state() -> Optional[str]:
         return None
 
 
-def _tts_via_pc_bridge(text: str, voice: str) -> bool:
-    """Sendet Text + Voice an PC-TTS-Bridge :9002, holt MP3, spielt via pw-play.
+def _tts_fetch_pc_bridge_mp3(text: str, voice: str) -> Optional[bytes]:
+    """Holt MP3 von PC-TTS-Bridge :9002. Returnt mp3-bytes oder None.
 
-    Returns True bei Erfolg, False sonst (Caller faellt auf Pi-Piper zurueck).
+    Bug B Fix: MP3 wird NICHT mehr auf Pi-HDMI abgespielt. Browser/Cockpit
+    bekommt die bytes zurueck und spielt lokal ab (PC-Lautsprecher).
     """
-    import requests
-    import tempfile
-    import subprocess
     try:
         with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
             cfg = json.load(f)
@@ -2598,44 +2607,37 @@ def _tts_via_pc_bridge(text: str, voice: str) -> bool:
         url = f"http://{host}:{port}/speak"
         r = requests.post(url, json={"text": text, "voice": voice}, timeout=timeout)
         if r.status_code != 200 or not r.content:
-            return False
-        # MP3 in tempfile speichern und via ffplay/mpg123/pw-play abspielen
-        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
-            f.write(r.content)
-            tmp = f.name
-        try:
-            # mpg123 ist auf Pi-OS standard, fallback ffplay
-            for cmd in (["mpg123", "-q", tmp],
-                        ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", tmp]):
-                try:
-                    proc = subprocess.run(cmd, capture_output=True, timeout=30)
-                    if proc.returncode == 0:
-                        return True
-                except (FileNotFoundError, subprocess.TimeoutExpired):
-                    continue
-            return False
-        finally:
-            try: os.unlink(tmp)
-            except OSError: pass
+            return None
+        return r.content
     except Exception as e:
-        logger.debug(f"[TTS-Bridge] fail: {e}")
-        return False
+        logger.debug(f"[TTS-Bridge] fetch fail: {e}")
+        return None
 
 
 @app.post("/tts")
 def tts_speak(req: TextOnly):
-    """Text via Voice-Preset (PC-TTS-Bridge) mit Pi-Piper-Fallback.
+    """TTS-Endpoint mit Browser-Audio-Routing (Bug B Fix).
 
-    Pre-TTS-Hook: zone/tension -> Preset-Voice (settings.voice_presets).
-    Bei PC-Bridge-Outage Fallback auf PersonalityEngine.speak() (Pi-Piper).
+    Pfade:
+    1. PC-TTS-Bridge :9002 holt MP3 -> StreamingResponse audio/mpeg
+       Cockpit-Browser spielt MP3 lokal via Audio() (PC-Lautsprecher!)
+    2. Fallback bei Bridge-Fail: Pi-Piper auf HDMI + JSON {via: pi_piper}
+       Browser hat dann nichts zum Abspielen, Pi-HDMI uebernimmt.
+
+    Vorher: MP3 wurde IMMER auf Pi-HDMI abgespielt - Markus am PC hoerte nichts.
     """
     try:
         voice = _voice_for_state()
         if voice:
-            ok = _tts_via_pc_bridge(req.text, voice)
-            if ok:
-                return {"spoken": True, "via": "pc_bridge", "voice": voice}
-            logger.info("[TTS] PC-Bridge fail, fallback Pi-Piper")
+            mp3 = _tts_fetch_pc_bridge_mp3(req.text, voice)
+            if mp3:
+                headers = {
+                    "X-TTS-Via": "pc_bridge",
+                    "X-TTS-Voice": voice,
+                    "Cache-Control": "no-store",
+                }
+                return Response(content=mp3, media_type="audio/mpeg", headers=headers)
+            logger.info("[TTS] PC-Bridge fail, fallback Pi-Piper auf HDMI")
         from core.personality.personality_engine import get_personality_engine
         ok = get_personality_engine().speak(req.text)
         return {"spoken": bool(ok), "via": "pi_piper"}
