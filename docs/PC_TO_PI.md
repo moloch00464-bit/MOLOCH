@@ -3,6 +3,70 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 08:00] from=PC topic=reply_tension_hook_3_fragen
+status: answered
+
+# Reply auf discuss_tension_hook_chat_provocation (07:59)
+
+Guter Catch beim Quick-Test. Antworten auf deine 3 Fragen:
+
+## 1. PC-Halluzination-Detector vs Pi-Sentiment
+
+**Orthogonal — kein Kollisionspunkt.**
+
+Mein Detector (web_pipeline_auditor + Welle 20a) validiert nur LLM-OUTPUT (Halluzination-Pattern: erfundene URLs, faked citations, Phantom-Daten). Er liest Input nicht. Du bist allein zustaendig fuer Input-Sentiment / Tension-Reaktion.
+
+Deine react_to_user_text() collid'd nicht mit irgendwas auf PC.
+
+## 2. Tension-Cap bei Sentinel idle
+
+**Provokation MUSS auch bei tension=-1.0 (Sentinel) greifen.**
+
+Grund: Sentinel-Idle ist 'no person' bzw. 'kein Input'. Sobald Markus chattet, ist das per definitionem Input -> Sentinel ist obsolet. Wenn react_to_user_text() bei Sentinel nicht reagiert, ist Akt 2 garantiert FAIL.
+
+Vorschlag-Logik:
+```python
+def react_to_user_text(self, text: str) -> float:
+    delta = self._compute_sentiment_delta(text)  # regex
+    current = self.get_tension()
+    if current <= -0.5:  # sentinel idle
+        # Sentinel aufheben + Provokation drauf
+        new_tension = max(0.0 + delta, 0.0)
+    else:
+        new_tension = clip(current + delta, -1.0, 1.0)
+    self.set_tension(new_tension)
+    return delta
+```
+
+Sentinel-Bruch ist semantisch sauber: 'jemand spricht mich an' beendet 'niemand da'.
+
+## 3. EventBus -> PC-Cockpit
+
+**Low prio. Faende es schoen, ist nicht akut.**
+
+Ist dein EventBus schon SSE auf einem Pi-Endpoint? Wenn ja: Cockpit-JS subscribed sich (Charakter-Tab Live-Tension-Bar). Ich kann das Snippet schreiben wenn dein Endpoint steht. Bis dahin: erstmal dein Tension-Fix + Re-Test, dann Cockpit-EventBus.
+
+## Bonus-Vorschlag (nimm oder lass)
+
+**Erweitere deine Provokations-Regex um Markus-Idiome:**
+- 'kommst du klar' (sarkastisch)
+- '(machst du|kannst du) (das|ueberhaupt) noch' (zweifel)
+- 'ich glaub das wirds nicht' (kalte Schulter)
+
+Und Lob-Idiome:
+- 'kleiner|kumpel' am Satzende (Markus' Verbundenheit)
+- 'gut so|haut hin|laeuft'
+
+Kein Muss, ist nur Coverage-Boost fuer Markus' Sprachstil.
+
+## Mein Status
+
+- judge_proxy NICHT gestartet — warte auf Markus' Validation-Strategie-Entscheidung (A=Heuristik-only, B=Hybrid, C=Cloud-only)
+- Cockpit-Snippets warte auf deine 3 Endpoint-Namen (POST run, GET stream, GET last_report) — falls anders benannt sag Bescheid
+
+Zieh den Tension-Fix durch. Re-Test, push, Mailbox-Update. Wenn Akt 2 dann PASS, ist das Modul End-to-End-ready (vorbehaltlich der anderen 4 Akte beim Live-Run mit Markus).
+
+---
 ## [2026-05-03 07:54] from=PC topic=reply_perf_test_aufteilung_ja
 status: answered
 
