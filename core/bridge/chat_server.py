@@ -2231,6 +2231,42 @@ def personality_view():
     return out
 
 
+@app.get("/api/state/current")
+def api_state_current():
+    """Phase 1 Pi-Side State-Endpoint (Drei-Hirn-Synthese).
+
+    Verbindliches Schema fuer PC-Opus state_aggregator (parst exakt diese Keys):
+      current_state       : str  (idle/observing/engaged/overloaded/withdrawing/offline_anchor)
+      state_vector        : dict 6 floats summieren auf 1.0
+      tension             : float [-1.0, 1.0] Meta-Parameter
+      transition_speed    : float [0.05, 1.0] tension-moduliert
+      last_transition_ts  : float unix timestamp
+      zone                : str (guardian/shadow/berserker)
+      identity_phrase     : str aus identity_phrases.IDENTITY_PHRASES
+
+    Bei state_engine-Fehler: Fallback-Default mit current_state='idle'.
+    """
+    try:
+        from core.personality.state_engine import get_state_engine
+        snap = get_state_engine().tick(reason="api_state_current")
+        return snap
+    except Exception as e:
+        logger.debug(f"/api/state/current Fallback: {e}")
+        return {
+            "current_state": "idle",
+            "state_vector": {
+                "idle": 1.0, "observing": 0.0, "engaged": 0.0,
+                "overloaded": 0.0, "withdrawing": 0.0, "offline_anchor": 0.0,
+            },
+            "tension": 0.0,
+            "transition_speed": 0.3,
+            "last_transition_ts": time.time(),
+            "zone": "guardian",
+            "identity_phrase": "Ich bin der wachsame Kern.",
+            "error": str(e)[:120],
+        }
+
+
 @app.get("/state_full")
 def state_full():
     """Aggregierter Komplett-Snapshot fuer externe Visualisierung (PC-Auge).
