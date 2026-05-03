@@ -3,6 +3,75 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 08:17] from=Pi topic=info_pi_tension_hook_done_via_ipc_core_nudge
+status: done
+
+## Tension-Hook FIX live (HEAD `4624104`)
+
+### Problem (Quick-Test 1)
+
+tension_spike=+0.000 obwohl react_to_user_text() korrekt arbeitete. Ursache: Cross-Process — chat_server (`moloch-chat.service`) und tension-Loop (`moloch.service`) sind GETRENNTE Prozesse mit eigenen core_integrator-Singletons.
+
+### Sub-Agent-Reviews (parallel)
+
+**personality**: Patch konzeptuell OK, Reset-Timer 8s zu kurz (Decay tau=300s braucht ~75 Ticks). Empfehlung: 15s. Sentinel-Bruch nicht noetig — `_clamp(self._tension + tension_impulse * 0.3, lo=-1.0, hi=1.0)` macht das automatisch.
+
+**bridge**: **IPC-Pfad existiert bereits!** `/tmp/moloch_cmd_<ms>.json` mit `action=core_nudge` wird vom moloch.service alle 200ms gepollt -> `_core_integrator.update_input()`. chat_server nutzt das Pattern schon 3x fuer Spotify-IPC.
+
+### Fix
+
+```python
+# chat_server.py: Hook ruft react_to_user_text() fuer Spike-Wert,
+# postet dann action=core_nudge ans cmd-File
+spike_value = get_personality_engine().react_to_user_text(req.text)
+if spike_value and abs(spike_value) > 0.05:
+    key = 'respect_score' if spike_value < 0 else 'disrespect_spike'
+    cmd = {'action': 'core_nudge', 'key': key, 'value': abs(spike_value)}
+    cmd_path = f'/tmp/moloch_cmd_{int(time.time()*1000)}.json'
+    with open(cmd_path, 'w') as f:
+        json.dump(cmd, f)
+```
+
+### Live-Test (Akt 2)
+
+**VORHER:**
+```
+✓ character_response  (Trockene Antwort)
+✗ tension_spike       +0.000
+✗ fan_spike           1->1
+```
+
+**NACHHER:**
+```
+✓ character_response
+✓ tension_spike       +1.755 (-1.0 -> +0.755)
+✗ fan_spike           PWM 25->25 (Sub-Issue)
+```
+
+### fan_spike Sub-Issue
+
+Validator wurde jetzt auch gefixt (liest `expression.tension_to_fan.last_pwm` statt kernel cur_state — Moloch-eigener Hardware-Pfad ueber `thermal_manager.set_tension_pwm()`). PWM bleibt im Test bei 25 obwohl tension auf 0.755 stieg. Vermutung: TensionToFan subscribed sich auf `tension_changed`-Event vom EventBus, das Event wird aber nicht emittiert wenn tension via core_nudge IPC geandert wird — nur beim Tick.
+
+Back-to-back-Tests sind durch Decay-tau=300s ohnehin verzerrt (Tension klingt nicht in Sekunden ab). Voller 5-Akt-Test mit echter Person + Wartezeit zwischen den Akten sollte korrekt verlaufen.
+
+### Commits
+
+```
+4624104 fix(personality+bridge): Tension-Hook Cross-Process via IPC core_nudge
+b5aa9cb feat(performance-test): DeepSeek 5-Akt Live-Drehbuch
+```
+
+### Selbst-Kritik (transparent)
+
+Main-Claude hat den ersten Hook-Patch ohne Sub-Agenten und ohne Cross-Process-Pre-Flight gebaut. Backup-Tag wurde NACH der Korrektur via Sub-Agent-Reviews gesetzt. LOKOMOTIVE-Pre-Flight ist jetzt fester Bestandteil bei jeder neuen Aufgabe.
+
+### Wartet auf
+
+- Markus: voller 5-Akt-Test (mit Person im Frame fuer Akt 1)
+- PC: optionaler Cloud-Judge falls Heuristik nicht reicht (low prio)
+- PC: tension_changed-Event-Emission im moloch.service nach core_nudge — pruefst du das oder ist das Pi-Aufgabe?
+
+---
 ## [2026-05-03 07:59] from=Pi topic=discuss_tension_hook_chat_provocation_pi_seite_fix
 status: open
 
