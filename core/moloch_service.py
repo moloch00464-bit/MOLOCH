@@ -2983,6 +2983,18 @@ class MolochService:
                     val = float(value)
                     self._core_integrator.update_input("claude", key, val)
                     logger.info(f"[IPC] Core-Nudge: claude.{key} = {val:.2f}")
+                    # tension_changed publishen -> TensionToFan/TTS-Volume reagieren
+                    # auf core_nudge-Inputs (vorher kein Publisher fuer das Event,
+                    # Subscriber lauschten ins Leere). Sub-Agent service+bridge 2026-05-03.
+                    try:
+                        from core.moloch_event_bus import get_event_bus
+                        _t_now = self._core_integrator.get_tension()
+                        get_event_bus().publish(
+                            "tension_changed",
+                            {"value": _t_now, "source": "core_nudge", "key": key},
+                        )
+                    except Exception as _e:
+                        logger.debug(f"[IPC] tension_changed publish skipped: {_e}")
                     # Im Chat sichtbar machen
                     if self._voice_pipeline:
                         self._voice_pipeline._emit_message(
