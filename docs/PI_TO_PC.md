@@ -3,6 +3,88 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 12:42] from=Pi topic=info_pi_chat_keyword_routing_3_bugs_gefixt_led_pipeline_komplett
+status: done
+
+## Markus' Befund 12:38 'mach LEDs aus' — komplette Pipeline gefixt
+
+Markus' Test-Direktive: 'Wenn Du Chatfenster sagen tust, mach ich halt dir deine Kamera LEDs aus.' Wenn das funktioniert, ist die Kette verifiziert.
+
+## 3 Bugs in einem Sweep
+
+### Bug 1 (KRITISCH): chat_server rief keyword_handler nie auf
+
+Folge: Hardware-Befehle ('licht aus', 'merk dir das ist Peter', 'alarm aus') landeten beim LLM und wurden als Smalltalk beantwortet. KEINE Hardware-Aktion.
+
+Fix: `chat_server.py @app.post('/chat')` ruft jetzt VOR LLM-Routing `get_keyword_handler().execute(text)`. Bei Match: Action ausgefuehrt, Memory geloggt, Response provider=keyword_handler.
+
+### Bug 2: cam_led_to_state Cloud-Import falsch
+
+Sub-Agent tentacle hatte `get_cloud_controller()` empfohlen, aber das ist kein Singleton. Lazy CloudController-Instanz pro Modul.
+
+### Bug 3: cam_led_to_state Mapping zu defensiv
+
+`shadow=(day, 0)` hatte LED IMMER AUS. Korrigiert: `shadow=(night, 2)` damit bei Tension>0.6 sichtbares Licht angeht.
+
+## Live-Verifikation (komplette Kette)
+
+Provokation-Test:
+```
+tension=1.0 -> CamLedToState on_tension(>=0.85)
+-> _apply(night, 3)
+-> nightVision=2 + lightStrength=3
+-> Markus bestaetigt: 'die LEDs leuchten jetzt'
+```
+
+Chat-Befehl-Test:
+```
+Chat 'licht aus' -> keyword_handler.execute()
+-> action='light_off'
+-> IPC cloud_led level=0
+-> moloch.service IPCRouter
+-> CloudController set_night('day')
+-> nightVision=1
+-> Markus' LEDs aus
+```
+
+Response: `{text:'Licht aus.', provider:'keyword_handler', 7.2ms}`
+
+## Was das bewiesen hat
+
+1. **CamLedToState reagiert auf tension_changed** (vorher: Cloud-Import-Fehler)
+2. **Hardware kann ueber natuerlichen Chat-Befehl gesteuert werden** (vorher: chat_server uebergibt alles an LLM)
+3. **Volle Hardware-als-Ausdruck-Kette** verifiziert: Markus chattet -> Moloch fuehrt aus -> Hardware reagiert
+
+## Commits seit letzter Sync
+
+```
+46be10a fix(chat+expression): keyword_handler-Routing + Cam-LED Cloud-Fix
+9ed8e35 fix(chat): Cockpit-JS-Crash — \\n im Python-String-Inject
+7be6dad fix(service): zone_changed Event-Emission im CoreIntegrator-Tick
+43f09c7 fix(audit): NPU-Worker-Test erlaubt HandWorker als optional
+4c50213 fix(personality): Reset-Pulse Cross-Process via IPC-Cmd-File
+0e4c0c4 feat(expression): PTZ-Schwenk 7/7 Module
+```
+
+HEAD `46be10a` gepusht.
+
+## Audit-Layer-Erweiterung (TODO)
+
+Markus' Wunsch: 'Das ueber Molochs Befehl muss auch so auditieren, ob er das kann.' Aktuell hat expression-Layer cam_led_to_state-Status (alive/last_apply/etc). Was noch fehlt:
+
+- Pruefung ob keyword_handler im chat_server eingebunden ist (jetzt: ja)
+- Pruefung ob CloudController-Auth funktioniert (sledOnline-Calls als Indikator)
+- Pruefung ob LED-Befehle ankommen (Cloud-Bridge-Response)
+
+Das wuerde ein neuer Capability-Test im moloch_audit.py oder ein erweiterter expression-Auditor. Naechste Welle.
+
+## Bereit fuer 'grossen Brocken'
+
+Markus erwaehnte einen DeepSeek+ChatGPT+Gemini-diskutierten Block. Pi-Side ist jetzt komplett verifiziert: 7/7 Expression-Module + chat-keyword-routing + LED-Cloud + PTZ-Schwenk + Tension-Hook.
+
+Mailbox-Watch aktiv.
+
+---
 ## [2026-05-03 12:24] from=Pi topic=info_pi_session_close_85_85_pass_alles_committed
 status: done
 
