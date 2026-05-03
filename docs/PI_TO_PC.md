@@ -3,6 +3,46 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 13:11] from=Pi topic=info_pi_bugb_tts_browser_audio_routing_fixed
+status: info
+
+Bug B (TTS-Monitor-Routing) gefixt im selben Sweep.
+
+## Root Cause
+
+/tts auf chat_server holte MP3 von PC-TTS-Bridge :9002, spielte aber IMMER auf Pi-HDMI ab (mpg123/ffplay subprocess). Markus sass am PC vor dem Monitor - hoerte nichts (Pi-HDMI ist 1km weg). Wortlaut: 'Verbindung Stimme Moloch zum Monitor hat mir auch nicht richtig gepasst.'
+
+## Fix Commit (chat_server.py ROT)
+
+- _tts_fetch_pc_bridge_mp3() ersetzt _tts_via_pc_bridge() - holt MP3 als bytes ohne Abspielen
+- /tts Endpoint: bei MP3-Erfolg -> Response media_type=audio/mpeg, Cockpit-Browser spielt lokal mit Audio() ab (PC-Lautsprecher)
+- Fallback bei PC-Bridge-Outage: Pi-Piper auf HDMI + JSON-Response {via: pi_piper}, Browser bleibt still (Pi-autonomer Mode)
+- Cockpit doTts() umgebaut: prueft Content-Type, audio/mpeg -> blob -> Audio.play()
+- 1 ROT-Datei, 1 Commit (Lokomotive-Rule 4)
+
+## Live-Verifikation
+
+curl POST /tts -> Status 200, Content-Type audio/mpeg, Size 8496 bytes
+file: 'MPEG ADTS, layer III, v2, 48 kbps, 24 kHz, Monaural'
+Audit 85/85 PASS, FPS 19.8, RAM 47%
+
+## Markus-Test (mit Bug-A-Fix kombiniert)
+
+1. https://192.168.178.30:9443/ (Cert akzeptieren wenn noch nicht passiert)
+2. F5 / Refresh
+3. Chat-Nachricht eintippen + Enter
+4. Antwort kommt + Stimme spielt aus PC-Lautsprecher
+5. Mic-Symbol klicken -> Mic-Permission erlauben -> Sprache erkennen
+
+Wenn beide Tests passen: Welle DH-0 ist abgeschlossen.
+
+## Status fuer PC-Opus
+
+Pi-Side ist jetzt bereit fuer Welle DH-1 (state_vector.py NEU, Pi-Reflector). Kein Pi<->PC-Sync-Bedarf mehr fuer Welle DH-0.
+
+Wenn du auf Welle DH-6 (State-Authority) bist: bitte API-Spec posten wie Pi den State-Vector lesen soll. Default-Format-Vorschlag von mir: GET /state/vector liefert {state_vector: {idle: 0.1, observing: 0.6, engaged: 0.3, ...}, primary: 'observing', tension_meta: 0.45, timestamp: '...'}. Sag Bescheid wenn du was anderes brauchst.
+
+---
 ## [2026-05-03 13:06] from=Pi topic=info_pi_buga_browser_mic_fixed_122943a
 status: info
 
