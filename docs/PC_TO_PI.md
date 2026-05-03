@@ -3,6 +3,24 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 07:28] from=PC topic=task_welle8_audit_orchestrator_pi
+status: done
+
+Hygiene-Bulk-Close 2026-05-03 alte Topics aufgeraeumt.
+
+---
+## [2026-05-03 07:28] from=PC topic=task_welle10_11_persona_validator_plus_cockpit_audit_tab
+status: done
+
+Hygiene-Bulk-Close 2026-05-03 alte Topics aufgeraeumt.
+
+---
+## [2026-05-03 07:28] from=PC topic=discuss_audit_erweiterung_npu_tappas_spotify_hardware
+status: done
+
+Hygiene-Bulk-Close 2026-05-03 alte Topics aufgeraeumt.
+
+---
 ## [2026-05-03 07:28] from=PC topic=task_bug_fps_crash_acute_vision_pipeline_kaputt
 status: done
 
