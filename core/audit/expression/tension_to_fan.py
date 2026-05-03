@@ -11,6 +11,14 @@ Mapping (Tension 0..1 -> PWM 0..100):
 
 Thermal-Override: Wenn cpu_temp > 70 deg C, gilt thermal_pwm.
 Effektive PWM: max(tension_pwm, thermal_pwm) — niemals unter thermal-Bedarf.
+
+Welle DH-4 (Drei-Hirn-Synthese): Seufzer-Spike
+==============================================
+Bei Tension-Delta >= 0.10 wird ein kurzer Spike ueber den aktuellen PWM-Wert
+hinaus ausgeloest (Gemini-Idee + DeepSeek-Refinement: 800ms Dauer, 30s Cooldown).
+Der Effekt ist akustisch wahrnehmbar - Markus hoert das Aufheulen als physische
+Reaktion auf Tension-Wechsel. Tension wirkt damit als Meta-Parameter (ChatGPT-
+Synthese-Position) auf die Lueftermodulation, NICHT als direkter State-Trigger.
 """
 import logging
 import threading
@@ -52,6 +60,12 @@ class TensionToFan:
         self._min_apply_interval: float = 2.0  # debounce: 2s zwischen Hardware-Calls
         self._bus = None
         self._subscribed = False
+        # Welle DH-4: Seufzer-Spike (akustische Reaktion auf Tension-Delta)
+        self._last_spike_ts: float = 0.0
+        self._spike_cooldown_sec: float = 30.0
+        self._spike_delta_threshold: float = 0.10
+        self._spike_duration_sec: float = 0.8
+        self._spike_pwm_boost: int = 25  # Spike addiert max +25% auf aktuellen PWM
 
     def start(self) -> bool:
         """Subscribe an EventBus, beginne Tension-Monitoring."""
@@ -110,16 +124,45 @@ class TensionToFan:
             logger.debug(f"TensionToFan _on_mood_event Fehler: {e}")
 
     def on_tension(self, value: float):
-        """Externe API: setzt Luefter-PWM nach Tension-Wert."""
+        """Externe API: setzt Luefter-PWM nach Tension-Wert.
+
+        Welle DH-4: bei Tension-Delta >= threshold wird ein Seufzer-Spike
+        ausgeloest (kurzer PWM-Boost ueber den aktuellen Wert hinaus).
+        """
+        spike_target: Optional[int] = None
+        spike_reset_to: Optional[int] = None
         with self._lock:
-            self._last_value = value
-            new_pwm = _tension_to_pwm(value)
+            try:
+                _v = float(value)
+            except (TypeError, ValueError):
+                _v = 0.0
+            delta = abs(_v - self._last_value)
+            self._last_value = _v
+            new_pwm = _tension_to_pwm(_v)
             now = time.time()
-            if new_pwm == self._last_pwm and (now - self._last_apply_ts) < self._min_apply_interval:
-                return
-            self._last_pwm = new_pwm
-            self._last_apply_ts = now
-        self._apply_pwm(new_pwm)
+
+            # Seufzer-Spike Trigger
+            if (delta >= self._spike_delta_threshold
+                    and (now - self._last_spike_ts) >= self._spike_cooldown_sec):
+                spike_target = min(100, new_pwm + self._spike_pwm_boost)
+                spike_reset_to = new_pwm
+                self._last_spike_ts = now
+
+            # Standard-PWM-Apply mit Debounce
+            do_apply = not (new_pwm == self._last_pwm
+                            and (now - self._last_apply_ts) < self._min_apply_interval)
+            if do_apply:
+                self._last_pwm = new_pwm
+                self._last_apply_ts = now
+
+        if spike_target is not None:
+            self._apply_pwm(spike_target)
+            logger.info(f"TensionToFan: Seufzer-Spike PWM={spike_target}% delta={delta:.2f}")
+            t = threading.Timer(self._spike_duration_sec, self._apply_pwm, args=(spike_reset_to,))
+            t.daemon = True
+            t.start()
+        elif do_apply:
+            self._apply_pwm(new_pwm)
 
     def _apply_pwm(self, tension_pwm: int):
         """Best-effort: ruft thermal_manager.set_tension_pwm() falls API existiert."""
