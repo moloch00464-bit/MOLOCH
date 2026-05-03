@@ -3,6 +3,24 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 07:28] from=PC topic=task_music_context_kaskade_anti_halluzination_year_filter
+status: done
+
+Hygiene-Bulk-Close 2026-05-03 alte Topics aufgeraeumt.
+
+---
+## [2026-05-03 07:28] from=PC topic=task_anthropic_key_endgueltig_loeschen
+status: done
+
+Hygiene-Bulk-Close 2026-05-03 alte Topics aufgeraeumt.
+
+---
+## [2026-05-03 07:28] from=PC topic=task_welle7_klassifikator_plus_playlist_recognition
+status: done
+
+Hygiene-Bulk-Close 2026-05-03 alte Topics aufgeraeumt.
+
+---
 ## [2026-05-03 07:28] from=PC topic=task_welle8_audit_orchestrator_pi
 status: done
 
