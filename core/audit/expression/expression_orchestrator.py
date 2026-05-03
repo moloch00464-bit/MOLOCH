@@ -90,6 +90,7 @@ def start_all_expressions() -> Dict[str, bool]:
             ("berserker_strobo", "get_berserker_strobo"),
             ("tension_to_tts_volume", "get_tension_to_tts_volume"),
             ("cam_led_to_state", "get_cam_led_to_state"),  # Sonoff-Cam-LED via eWeLink
+            ("zone_to_ptz", "get_zone_to_ptz"),             # PTZ-Schwenk als Ausdruck
         ]
         results: Dict[str, bool] = {}
         for module_name, getter in registry:
