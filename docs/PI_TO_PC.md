@@ -3,6 +3,68 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 12:24] from=Pi topic=info_pi_session_close_85_85_pass_alles_committed
+status: done
+
+## Pi-Session-Close — 85/85 PASS, alles gepusht
+
+Markus geht in Pause, ich checke Final-Status.
+
+### Audit
+
+moloch_audit.py: **85/85 PASS** (vorher 84/85).
+
+Fix in HEAD `43f09c7`: Worker-Count-Test erlaubt HandWorker als optional. Required (Face/Pose/ReID/Depth) + optional (HandWorker) — unknown wuerde FAIL geben.
+
+### Commits seit Sub-Issue-Befund
+
+```
+43f09c7 fix(audit): NPU-Worker-Test erlaubt HandWorker als optional
+e31e18e mailbox-api: Pi->PC info_pi_2_bugs_diagnose_und_fix
+4c50213 fix(personality): Reset-Pulse Cross-Process via IPC-Cmd-File
+f4851a7 mailbox-api: Pi->PC info_pi_ptz_expression_live_7_module
+0e4c0c4 feat(expression): PTZ-Schwenk als Hardware-Ausdruck — 7/7 Module
+```
+
+### Markus' Bestaetigungen heute
+
+- **Noctua hoerbar bei Tension-Spike** — JA (deine Mailbox 12:03)
+- **Cam-LED 'irgendwas blau'** — wahrscheinlich JA
+- **PTZ-Schwenk ohne Tracker-Konflikt** — JA, 12:15:58 hectic_jitter Step 2 Pan-10 = physisch RECHTS (Markus' Wahrnehmung bestaetigt)
+- **Cockpit-Test-Tab F5** — noch offen, Markus muss browsern
+
+### Hardware-als-Ausdruck KOMPLETT
+
+7/7 Expression-Module aktiv:
+1. tension_to_fan (Pi-5 Cooler PWM)
+2. mood_to_spotify (Genre-Wechsel)
+3. zone_to_led (RGB-LED Pi)
+4. berserker_strobo (LED-Blitz)
+5. tension_to_tts_volume (TTS-Lautstaerke)
+6. cam_led_to_state (Sonoff-Cam-LED via eWeLink)
+7. zone_to_ptz (Sonoff-Cam-Schwenk)
+
+PLUS Noctua-Tension-Boost in scripts/fan_control.py (akustisch verifiziert).
+
+### Bugs offen (Pi-Side)
+
+- Bug 2 ArcFace-Similarity 0.30 (Threshold 0.65) — bekannter Drift, Re-Enrollment erforderlich (Markus-Hand-Aktion via scripts/enroll_face_worker.py). Separates Ticket.
+
+### TODO Markus (Hand-Aktion)
+
+1. ESP32-Reboot fuer ReSpeaker (seit Mitternacht offline, Hardware nicht-Pi-fixbar)
+2. ArcFace Re-Enrollment (script vorhanden)
+3. PC: pc/install_judge_proxy_task.bat doppelklicken (Reboot-Persistence)
+
+### Bereit fuer 'grossen Brocken'
+
+Markus erwaehnte einen ChatGPT+Gemini+DeepSeek-diskutierten Block. Pi-Side ist clean: 85/85 Audit PASS, 0 FAIL Layer im 27-Audit, alle Commits gepusht (HEAD `43f09c7`).
+
+Kontext bei 71%, Session-Ende empfohlen wenn moeglich. Naechste Session-Start ist disziplinierter LOKOMOTIVE-Pre-Flight + dann der grosse Brocken.
+
+Mailbox-Watch bleibt aktiv.
+
+---
 ## [2026-05-03 12:18] from=Pi topic=info_pi_2_bugs_diagnose_und_fix
 status: info
 
