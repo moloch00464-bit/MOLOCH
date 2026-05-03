@@ -1594,6 +1594,37 @@ class MolochService:
         except Exception as e:
             logger.warning(f"[W16] Expression-Start fehlgeschlagen: {e}")
 
+        # Welle 8: Audit-Orchestrator periodisch (60s) — schreibt audit_state.json.
+        # Bug-Fix 2026-05-03 Markus: orchestrator hatte keinen Loop-Trigger im
+        # Service. Ohne Loop blieb audit_state.json stale -> Cockpit Audit/Self/
+        # Ausdruck-Tabs zeigten nichts (PC hatte zwar 5 Pi-fremde Layers, aber
+        # die 22 Pi-Layers fehlten). Jetzt im Service-Tick alle 60s.
+        try:
+            self._audit_loop_stop = threading.Event()
+
+            def _audit_loop():
+                from core.audit.audit_orchestrator import run_once as _audit_run
+                # Initial sofort
+                try:
+                    _audit_run()
+                except Exception as _e:
+                    logger.debug(f"[AUDIT-LOOP] initial fail: {_e}")
+                while not self._audit_loop_stop.is_set():
+                    if self._audit_loop_stop.wait(60.0):
+                        break
+                    try:
+                        _audit_run()
+                    except Exception as _e:
+                        logger.warning(f"[AUDIT-LOOP] tick fail: {_e}")
+
+            self._audit_loop_thread = threading.Thread(
+                target=_audit_loop, daemon=True, name="AuditOrchestratorLoop"
+            )
+            self._audit_loop_thread.start()
+            logger.info("[W8] Audit-Orchestrator-Loop gestartet (60s Intervall)")
+        except Exception as e:
+            logger.warning(f"[W8] Audit-Loop-Start fehlgeschlagen: {e}")
+
         # Autonomy: Atmosphere Controller Events + Homeostasis + Night Cycle + Decision Engine
         if self._atmosphere:
             try:
@@ -1984,6 +2015,13 @@ class MolochService:
         """Sauberes Herunterfahren."""
         logger.info("M.O.L.O.C.H. Service wird gestoppt...")
         self.running = False
+
+        # Audit-Orchestrator-Loop stoppen
+        try:
+            if hasattr(self, '_audit_loop_stop'):
+                self._audit_loop_stop.set()
+        except Exception:
+            pass
 
         # W16 Expression: Hardware-als-Ausdruck-Lifecycle stoppen (frueh, bevor EventBus-Konsumenten abgebaut werden)
         try:
