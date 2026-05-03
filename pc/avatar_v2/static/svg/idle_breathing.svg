@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600" width="600" height="600">
+  <defs>
+    <radialGradient id="bodyGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#88aaff" stop-opacity="1.0"/>
+      <stop offset="60%" stop-color="#4466cc" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#112244" stop-opacity="0.7"/>
+    </radialGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="600" height="600" fill="#000010"/>
+
+  <!-- Particle stars (static) -->
+  <g fill="#6688aa" opacity="0.6">
+    <circle cx="80"  cy="120" r="1.5"/>
+    <circle cx="180" cy="80"  r="1.0"/>
+    <circle cx="320" cy="50"  r="1.2"/>
+    <circle cx="450" cy="90"  r="1.0"/>
+    <circle cx="520" cy="180" r="1.5"/>
+    <circle cx="50"  cy="280" r="1.0"/>
+    <circle cx="100" cy="450" r="1.2"/>
+    <circle cx="250" cy="520" r="1.0"/>
+    <circle cx="400" cy="500" r="1.5"/>
+    <circle cx="540" cy="380" r="1.0"/>
+    <circle cx="550" cy="520" r="1.0"/>
+    <circle cx="200" cy="380" r="0.8"/>
+  </g>
+
+  <!-- Avatar Body (breathing animation) -->
+  <g filter="url(#glow)">
+    <circle cx="300" cy="300" r="120" fill="url(#bodyGrad)" stroke="#66aaff" stroke-width="2">
+      <animate attributeName="r" values="120;128;120" dur="3s" repeatCount="indefinite"/>
+      <animateTransform attributeName="transform" type="translate"
+                        values="0,0; 0,-8; 0,0" dur="3s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+
+  <!-- Status text -->
+  <text x="300" y="500" text-anchor="middle"
+        font-family="Consolas, monospace" font-size="18" fill="#cce">
+    MOLOCH idle (3D-Modus nicht verfuegbar)
+  </text>
+  <text x="300" y="525" text-anchor="middle"
+        font-family="Consolas, monospace" font-size="12" fill="#688">
+    SVG-Fallback aktiv
+  </text>
+</svg>

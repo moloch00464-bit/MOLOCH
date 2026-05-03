@@ -1,0 +1,68 @@
+/* MOLOCH Avatar 2.0 — Cyberpunk / Max Headroom Style */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 100%; height: 100%;
+  background: #000;
+  color: #cce;
+  font-family: 'Consolas', 'Courier New', monospace;
+  overflow: hidden;
+}
+
+/* Top HUD */
+#hud-top {
+  position: fixed; top: 0; left: 0; right: 0;
+  padding: 0.4em 1em;
+  background: linear-gradient(180deg, rgba(0,20,40,0.85), rgba(0,0,0,0));
+  display: flex; gap: 1.5em;
+  font-size: 0.85em;
+  z-index: 100;
+}
+.hud-item {
+  padding: 0.2em 0.6em;
+  border-radius: 3px;
+  background: rgba(20,20,40,0.6);
+  border: 1px solid #345;
+}
+
+/* State-Indicator-Farben (6 States) */
+.state-idle        { background: #1a3a5a; border-color: #4a7; color: #9cf; }
+.state-observing   { background: #1a4a3a; border-color: #4a7; color: #9fc; }
+.state-engaged     { background: #4a3a1a; border-color: #fc6; color: #fc6; }
+.state-overloaded  { background: #5a1a1a; border-color: #f66; color: #fcc; }
+.state-withdrawing { background: #3a1a4a; border-color: #c6f; color: #ccf; }
+.state-offline_anchor { background: #3a3a3a; border-color: #888; color: #aaa; }
+
+/* Main Stage */
+#stage-container {
+  width: 100vw; height: 100vh;
+  display: flex; align-items: center; justify-content: center;
+  position: relative;
+}
+#avatar-canvas {
+  width: 100%; height: 100%;
+  display: block;
+}
+
+#svg-fallback {
+  text-align: center;
+}
+.fallback-msg {
+  margin-top: 1em;
+  color: #f66;
+  font-size: 0.9em;
+}
+
+/* Identity Panel (bottom) */
+#identity-panel {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  padding: 1em 2em;
+  background: linear-gradient(0deg, rgba(0,20,40,0.85), rgba(0,0,0,0));
+  text-align: center;
+  font-size: 1.2em;
+  font-style: italic;
+  color: #cce;
+  z-index: 100;
+}
+#identity-phrase {
+  text-shadow: 0 0 10px #69f, 0 0 20px #69f;
+}

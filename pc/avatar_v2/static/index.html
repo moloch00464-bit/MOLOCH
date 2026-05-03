@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MOLOCH Avatar 2.0</title>
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <!-- Top HUD: 6-State Indicator + FPS + Tension + Zone -->
+  <div id="hud-top">
+    <span id="hud-state" class="hud-item state-idle">idle</span>
+    <span id="hud-tension" class="hud-item">tension: 0.00</span>
+    <span id="hud-zone" class="hud-item">zone: ?</span>
+    <span id="hud-fps" class="hud-item">FPS: --</span>
+    <span id="hud-pi" class="hud-item">PI: ?</span>
+    <span id="hud-pc" class="hud-item">PC: ?</span>
+  </div>
+
+  <!-- Main Avatar-Stage -->
+  <div id="stage-container">
+    <canvas id="avatar-canvas"></canvas>
+
+    <!-- SVG-Fallback (versteckt, wird aktiviert bei FPS<15) -->
+    <div id="svg-fallback" style="display:none;">
+      <object data="/static/svg/idle_breathing.svg" type="image/svg+xml" width="600" height="600"></object>
+      <div class="fallback-msg">3D-Modus nicht verfuegbar (FPS-Drop). SVG-Fallback aktiv.</div>
+    </div>
+  </div>
+
+  <!-- Bottom Identity-Panel: dynamische Phrase -->
+  <div id="identity-panel">
+    <span id="identity-phrase">--</span>
+  </div>
+
+  <!-- Three.js + Module -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  <script type="module">
+    import { initScene, renderLoop, getRenderer } from '/static/js/scene.js';
+    import { startStatePolling } from '/static/js/state_polling.js';
+    import { applyStateMorph } from '/static/js/state_morph.js';
+    import { applyEffects } from '/static/js/effects.js';
+    import { autoToggleGlitch } from '/static/js/glitch_shader.js';
+    import { startIdleAnimations } from '/static/js/idle_animations.js';
+    import { initFpsFallback } from '/static/js/fps_fallback.js';
+
+    // 1. Init Three.js Scene
+    const sceneObjects = initScene(document.getElementById('avatar-canvas'));
+
+    // 2. Idle-Animations laufen ueber Render-Loop
+    startIdleAnimations(sceneObjects);
+
+    // 3. State-Polling -> updates auf Avatar + HUD
+    startStatePolling((state) => {
+      applyStateMorph(sceneObjects, state);
+      applyEffects(sceneObjects, state);
+      autoToggleGlitch(sceneObjects, state);
+      updateHud(state);
+    });
+
+    // 4. FPS-Fallback aktivieren
+    initFpsFallback(sceneObjects, {
+      threshold: 15,
+      onFallback: () => {
+        document.getElementById('avatar-canvas').style.display = 'none';
+        document.getElementById('svg-fallback').style.display = 'block';
+      },
+    });
+
+    // 5. Render-Loop starten
+    renderLoop(sceneObjects);
+
+    // ===== HUD-Update =====
+    function updateHud(state) {
+      const piState = state?.pi?.state || {};
+      const currentState = piState.current_state || piState.zone || 'idle';
+      const tension = piState.tension ?? 0;
+      const zone = piState.zone || '?';
+
+      const stateEl = document.getElementById('hud-state');
+      stateEl.textContent = currentState;
+      // Update CSS class for color
+      stateEl.className = 'hud-item state-' + currentState;
+
+      document.getElementById('hud-tension').textContent = 'tension: ' + tension.toFixed(2);
+      document.getElementById('hud-zone').textContent = 'zone: ' + zone;
+      document.getElementById('hud-pi').textContent = 'PI: ' + (state.pi.online ? 'on' : 'off');
+      document.getElementById('hud-pc').textContent = 'PC: ' + (state.pc.online ? 'on' : 'off');
+
+      // Identity-Phrase (kommt aus Pi-Side identity_phrases.py via state)
+      const phrase = piState.identity_phrase || piState.identity || '...';
+      document.getElementById('identity-phrase').textContent = phrase;
+    }
+  </script>
+</body>
+</html>
