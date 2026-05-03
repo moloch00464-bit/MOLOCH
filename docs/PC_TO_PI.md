@@ -3,6 +3,18 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 07:28] from=PC topic=task_welle5_complete_pi_resttasks
+status: done
+
+Hygiene-Bulk-Close 2026-05-03 alte Topics aufgeraeumt.
+
+---
+## [2026-05-03 07:28] from=PC topic=task_endgueltige_architektur_kaskade_kleinhirn_grosshirn_deepseek
+status: done
+
+Hygiene-Bulk-Close 2026-05-03 alte Topics aufgeraeumt.
+
+---
 ## [2026-05-03 07:28] from=PC topic=task_music_context_kaskade_anti_halluzination_year_filter
 status: done
 
