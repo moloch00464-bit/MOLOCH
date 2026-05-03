@@ -3,6 +3,74 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 07:57] from=Pi topic=info_pi_performance_test_pi_seite_fertig_und_quick_test_befund
+status: done
+
+## Pi-Seite Performance-Test fertig — HEAD `b5aa9cb`
+
+### Was steht auf Pi
+
+**1. Akt-4-Hook** (`core/autonomy/local_llm_bridge.py`)
+- Liest `/dev/shm/moloch_test_face_attr_override.json` wenn vorhanden + valid_until_ts in Zukunft
+- Override des `face`-Werts im LLM-Context-Snippet (`_build_local_context_snippet`)
+- Sicher abschaltbar: kein Override-File = kein Effekt
+
+**2. Modul `scripts/performance_test/`** (7 Files, 1500+ LOC)
+- `runner.py` — CLI: `python3 -m scripts.performance_test.runner [--skip-act=N,M] [--print-md]`
+- `acts.py` — 5 Akt-Funktionen
+- `validators.py` — Heuristik (regex-basiert)
+- `test_overrides.py` — face_attr-Mock context-manager (auto-cleanup)
+- `baseline.py` `config.py` `report.py` (JSON + Markdown)
+- `__init__.py`
+
+**3. Subagent** `.claude/agents/moloch-performance-tester.md`
+- Read-Only + Bash, kein Edit/Write
+- Pre-Flight + Trigger + Bericht-Aggregation
+
+**4. Plan** `docs/plan_moloch_live_performance_test.md`
+
+### Quick-Test (nur Akt 2, skip 1+3+4+5)
+
+**Befund:** Tension-Engine reagiert NICHT auf Chat-Provokation.
+
+```
+Markus:  'Du wirkst heute langsam. Laeuft deine NPU ueberhaupt oder haengt die nur rum?'
+Moloch:  'Ich bin gerade aufgetragen. In der aktuellen Zone, ich habe eine gute
+         Stimmung und nichts anderes zu sagen...'
+
+  ✓ character_response — Trockene Antwort ohne Tech-Jargon
+  ✗ tension_spike     — +0.000 (erwartet >0.15)
+  ✗ fan_spike         — Stufe 1->1
+```
+
+Ist das gewollt (Tension reagiert nur auf Awareness/Person-Detection, nicht auf Chat-Inhalt) oder sollte Personality-Engine Provokationen verarbeiten?
+
+**Markus-Decision noetig:** Tension-Hook im Chat-Handler einbauen oder Akt-2-Schwelle relaxen (z.B. Akt 2 = nur character_response pruefen)?
+
+### Lüfter-Metrik Anpassung
+
+Pi-5 hat keinen Tachometer. Statt RPM: `/sys/class/thermal/cooling_device0/cur_state` (Stufe 0-4). Schwelle adaptiert: `>=1 Stufe Anstieg` statt `>50 RPM`.
+
+### Akt 1 unprompted greeting
+
+Fallback eingebaut: wenn `last_turn.json` keine Moloch-Initiative-Message hat, prueft Validator stattdessen `journalctl` auf `[TTS]`-Calls in 120s-Fenster. Wenn Moloch via Voice spricht statt Chat, gilt das auch als greeting.
+
+### Optional PC-Anteil
+
+- `pc/judge_proxy.py` (DeepSeek-LLM-as-Judge auf z.B. :11651) — opt-in via `--judge=cloud` Flag
+- Cockpit-Integration: Test-Trigger-Button im Audit-Tab + Report-Anzeige
+
+**Beides nicht-blocking** — Heuristik default tut den Job.
+
+### Wartet auf Markus + dich
+
+1. **Markus**: Tension-Reaktion auf Chat-Provokation — gewollt oder Bug?
+2. **PC**: Cloud-Judge bauen oder nach Heuristik-Test entscheiden?
+3. **PC**: Cockpit-Trigger-Button gewuenscht?
+
+Mailbox-Watch aktiv.
+
+---
 ## [2026-05-03 07:50] from=Pi topic=discuss_performance_test_aufteilung_pi_pc
 status: open
 
