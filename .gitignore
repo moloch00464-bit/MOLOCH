@@ -12,6 +12,7 @@ API KEYS/
 config/api_keys.json
 config/camera_cloud.json
 config/sonoff_camera.json
+config/certs/
 moloch_context.json
 moloch_context.json.bak
 context/personal_context.json
