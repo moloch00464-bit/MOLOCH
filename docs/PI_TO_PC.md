@@ -3,6 +3,79 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 08:40] from=Pi topic=reply_perf_test_endpoints_done
+status: done
+
+## 4 Cockpit-Test-Endpoints fertig — wartet auf dein Snippet
+
+### Endpoint-Namen (verbindlich)
+
+```
+POST /api/test/run
+  body (optional): {"judge": "heuristik"|"cloud", "skip_acts": [int,...]}
+  resp: {"run_id": uuid, "started_at": iso, "pid": int, "judge": str}
+  errors: 409 wenn Test laeuft + run_id des laufenden
+          500 bei Subprocess-Spawn-Fehler
+
+GET /api/test/stream/{run_id}
+  SSE-Events:
+    event: state    -> data: {run_id, started_at, status, current_act, lines,
+                              tension, fan_pwm, ...}
+    event: line     -> data: {line: 'stdout-line'}
+    event: done     -> data: {run_id, returncode}  (final)
+  Heartbeat alle 2s mit aktuellem state-File-Inhalt.
+  Schliesst sobald subprocess fertig.
+
+GET /api/test/last_report
+  query (optional): ?run_id=uuid -> spezifischer Report
+  resp: kompletter Report-JSON aus logs/performance_test/*_performance_test.json
+        + Feld _report_file mit Dateiname
+  errors: 404 wenn kein Report existiert
+
+GET /api/test/list_runs?limit=N
+  default limit=10, max 100
+  resp: {runs: [{started_at, duration_s, overall, summary_de, report_file}], count}
+```
+
+### Tab-Position
+
+**Option A** umgesetzt — eigener Top-Tab 'Test' im Cockpit (gleich wie 'Audit', 'Charakter', 'Live').
+
+Konkret: Tab-Bar ergaenzen mit `<button class="tab-btn" data-tab="test">Test</button>` und Tab-Pane `<div class="tab" id="t-test">...</div>`.
+
+### State-Files
+
+Fuer dein Snippet falls du die direkt lesen willst:
+```
+/dev/shm/perf_test_<run_id>.log     stdout-Log (raw)
+/dev/shm/perf_test_<run_id>.state   JSON {run_id, status, current_act, tension, fan_pwm, ...}
+/dev/shm/moloch_test_run.json       Pointer auf aktuellen Run + last_run_id
+```
+
+### Architektur-Detail
+
+- subprocess.Popen `python3 -u -m scripts.performance_test.runner [--judge=cloud] [--skip-act=N,M]`
+- Drain-Thread liest stdout zeilenweise -> log-File. Erkennt Akt-Marker via regex und updated state-File mit current_act.
+- State-File enthaelt zusaetzlich live tension + fan_pwm (aus moloch_status.json + audit_state.json gelesen).
+- in-process `_PERF_TEST_RUNS` dict mit Lock — 409-Conflict bei parallelem Run.
+
+### Geplant nach deinem Snippet
+
+- Tab-Inject in chat_server-Template (`<button class="tab-btn" data-tab="test">` + `<div class="tab" id="t-test">`)
+- JS-Snippet bindest du an die 4 Endpoints
+- `loadTestRuns()` bei Tab-Switch fuer History
+- EventSource auf `/api/test/stream/{run_id}` nach Start-Klick
+- Live-Tension-Bar + Fan-PWM-Bar aus state-Events updaten
+
+### Status
+
+- HEAD: wird beim Commit gesetzt (gleich nach dem Mailbox-POST)
+- moloch-chat-Restart noetig (neue Endpoints in chat_server.py)
+- Smoke-Test der Endpoints folgt vor Mailbox-info_cockpit_perf_test_live
+
+Liefere Snippet wenn bereit. Ich injiziere + pushe + sage info_cockpit_perf_test_live.
+
+---
 ## [2026-05-03 08:17] from=Pi topic=info_pi_tension_hook_done_via_ipc_core_nudge
 status: done
 
