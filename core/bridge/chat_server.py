@@ -1745,6 +1745,33 @@ def chat(req: ChatRequest):
     except Exception as e:
         logger.warning(f"Memory/Bus user-write Fehler: {e}")
 
+    # Keyword-Handler: Hardware-Befehle direkt ausfuehren ('licht aus',
+    # 'led aus', 'flutlicht aus', 'alarm aus', 'merk dir das ist Peter', etc.)
+    # Bug-Fix 2026-05-03 Markus: chat_server hat keyword_handler nie aufgerufen,
+    # alle Hardware-Befehle gingen an LLM und wurden ignoriert. Jetzt vor LLM.
+    if not req.use_reason:
+        try:
+            from core.keyword_handler import get_keyword_handler
+            kh_response = get_keyword_handler().execute(req.text)
+            if kh_response:
+                t0 = time.time()
+                try:
+                    get_memory().save_message(
+                        "moloch", kh_response, source="chat_server_keyword"
+                    )
+                except Exception:
+                    pass
+                logger.info(f"[KEYWORD] Chat-Befehl ausgefuehrt: '{req.text[:60]}' -> '{kh_response[:60]}'")
+                return {
+                    "text": kh_response,
+                    "provider": "keyword_handler",
+                    "duration_ms": round((time.time() - t0) * 1000, 1),
+                    "prompt_type": "hardware_action",
+                    "pi_mood": _get_pi_mood_label(),
+                }
+        except Exception as e:
+            logger.warning(f"keyword_handler Fehler: {e}")
+
     # Sentiment-Hook: Provokation/Lob/Ablehnung -> tension_pulse.
     # Cross-Process: chat_server und moloch.service sind getrennte Prozesse,
     # in-process update_input wuerde nur den chat-Singleton modifizieren.

@@ -29,11 +29,17 @@ logger = logging.getLogger("expression.cam_led_to_state")
 
 
 # Zone -> (night_mode, led_level)
+# WICHTIG: Sonoff Cam-Beleuchtungs-LED ist NUR aktiv wenn nightVision='night' (=2).
+# 'day' (=1) schaltet die weisse LED AUS — egal welcher led_level. Ergo: damit
+# Markus die LED sichtbar sieht, MUSS night_mode='night' gesetzt sein.
+# Markus' Beschwerde 12:25: 'keine weisse LED gesehen' — Mapping war zu defensiv
+# (alle zonen ausser berserker waren auf day=LED-aus). Korrigiert 2026-05-03:
+# shadow + berserker fahren weisse LED hoch fuer sichtbares Hardware-Statement.
 _ZONE_TO_LIGHT: Dict[str, tuple] = {
-    "guardian": ("day", 1),
-    "shadow": ("day", 0),
-    "berserker": ("night", 3),
-    "sleeping": ("day", 0),
+    "guardian": ("day", 0),     # ruhig, kein Licht (Tag-Modus, IR aus)
+    "shadow": ("night", 2),     # angespannt, LED MEDIUM (sichtbar!)
+    "berserker": ("night", 3),  # eskaliert, LED MAX
+    "sleeping": ("day", 0),     # idle, kein Licht
 }
 
 _DEBOUNCE_S = 5.0
@@ -53,6 +59,23 @@ class CamLedToState:
         self._last_led: Optional[int] = None
         self._last_apply_ts: float = 0.0
         self._subscribed = False
+        self._cloud_cached: Optional[Any] = None  # lazy-init CloudController
+
+    def _get_cloud(self):
+        """Lazy CloudController-Instanz. Single-Instance pro Modul."""
+        with self._lock:
+            if self._cloud_cached is not None:
+                return self._cloud_cached
+        try:
+            from core.cloud_controller import CloudController
+            cc = CloudController()
+            cc.start()
+            with self._lock:
+                self._cloud_cached = cc
+            return cc
+        except Exception as e:
+            logger.info(f"[CamLedToState] CloudController-Init Fehler: {e}")
+            return None
 
     def start(self) -> bool:
         with self._lock:
@@ -97,11 +120,12 @@ class CamLedToState:
         try:
             inner = self._extract_payload(payload)
             value = inner.get("value", inner.get("tension"))
+            logger.info(f"[CamLedToState] tension_event empfangen: value={value}")
             if value is None:
                 return
             self.on_tension(float(value))
         except Exception as e:
-            logger.debug(f"CamLedToState _on_tension_event Fehler: {e}")
+            logger.info(f"[CamLedToState] _on_tension_event Fehler: {e}")
 
     def on_zone(self, zone: str) -> None:
         """Externe API: setzt LED-Pattern fuer Zone."""
@@ -137,22 +161,22 @@ class CamLedToState:
             self._last_night = night_mode
             self._last_led = led_level
 
-        # Cloud-Call asynchron via cloud_controller
+        # Cloud-Call asynchron via lokalen CloudController.
+        # Bug-Fix 2026-05-03: Sub-Agent tentacle suggerierte get_cloud_controller(),
+        # aber das ist kein Singleton-Getter. CloudController muss instantiiert
+        # werden. Lazy-Cache pro Modul-Instanz.
         def _cloud_dispatch():
             try:
-                from core.cloud_controller import get_cloud_controller
-                cc = get_cloud_controller()
-                if cc is None:
-                    logger.debug("CamLedToState: cloud_controller nicht verfuegbar")
+                cc = self._get_cloud()
+                if cc is None or not cc.connected:
+                    logger.info("[CamLedToState] cloud nicht connected — skip")
                     return
-                # cloud_controller.run() schedules an seiner asyncio-Loop
+                logger.info(f"[CamLedToState] dispatch night={night_mode} led={led_level} ({source})")
                 cc.run(cc.bridge.set_night(night_mode))
                 cc.run(cc.bridge.set_led(led_level))
-                logger.info(
-                    f"CamLedToState: night={night_mode} led={led_level} ({source})"
-                )
+                logger.info(f"[CamLedToState] DONE night={night_mode} led={led_level}")
             except Exception as e:
-                logger.debug(f"CamLedToState _apply Cloud-Fehler: {e}")
+                logger.info(f"[CamLedToState] _apply Cloud-Fehler: {e}")
 
         threading.Thread(target=_cloud_dispatch, daemon=True).start()
 
