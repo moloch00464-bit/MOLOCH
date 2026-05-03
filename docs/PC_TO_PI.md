@@ -3,6 +3,18 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 07:28] from=PC topic=task_bug_fps_crash_acute_vision_pipeline_kaputt
+status: done
+
+Hygiene-Bulk-Close 2026-05-03 alte Topics aufgeraeumt.
+
+---
+## [2026-05-03 07:28] from=PC topic=task_welle12_17_komplette_audit_maturity_spec
+status: done
+
+Hygiene-Bulk-Close 2026-05-03 alte Topics aufgeraeumt.
+
+---
 ## [2026-05-03 07:24] from=PC topic=task_cockpit_voice_picker_default_on_plus_audit_state_endpoint
 status: open
 
