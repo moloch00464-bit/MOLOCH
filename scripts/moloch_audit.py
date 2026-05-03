@@ -1423,26 +1423,31 @@ def test_hailort_firmware_version():
     except Exception as e:
         return False, f"hailortcli Fehler: {e}"
 
-@auto_test("4 NPU-Worker exakt (Face/Pose/ReID/Depth)", "session19")
+@auto_test("NPU-Worker registriert (Face/Pose/ReID/Depth + optional Hand)", "session19")
 def test_worker_count_exact():
-    """Genau die 4 Session-19-Worker registriert, keine zusaetzlichen.
+    """Pflicht-Worker registriert + optionale Worker erlaubt.
 
-    Filtert Eintraege mit '_'-Prefix (z.B. '_dispatcher' = ROI-Dispatcher,
-    kein NPU-Worker mit Network-Group).
+    Pflicht: FaceWorker/PoseWorker/ReIDWorker/DepthWorker (4)
+    Optional: HandWorker (Welle 22, Markus-Direktive 2026-05-02 hat #24
+              Hand-Erkennung freigegeben + hailo-ollama disabled fuer Slot)
+    Filtert '_'-Prefix-Eintraege (z.B. '_dispatcher' = ROI-Dispatcher).
     """
-    expected = {"FaceWorker", "PoseWorker", "ReIDWorker", "DepthWorker"}
+    required = {"FaceWorker", "PoseWorker", "ReIDWorker", "DepthWorker"}
+    optional = {"HandWorker"}  # 2026-05-02 freigegeben (#24)
     data = read_status()
     if not data:
         return False, "Kein Status"
     raw = set(data.get("worker_health", {}).keys())
-    workers = {w for w in raw if not w.startswith("_")}  # Dispatcher etc. ignorieren
-    extra = workers - expected
-    missing = expected - workers
+    workers = {w for w in raw if not w.startswith("_")}
+    missing = required - workers
+    unknown = workers - required - optional
     if missing:
         return False, f"Fehlt: {','.join(sorted(missing))}"
-    if extra:
-        return False, f"Unerwartet aktiv: {','.join(sorted(extra))} (Slot-Risiko fuer Qwen)"
-    return True, "4/4 erwartete Worker aktiv, keine zusaetzlichen NPU-Worker"
+    if unknown:
+        return False, f"Unerwartet aktiv: {','.join(sorted(unknown))} (Slot-Risiko)"
+    extras_active = workers & optional
+    extras_str = (f" + {','.join(sorted(extras_active))}" if extras_active else "")
+    return True, f"{len(workers)}/{len(required) + len(optional)} Worker aktiv ({len(required)} Pflicht{extras_str})"
 
 @auto_test("llm_profiles.json valide (>=5 Profile)", "session19")
 def test_llm_profiles_valid():
