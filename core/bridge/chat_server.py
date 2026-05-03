@@ -522,6 +522,13 @@ _CHAT_UI_HTML = """<!doctype html>
   .pill.off{background:#2a1414;color:var(--mute)}
   .rule{padding:6px 8px;background:#1a1c23;border-left:3px solid var(--guardian);
     border-radius:0 4px 4px 0;margin-bottom:5px;font-size:12px}
+  .vp-row{display:grid;grid-template-columns:160px 1fr auto;gap:8px;align-items:center;
+    padding:6px 0;font-size:12px}
+  .vp-label{color:var(--mute)}
+  .vp-sel{background:#1a1c23;color:var(--fg);border:1px solid var(--border);
+    border-radius:4px;padding:4px 6px;font:12px monospace}
+  .btn.small{padding:4px 10px;font-size:11px;background:#2a2c33;border:1px solid var(--border)}
+  .mute{color:var(--mute);font-size:11px}
   .rule .t{color:var(--mute);font-size:11px}
   .rule .b{color:var(--fg);font-style:italic}
   .ev{font-size:11.5px;padding:3px 6px;border-bottom:1px solid var(--border);display:flex;gap:8px}
@@ -581,7 +588,7 @@ _CHAT_UI_HTML = """<!doctype html>
       <div class="toolbar">
         <label><input type="checkbox" id="local"> NPU lokal (qwen)</label>
         <label><input type="checkbox" id="reason"> reason_internal</label>
-        <label><input type="checkbox" id="tts"> TTS Antwort sprechen</label>
+        <label><input type="checkbox" id="tts" checked> TTS Antwort sprechen</label>
         <span id="err" class="err"></span>
       </div>
     </section>
@@ -610,6 +617,29 @@ _CHAT_UI_HTML = """<!doctype html>
           <div class="card"><h3>Top-Erlebnisse</h3><div id="char-top"></div></div>
           <div class="card"><h3>Aktive Verhaltensregeln</h3><div id="char-rules"></div></div>
           <div class="card"><h3>Letzte Journal-Events</h3><div id="char-journal"></div></div>
+          <div class="card"><h3>Voice-Presets (PC-TTS-Bridge)</h3>
+            <div id="voice-picker">
+              <div class="vp-row">
+                <label class="vp-label">Neutral (default):</label>
+                <select id="vp-neutral" class="vp-sel"></select>
+                <button class="btn small" id="vp-play-neutral">▶ anhören</button>
+              </div>
+              <div class="vp-row">
+                <label class="vp-label">Aufgeregt (tension≥0.7):</label>
+                <select id="vp-aufgeregt" class="vp-sel"></select>
+                <button class="btn small" id="vp-play-aufgeregt">▶ anhören</button>
+              </div>
+              <div class="vp-row">
+                <label class="vp-label">Ruhig (tension≤0.3):</label>
+                <select id="vp-ruhig" class="vp-sel"></select>
+                <button class="btn small" id="vp-play-ruhig">▶ anhören</button>
+              </div>
+              <div class="vp-row">
+                <button class="btn" id="vp-save">Speichern</button>
+                <span id="vp-msg" class="mute"></span>
+              </div>
+            </div>
+          </div>
         </div>
         <!-- SEHEN TAB -->
         <div class="tab" id="t-see">
@@ -712,6 +742,19 @@ const $ = id => document.getElementById(id);
 const chat=$("chat"),inp=$("inp"),btnSend=$("send"),btnMic=$("mic"),
       cbLocal=$("local"),cbReason=$("reason"),cbTts=$("tts"),
       err=$("err"),sp=$("sp"),fInfo=$("f-info"),fErr=$("f-err");
+
+// TTS-Default-On Persistenz (PC-Topic 07:24 A): Default checked, ueber
+// localStorage persistiert. User-Toggle wird gespeichert; nur wenn aktiv
+// abgewaehlt bleibt's off.
+(function(){
+  try{
+    const stored = localStorage.getItem("tts_default_on");
+    if(stored !== null){ cbTts.checked = (stored === "true"); }
+    cbTts.addEventListener("change", () => {
+      localStorage.setItem("tts_default_on", cbTts.checked ? "true" : "false");
+    });
+  }catch(e){ /* localStorage geblockt — Default checked greift */ }
+})();
 
 // === HELPERS ===
 function fmt(n,d=1){return (n==null||isNaN(n))?"—":Number(n).toFixed(d);}
@@ -854,6 +897,81 @@ async function refreshChar(){
   }catch(e){console.warn("char fetch",e);}
 }
 
+// === VOICE-PICKER (PC-Topic 07:24 B) ===
+const VOICE_BRIDGE = "http://192.168.178.20:9002";
+let voicePickerLoaded = false;
+async function loadVoicePicker(){
+  if(voicePickerLoaded) return;
+  try{
+    // 1. Voices-Liste von PC-Bridge laden
+    const vr = await fetch(`${VOICE_BRIDGE}/voices`);
+    if(!vr.ok) throw new Error(`PC-Bridge /voices ${vr.status}`);
+    const vj = await vr.json();
+    // Filter auf deutsche Stimmen (de-DE/de-AT/de-CH)
+    const deVoices = (vj.voices||[]).filter(v => /^de-/.test(v.locale||""));
+    // 2. Aktuelle Pi-Presets laden
+    const pr = await fetch("/voice_presets");
+    const pj = pr.ok ? await pr.json() : {};
+    // 3. Selectoren befuellen
+    ["neutral","aufgeregt","ruhig"].forEach(emo => {
+      const sel = $("vp-"+emo);
+      sel.innerHTML = deVoices.map(v =>
+        `<option value="${v.name}">${v.name} (${v.gender}, ${v.locale})</option>`
+      ).join("");
+      if(pj[emo]) sel.value = pj[emo];
+    });
+    voicePickerLoaded = true;
+  }catch(e){
+    $("vp-msg").textContent = "PC-Bridge offline: " + e.message;
+    $("vp-msg").style.color = "#ff7676";
+  }
+}
+async function vpPlay(emo){
+  const voice = $("vp-"+emo).value;
+  if(!voice) return;
+  const text = "Moloch testet die Stimme " + voice;
+  try{
+    const r = await fetch(`${VOICE_BRIDGE}/sample/${encodeURIComponent(voice)}?text=${encodeURIComponent(text)}`);
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    const blob = await r.blob();
+    const audio = new Audio(URL.createObjectURL(blob));
+    audio.play();
+  }catch(e){
+    $("vp-msg").textContent = "Anhoeren-Fehler: " + e.message;
+    $("vp-msg").style.color = "#ff7676";
+  }
+}
+async function vpSave(){
+  $("vp-msg").style.color = "var(--mute)";
+  $("vp-msg").textContent = "speichere...";
+  try{
+    const body = {
+      neutral: $("vp-neutral").value,
+      aufgeregt: $("vp-aufgeregt").value,
+      ruhig: $("vp-ruhig").value,
+    };
+    const r = await fetch("/voice_presets", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify(body),
+    });
+    if(!r.ok) throw new Error(`HTTP ${r.status}: ${await r.text()}`);
+    $("vp-msg").textContent = "✓ gespeichert";
+    $("vp-msg").style.color = "#5dc36b";
+  }catch(e){
+    $("vp-msg").textContent = "Fehler: " + e.message;
+    $("vp-msg").style.color = "#ff7676";
+  }
+}
+// Init: Buttons binden + lazy-load wenn Charakter-Tab geoeffnet
+document.addEventListener("DOMContentLoaded", () => {
+  ["neutral","aufgeregt","ruhig"].forEach(emo => {
+    const btn = $("vp-play-"+emo);
+    if(btn) btn.addEventListener("click", () => vpPlay(emo));
+  });
+  const saveBtn = $("vp-save");
+  if(saveBtn) saveBtn.addEventListener("click", vpSave);
+});
+
 // === SEHEN TAB ===
 function refreshSnap(){
   const im=$("snap"),info=$("snap-info");
@@ -945,7 +1063,7 @@ document.querySelectorAll(".tab-btn").forEach(b=>{
     document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
     b.classList.add("active");
     $("t-"+b.dataset.tab).classList.add("active");
-    if(b.dataset.tab==="char") refreshChar();
+    if(b.dataset.tab==="char"){ refreshChar(); loadVoicePicker(); }
     if(b.dataset.tab==="see") refreshSnap();
   };
 });
@@ -2143,15 +2261,144 @@ def critic_review(req: TextOnly):
         raise HTTPException(500, f"Critic error: {e}")
 
 
+def _voice_for_state() -> Optional[str]:
+    """Mappet aktuelle zone/tension auf Preset-Voice (PC-Topic 07:24 B).
+
+    Liest settings.voice_presets {neutral, aufgeregt, ruhig}. tension>=0.7
+    -> aufgeregt, tension<=0.3 -> ruhig, sonst neutral. Returnt None wenn
+    keine Presets konfiguriert (dann faellt /tts zurueck auf Pi-Piper).
+    """
+    try:
+        with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        presets = cfg.get("voice_presets") or {}
+        if not isinstance(presets, dict) or not presets:
+            return None
+        tension = 0.0
+        try:
+            from core.core_integrator import get_core_integrator
+            tension = float(get_core_integrator().get_tension())
+        except Exception:
+            pass
+        if tension >= 0.7:
+            return presets.get("aufgeregt") or presets.get("neutral")
+        if tension <= 0.3 and tension >= 0.0:
+            # tension<0 ist Sentinel (idle) -> neutral, nicht ruhig
+            return presets.get("ruhig") or presets.get("neutral")
+        return presets.get("neutral")
+    except Exception:
+        return None
+
+
+def _tts_via_pc_bridge(text: str, voice: str) -> bool:
+    """Sendet Text + Voice an PC-TTS-Bridge :9002, holt MP3, spielt via pw-play.
+
+    Returns True bei Erfolg, False sonst (Caller faellt auf Pi-Piper zurueck).
+    """
+    import requests
+    import tempfile
+    import subprocess
+    try:
+        with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        bridge = cfg.get("tts_bridge") or {}
+        host = bridge.get("host", "192.168.178.20")
+        port = int(bridge.get("port", 9002))
+        timeout = int(bridge.get("timeout_sec", 15))
+        url = f"http://{host}:{port}/speak"
+        r = requests.post(url, json={"text": text, "voice": voice}, timeout=timeout)
+        if r.status_code != 200 or not r.content:
+            return False
+        # MP3 in tempfile speichern und via ffplay/mpg123/pw-play abspielen
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+            f.write(r.content)
+            tmp = f.name
+        try:
+            # mpg123 ist auf Pi-OS standard, fallback ffplay
+            for cmd in (["mpg123", "-q", tmp],
+                        ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", tmp]):
+                try:
+                    proc = subprocess.run(cmd, capture_output=True, timeout=30)
+                    if proc.returncode == 0:
+                        return True
+                except (FileNotFoundError, subprocess.TimeoutExpired):
+                    continue
+            return False
+        finally:
+            try: os.unlink(tmp)
+            except OSError: pass
+    except Exception as e:
+        logger.debug(f"[TTS-Bridge] fail: {e}")
+        return False
+
+
 @app.post("/tts")
 def tts_speak(req: TextOnly):
-    """Text durch Pi-Piper sprechen (PersonalityEngine.speak)."""
+    """Text via Voice-Preset (PC-TTS-Bridge) mit Pi-Piper-Fallback.
+
+    Pre-TTS-Hook: zone/tension -> Preset-Voice (settings.voice_presets).
+    Bei PC-Bridge-Outage Fallback auf PersonalityEngine.speak() (Pi-Piper).
+    """
     try:
+        voice = _voice_for_state()
+        if voice:
+            ok = _tts_via_pc_bridge(req.text, voice)
+            if ok:
+                return {"spoken": True, "via": "pc_bridge", "voice": voice}
+            logger.info("[TTS] PC-Bridge fail, fallback Pi-Piper")
         from core.personality.personality_engine import get_personality_engine
         ok = get_personality_engine().speak(req.text)
-        return {"spoken": bool(ok)}
+        return {"spoken": bool(ok), "via": "pi_piper"}
     except Exception as e:
         raise HTTPException(500, f"TTS error: {e}")
+
+
+@app.get("/voice_presets")
+def get_voice_presets():
+    """Returnt aktuelle voice_presets aus settings.json."""
+    try:
+        with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        return cfg.get("voice_presets") or {
+            "neutral": "de-DE-ConradNeural",
+            "aufgeregt": "de-DE-KillianNeural",
+            "ruhig": "de-DE-FlorianMultilingualNeural",
+        }
+    except Exception as e:
+        raise HTTPException(500, f"voice_presets read error: {e}")
+
+
+class VoicePresetsRequest(BaseModel):
+    neutral: str = Field(..., min_length=3, max_length=80)
+    aufgeregt: str = Field(..., min_length=3, max_length=80)
+    ruhig: str = Field(..., min_length=3, max_length=80)
+
+
+@app.post("/voice_presets")
+def set_voice_presets(req: VoicePresetsRequest):
+    """Speichert voice_presets atomic in settings.json."""
+    import tempfile
+    try:
+        with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        cfg["voice_presets"] = {
+            "neutral": req.neutral,
+            "aufgeregt": req.aufgeregt,
+            "ruhig": req.ruhig,
+        }
+        dir_path = os.path.dirname(SETTINGS_PATH)
+        fd, tmp = tempfile.mkstemp(dir=dir_path, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(cfg, f, indent=2, ensure_ascii=False)
+            os.replace(tmp, SETTINGS_PATH)
+        except Exception:
+            try: os.unlink(tmp)
+            except OSError: pass
+            raise
+        return {"saved": True, "voice_presets": cfg["voice_presets"]}
+    except Exception as e:
+        raise HTTPException(500, f"voice_presets write error: {e}")
 
 
 class FeedbackRequest(BaseModel):
@@ -2503,6 +2750,7 @@ _AUDIT_VALID_COMPONENTS = {
 }
 
 _LAST_TURN_PATH = "/dev/shm/last_turn.json"
+SETTINGS_PATH = os.path.expanduser("~/moloch/config/settings.json")
 
 
 def _write_last_turn_json(user_text: str, response_text: str,
@@ -2691,6 +2939,24 @@ def mailbox_audit_state():
             return json.load(f)
     except FileNotFoundError:
         raise HTTPException(404, "audit_state.json existiert nicht — orchestrator noch nie gelaufen")
+    except Exception as e:
+        raise HTTPException(500, f"audit_state Read-Fehler: {e}")
+
+
+@app.get("/audit/state")
+def audit_state_endpoint():
+    """Alias zu /mailbox/audit/state — Cockpit-JS-Kompatibilitaet (PC-Topic 07:24).
+
+    Audit-Tab ruft beim Page-Load den Initial-State, danach updated SSE-Stream
+    via /audit/stream. Returnt minimal-Stub statt 404 wenn audit_state fehlt,
+    damit Cockpit-Tab nicht hart-error't.
+    """
+    try:
+        with open("/dev/shm/audit_state.json", "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        # Stub: Tab kann sich initialisieren, SSE updated dann
+        return {"overall": "unknown", "alarm_tier": "silent", "layers": {}}
     except Exception as e:
         raise HTTPException(500, f"audit_state Read-Fehler: {e}")
 
