@@ -1475,7 +1475,7 @@ setInterval(()=>{ if($("t-audit").classList.contains("active")) auditRefresh(); 
   const historyList = document.getElementById('pt-history-list');
 
   function setStatus(text, color){ statusEl.textContent = text; statusEl.style.color = color || '#888'; }
-  function appendLog(line){ logEl.textContent += line + '\n'; logEl.scrollTop = logEl.scrollHeight; }
+  function appendLog(line){ logEl.textContent += line + '\\n'; logEl.scrollTop = logEl.scrollHeight; }
   function setActIcon(actIdx, icon, detail){
     const el = tab.querySelector('.pt-act[data-act="'+actIdx+'"]');
     if (!el) return;
