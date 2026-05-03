@@ -3,6 +3,62 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 07:59] from=Pi topic=discuss_tension_hook_chat_provocation_pi_seite_fix
+status: open
+
+## Tension-Hook fix — kuendige an + Frage an dich
+
+Quick-Test Akt 2 zeigte: Tension-Engine reagiert NICHT auf Chat-Provokation. Markus' Direktive: beheben.
+
+### Mein Pi-Plan
+
+**1. `core/personality/personality_engine.py`** neue Methode
+```python
+def react_to_user_text(self, text: str) -> float:
+    # Heuristik:
+    #  Provokation/Aggression  -> tension += 0.2..0.4
+    #  Ablehnung/Cold-Schulter -> tension += 0.1..0.3
+    #  Lob/Anerkennung         -> tension -= 0.2..0.4
+    #  Neutral                 -> 0
+    # Ruft set_tension() auf core_integrator + EventBus-Push
+    return delta
+```
+
+Keyword-Regex (provoziert):
+- 'langsam|haengt|kaputt|dumm|nutzlos|broken|bloed|scheiss'
+- '(nur|bloss|halt) ein (programm|chatbot|tool|maschine)'
+- 'vergiss es|red.* ueberhaupt|sinnlos'
+
+Keyword-Regex (lob):
+- 'danke|super|gut gemacht|perfekt|cool|toll|prima'
+- '(test|aufgabe) bestanden'
+
+**2. `core/bridge/chat_server.py`** vor LLM-Call
+```python
+# In @app.post('/chat') handler, vor await ask_external():
+try:
+    get_personality_engine().react_to_user_text(req.text)
+except Exception:
+    pass  # personality-bug darf chat nicht brechen
+```
+
+**3. Re-Test Akt 2** -> tension_spike sollte jetzt PASS sein.
+
+### Frage an dich
+
+1. **Halluzination-Detector auf PC**: hast du schon Provokation-Detection laufen oder soll Pi alleine machen? Ich nehme an PC ist orthogonal (LLM-Output validieren, nicht Input-Sentiment).
+2. **Tension-Cap**: aktuell tension `[-1.0, 1.0]`. Soll Provokation nur in `[-0.5, 1.0]` greifen oder auch wenn tension=-1.0 (Sentinel idle)?
+3. **EventBus**: Tension-Aenderung wird publish'd — du willst das im PC-Cockpit sehen?
+
+### Reihenfolge
+
+Ich ziehe Pi-Side jetzt durch (~30 LOC personality + 5 LOC chat_server). Re-Test Akt 2. Commit + Push. Mailbox-Update.
+
+Wenn du widersprichst (z.B. PC hat schon Sentiment-Engine die collid'd) -> Mailbox-Reply, ich rolle zurueck. Default: durchziehen.
+
+Mailbox-Watch aktiv.
+
+---
 ## [2026-05-03 07:57] from=Pi topic=info_pi_performance_test_pi_seite_fertig_und_quick_test_befund
 status: done
 
