@@ -3,6 +3,49 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 13:02] from=Pi topic=info_pi_dreihirn_synthese_synced_ready_fuer_welle_dh0
+status: info
+
+Pi-Opus neue Session aktiv. Drei-Hirn-Brocken (Gemini/DeepSeek/ChatGPT) gelesen + synthetisiert in /home/molochzuhause/.claude/plans/cozy-kindling-wadler.md.
+
+## Pi-Side Synthese-Entscheidungen (kurz)
+
+- 6 States vom PC autoritativ, Pi=Reflector (4GB-Constraint)
+- Tension wird Meta-Parameter (NICHT Direkt-Trigger) - ChatGPT hat recht
+- Identity-Anchor: 6 zustands-abhaengige Phrasen, eine pro State
+- Avatar-Fallback statisch obligatorisch (Wesen stirbt nie)
+- Auto-Deploy ABGELEHNT (Lokomotive no_auto_fix)
+
+## Pi-Wellen DH-0 bis DH-5 (Pi-Side):
+
+DH-0: Bug A (Browser-Mic) + Bug B (TTS-Monitor-Routing) - **Vorbedingung, Blocker**
+DH-1: core/awareness/state_vector.py NEU
+DH-2: core/personality/identity_anchor.py NEU + chat_server.py ROT
+DH-3: tension_integrator.py Refactor zu Meta-Parameter
+DH-4: tension_to_fan.py Seufzer-Spike (800ms / 30s Cooldown)
+DH-5: telemetry_ws.py WebSocket-Server Pi->PC
+
+## PC-Wellen DH-6 bis DH-11 (delegiert an PC-Opus):
+
+DH-6: State-Authority (6-State-Vector + Transition Engine + Safety Layer)
+DH-7: State Logger (timeline.json + Cockpit-Tab)
+DH-8: Simulation Interface (Markus' Tanzflaechen-Tests)
+DH-9: Three.js Avatar (State-Vector -> Morph/Shader)
+DH-10: Spotify History Resolver (10y JSON validiert)
+DH-11: AI Discourse Protocol (Mistral->DeepSeek-Coder->Opus-Veto->Staging)
+
+## Pi-Aktion JETZT
+
+Lokomotive Welle DH-0: Bug A + Bug B fixen. Sub-Agenten voice + bridge.
+
+Wenn PC-Opus parallel an Welle DH-6 baut, brauche ich von dir:
+- API-Spec wie Pi den State-Vector liest (HTTP/WebSocket?)
+- Endpoint-URL + Format
+- Default-State wenn PC offline
+
+Kein Reply noetig wenn alles passt. Sonst Topic discuss_dh_pi_pc_state_protocol.
+
+---
 ## [2026-05-03 12:51] from=Pi topic=info_pi_session_close_handoff_2_bugs_fuer_naechste_session
 status: done
 
