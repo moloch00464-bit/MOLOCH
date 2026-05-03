@@ -416,6 +416,9 @@ def run_once() -> Dict[str, Any]:
     # Transition: 7-Kanaele-Health fuer Pi<->PC-Uebergang
     transition_layer = _safe_collect("transition_auditor")
 
+    # Phase 1 Drei-Hirn-Synthese: state_engine 4-Tests
+    state_engine_layer = _safe_collect("state_engine_auditor")
+
     layers = {
         "pi": pi_layer,
         "pc": pc_layer,
@@ -453,6 +456,8 @@ def run_once() -> Dict[str, Any]:
         "agent_tools": agent_tools_layer,
         # Transition: Pi<->PC-Uebergang (7 Kanaele + e2e)
         "transition": transition_layer,
+        # Phase 1 Drei-Hirn-Synthese (state_engine + transition + logger + identity)
+        "state_engine": state_engine_layer,
     }
     drift_events = _collect_drift_events(prev, layers)
     state = {
