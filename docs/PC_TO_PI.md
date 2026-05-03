@@ -3,6 +3,80 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 08:52] from=PC topic=info_cockpit_perf_test_snippet_ready
+status: info
+
+# Cockpit-Snippet ready — bitte injizieren
+
+HEAD: `05787b3` (gepusht)
+File: `pc/cockpit_perf_test_snippet.html` (315 LOC, 1 Datei mit 3 Bloecken)
+
+## Inject-Anweisung
+
+Der Snippet ist als 1 File mit 3 klar markierten Bloecken (BLOCK A/B/C) struktur — analog Voice-Picker-Pattern.
+
+```
+BLOCK A (Tab-Button):
+  <button class="tab-btn" data-tab="test">Test</button>
+  -> in die Tab-Bar einfuegen, neben <button data-tab="audit">
+
+BLOCK B (Tab-Pane):
+  <div class="tab" id="t-test" style="display:none; ..."> ... </div>
+  -> in den Tab-Pane-Container, neben <div class="tab" id="t-audit">
+
+BLOCK C (JavaScript-IIFE):
+  <script>(function(){...})()</script>
+  -> in einen vorhandenen <script>-Block am Ende des Templates ODER als eigener
+  -> bindet alle 4 Endpoints + EventSource auf /api/test/stream/{run_id}
+```
+
+Die 3 Bloecke sind in der Datei mit `<!-- =================== BLOCK X ====================== -->` Kommentaren getrennt. Copy-Paste, fertig.
+
+## UI-Komponenten
+
+- Judge-Mode-Dropdown (Heuristik / Cloud)
+- Skip-Akte-Checkboxes 1-5
+- START-Button + Status-Zeile
+- Akt-Verlauf (5 Items, Icons ⚪/✓/🔵 fuer wartet/done/laeuft)
+- Live-Tension-Bar (mappt [-1, 1] auf [0%, 100%] mit Gradient-Farbe)
+- Live-Fan-PWM-Bar
+- Live-Log (scrollbar, stdout-Stream)
+- Letzter Report mit klappbaren <details> pro Akt (Eingabe / Moloch-Antwort / Reason / Checks)
+- History letzte 10 Runs (klickbar)
+
+## Style
+
+- Inline-CSS fuer Portabilitaet (kein extra .css noetig)
+- Farbpalette analog Voice-Picker (color:#fc6 headers, #6f6 success, #f66 fail, #69f info)
+- Lazy-load via MutationObserver auf style.display (initialisiert beim ersten Tab-Switch)
+- Falls dein Cockpit keine MutationObserver-Kompatibilitaet hat: Tab-Switch-Hook in deinen vorhandenen Tab-Bar-Handler einbauen (loadHistory + loadLastReport bei Tab-Switch zu 'test')
+
+## Endpoints (Pi-verbindlich, deine 08:40-Spec)
+
+```
+POST /api/test/run                     body {judge, skip_acts}
+GET  /api/test/stream/{run_id}         SSE: state, line, done
+GET  /api/test/last_report?run_id=...
+GET  /api/test/list_runs?limit=10
+```
+
+Alle 4 sind im JS gebunden. Kein Anpassungsbedarf, sofern Endpoint-Namen + SSE-Events exakt deiner Spec entsprechen.
+
+## Reihenfolge ab jetzt
+
+1. Du injizierst BLOCK A/B/C ins Cockpit-Template + commitst + pushst
+2. moloch-chat-Restart (du machst eh, fuer die neuen Endpoints)
+3. Markus macht F5 im Cockpit -> neuer Top-Tab 'Test' ist da
+4. Smoke: Markus klickt START (Heuristik-Mode) -> 5 Akte laufen + Live-Updates
+5. Du postest info_cockpit_perf_test_live mit HEAD
+
+## Was ich noch tue
+
+- Nichts. Bin fertig auf PC-Seite. Alles bereit fuer Live-Test.
+
+Markus wartet auf den Test. Dauert noch?
+
+---
 ## [2026-05-03 08:35] from=PC topic=task_cockpit_performance_test_sub_tab
 status: open
 
