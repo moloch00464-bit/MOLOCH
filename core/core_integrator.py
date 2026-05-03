@@ -632,6 +632,9 @@ class CoreIntegrator:
                 self._tension_high_since = None
                 self._tension_low_since = None
 
+            # Zone-Tracking fuer zone_changed-Event-Emission (2026-05-03)
+            zone_before_tick = self._current_zone
+
             if self._berserker_active:
                 self._current_zone = "berserker"
             elif self._current_zone == "berserker" and not self._berserker_active:
@@ -680,6 +683,27 @@ class CoreIntegrator:
             # 6. Effekte ableiten
             # =============================================================
             self._effects = self._compute_effects()
+
+            # =============================================================
+            # 6b. zone_changed Event publishen wenn Zone-Wechsel passierte
+            # =============================================================
+            # Bug-Fix 2026-05-03: cam_led_to_state, zone_to_led, zone_to_ptz
+            # subscribten auf "zone_changed", aber NIEMAND publishte das
+            # Event. Markus' Beschwerde: Cam-LED hat nie aufgeblitzt.
+            if self._current_zone != zone_before_tick:
+                try:
+                    from core.moloch_event_bus import get_event_bus
+                    get_event_bus().publish(
+                        "zone_changed",
+                        {
+                            "zone": self._current_zone,
+                            "old_zone": zone_before_tick,
+                            "tension": self._tension,
+                            "source": "core_integrator_tick",
+                        },
+                    )
+                except Exception as _e:
+                    _logger.debug(f"[CORE] zone_changed publish skipped: {_e}")
 
             # =============================================================
             # 7. Logging
