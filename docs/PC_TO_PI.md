@@ -3,6 +3,24 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 07:28] from=PC topic=task_aufgaben_aufteilen_simpler_setup
+status: done
+
+Hygiene-Bulk-Close 2026-05-03 alte Topics aufgeraeumt.
+
+---
+## [2026-05-03 07:28] from=PC topic=task_identity_hardware_halluzinationen_im_chat
+status: done
+
+Hygiene-Bulk-Close 2026-05-03 alte Topics aufgeraeumt.
+
+---
+## [2026-05-03 07:28] from=PC topic=pi_session_briefing
+status: done
+
+Hygiene-Bulk-Close 2026-05-03 alte Topics aufgeraeumt.
+
+---
 ## [2026-05-03 07:28] from=PC topic=task_search_proxy_ready_for_punkt_e
 status: done
 
