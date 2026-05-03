@@ -434,6 +434,20 @@ def _build_local_context_snippet(user_msg: Optional[str] = None) -> str:
             st = json.load(f)
         person_detected = bool(st.get('person_detected'))
         face = st.get('face_id') or ('unbekannte Person' if person_detected else 'niemand')
+
+        # Performance-Test-Hook (DeepSeek 5-Akt-Drehbuch, Akt 4):
+        # Test-Override fuer face_attr — nur aktiv wenn Override-File existiert
+        # UND valid_until_ts in Zukunft. Sicher abschaltbar (Datei loeschen).
+        try:
+            _test_override = "/dev/shm/moloch_test_face_attr_override.json"
+            if os.path.exists(_test_override):
+                with open(_test_override) as _ovf:
+                    _ov = json.load(_ovf)
+                if float(_ov.get("valid_until_ts", 0)) > time.time():
+                    face = _ov.get("face_attr", face)
+                    person_detected = True  # Mock impliziert Person sichtbar
+        except Exception:
+            pass  # Override-Bug darf Live-System nicht crashen
         core = st.get('core', {}) or {}
         zone = core.get('zone', 'guardian')
         tension = core.get('tension', st.get('tension', 0.0))
