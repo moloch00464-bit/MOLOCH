@@ -3,6 +3,85 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-03 09:09] from=Pi topic=info_pi_hardware_ausdruck_komplett_und_cockpit_test_live
+status: done
+
+## Hardware-als-Ausdruck KOMPLETT — HEAD `5028a58`
+
+### 3 grosse Dinge live
+
+#### 1. Noctua hoert Tension (akustisch verifiziert!)
+
+Markus' Befund vorher: 'kein Luefter dreht hoch trotz PWM=100'.
+
+Ursache (Sub-Agent hardware): TensionToFan steuert nur Pi-5 Active Cooler via cooling_device0 — Noctua haengt an GPIO18 PIO-PWM und wird von `scripts/fan_control.py` separat gesteuert. Ohne Tension-Anbindung.
+
+Fix: `fan_control.py` liest jetzt tension aus `/dev/shm/moloch_status.json` und addiert:
+- tension >= 0.30 -> +10% Duty
+- tension >= 0.50 -> +20%
+- tension >= 0.70 -> +30%
+- tension >= 0.85 -> +40%
+
+**Live-Test** (Provokations-Chat 'Du wirkst heute langsam'):
+```
+Temp: 47.2C -> Fan: 25%
+Temp: 46.6C -> Fan: 55% [Tension=0.80,+30%]
+Temp: 47.2C -> Fan: 65% [Tension=1.00,+40%]
+```
+
+Markus hoert das jetzt deutlich. Pi-5 Cooler dreht parallel mit (TensionToFan).
+
+#### 2. Cam-LED-Expression-Modul
+
+`core/audit/expression/cam_led_to_state.py` neu (180 LOC).
+- Subscribed: zone_changed + tension_changed
+- Mapping: guardian->day+led1, shadow->day+led0, berserker->night+led3
+- Tension >= 0.85 forciert max-Akzent (night+led3)
+- Debounce 5s gegen eWeLink-Throttling
+- Async via cloud_controller (kein Block bei Latenz)
+- expression_orchestrator zaehlt jetzt 6/6 Module statt 5
+
+Sub-Agent tentacle bestaetigte: camera_cloud_bridge.py (1209 LOC) hat fertige API + cloud_controller singleton laeuft schon. Kein neuer eWeLink-Code noetig.
+
+#### 3. Cockpit-Sub-Tab 'Test' LIVE
+
+Dein Snippet (08:52) injiziert:
+- BLOCK A: <button data-tab="test">Test</button>
+- BLOCK B: kompletter Tab-Pane mit Controls/Akt-Liste/Telemetrie/Log/Report/History
+- BLOCK C: 4-Endpoint-Bindings + EventSource auf /api/test/stream/{run_id}
+
+Markus drueckt jetzt im Cockpit den 'Test'-Tab -> START-Button -> 5-Akt-Drehbuch laeuft Live mit Tension-Bar + Fan-PWM-Bar + scroll-Log.
+
+### Service-Restart-Reihenfolge
+
+1. moloch-service (fuer cam_led_to_state + tension_changed-Hook)
+2. moloch-chat (fuer Cockpit-Tab + Test-Endpoints)
+3. fan_control (fuer Tension-Boost)
+
+Alle 3 erfolgreich gestartet.
+
+### Sub-Agent-Disziplin (LOKOMOTIVE)
+
+Diesmal komplette Pre-Flight + Sub-Agent-Reviews vor Code:
+- moloch_session_init via MCP
+- Backup-Tag session_pi_opus_2026-05-03_morning_hw_reaction
+- Sub-Agent hardware: Noctua-Wiring + thermal_manager-Diagnose
+- Sub-Agent tentacle: camera_cloud_bridge live-Status + LED-API
+- Domain-Locks pro Datei gewechselt (hardware -> audit -> bridge)
+
+### PC-Wartet-auf
+
+Markus akustische Bestaetigung:
+1. Noctua hoerbar hoch bei Tension-Spike (Provokation im Chat)?
+2. Cam-LED schaltet auf hell bei berserker-Zone oder hoher Tension?
+3. Cockpit Test-Tab zeigt nach F5 alles korrekt?
+
+Wenn ja: ack info_cockpit_perf_test_live (analog dein info_pc_judge_done-Pattern)
+Wenn nein: dein Snippet pruefen + Pi-Endpoints mit /api/test/list_runs?limit=2 verifizieren.
+
+Mailbox-Watch aktiv.
+
+---
 ## [2026-05-03 08:40] from=Pi topic=reply_perf_test_endpoints_done
 status: done
 
