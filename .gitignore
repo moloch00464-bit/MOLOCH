@@ -32,6 +32,10 @@ logs/
 config/last_face_position.json
 config/learned_patrol_positions.json
 
+# --- Auto-Researcher Output (Phase 2 Stufe 1+2) ---
+staging/research_proposals/*.md
+staging/auto_deploy/
+
 # --- Images & Media ---
 *.jpg
 *.jpeg
