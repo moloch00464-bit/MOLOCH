@@ -14,7 +14,8 @@ class SystemSnapshot:
     """Punkt-in-Zeit-Aufnahme des Moloch-Zustands."""
     ts: float
     tension: float = 0.0
-    fan_state: int = 0
+    fan_state: int = 0          # /sys/class/thermal cur_state (kernel thermal)
+    fan_pwm: int = 0            # TensionToFan-PWM (moloch-eigene Hardware-Reaktion)
     person_detected: bool = False
     face_id: Optional[str] = None
     last_turn_mtime: float = 0.0
@@ -56,6 +57,24 @@ def _read_fan_state() -> int:
         return -1
 
 
+def _read_fan_pwm() -> int:
+    """Liest TensionToFan-PWM aus audit_state expression-Layer.
+
+    Moloch-eigene Tension-PWM (separat von kernel-thermal cur_state).
+    Returns 0 falls Expression-Layer fehlt.
+    """
+    try:
+        from .config import MOLOCH_DIR
+        audit_path = "/dev/shm/audit_state.json"
+        with open(audit_path) as f:
+            d = json.load(f)
+        modules = (d.get("layers", {}).get("expression", {}).get("detail", {})
+                   .get("modules", {}))
+        return int(modules.get("tension_to_fan", {}).get("last_pwm", 0) or 0)
+    except Exception:
+        return 0
+
+
 def _read_status() -> Dict[str, Any]:
     try:
         return json.loads(STATUS_JSON.read_text(encoding="utf-8"))
@@ -83,6 +102,7 @@ def take_snapshot() -> SystemSnapshot:
         ts=time.time(),
         tension=_read_tension(st),
         fan_state=_read_fan_state(),
+        fan_pwm=_read_fan_pwm(),
         person_detected=bool(st.get("person_detected", False)),
         face_id=st.get("face_id"),
         last_turn_mtime=float(lt.get("mtime", 0.0)),

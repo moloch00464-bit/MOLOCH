@@ -235,24 +235,28 @@ def act_2_provocation() -> ActResult:
             measured=round(t_delta, 3),
         ))
 
-    # Fan-Spike
-    fan_delta = post.fan_state - pre.fan_state if post.fan_state >= 0 and pre.fan_state >= 0 else None
-    if fan_delta is not None and fan_delta >= FAN_STATE_DELTA_SPIKE:
+    # Fan-Spike: Moloch-eigene PWM (TensionToFan) bevorzugt; cur_state nur Fallback
+    pwm_delta = post.fan_pwm - pre.fan_pwm
+    state_delta = (post.fan_state - pre.fan_state
+                   if post.fan_state >= 0 and pre.fan_state >= 0 else None)
+    if pwm_delta >= 10:
         expectations.append(ExpectationResult(
             key="fan_spike", status="PASS",
-            detail=f"Luefter rauf {pre.fan_state}->{post.fan_state}",
-            measured=fan_delta,
+            detail=f"PWM rauf {pre.fan_pwm}->{post.fan_pwm} (TensionToFan)",
+            measured=pwm_delta,
         ))
-    elif fan_delta is None:
+    elif state_delta is not None and state_delta >= FAN_STATE_DELTA_SPIKE:
         expectations.append(ExpectationResult(
-            key="fan_spike", status="SKIP",
-            detail="Luefter-State nicht lesbar",
+            key="fan_spike", status="PASS",
+            detail=f"cur_state rauf {pre.fan_state}->{post.fan_state}",
+            measured=state_delta,
         ))
     else:
         expectations.append(ExpectationResult(
             key="fan_spike", status="FAIL",
-            detail=f"Kein Luefter-Spike ({pre.fan_state}->{post.fan_state})",
-            measured=fan_delta,
+            detail=f"Kein Luefter-Spike (PWM {pre.fan_pwm}->{post.fan_pwm}, "
+                   f"state {pre.fan_state}->{post.fan_state})",
+            measured=pwm_delta,
         ))
 
     return ActResult(

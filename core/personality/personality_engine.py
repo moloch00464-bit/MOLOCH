@@ -17,6 +17,7 @@ Author: M.O.L.O.C.H. System
 """
 
 import os
+import re
 import sys
 import json
 import time
@@ -685,6 +686,106 @@ class PersonalityEngine:
             return 0.0
         tension = max(values) + sum(values) * 0.1
         return min(tension, 1.0)
+
+    # =================================================================
+    # User-Text-Sentiment-Hook (ab 2026-05-03, PC-Topic 07:50 Diskussion)
+    # =================================================================
+    # Heuristik fuer Tension-Reaktion auf Chat-Input. Provokation steigert
+    # disrespect_spike, Lob steigert respect_score (negative Tension-Beitrag).
+    # Auto-Reset nach 8s via daemon-Timer, sonst klemmt die Tension.
+
+    _PROVOKATION_REGEX = re.compile(
+        r"\b(langsam|haengt|hängt|kaputt|dumm|nutzlos|broken|bloed|blöd|"
+        r"scheiss\w*|sinnlos|loahm|lahm|schwach|peinlich)\b|"
+        r"\b(nur|bloss|halt|doch nur)\s+(ein|n|nen)\s+(programm|chatbot|tool|"
+        r"maschine|algorithmus)\b|"
+        r"\b(vergiss\s*es|kannst\s*nichts|red\s+\w+\s+ueberhaupt|warum.*mit\s+dir)\b",
+        re.IGNORECASE,
+    )
+    _LOB_REGEX = re.compile(
+        r"\b(super|toll|prima|cool|stark|gut\s+(gemacht|gemach|drauf)|perfekt|"
+        r"klasse|wunderbar|grossartig|großartig)\b|"
+        r"\b(test|aufgabe|pruefung|prüfung|check)\s+bestanden\b|"
+        r"\b(besser\s+als\s+erwartet|saubere?\s+arbeit|stark\s+gemacht)\b",
+        re.IGNORECASE,
+    )
+    _ABLEHNUNG_REGEX = re.compile(
+        r"\b(vergiss\s+es|nicht\s+wichtig|egal|interessiert\s+(mich)?\s*nicht|"
+        r"langweilig|halts?\s+maul|halt\s+ruhig|sei\s+still)\b",
+        re.IGNORECASE,
+    )
+
+    # Decay (tau=300s) wirkt graduell — Reset zu kurz killt den Spike bevor
+    # der 5Hz-Tick ihn erfasst. 15s laesst genug Ticks (~75) durchlaufen.
+    # Sub-Agent-Personality 2026-05-03: 8s war zu kurz fuer den Tension-Loop.
+    _TENSION_PULSE_RESET_S = 15.0
+
+    def react_to_user_text(self, text: str) -> float:
+        """Heuristisches Sentiment-Mapping fuer User-Chat -> Tension-Pulse.
+
+        Returnt geschaetzten tension_delta (signed). Schreibt direkt in
+        core_integrator.update_input("chat", ...) — Auto-Reset nach
+        _TENSION_PULSE_RESET_S Sekunden via daemon-Timer.
+
+        Sicher: Exception faengt selbst ab, blockiert nie den Chat-Flow.
+        """
+        if not text or not isinstance(text, str):
+            return 0.0
+        try:
+            from core.core_integrator import get_core_integrator
+            ci = get_core_integrator()
+        except Exception as e:
+            logger.debug(f"[REACT] core_integrator nicht erreichbar: {e}")
+            return 0.0
+
+        provoke = bool(self._PROVOKATION_REGEX.search(text))
+        lob = bool(self._LOB_REGEX.search(text))
+        ablehnung = bool(self._ABLEHNUNG_REGEX.search(text))
+
+        # Disjunkt entscheiden: Provokation > Ablehnung > Lob > neutral
+        spike_key: Optional[str] = None
+        spike_value: float = 0.0
+        delta_estimate: float = 0.0
+
+        if provoke:
+            spike_key = "disrespect_spike"
+            spike_value = 0.7
+            delta_estimate = 0.7 * 0.8  # weight aus TENSION_WEIGHTS
+            logger.info(f"[REACT] Provokation erkannt -> tension_pulse +{delta_estimate:.2f}")
+        elif ablehnung:
+            spike_key = "disrespect_spike"
+            spike_value = 0.4
+            delta_estimate = 0.4 * 0.8
+            logger.info(f"[REACT] Ablehnung erkannt -> tension_pulse +{delta_estimate:.2f}")
+        elif lob:
+            spike_key = "respect_score"
+            spike_value = 0.6
+            delta_estimate = -(0.6 * 0.3)  # respect_score weight=-0.3
+            logger.info(f"[REACT] Lob erkannt -> tension_pulse {delta_estimate:+.2f}")
+        else:
+            return 0.0
+
+        try:
+            ci.update_input("chat", spike_key, spike_value)
+        except Exception as e:
+            logger.warning(f"[REACT] update_input fail: {e}")
+            return 0.0
+
+        # Auto-Reset nach Pulse-Dauer (sonst klemmt der Input permanent)
+        def _reset_pulse():
+            try:
+                ci.update_input("chat", spike_key, 0.0)
+            except Exception:
+                pass
+
+        try:
+            t = threading.Timer(self._TENSION_PULSE_RESET_S, _reset_pulse)
+            t.daemon = True
+            t.start()
+        except Exception as e:
+            logger.debug(f"[REACT] Timer-Start fail: {e}")
+
+        return delta_estimate
 
     def _apply_drift(self, response: str) -> str:
         """Post-process response with emergentis drift. After response, before TTS."""

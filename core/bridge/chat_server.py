@@ -1502,6 +1502,26 @@ def chat(req: ChatRequest):
     except Exception as e:
         logger.warning(f"Memory/Bus user-write Fehler: {e}")
 
+    # Sentiment-Hook: Provokation/Lob/Ablehnung -> tension_pulse.
+    # Cross-Process: chat_server und moloch.service sind getrennte Prozesse,
+    # in-process update_input wuerde nur den chat-Singleton modifizieren.
+    # Stattdessen: IPC-Cmd-File via etablierter core_nudge-Action (gepollt
+    # vom moloch.service alle 200ms via IPCRouter -> CoreIntegrator).
+    # Pattern wie _trigger_spotify_year (chat_server schreibt IPC).
+    try:
+        from core.personality.personality_engine import get_personality_engine
+        spike_value = get_personality_engine().react_to_user_text(req.text)
+        if spike_value and abs(spike_value) > 0.05:
+            # disrespect_spike (Provokation) ODER respect_score (Lob)
+            key = "respect_score" if spike_value < 0 else "disrespect_spike"
+            cmd = {"action": "core_nudge", "key": key, "value": abs(spike_value)}
+            cmd_path = f"/tmp/moloch_cmd_{int(time.time() * 1000)}.json"
+            with open(cmd_path, "w", encoding="utf-8") as f:
+                json.dump(cmd, f)
+            logger.info(f"[BRIDGE] tension-IPC: {key}={abs(spike_value):.2f}")
+    except Exception as e:
+        logger.debug(f"react_to_user_text Hook fehlgeschlagen: {e}")
+
     # Welle 6 Schritt 7 + Welle 7 Schritt 2.3 + Welle 12 Bug B: Music-IPC-Shortcuts.
     # Wenn music_query mit Year-Match ODER Playlist-Pattern ODER Action-Phrase
     # erkannt wird, triggern wir Spotify direkt via IPC statt durch die LLM-Kaskade.
