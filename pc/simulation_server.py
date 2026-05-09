@@ -9,8 +9,10 @@ Echte Replay-Logik (Event-Stream + State-Pipeline-Feed) folgt in iterativem Ausb
 from __future__ import annotations
 
 import os
+import threading
 import time
 import uuid
+from collections import OrderedDict
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -23,9 +25,11 @@ SCENARIOS_DIR = Path(
         str(Path(__file__).parent / "simulation" / "scenarios"),
     )
 )
+MAX_RUNS_KEPT = 100  # FIFO-Cap gegen Memory-Leak bei langer Laufzeit / Spam
 
-app = FastAPI(title="MOLOCH Simulation Server", version="0.1")
-_runs: dict[str, dict] = {}
+app = FastAPI(title="MOLOCH Simulation Server", version="0.2")
+_runs: "OrderedDict[str, dict]" = OrderedDict()
+_runs_lock = threading.Lock()
 
 
 @app.get("/health")
@@ -53,7 +57,7 @@ def run_scenario(name: str) -> dict:
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     run_id = uuid.uuid4().hex[:12]
-    _runs[run_id] = {
+    entry = {
         "run_id": run_id,
         "scenario": name,
         "n_events": n_events,
@@ -61,19 +65,26 @@ def run_scenario(name: str) -> dict:
         "started_ts": time.time(),
         "status": "skeleton-not-yet-executing",
     }
-    return _runs[run_id]
+    with _runs_lock:
+        _runs[run_id] = entry
+        while len(_runs) > MAX_RUNS_KEPT:
+            _runs.popitem(last=False)
+    return entry
 
 
 @app.get("/runs/{run_id}")
 def get_run(run_id: str) -> dict:
-    if run_id not in _runs:
+    with _runs_lock:
+        entry = _runs.get(run_id)
+    if entry is None:
         raise HTTPException(status_code=404, detail="run_id not found")
-    return _runs[run_id]
+    return entry
 
 
 @app.get("/runs")
 def list_runs() -> dict:
-    return {"runs": list(_runs.values())}
+    with _runs_lock:
+        return {"runs": list(_runs.values())}
 
 
 if __name__ == "__main__":

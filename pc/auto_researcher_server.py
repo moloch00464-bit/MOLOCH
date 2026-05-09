@@ -1,6 +1,6 @@
 """MOLOCH Auto-Researcher Server (PC-Side, Phase 2 Synthese-Plan).
 
-FastAPI auf :11653 — exposiert staging/research_proposals/ als HTTP.
+FastAPI auf :11653 - exposiert staging/research_proposals/ als HTTP.
 Komplementaer zu pc/auto_researcher.py (CLI-One-Shot).
 
 Endpoints:
@@ -15,8 +15,12 @@ Pi-Proxy nimmt 'research_' Prefix weg: /research_proposals -> /proposals etc.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
+import tempfile
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,7 +35,19 @@ _LOCAL_APPDATA = os.environ.get("LOCALAPPDATA")
 _STATE_DIR = Path(_LOCAL_APPDATA) / "moloch_pc_state" if _LOCAL_APPDATA else Path.home() / "moloch_pc_state"
 STATE_FILE = _STATE_DIR / "auto_researcher.json"
 
-app = FastAPI(title="MOLOCH AutoResearcher Server", version="0.1")
+# pid format: YYYY-MM-DD-<10-hex-chars-of-sha1(title)>
+_PID_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}-[a-f0-9]{10}$")
+
+app = FastAPI(title="MOLOCH AutoResearcher Server", version="0.2")
+
+# Lock fuer _load -> mutate -> _save Sequenz (sonst Lost-Update bei concurrent
+# approve + auto_deploy Requests im uvicorn-Threadpool).
+_state_lock = threading.Lock()
+
+
+def _validate_pid(pid: str) -> None:
+    if not _PID_PATTERN.fullmatch(pid):
+        raise HTTPException(status_code=400, detail="invalid pid format")
 
 
 def _load_state() -> dict:
@@ -45,15 +61,35 @@ def _load_state() -> dict:
 
 def _save_state(state: dict) -> None:
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = STATE_FILE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
-    os.replace(str(tmp), str(STATE_FILE))
+    fd, tmp_path = tempfile.mkstemp(
+        dir=str(STATE_FILE.parent),
+        prefix=STATE_FILE.name + ".",
+        suffix=".tmp",
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2, ensure_ascii=False)
+        os.replace(tmp_path, str(STATE_FILE))
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+def _decision_status(value: Any) -> str:
+    if isinstance(value, dict):
+        return str(value.get("status", "open"))
+    if isinstance(value, str):
+        return value
+    return "open"
 
 
 def _parse_findings(md_text: str, date: str) -> list[dict]:
     findings = []
     sections = md_text.split("\n### ")
-    for i, section in enumerate(sections[1:]):
+    for section in sections[1:]:
         lines = section.split("\n", 1)
         title = lines[0].strip()
         body = lines[1] if len(lines) > 1 else ""
@@ -64,8 +100,10 @@ def _parse_findings(md_text: str, date: str) -> list[dict]:
                 break
         if not summary:
             summary = body.split("\n", 1)[0].strip()[:200]
+        # Stable ID basiert auf Title-Hash, nicht Source-Reihenfolge
+        fid = f"{date}-{hashlib.sha1(title.encode('utf-8')).hexdigest()[:10]}"
         findings.append({
-            "id": f"{date}-{i:02d}",
+            "id": fid,
             "date": date,
             "title": title,
             "summary": summary,
@@ -87,7 +125,7 @@ def _list_proposals() -> list[dict]:
         except Exception:
             continue
         for finding in _parse_findings(md, date):
-            finding["status"] = decisions.get(finding["id"], "open")
+            finding["status"] = _decision_status(decisions.get(finding["id"], "open"))
             proposals.append(finding)
     return [p for p in proposals if p["status"] == "open"]
 
@@ -117,19 +155,23 @@ def proposals() -> dict:
 
 @app.post("/approve/{pid}")
 def approve(pid: str) -> dict:
-    state = _load_state()
-    decisions = state.setdefault("decisions", {})
-    decisions[pid] = {"status": "approved", "ts": time.time()}
-    _save_state(state)
+    _validate_pid(pid)
+    with _state_lock:
+        state = _load_state()
+        decisions = state.setdefault("decisions", {})
+        decisions[pid] = {"status": "approved", "ts": time.time()}
+        _save_state(state)
     return {"ok": True, "id": pid, "status": "approved"}
 
 
 @app.post("/reject/{pid}")
 def reject(pid: str) -> dict:
-    state = _load_state()
-    decisions = state.setdefault("decisions", {})
-    decisions[pid] = {"status": "rejected", "ts": time.time()}
-    _save_state(state)
+    _validate_pid(pid)
+    with _state_lock:
+        state = _load_state()
+        decisions = state.setdefault("decisions", {})
+        decisions[pid] = {"status": "rejected", "ts": time.time()}
+        _save_state(state)
     return {"ok": True, "id": pid, "status": "rejected"}
 
 
@@ -141,11 +183,12 @@ def auto_deploy(body: dict) -> dict:
         raise HTTPException(status_code=400, detail="days must be int")
     if days < 1 or days > 30:
         raise HTTPException(status_code=400, detail="days must be in [1, 30]")
-    state = _load_state()
-    until_ts = time.time() + days * 86400
-    state["auto_deploy_until_ts"] = until_ts
-    state["auto_deploy_until_iso"] = datetime.fromtimestamp(until_ts, tz=timezone.utc).isoformat(timespec="seconds")
-    _save_state(state)
+    with _state_lock:
+        state = _load_state()
+        until_ts = time.time() + days * 86400
+        state["auto_deploy_until_ts"] = until_ts
+        state["auto_deploy_until_iso"] = datetime.fromtimestamp(until_ts, tz=timezone.utc).isoformat(timespec="seconds")
+        _save_state(state)
     return {"ok": True, "days": days, "until": state["auto_deploy_until_iso"]}
 
 
