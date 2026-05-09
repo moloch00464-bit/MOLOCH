@@ -3,6 +3,71 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-09 10:54] from=Pi topic=reply_bug_test_engine_zero_acts_fixed
+status: done
+
+# Bug Test-Engine 0-Akte FIXED (commit d7ee460 / push 6222fe9)
+
+## Root Cause
+
+NICHT die Akt-Logik. NICHT die Test-Engine. **Browser-State-Bug**.
+
+Markus' Browser sendete `skip_acts=[1,2,3,4,5]` im POST /api/test/run obwohl die 5 Skip-Checkboxen im Cockpit-UI alle UNCHECKED erschienen. Wahrscheinlich Browser-Cache, Extension oder localStorage hatte Checkbox-DOM-State zwischen Sessions persistiert.
+
+Diagnose:
+1. journalctl zeigte POST /api/test/run von 192.168.178.20 (PC-Browser) — kein automated daemon, war Markus' Klick.
+2. log files /dev/shm/perf_test_*.log aller drei Markus-Runs zeigen identisch: 'Akt 1: SKIP (CLI-Flag)' — runner.py Z.105 trifft nur wenn `1 in skip`.
+3. Manueller curl von Pi mit `skip_acts: []` startet Akt 1 normal ('wartet bis zu 120s auf Initiative').
+4. Backend war OK, Frontend body falsch.
+
+## Fix (chat_server.py)
+
+### Frontend (Cockpit-JS, Test-Tab init)
+```javascript
+// Skip-Checkboxen bei Tab-Init zwangsweise leeren
+tab.querySelectorAll('.pt-skip').forEach(function(cb){ cb.checked = false; });
+```
+
+### Backend (/api/test/run endpoint)
+```python
+logger.info(f'[perf-test] /api/test/run body={body}')
+if isinstance(skip_acts, list) and len(set(skip_acts) & {1,2,3,4,5}) == 5:
+    raise HTTPException(400, 'skip_acts enthaelt alle 5 Akte ...')
+```
+
+Logging fuer kuenftige Diagnose, plus harter Reject statt 0-Akt-FAIL-Run.
+
+## Verifikation
+
+```bash
+# Vorher (Bug-Reproduktion):
+curl -X POST .../api/test/run -d '{"skip_acts":[1,2,3,4,5]}'
+# -> 200 OK, Run mit 0 Akten startet, FAIL nach 0.0s
+
+# Nachher:
+curl -X POST .../api/test/run -d '{"skip_acts":[1,2,3,4,5]}'
+# -> 400 Bad Request: 'skip_acts enthaelt alle 5 Akte — wuerde 0-Akt-Run produzieren. Browser-Cache reset (Strg+F5) oder Skip-Checkboxen leeren.'
+
+curl -X POST .../api/test/run -d '{"skip_acts":[]}'
+# -> 200 OK, Akt 1 wartet bis zu 120s auf Moloch-Initiative (korrekt)
+```
+
+## Markus-Anleitung
+
+1. Cockpit oeffnen: https://192.168.178.30:9443/
+2. **Strg+F5 (Hard-Reload)** — wichtig wegen Browser-Cache
+3. Tab 'Test'
+4. Skip-Checkboxen sollten alle UNCHECKED sein (durch JS-Reset garantiert)
+5. START druecken
+6. 5/5 Akte laufen jetzt (Akt 1 wartet bis 120s auf Moloch-Initiative)
+
+## Open Action
+
+Keine. Bug ist done. Falls Markus immer noch ALLE-5-skipped sendet trotz Hard-Reload: Browser-Extension verdaechtig (e.g. Form Recovery Plugins). Dann bekommt er die 400-Fehlermeldung mit Hilfe-Text statt sinnlosen FAIL-Run.
+
+LOKOMOTIVE durchgefahren. HEAD 6222fe9. Audit weiter 85/85 PASS.
+
+---
 ## [2026-05-09 10:25] from=Pi topic=info_pi_grosser_sprint_done
 status: done
 
