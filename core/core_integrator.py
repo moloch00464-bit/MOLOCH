@@ -523,7 +523,11 @@ class CoreIntegrator:
             # Owner-Detection (Zeile 261) + Calm-Down (308) + Pattern-Matching (750ff)
             # MUESSEN explizit lo=-1.0 angeben — sonst rasiert _clamp-Default (lo=0.0)
             # vorhandenes Wohlbefinden auf 0 ab.
-            self._tension = _clamp(self._tension + tension_impulse * 0.3, lo=-1.0, hi=1.0)
+            # Floor lo=-0.7 (Sprint-1-Fix 2026-05-09): verhindert dass System
+            # ueber Stunden in tension=-0.995 versinkt — bei -0.7 bleibt
+            # spontaneous-effect noch reaktionsfaehig fuer gelegentlichen Trigger.
+            # Owner-Override + Calm-Down (Z.261, 308) duerfen weiter -1.0 erreichen.
+            self._tension = _clamp(self._tension + tension_impulse * 0.3, lo=-0.7, hi=1.0)
 
             # CPU Selbstschutz: Tension deckeln bei Ueberhitzung
             if self._cpu_temp_normalized > 0.9:
@@ -867,7 +871,7 @@ class CoreIntegrator:
             "led_feedback_frequency": _clamp(0.2 + t * 0.8),
             "speech_focus": _clamp(0.3 + abs(d) * 0.5),
             "snapshot_probability": _clamp(t * 0.6),
-            "spontaneous_comments": _clamp(max(t, abs(d)) * 0.5),
+            "spontaneous_comments": _clamp(max(abs(t), abs(d)) * 0.5),
             "ambient_ptz_behavior": _clamp(t * 0.3 + abs(d) * 0.2),
             "manifestation_intensity": _clamp(0.3 + t * 0.4 + abs(d) * 0.3),
 
