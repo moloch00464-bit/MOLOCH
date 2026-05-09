@@ -3127,6 +3127,21 @@ def proxy_research_auto_deploy(payload: Dict[str, Any] = Body(default={})):
         raise HTTPException(502, f"research_auto_deploy proxy fail: {e}")
 
 
+@app.post("/research_apply/{prop_id}")
+def proxy_research_apply(prop_id: str):
+    """Pi-Proxy zu PC auto_researcher /apply/<id> (manueller Apply, Stufe 2 v0.3)."""
+    try:
+        base = _pc_service_url("auto_researcher", "192.168.178.20", 11653)
+        r = requests.post(f"{base}/apply/{prop_id}", timeout=15)
+        if r.status_code in (404, 501):
+            raise HTTPException(501, "auto_researcher /apply endpoint not yet live")
+        if r.status_code != 200:
+            raise HTTPException(r.status_code, "research apply upstream error")
+        return Response(content=r.content, media_type="application/json")
+    except requests.RequestException as e:
+        raise HTTPException(502, f"research_apply proxy fail: {e}")
+
+
 @app.get("/voice_presets")
 def get_voice_presets():
     """Returnt aktuelle voice_presets aus settings.json."""
