@@ -36,6 +36,17 @@
     </div>
   </div>
 
+  <!-- Toggle-Button fuer Reference-Bild (Stufe 1 vs Stufe 2 vs beides) -->
+  <button id="reference-toggle" onclick="(function(){
+    const b = document.body;
+    const cur = b.classList.contains('ref-hidden') ? 'hidden'
+              : b.classList.contains('ref-prominent') ? 'prominent' : 'background';
+    b.classList.remove('ref-hidden','ref-prominent');
+    if (cur === 'background') { b.classList.add('ref-prominent'); document.getElementById('reference-toggle').textContent = '👁 Bild prominent'; }
+    else if (cur === 'prominent') { b.classList.add('ref-hidden'); document.getElementById('reference-toggle').textContent = '🚫 Bild aus'; }
+    else { document.getElementById('reference-toggle').textContent = '👻 Bild hinten'; }
+  })();">👻 Bild hinten</button>
+
   <!-- Bottom Identity-Panel: dynamische Phrase -->
   <div id="identity-panel">
     <span id="identity-phrase">--</span>

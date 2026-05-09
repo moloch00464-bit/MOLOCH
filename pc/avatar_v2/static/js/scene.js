@@ -1,6 +1,8 @@
 // MOLOCH Avatar 2.0 — Three.js Scene Setup
-// Phase 1: Placeholder-Geometry (IcosahedronGeometry).
-// Phase 3: MOLOCH_v1.glb Modell-Loader (TODO).
+// Stufe 2 (2026-05-09): Procedural Low-Poly Head von procedural_head.js
+// Stufe 3 (TODO): MOLOCH_v1.glb Modell-Loader
+
+import { createMolochHead } from '/static/js/procedural_head.js';
 
 export function initScene(canvas) {
   const scene = new THREE.Scene();
@@ -32,20 +34,25 @@ export function initScene(canvas) {
   rimLight.position.set(-3, -2, 3);
   scene.add(rimLight);
 
-  // ===== Avatar-Mesh (Phase-1 Placeholder) =====
-  // Spaeter Modell-Load: const loader = new GLTFLoader(); loader.load('MOLOCH_v1.glb', ...);
-  // Jetzt: Icosahedron als Stand-In, mit eigenem Shader-Material
-  const geometry = new THREE.IcosahedronGeometry(1.5, 4);
-  const material = new THREE.MeshStandardMaterial({
-    color: 0x66aaff,
-    emissive: 0x113355,
-    emissiveIntensity: 0.4,
-    roughness: 0.3,
-    metalness: 0.7,
-    flatShading: true,
-  });
-  const avatar = new THREE.Mesh(geometry, material);
+  // ===== Avatar Stufe 2: Procedural Low-Poly Head (3D-Modell) =====
+  // Markus' Wunsch: GPU-gerendertes 3D-Modell statt 2D-Bild.
+  // procedural_head.js baut Kopf aus Three.js Primitives (Sphere/Cone/Torus/Cylinder)
+  // mit IcosahedronGeometry detail=2 fuer Low-Poly-Look.
+  const moloch = createMolochHead();
+  const avatar = moloch.group;
+  const material = moloch.material;  // Face-Material - state_morph schreibt emissive hier
+  const geometry = null;  // Group hat keine einzelne Geometry, ungenutzt
+  avatar.scale.setScalar(1.4);
+  avatar.position.y = 0.3;
   scene.add(avatar);
+
+  // Expose ALLE Materialien fuer effects/morph
+  const allMaterials = [
+    material,
+    moloch.hairMaterial,
+    moloch.mouthMaterial,
+    ...moloch.eyeMaterials,
+  ];
 
   // ===== Particle Aura (Phase 1: Sterne) =====
   const particleCount = 600;
@@ -78,6 +85,10 @@ export function initScene(canvas) {
   return {
     scene, camera, renderer,
     avatar, material, geometry,
+    allMaterials,             // alle Materialien fuer effects/morph
+    eyeMaterials: moloch.eyeMaterials,
+    hairMaterial: moloch.hairMaterial,
+    mouthMaterial: moloch.mouthMaterial,
     particles, particleMaterial,
     keyLight, rimLight, ambient,
     clock: new THREE.Clock(),
