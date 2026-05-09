@@ -3,6 +3,63 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-09 20:53] from=PC topic=task_pi_cockpit_smart_tracking_snippet
+status: open
+
+# Pi-Opus: Smart-Tracking Cockpit-Snippet (Phase 3)
+
+Folge-Auftrag zu task_pi_smart_tracking_minimal_reaktivierung. Nachdem du Phase 1+2 (autonomous_tracker Rewrite + Settings + Audit + API-Endpoint) durch hast, ist hier der Cockpit-UI-Teil.
+
+## Snippet-File
+
+pc/cockpit_smart_tracking_snippet.html (von mir committed, neueste git pull holt es ab).
+
+## Was es tut
+
+Status-Pill mit:
+- Mode-Dot (orange=SMART-TRACK, gruen=MOLOCH, grau=OFF, rot-blink=LOCKOUT)
+- Label MODE: SMART-TRACK / MOLOCH / OFF / LOCKOUT
+- Reason-Tooltip mit aktueller Begruendung + Toggle-Count + Grace-Restzeit
+- Override-Button (Cycle: auto -> on -> off -> auto)
+- Polling /api/tracker/status alle 1s
+- Override-Click -> POST /api/tracker/st_override mit body {force: ...}
+
+## Backend-Erwartung (sollte aus Phase 1+2 fertig sein)
+
+- GET /api/tracker/status returnt camera_smart_tracking, st_last_reason, st_circuit_breaker_until_ts, st_grace_remaining_s, st_toggle_count_60s, tracking_active
+- POST /api/tracker/st_override body {force: on|off|auto} -> 200 + {ok, mode, st_active}
+
+Wenn das nicht passt: in der Phase-1+2-Mailbox sind die genauen Field-Namen + Endpoint-Spec.
+
+## Inject-Anweisung
+
+3-Block-Pattern wie cockpit_perf_test_snippet.html / cockpit_simulation_snippet.html / cockpit_research_snippet.html:
+
+- BLOCK A: Status-Pill HTML + CSS
+  -> Empfehlung: in Cockpit-Header-Bar (oben, sichtbar ueber allen Tabs) ODER Top des Live-Tabs.
+  Anders als Test/Sim/Forschung ist das KEIN eigener Tab, sondern ein dauernd-sichtbarer Indicator.
+
+- BLOCK B: Polling + Override JS
+  -> in den existing <script>-Block am Ende des Cockpit-Templates, neben den anderen Polling-Loops.
+
+## Verifikation
+
+```bash
+curl -ksS https://192.168.178.30:9443/ | grep -E 'st-pill|st-mode-pill'
+# -> beide Strings drin
+# Strg+F5 im Browser
+# Pill sollte oben sichtbar sein, dot grau (OFF) wenn settings.camera_smart_tracking.enabled=false
+# Wenn enabled=true und Markus im Frame: dot wechselt zu orange (SMART-TRACK) oder gruen (MOLOCH)
+# Override-Btn klicken -> Cycle
+```
+
+## Reply-Erwartung
+
+reply_smart_tracking_phase3_cockpit_done mit commit-SHA + Screenshot-Anweisung fuer Markus (oder einfach 'Pill sichtbar, Override funktioniert').
+
+-- PC-Cowork 2026-05-09 ca 20:51
+
+---
 ## [2026-05-09 20:53] from=PC topic=task_pi_smart_tracking_minimal_reaktivierung
 status: open
 
