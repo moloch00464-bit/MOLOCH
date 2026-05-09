@@ -456,6 +456,15 @@ class AutonomousTracker:
         self._camera_smart_tracking_on = False  # Kamera-eigenes Smart-Tracking aktiv?
         self._last_face_save_time = 0.0  # Throttle: max alle 10s speichern
 
+        # Smart-Tracking (Sonoff CAM-PT2 kamera-internes ST) Minimal-Reaktivierung 2026-05-09
+        # — vorher seit 2026-03-30 permanent geblockt, jetzt mit Schutz-Schichten:
+        #   Master-Toggle, Person-Gate, Hysterese, Circuit-Breaker, Failsafe.
+        self._st_config = self._load_st_config()
+        self._st_last_change_t = 0.0
+        self._st_toggle_history: list = []
+        self._st_circuit_broken_until = 0.0
+        self._st_last_reason = ""
+        self._st_force_override = "auto"  # 'auto' | 'on' | 'off'
         # ST-Bewegungslernen: Kamera-Positionen aufzeichnen
         self._st_learner = STMovementLearner()
 
@@ -1162,6 +1171,12 @@ class AutonomousTracker:
             loop_start = time.time()
 
             try:
+                # Smart-Tracking Person-Grace-Check (~1Hz) — schaltet ST aus
+                # wenn Person zu lange weg (cfg.person_grace_seconds), auch
+                # wenn Tracker gerade nicht active ist.
+                if self.stats["cycles"] % 5 == 0:
+                    self._check_st_person_grace()
+
                 if self.tracking_active:
                     # Alle 5 Zyklen (~1x/s): Parameter vom CoreIntegrator anpassen
                     if self.stats["cycles"] % 5 == 0:
@@ -2054,25 +2069,174 @@ class AutonomousTracker:
         self._enable_camera_smart_tracking(False)
         return True
 
-    def _enable_camera_smart_tracking(self, on: bool):
-        """Sonoff-eigenes Smart-Tracking — DEAKTIVIERT.
+    def _check_st_person_grace(self):
+        """1Hz-Hook: schaltet ST aus wenn Person seit >grace_seconds nicht da.
 
-        Smart Tracking kaempft mit Moloch-Tracking und verursacht:
-        - Nervöses Kamera-Hin-und-Her (Toggle-Schleife)
-        - Mögliche RTSP-Stream-Störungen bei jedem Umschalten
-        - Szenario-Wechsel die Valve-Transitions triggern
-        Bleibt AUS bis Moloch-Tracking stabil genug ist (2026-03-30).
+        Greift unabhaengig von der existing Smart-Switch-Logik als zusaetzliches
+        Sicherheitsnetz. Cockpit-Override 'on' schlaegt das (kein Auto-Off
+        wenn Markus explizit eingeschaltet hat).
         """
-        # ST komplett deaktiviert — Moloch trackt allein
-        if self._camera_smart_tracking_on:
-            try:
-                if self.camera and hasattr(self.camera, 'cloud_bridge') and self.camera.cloud_bridge:
+        if self._st_force_override == "on":
+            return  # Override erzwingt ST AN
+        if not self._camera_smart_tracking_on:
+            return  # bereits aus
+        cfg = self._st_config
+        if not cfg.get("active_only_when_person_in_frame", True):
+            return  # Feature deaktiviert
+        last_person_ts = float(getattr(self, "last_detection_time", 0.0))
+        if last_person_ts <= 0:
+            return  # noch nie Person gesehen — defensiv nicht ausschalten
+        elapsed = time.time() - last_person_ts
+        if elapsed > cfg["person_grace_seconds"]:
+            self._enable_camera_smart_tracking(False, reason="person_grace_expired")
+
+    def _st_grace_remaining_s(self) -> float:
+        """Verbleibende Person-Grace-Zeit (s) bis ST automatisch aus geht.
+
+        > 0 wenn person grace aktiv. 0 wenn keine Person je gesehen oder
+        Grace abgelaufen.
+        """
+        cfg = getattr(self, "_st_config", None) or {}
+        grace = cfg.get("person_grace_seconds", 300)
+        last_person_ts = float(getattr(self, "last_detection_time", 0.0))
+        if last_person_ts <= 0:
+            return 0.0
+        elapsed = time.time() - last_person_ts
+        remaining = grace - elapsed
+        return max(0.0, round(remaining, 1))
+
+    def _load_st_config(self) -> dict:
+        """Liest config/settings.json camera_smart_tracking-Block mit Defaults."""
+        defaults = {
+            "enabled": False,
+            "active_only_when_person_in_frame": True,
+            "person_grace_seconds": 300,
+            "min_hold_on_s": 5.0,
+            "min_hold_off_s": 8.0,
+            "max_toggles_per_minute": 4,
+            "circuit_breaker_lockout_s": 300.0,
+            "rtsp_reconnect_max_per_minute": 2,
+            "failsafe_use_last_tracking_pos": True,
+            "log_decisions": True,
+        }
+        try:
+            import json as _json
+            from pathlib import Path as _Path
+            p = _Path(__file__).resolve().parent.parent.parent / "config" / "settings.json"
+            with open(p, "r", encoding="utf-8") as f:
+                cfg = _json.load(f)
+            user = cfg.get("camera_smart_tracking") or {}
+            defaults.update({k: user[k] for k in defaults if k in user})
+        except Exception as _e:
+            logger.warning(f"[ST] _load_st_config Fehler, Defaults: {_e}")
+        return defaults
+
+    def set_st_force_override(self, mode: str) -> str:
+        """Externer Override-Schalter (Cockpit-Override-Button).
+
+        mode = 'on' | 'off' | 'auto'. Returnt aktiven mode-String.
+        'on'/'off' uebersteuern Hysterese + Circuit-Breaker + Person-Gate.
+        'auto' gibt die Steuerung an die Smart-Switch-Logik zurueck.
+        """
+        if mode not in ("on", "off", "auto"):
+            return self._st_force_override
+        self._st_force_override = mode
+        if mode == "on":
+            self._enable_camera_smart_tracking(True, reason="cockpit_override_on")
+        elif mode == "off":
+            self._enable_camera_smart_tracking(False, reason="cockpit_override_off")
+        return self._st_force_override
+
+    def _enable_camera_smart_tracking(self, on: bool, reason: str = ""):
+        """Smart-Tracking-Switch mit Master-Toggle, Person-Gate, Hysterese,
+        Circuit-Breaker, OFF-Failsafe (Pi-Reaktivierung 2026-05-09).
+
+        Vorher (2026-03-30): permanent deaktiviert wegen Toggle-Schleifen.
+        Jetzt: Schutz-Schichten verhindern Flapping/RTSP-Stoerungen.
+        """
+        cfg = self._st_config
+        # Master-Off: kompletter no-op (egal was der Caller will)
+        if not cfg.get("enabled", False) and self._st_force_override == "auto":
+            return
+
+        # Cockpit-Override greift unabhaengig von Hysterese
+        if self._st_force_override == "on":
+            on = True
+        elif self._st_force_override == "off":
+            on = False
+
+        if on == self._camera_smart_tracking_on:
+            return  # idempotent
+
+        now = time.time()
+
+        # Skip-Gates nur wenn auto-mode + ON
+        if self._st_force_override == "auto" and on:
+            # Person-Gate: nur AN wenn YOLO Person seit <person_grace_seconds gesehen
+            if cfg.get("active_only_when_person_in_frame", True):
+                last_person_ts = float(getattr(self, "last_detection_time", 0.0))
+                if last_person_ts > 0 and (now - last_person_ts) > cfg["person_grace_seconds"]:
+                    self._st_last_reason = "person_grace_expired"
+                    return
+
+        # Min-Hold-Hysterese (asymmetrisch: 5s ON, 8s OFF) — auch im Auto-Mode
+        if self._st_force_override == "auto":
+            in_state_for = now - self._st_last_change_t if self._st_last_change_t > 0 else 999.0
+            if self._camera_smart_tracking_on and in_state_for < cfg["min_hold_on_s"]:
+                self._st_last_reason = "min_hold_on"
+                return
+            if (not self._camera_smart_tracking_on) and in_state_for < cfg["min_hold_off_s"]:
+                self._st_last_reason = "min_hold_off"
+                return
+
+            # Circuit-Breaker (anti-flapping safety)
+            self._st_toggle_history = [t for t in self._st_toggle_history if now - t < 60.0]
+            if len(self._st_toggle_history) >= cfg["max_toggles_per_minute"]:
+                if now >= self._st_circuit_broken_until:
+                    self._st_circuit_broken_until = now + cfg["circuit_breaker_lockout_s"]
+                    logger.warning(
+                        f"[ST] Toggle-Limit ({len(self._st_toggle_history)}/min) "
+                        f"-> Lockout {cfg['circuit_breaker_lockout_s']:.0f}s"
+                    )
+                self._st_last_reason = "circuit_breaker"
+                return
+            if now < self._st_circuit_broken_until:
+                self._st_last_reason = "circuit_lockout_active"
+                return
+
+        # OFF-Failsafe: vor jedem AUS expliziter ONVIF-Reset zur letzten Tracking-Position
+        try:
+            if not on and self.camera and getattr(self.camera, "is_connected", False):
+                if hasattr(self.camera, "cloud_bridge") and self.camera.cloud_bridge:
                     self.camera.cloud_bridge.set_smart_tracking(False)
-                    logger.info("[SMART-TRACK] Kamera Smart-Tracking AUS (permanent deaktiviert)")
-            except Exception:
-                pass
-            self._camera_smart_tracking_on = False
-        return
+                    time.sleep(0.3)  # Sonoff-Settle
+                if cfg.get("failsafe_use_last_tracking_pos", True):
+                    try:
+                        self.camera.move_absolute(
+                            self._last_tracking_pan,
+                            self._last_tracking_tilt,
+                            speed=0.5,
+                        )
+                    except Exception as _me:
+                        logger.debug(f"[ST] OFF-failsafe move-Fehler: {_me}")
+            elif on and self.camera and getattr(self.camera, "cloud_bridge", None):
+                self.camera.cloud_bridge.set_smart_tracking(True)
+                self._st_activate_time = now
+        except Exception as e:
+            logger.error(f"[ST] {'ON' if on else 'OFF'}-Aktivierung Fehler: {e}")
+            self._st_last_reason = f"hw_error:{type(e).__name__}"
+            return
+
+        # State commit
+        self._camera_smart_tracking_on = on
+        self._st_last_change_t = now
+        self._st_toggle_history.append(now)
+        self._st_last_reason = reason or ("auto_on" if on else "auto_off")
+        if cfg.get("log_decisions", True):
+            logger.info(
+                f"[ST] {'AN' if on else 'AUS'} reason={self._st_last_reason} "
+                f"toggles_60s={len(self._st_toggle_history)}"
+            )
 
     def _do_coast(self):
         """Coast - stop movement when target briefly lost."""
@@ -2159,6 +2323,15 @@ class AutonomousTracker:
                 "park_timeout_sec": self.config.search_park_timeout
             },
             "camera_smart_tracking": self._camera_smart_tracking_on,
+            "st_last_reason": self._st_last_reason,
+            "st_circuit_breaker_until_ts": self._st_circuit_broken_until,
+            "st_grace_remaining_s": self._st_grace_remaining_s(),
+            "st_toggle_count_60s": len([
+                t for t in self._st_toggle_history
+                if (time.time() - t) < 60.0
+            ]),
+            "st_force_override": self._st_force_override,
+            "st_config_enabled": bool(self._st_config.get("enabled", False)),
             "st_learner": self._st_learner.get_stats(),
             "stats": self.stats.copy(),
             "config": {
