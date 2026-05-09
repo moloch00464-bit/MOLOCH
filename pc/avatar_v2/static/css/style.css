@@ -56,17 +56,21 @@ html, body {
 /* Markus' Max-Headroom-Bild als statisches Reference-Asset, mit
    State-abhaengigen CSS-Filtern fuer Glow / Pulse / Glitch / Dim.
    Three.js-Stage bleibt darunter als Hintergrund (Particle-Aura). */
+/* DEFAULT auf GTX 760 2GB: 2D-Bild ist primary (3D zu GPU-intensive).
+   Markus kann via Toggle-Button auf 3D wechseln wenn Hardware mitspielt. */
 #reference-layer {
   position: absolute; top: 50%; left: 50%;
   transform: translate(-50%, -50%);
   width: min(85vmin, 800px); height: min(85vmin, 800px);
-  z-index: 10;                 /* HINTER 3D-Avatar (canvas z-index unset = 0 aber stage flex) */
+  z-index: 30;                 /* VORN als primary */
   pointer-events: none;
   display: flex; align-items: center; justify-content: center;
-  opacity: 0.18;                /* dezent als Hintergrund-Atmosphaere */
+  opacity: 1.0;                 /* primary, voll sichtbar */
   transition: filter 0.6s ease, transform 0.6s ease, opacity 0.6s ease;
 }
-#avatar-canvas { position: relative; z-index: 20; }   /* 3D-Avatar VORN */
+/* 3D-Avatar Default DEAKTIVIERT — body.three-d-on schaltet ein */
+#avatar-canvas { position: relative; z-index: 20; display: none; }
+body.three-d-on #avatar-canvas { display: block; }
 #reference-img {
   width: 100%; height: 100%;
   object-fit: contain;
@@ -84,7 +88,9 @@ html, body {
   font-family: inherit;
 }
 body.ref-hidden #reference-layer { display: none; }
-body.ref-prominent #reference-layer { opacity: 0.85; }
+body.ref-prominent #reference-layer { opacity: 1.0; }
+body.three-d-on #reference-layer { opacity: 0.18; z-index: 10; }
+body.three-d-on.ref-prominent #reference-layer { opacity: 0.85; z-index: 35; }
 
 /* State-spezifische Filter — body-class wird vom JS gesetzt */
 body.ref-state-idle #reference-img {

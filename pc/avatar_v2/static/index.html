@@ -36,16 +36,26 @@
     </div>
   </div>
 
-  <!-- Toggle-Button fuer Reference-Bild (Stufe 1 vs Stufe 2 vs beides) -->
+  <!-- Toggle-Button: 3D-Modell ein/aus (Default: AUS, weil GTX 760 2GB nur 3-4 FPS schafft) -->
+  <button id="three-d-toggle" onclick="(function(){
+    const b = document.body;
+    b.classList.toggle('three-d-on');
+    const on = b.classList.contains('three-d-on');
+    document.getElementById('three-d-toggle').textContent = on ? '🎮 3D AN (GPU-intensive)' : '🖼 2D-Bild (Performance)';
+    // FPS-Fallback reset wenn 3D wieder an
+    if (on && window.__resetFpsFallback) window.__resetFpsFallback();
+  })();" style="position:fixed; bottom:110px; right:20px; background:rgba(20,20,40,0.7); color:#cce; border:1px solid #345; border-radius:4px; padding:0.4em 0.8em; font-size:0.85em; cursor:pointer; z-index:200;">🖼 2D-Bild (Performance)</button>
+
+  <!-- Toggle-Button fuer Reference-Bild Sichtbarkeit -->
   <button id="reference-toggle" onclick="(function(){
     const b = document.body;
     const cur = b.classList.contains('ref-hidden') ? 'hidden'
-              : b.classList.contains('ref-prominent') ? 'prominent' : 'background';
+              : b.classList.contains('ref-prominent') ? 'prominent' : 'normal';
     b.classList.remove('ref-hidden','ref-prominent');
-    if (cur === 'background') { b.classList.add('ref-prominent'); document.getElementById('reference-toggle').textContent = '👁 Bild prominent'; }
+    if (cur === 'normal') { b.classList.add('ref-prominent'); document.getElementById('reference-toggle').textContent = '👁 Bild prominent'; }
     else if (cur === 'prominent') { b.classList.add('ref-hidden'); document.getElementById('reference-toggle').textContent = '🚫 Bild aus'; }
-    else { document.getElementById('reference-toggle').textContent = '👻 Bild hinten'; }
-  })();">👻 Bild hinten</button>
+    else { document.getElementById('reference-toggle').textContent = '🖼 Bild normal'; }
+  })();">🖼 Bild normal</button>
 
   <!-- Bottom Identity-Panel: dynamische Phrase -->
   <div id="identity-panel">
