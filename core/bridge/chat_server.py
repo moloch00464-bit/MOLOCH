@@ -3102,6 +3102,87 @@ def _append_topic(path: Path, sender: str, topic: str, status: str,
     return len(new_content)
 
 
+_MB_HEADER_RE = re.compile(
+    r"^## \[(?P<ts>[0-9: \-]+)\] from=(?P<sender>\w+) topic=(?P<topic>[^\s]+)"
+)
+
+
+def _mailbox_meta(box: str) -> Dict[str, Any]:
+    """Light-weight Mailbox-Snapshot: mtime + erste Topic-Header-Zeile."""
+    path = MAILBOX_DIR / MAILBOX_FILES[box]
+    if not path.exists():
+        return {"box": box, "exists": False, "mtime": 0.0, "size": 0, "latest": None}
+    st = path.stat()
+    latest = None
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                m = _MB_HEADER_RE.match(line)
+                if m:
+                    latest = {
+                        "ts": m.group("ts").strip(),
+                        "from": m.group("sender"),
+                        "topic": m.group("topic").strip(),
+                    }
+                    break
+    except OSError:
+        pass
+    return {
+        "box": box,
+        "exists": True,
+        "mtime": round(st.st_mtime, 3),
+        "size": st.st_size,
+        "latest": latest,
+    }
+
+
+@app.get("/mailbox/poll")
+def mailbox_poll(box: str = "PC_TO_PI", since: float = 0.0):
+    """Light-weight Mailbox-Watcher: Federation-fed_kill-Workaround.
+
+    PC ruft `GET /mailbox/poll?box=PC_TO_PI&since=<letzter_mtime>` periodisch.
+    `changed=true` wenn mtime > since. Spart das Holen der vollen .md.
+    """
+    if box not in MAILBOX_FILES:
+        raise HTTPException(404, f"unknown mailbox '{box}' (use PC_TO_PI or PI_TO_PC)")
+    meta = _mailbox_meta(box)
+    meta["changed"] = bool(meta.get("mtime", 0.0) > float(since))
+    meta["server_now"] = round(time.time(), 3)
+    return meta
+
+
+@app.get("/mailbox/stream")
+async def mailbox_stream(box: str = "PC_TO_PI", interval: float = 2.0):
+    """SSE-Stream: 'snapshot' beim Connect, 'change' bei mtime-Diff, 'heartbeat' 30s.
+
+    PC-Cowork: `curl -N http://192.168.178.30:9100/mailbox/stream?box=PC_TO_PI`
+    Loest fed_kill ohne Daemon.
+    """
+    if box not in MAILBOX_FILES:
+        raise HTTPException(404, f"unknown mailbox '{box}' (use PC_TO_PI or PI_TO_PC)")
+    interval = max(0.5, min(10.0, float(interval)))
+
+    async def _gen():
+        meta = _mailbox_meta(box)
+        last_mtime = meta.get("mtime", 0.0)
+        last_heartbeat = time.time()
+        yield f"event: snapshot\ndata: {json.dumps(meta)}\n\n"
+        while True:
+            await asyncio.sleep(interval)
+            meta = _mailbox_meta(box)
+            cur_mtime = meta.get("mtime", 0.0)
+            if cur_mtime > last_mtime:
+                last_mtime = cur_mtime
+                yield f"event: change\ndata: {json.dumps(meta)}\n\n"
+                last_heartbeat = time.time()
+            elif (time.time() - last_heartbeat) > 30.0:
+                hb = {"now": round(time.time(), 1), "mtime": cur_mtime}
+                yield f"event: heartbeat\ndata: {json.dumps(hb)}\n\n"
+                last_heartbeat = time.time()
+
+    return StreamingResponse(_gen(), media_type="text/event-stream")
+
+
 @app.get("/mailbox/{name}")
 def mailbox_get(name: str):
     """Raw .md Content der Mailbox.
