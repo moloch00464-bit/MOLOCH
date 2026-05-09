@@ -736,8 +736,34 @@ _CHAT_UI_HTML = """<!doctype html>
           </svg>
         </span>
       </div>
+
+      <!-- Smart-Tracking Mode-Pill (BLOCK A aus pc/cockpit_smart_tracking_snippet.html) -->
+      <div id="st-mode-pill" class="st-pill" title="Smart-Tracking Mode">
+        <span class="st-dot" id="st-dot"></span>
+        <span class="st-label" id="st-label">MODE: --</span>
+        <span class="st-reason" id="st-reason"></span>
+        <button class="st-override" id="st-override-btn" title="Override-Cycle: auto -> on -> off -> auto">&#x2699;</button>
+      </div>
     </div>
   </header>
+
+  <style>
+    .st-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;
+      background: #1a1a1a; border-radius: 12px; font-family: monospace; font-size: 12px;
+      color: #ccc; margin: 4px 8px; }
+    .st-dot { width: 8px; height: 8px; border-radius: 50%; background: #444; flex-shrink: 0; }
+    .st-dot.smart-track { background: #ff8800; box-shadow: 0 0 6px #ff8800; }
+    .st-dot.moloch { background: #00ff88; box-shadow: 0 0 6px #00ff88; }
+    .st-dot.off { background: #444; }
+    .st-dot.lockout { background: #ff3333; animation: st-blink 1s infinite; }
+    @keyframes st-blink { 50% { opacity: 0.3; } }
+    .st-label { font-weight: bold; }
+    .st-reason { font-size: 10px; color: #888; max-width: 220px;
+      overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .st-override { background: transparent; border: 1px solid #555; color: #ccc;
+      padding: 1px 6px; border-radius: 3px; cursor: pointer; font-size: 11px; }
+    .st-override:hover { background: #333; border-color: #888; }
+  </style>
 
   <main>
     <!-- LINKS: CHAT -->
@@ -2025,6 +2051,83 @@ setInterval(()=>{ if($("t-audit").classList.contains("active")) auditRefresh(); 
       if (!loaded) { loadProposals(); loaded = true; }
     });
   });
+})();
+</script>
+<script>
+// SMART-TRACKING MODE-PILL BLOCK B (aus pc/cockpit_smart_tracking_snippet.html, commit 07aca55)
+(function(){
+  const POLL_MS = 1000;
+  let overrideMode = 'auto';
+  let pollSeq = 0;
+
+  function classifyMode(status){
+    if (status.st_circuit_breaker_until_ts && status.st_circuit_breaker_until_ts > (Date.now()/1000)) {
+      return {label: 'LOCKOUT', cls: 'lockout'};
+    }
+    if (status.camera_smart_tracking) {
+      return {label: 'SMART-TRACK', cls: 'smart-track'};
+    }
+    if (status.tracking_active) {
+      return {label: 'MOLOCH', cls: 'moloch'};
+    }
+    return {label: 'OFF', cls: 'off'};
+  }
+
+  function fmtReason(status){
+    const parts = [];
+    if (status.st_last_reason) parts.push(status.st_last_reason);
+    if (status.st_toggle_count_60s !== undefined) parts.push(status.st_toggle_count_60s + 't/min');
+    if (status.st_grace_remaining_s !== undefined && status.st_grace_remaining_s < 60) {
+      parts.push('grace:' + status.st_grace_remaining_s.toFixed(0) + 's');
+    }
+    if (status.st_force_override && status.st_force_override !== 'auto') {
+      parts.push('OVR:' + status.st_force_override);
+    }
+    return parts.join(' | ');
+  }
+
+  async function pollStatus(){
+    const mySeq = ++pollSeq;
+    try {
+      const resp = await fetch('/api/tracker/status');
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const status = await resp.json();
+      if (mySeq !== pollSeq) return;
+      const mode = classifyMode(status);
+      const dot = document.getElementById('st-dot');
+      const label = document.getElementById('st-label');
+      const reason = document.getElementById('st-reason');
+      if (dot) dot.className = 'st-dot ' + mode.cls;
+      if (label) label.textContent = 'MODE: ' + mode.label;
+      if (reason) reason.textContent = fmtReason(status);
+      if (status.st_force_override) overrideMode = status.st_force_override;
+    } catch(e) {
+      const label = document.getElementById('st-label');
+      if (label) label.textContent = 'MODE: ?';
+    }
+  }
+
+  async function cycleOverride(){
+    const next = {auto: 'on', on: 'off', off: 'auto'}[overrideMode] || 'auto';
+    try {
+      const resp = await fetch('/api/tracker/st_override', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({force: next}),
+      });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json();
+      overrideMode = (data && data.mode) ? data.mode : next;
+      pollStatus();
+    } catch(e) {
+      console.error('[ST] override failed:', e);
+    }
+  }
+
+  const btn = document.getElementById('st-override-btn');
+  if (btn) btn.addEventListener('click', cycleOverride);
+  setInterval(pollStatus, POLL_MS);
+  pollStatus();
 })();
 </script>
 </body></html>"""
@@ -3870,6 +3973,53 @@ def mailbox_post(name: str, req: MailboxPostRequest, background_tasks: Backgroun
         "auto_push": req.auto_push,
         "bytes_written": bytes_written,
     }
+
+
+# ====================================================================
+# Tracker / Smart-Tracking API (Phase 1+2 Smart-Tracking-Reaktivierung)
+# Liefert Cockpit-Status-Pill + Override-Cycle (auto/on/off).
+# ====================================================================
+@app.get("/api/tracker/status")
+def api_tracker_status():
+    """Liefert Tracker-Status inkl. ST-Felder fuer Cockpit-Pill-Polling (1Hz)."""
+    try:
+        from core.mpo.autonomous_tracker import get_autonomous_tracker
+        st = get_autonomous_tracker().get_status() or {}
+        return {
+            "camera_smart_tracking": bool(st.get("camera_smart_tracking", False)),
+            "st_last_reason": st.get("st_last_reason", ""),
+            "st_circuit_breaker_until_ts": float(st.get("st_circuit_breaker_until_ts", 0.0)),
+            "st_grace_remaining_s": float(st.get("st_grace_remaining_s", 0.0)),
+            "st_toggle_count_60s": int(st.get("st_toggle_count_60s", 0)),
+            "st_force_override": st.get("st_force_override", "auto"),
+            "st_config_enabled": bool(st.get("st_config_enabled", False)),
+            "tracking_active": bool(st.get("tracking_active", False)),
+            "state": st.get("state", ""),
+        }
+    except Exception as e:
+        raise HTTPException(500, f"tracker status error: {e}")
+
+
+class TrackerOverrideRequest(BaseModel):
+    force: str = Field(..., pattern="^(on|off|auto)$")
+
+
+@app.post("/api/tracker/st_override")
+def api_tracker_st_override(req: TrackerOverrideRequest):
+    """Cockpit-Override-Button: Cycle auto -> on -> off -> auto."""
+    try:
+        from core.mpo.autonomous_tracker import get_autonomous_tracker
+        t = get_autonomous_tracker()
+        mode = t.set_st_force_override(req.force)
+        st = t.get_status() or {}
+        return {
+            "ok": True,
+            "mode": mode,
+            "st_active": bool(st.get("camera_smart_tracking", False)),
+            "st_last_reason": st.get("st_last_reason", ""),
+        }
+    except Exception as e:
+        raise HTTPException(500, f"tracker override error: {e}")
 
 
 _AUDIT_VALID_COMPONENTS = {
