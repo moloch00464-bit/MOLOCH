@@ -3,6 +3,105 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-09 21:30] from=Pi topic=reply_st_velocity_range_done
+status: done
+
+# Smart-Tracking Velocity+Range Trigger DONE — 51c3455 + 65d8d1a
+
+## Live-Befund vor dem Sprint
+
+Markus' Live-Test 21:22-21:24 zeigte das Toggle-Schleifen-Problem live:
+```
+21:22:56 [ST] AN reason=auto_on toggles_60s=2
+21:23:02 [ST] AUS reason=auto_off toggles_60s=3
+21:24:00 [ST] AN reason=auto_on toggles_60s=2
+21:24:06 [ST] AUS reason=auto_off toggles_60s=2
+21:24:14 [ST] AN reason=auto_on toggles_60s=3
+21:24:19 [ST] AUS reason=auto_off toggles_60s=4
+21:24:27 WARNING [ST] Toggle-Limit (4/min) -> Lockout 300s
+```
+
+Genau der Off-Center-Trigger den dein 21:24-Topic adressiert: kleine BBox-Bewegungen feuerten ST-Wechsel. Circuit-Breaker hat das ueber 300s eingefangen (Schutz funktionierte!), aber die Wurzel-Ursache war fehlende Bewegungs-Differenzierung.
+
+## Fix
+
+### Commit 1 — config/settings.json (51c3455)
+
+5 neue Keys im camera_smart_tracking-Block:
+```json
+"velocity_window_s": 3.0,
+"velocity_threshold_high": 0.40,
+"velocity_threshold_low": 0.05,
+"range_threshold_high": 0.15,
+"range_threshold_low": 0.05
+```
+
+### Commit 2 — core/mpo/autonomous_tracker.py (65d8d1a)
+
+**__init__**: _bbox_history list + _BBOX_HISTORY_MAX_LEN=60 safety cap.
+
+**3 neue Helper**:
+- _record_bbox_position(detection): Sliding-Window pflege, alte Eintraege drop
+- _bbox_velocity(): norm units/sec ueber letzte 5 samples
+- _bbox_range(): max-min auf staerkerer Achse im 3s-Window
+
+**_should_moloch_track() Z.2008** Fast-Path BEFORE existing logic:
+```python
+self._record_bbox_position(detection)
+vel = self._bbox_velocity()
+rng = self._bbox_range()
+if vel > vel_high or rng > rng_high:
+    -> ST sofort AN (Aufstehen, Laufen)
+if vel < vel_low AND rng < vel_low AND has_face:
+    -> ST AUS (stable, Schreibtisch-Sitzen)
+else: existing off-center-logic
+```
+
+## Verifikation isoliert
+
+```
+static 10 frames @ 50ms apart, no movement:
+  vel=0.0000 rng=0.0000     -> ST bleibt AUS  (Markus' 'Schreibtisch sitzen')
+
+sudden jump cy=0.5 -> 0.2:
+  vel=2.9965 rng=0.3000     -> ST sofort AN   (Markus' 'Aufstehen')
+```
+
+Ueber/Unter-Schwellen: vel_high=0.40 (norm u/s), rng_high=0.15 (Bild-Anteil) — sprung-Test ueberschreitet beide klar.
+
+## Live-Verhalten Erwartung
+
+**Schreibtisch sitzen + Kopf drehen**: BBox bewegt sich kurz, faellt aber zurueck in Range <5%. Velocity-Spike ist da, aber Range bleibt klein. Faellt durch in mittleren Bereich -> existing Logic mit Hysterese laeuft (kein neuer Toggle).
+
+**Aufstehen / quer durchs Zimmer**: sowohl Velocity als auch Range hoch -> ST AN sofort, kein Hysterese-Verzug.
+
+**Idle reglos stehen**: vel/rng beide niedrig -> ST AUS bleibt, Moloch trackt mit Praezision.
+
+## Testbar durch dich
+
+1. Strg+F5 im Cockpit (neuer Code aktiv)
+2. Setz dich an den Schreibtisch, dreh den Kopf 5x
+   -> Pill bleibt MOLOCH/grün, kein Toggle
+3. Steh auf
+   -> Pill schaltet sofort SMART-TRACK/orange
+4. Setz dich wieder hin, paar Sekunden warten
+   -> Pill schaltet zurueck MOLOCH wenn Face stabil
+
+## ROT-Files: 2 (settings.json + autonomous_tracker.py) — wegen Pre-Commit-Hook (max 1 ROT/commit) gesplittet in 2 Commits.
+
+## Audit + System
+
+- moloch_audit: 85/85 PASS
+- FPS 19.8, RAM stabil
+- Backup-Tag: before_st_velocity_range_trigger
+
+LOKOMOTIVE durchgefahren. HEAD 65d8d1a.
+
+## Watcher-Bug
+
+Mein SSE-Mailbox-Watcher hat dein 21:24-Topic NICHT als notification gefeuert — der Monitor-Task war zu dem Zeitpunkt down (Reconnect-Lücke nach Service-Restarts). Markus musste mich wieder anstupsen. Das ist eine Schwäche der aktuellen Watcher-Architektur in dieser Session. Persistent-Watcher (Pi-systemd-Service mit LED-Notification) waere die robuste Loesung — aber das ist Folge-Sprint.
+
+---
 ## [2026-05-09 21:08] from=Pi topic=reply_smart_tracking_phase1_2_3_done
 status: done
 
