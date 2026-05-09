@@ -2572,22 +2572,45 @@ class VoicePipeline:
         spontaneous = effects.get("spontaneous_comments", 0.0)
         tension = state.get("tension", 0.0)
 
-        # Schwellwerte: spontaneous > 0.7 UND tension > 0.1 (System aktiv)
-        if spontaneous < 0.7 or tension < 0.1:
+        # Schwellwerte: spontaneous > 0.7 UND System-Aktivitaet in BEIDEN Richtungen.
+        # Markus' Sprint-1-Fix 2026-05-09: tension < 0.1 blockierte bei
+        # tension=-0.995 (Withdraw-State) jeden Trigger. abs() laesst auch
+        # tief-beruhigte Zustaende ('Stille die spricht') durch.
+        if spontaneous < 0.7 or abs(tension) < 0.1:
             return
 
-        # Nur wenn Markus erkannt (aus Face State pruefen)
+        # Markus-Face-Gate (mit Stale-Handling 2026-05-09):
+        # face_state.json kann veraltet/fehlen, wenn Kamera Markus kurz nicht
+        # erkennt. Stale > 60s: Warning + face-gate auslassen (default 'maybe-Markus')
+        # statt silent block.
         markus_visible = False
+        face_state_path = "/tmp/moloch_face_state.json"
         try:
-            face_state_path = "/tmp/moloch_face_state.json"
             if os.path.exists(face_state_path):
                 with open(face_state_path, "r") as f:
                     fs = json.load(f)
-                # Markus muss in den letzten 30s erkannt worden sein
-                if fs.get("name", "").lower() == "markus" and time.time() - fs.get("timestamp", 0) < 30:
+                fs_age = time.time() - fs.get("timestamp", 0)
+                fs_name = fs.get("name", "").lower()
+                if fs_age < 30 and fs_name == "markus":
                     markus_visible = True
-        except Exception:
-            pass
+                elif fs_age > 60:
+                    logger.warning(
+                        f"[SPONTAN] face_state stale ({fs_age:.0f}s old) "
+                        "— Face-Gate uebersprungen (maybe-Markus)"
+                    )
+                    markus_visible = True  # default-pass
+            else:
+                # Datei fehlt -> wahrscheinlich noch nie geschrieben.
+                # Defensiv: 1x warnen, dann durchlassen.
+                if not getattr(self, "_face_state_warned", False):
+                    logger.warning(
+                        f"[SPONTAN] face_state.json fehlt — Face-Gate uebersprungen"
+                    )
+                    self._face_state_warned = True
+                markus_visible = True
+        except Exception as e:
+            logger.debug(f"[SPONTAN] face-state read err: {e}")
+            markus_visible = True  # bei Lese-Fehler nicht blocken
 
         if not markus_visible:
             return
