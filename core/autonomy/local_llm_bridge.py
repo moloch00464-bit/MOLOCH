@@ -24,6 +24,7 @@ Singleton: get_llm_bridge()
 import json
 import logging
 import os
+import re
 import requests
 import signal
 import subprocess
@@ -263,17 +264,28 @@ _HARDWARE_KEYWORDS = (
 )
 
 
+_HARDWARE_KW_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(kw) for kw in _HARDWARE_KEYWORDS) + r")\b",
+    re.IGNORECASE,
+)
+
+
 def _is_hardware_query(user_msg: Optional[str]) -> bool:
     """Phase 1d: Prueft ob User-Frage Hardware-Block braucht.
 
     Triggert bei direkten/indirekten Hardware-Keywords ODER /hw Slash-Command.
+
+    Phase-3-Task-2-Fix: word-boundary statt substring. Vorher hat 'Programm'
+    als Hardware-Match gefeuert weil 'ram' substring von 'pRAMm' war —
+    Markus' 5-Akt-Test Akt 3 'Du bist nur ein Programm' wurde falsch zu
+    NPU-qwen geroutet statt Tentakel-Smalltalk.
     """
     if not user_msg:
         return False
     msg = user_msg.lower().strip()
     if msg.startswith("/hw"):
         return True
-    return any(kw in msg for kw in _HARDWARE_KEYWORDS)
+    return bool(_HARDWARE_KW_RE.search(msg))
 
 
 # Phase 1a: Bridge-Satz nach Profil — ankert Moloch in ICH-Form fuer Live-Eindruecke.
@@ -1032,10 +1044,13 @@ class LocalLLMBridge:
             return None
 
         # Mode "kaskade": Pi-Kleinhirn -> PC-Specialist -> DeepSeek (Markus 2026-04-29).
-        # NPU-qwen NUR fuer hardware_status + simple_smalltalk, alles andere durch Kaskade.
+        # NPU-qwen NUR fuer hardware_status + force_local. simple_smalltalk geht
+        # durch Kaskade weil Qwen2.5:1.5b schlechtes Deutsch produziert (Phase 3 Task 2,
+        # Markus' 5-Akt-Test 20260509_105332: "heutens", "beschuetzten", "dir nicht weisz").
+        # Tentakel dolphin-llama3:8b liefert ordentliches Deutsch fuer Smalltalk.
         if mode == LLM_MODE_KASKADE:
             logger.debug(f"[LLM-BRIDGE] mode=kaskade type={prompt_type} force_local={force_local}")
-            if force_local or prompt_type in ("hardware_status", "simple_smalltalk"):
+            if force_local or prompt_type == "hardware_status":
                 # NPU-Pfad direkt — kein Cloud, kein Specialist
                 result = self._generate_ollama(prompt, system, max_tokens,
                                                 model=model, timeout=timeout,
