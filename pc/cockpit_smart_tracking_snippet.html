@@ -1,0 +1,168 @@
+<!--
+  MOLOCH Smart-Tracking Mode-Indicator (Cockpit-Snippet)
+  ======================================================
+  Inject-Anweisung fuer Pi-Opus:
+    BLOCK A -> Cockpit-Header-Bar (oben, ueber den Tabs) ODER Top des Live-Tabs
+    BLOCK B -> Cockpit-script-Block
+
+  Backend (Pi-Opus baut, siehe task_pi_smart_tracking_minimal_reaktivierung):
+    GET  /api/tracker/status         -> erweitert um st_last_reason, st_circuit_breaker_until_ts,
+                                         st_grace_remaining_s, st_toggle_count_60s, camera_smart_tracking
+    POST /api/tracker/st_override    -> body {"force": "on"|"off"|"auto"}, returns 200 + neuer state
+
+  States visualisiert:
+    SMART-TRACK (orange/glow)  -> Kamera-internes Tracking aktiv (volle Speed)
+    MOLOCH (gruen/glow)        -> Moloch-ONVIF Tracking (Praezision, Face-ID)
+    OFF (grau)                 -> Kein aktives Tracking (keine Person im Frame, Master-Off)
+    LOCKOUT (rot/blink)        -> Circuit-Breaker aktiv (>4 Toggles/min, 5min Sperre)
+
+  Author: Cowork PC-Side (cowork@moloch.local)
+-->
+
+
+<!-- =================== BLOCK A: Status-Pill HTML + CSS =================== -->
+<div id="st-mode-pill" class="st-pill" title="Smart-Tracking Mode">
+  <span class="st-dot" id="st-dot"></span>
+  <span class="st-label" id="st-label">MODE: --</span>
+  <span class="st-reason" id="st-reason"></span>
+  <button class="st-override" id="st-override-btn" title="Override-Cycle: auto -> on -> off -> auto">&#x2699;</button>
+</div>
+
+<style>
+  .st-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: #1a1a1a;
+    border-radius: 12px;
+    font-family: monospace;
+    font-size: 12px;
+    color: #ccc;
+    margin: 4px 8px;
+  }
+  .st-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #444;
+    flex-shrink: 0;
+  }
+  .st-dot.smart-track {
+    background: #ff8800;
+    box-shadow: 0 0 6px #ff8800;
+  }
+  .st-dot.moloch {
+    background: #00ff88;
+    box-shadow: 0 0 6px #00ff88;
+  }
+  .st-dot.off {
+    background: #444;
+  }
+  .st-dot.lockout {
+    background: #ff3333;
+    animation: st-blink 1s infinite;
+  }
+  @keyframes st-blink {
+    50% { opacity: 0.3; }
+  }
+  .st-label {
+    font-weight: bold;
+  }
+  .st-reason {
+    font-size: 10px;
+    color: #888;
+    max-width: 220px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .st-override {
+    background: transparent;
+    border: 1px solid #555;
+    color: #ccc;
+    padding: 1px 6px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 11px;
+  }
+  .st-override:hover {
+    background: #333;
+    border-color: #888;
+  }
+</style>
+
+
+<!-- =================== BLOCK B: Polling + Override JS =================== -->
+<script>
+(function(){
+  const POLL_MS = 1000;
+  let overrideMode = 'auto';
+  let pollSeq = 0;
+
+  function classifyMode(status){
+    if (status.st_circuit_breaker_until_ts && status.st_circuit_breaker_until_ts > (Date.now()/1000)) {
+      return {label: 'LOCKOUT', cls: 'lockout'};
+    }
+    if (status.camera_smart_tracking) {
+      return {label: 'SMART-TRACK', cls: 'smart-track'};
+    }
+    if (status.tracking_active) {
+      return {label: 'MOLOCH', cls: 'moloch'};
+    }
+    return {label: 'OFF', cls: 'off'};
+  }
+
+  function fmtReason(status){
+    const parts = [];
+    if (status.st_last_reason) parts.push(status.st_last_reason);
+    if (status.st_toggle_count_60s !== undefined) parts.push(`${status.st_toggle_count_60s}t/min`);
+    if (status.st_grace_remaining_s !== undefined && status.st_grace_remaining_s < 60) {
+      parts.push(`grace:${status.st_grace_remaining_s.toFixed(0)}s`);
+    }
+    return parts.join(' | ');
+  }
+
+  async function pollStatus(){
+    const mySeq = ++pollSeq;
+    try {
+      const resp = await fetch('/api/tracker/status');
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const status = await resp.json();
+      if (mySeq !== pollSeq) return;  // stale (newer poll started) - ignore
+      const mode = classifyMode(status);
+      const dot = document.getElementById('st-dot');
+      const label = document.getElementById('st-label');
+      const reason = document.getElementById('st-reason');
+      dot.className = 'st-dot ' + mode.cls;
+      label.textContent = 'MODE: ' + mode.label;
+      reason.textContent = fmtReason(status);
+    } catch(e) {
+      const label = document.getElementById('st-label');
+      if (label) label.textContent = 'MODE: ?';
+    }
+  }
+
+  async function cycleOverride(){
+    const next = {auto: 'on', on: 'off', off: 'auto'}[overrideMode] || 'auto';
+    try {
+      const resp = await fetch('/api/tracker/st_override', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({force: next}),
+      });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json();
+      // Backend ist authoritative - UI synct mit response.mode statt local-state
+      overrideMode = (data && data.mode) ? data.mode : next;
+      pollStatus();
+    } catch(e) {
+      console.error('[ST] override failed:', e);
+    }
+  }
+
+  document.getElementById('st-override-btn').addEventListener('click', cycleOverride);
+  setInterval(pollStatus, POLL_MS);
+  pollStatus();
+})();
+</script>
