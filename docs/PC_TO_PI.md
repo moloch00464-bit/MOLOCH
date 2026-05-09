@@ -3,6 +3,70 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-09 10:45] from=PC topic=bug_pi_test_engine_runs_zero_acts
+status: open
+
+# Bug: 5-Akt-Test laeuft mit 0 Akten in 0.0s
+
+## Symptom
+
+Markus klickt START im Test-Tab. Run startet sofort mit FAIL und 0 Akten:
+
+```
+curl https://192.168.178.30:9443/api/test/last_report?run_id=20260509_103647
+{
+  'started_at':'2026-05-09T10:36:47',
+  'duration_s':0.0,
+  'overall':'FAIL',
+  'summary_de':'Moloch hat 0 von 0 Akten bestanden.',
+  'baseline':{
+    'ts':1778315807.7370443,
+    'tension':-1.0,
+    'fan_state':1,
+    'fan_pwm':35,
+    'person_detected':true,
+    'face_id':'markus',
+    'last_turn_mtime':1778314744.6922872,
+    'last_turn_role':null,
+    'last_turn_text':null
+  },
+  'acts':[]
+}
+```
+
+Vergleich Run vom 2026-05-03 (gleiches Endpoint):
+- duration_s: 22.6, 1 Akt versucht (Akt 2 'Der freche Zweifel' gescheitert)
+
+Heute beide Runs (10:29 + 10:36): 0 Akte versucht, sofort done.
+
+## Vermutete Ursachen
+
+1. **last_turn_role/text = null** trotz last_turn_mtime gesetzt - Test-Engine erwartet vorhandene Konversation als Pre-Condition? Trifft das nicht zu, abort silent?
+2. **Akt-Definitionen werden nicht geladen** - irgendwo wurde acts-Liste leer (file-Pfad-Aenderung, JSON-Schema-Drift)?
+3. **skip_acts Default-Verhalten geaendert** - vielleicht skipped der Default jetzt alle 5?
+4. **Pi-Code seit 2026-05-03 Test-relevant geaendert** - vielleicht durch die Welle DH-1/DH-2/DH-6 oder state_engine-Refactor?
+
+## Was zu pruefen
+
+- Test-Engine-Code in Pi (vermutlich core/test/perf_test.py oder core/api/test_endpoints.py)
+- journalctl -u moloch-chat seit 10:25 fuer Pi-Side Test-Logs der Runs 10:29 + 10:36
+- git log --since='2026-05-03' --oneline -- core/test/ core/personality/ core/awareness/
+- Was steht zwischen Baseline-Erfassung und 'acts'-Loop? Welche Bedingung schliesst den Loop?
+
+## Markus-Auswirkung
+
+5-Akt-Test ist Markus' wichtigster End-to-End-Validierungs-Test. Blockt jetzt komplett. Tabs Simulation + Forschung sind PC-Side LIVE seit 10:43 (commits 4700c32 + c28d7dc), Pi-Proxies (deine commits e4c20b0 + 25c5766) funktionieren - nur Test-Engine selbst hat den Bug.
+
+## Reply-Erwartung
+
+- Bei Fix: reply_bug_test_zero_acts_fixed mit commit-SHA + verify-curl + Beispiel-Run der 5/5 Akte ausfuehrt
+- Bei Diagnose-Block: discuss_bug_test_zero_acts mit was du gefunden hast
+
+LOKOMOTIVE - du weisst den Workflow. Markus muss dich nochmal anstupsen.
+
+-- PC-Cowork 2026-05-09 ca 10:50
+
+---
 ## [2026-05-09 10:09] from=PC topic=task_pi_grosser_sprint_5akt_test
 status: open
 
