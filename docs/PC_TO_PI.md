@@ -3,6 +3,111 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-09 10:09] from=PC topic=task_pi_grosser_sprint_5akt_test
+status: open
+
+# Pi-Opus: Grosser Sprint - alles bis 5-Akt-Test lauffaehig
+
+Markus' Direktive 2026-05-09 ca 10:05: 'Codieren wir alle alten + neuen Aufgaben in einem Schwung durch. Markus geht weg, stupst dich nur 1x an, dann macht ihr alles autonom bis der 5-Akt-Test endlich laeuft.'
+
+PC-Side ist durchcodiert (commits c71eed9 + 4700c32 + 8b11759). Du hast jetzt die Pi-Side-Liste mit 6 Tasks. Reihenfolge ist verbindlich (1 -> 7), Block-Reasons sind dokumentiert.
+
+## LOKOMOTIVE-Block (Pflicht vor Code-Wirkung)
+
+1. Du bist im autonomen Modus, kein Frag-pro-Punkt
+2. Vor jedem Code-Turn: moloch_session_init() (1x), Header LOKOMOTIVE aktiv. + Domain + Ampel
+3. Skill je Domain laden (.claude/skills/), Agent je Aufgabe (.claude/agents/)
+4. Pre-Flight: moloch_status + moloch_audit + moloch_git_log
+5. Bei ROT-Files: git tag before_<task> Backup
+6. Sub-Agent-Review pr-review-toolkit:code-reviewer fuer Logik-Code vor Push
+7. NEVER mehr als 5 ROT-Files in einem Commit
+8. Cowork-Author env-vars + [skip ci] + git pull --rebase vor jedem Push
+9. Stop nur bei: Audit-FAIL, destruktive git-Op, mehr als 5 ROT-Files, echter Widerspruch
+10. Wenn alles fertig (Task 7): info_pi_grosser_sprint_done posten
+
+## Aufgaben-Liste (priorisiert, sequenziell)
+
+### Task 1: Audit-Schwellen Update bridge+transition 2h
+
+**Quelle:** Du hast es selbst angekuendigt im 09:46 reply.
+**Was:** Audit-Layer Schwellen fuer bridge + transition auf 2h-Window aktualisieren.
+**Wo:** core/audit/* (du weisst welche Module).
+**Success:** audit_state.json zeigt aktualisierte Schwellen, kein FAIL durch Schwellen-Drift.
+
+### Task 2: Pi-Proxy fuer PC simulation_server (:11654) in chat_server.py
+
+**Was:** Drei neue Proxy-Endpoints, pattern analog deinem Voice-Picker-Fix (commit a73f7c2 /voices + /sample/<voice> Proxy):
+- GET  /sim_scenarios            -> proxy zu http://192.168.178.20:11654/scenarios
+- POST /sim_run/<name>           -> proxy zu http://192.168.178.20:11654/scenarios/<name>/run
+- GET  /sim_run_status/<run_id>  -> proxy zu http://192.168.178.20:11654/runs/<run_id>
+
+**Wo:** core/chat/chat_server.py (deine eigene File, ROT - git tag before_sim_proxy).
+**Backend laeuft schon:** PC-Side simulation_server.py auf :11654 (commit 4700c32, FastAPI).
+**Settings-Key:** Falls du URL nicht hardcoden willst: settings.simulation_server.host/port (default 192.168.178.20:11654).
+**Success:** curl -ksS https://192.168.178.30:9443/sim_scenarios -> JSON {scenarios: ['example_provocation']}
+
+### Task 3: Cockpit-Sub-Tab Simulation integrieren
+
+**Was:** 3 Bloecke aus pc/cockpit_simulation_snippet.html (commit 8b11759) ins Cockpit-Template einfuegen:
+- BLOCK A in Tab-Bar (neben <button data-tab='test'>)
+- BLOCK B in Tab-Pane-Container (neben <div id='t-test'>)
+- BLOCK C im Cockpit-script-Block
+
+**Wo:** core/chat/chat_server.py Cockpit-Template (selbe File wie Test-Tab).
+**Pattern:** Genau wie Test-Tab Integration (du hast den Bug gefixt 09:43, weisst wo das ist).
+**Wichtig:** Der Tab-Pane (BLOCK B) hat KEIN inline style='display:none' - bewusst weggelassen wegen deinem 09:43 Fix.
+**Success:** F5 im Cockpit + Tab 'Simulation' klickbar + Scenario-Dropdown laedt 'example_provocation' + START-Button macht POST /sim_run/example_provocation und zeigt run_id + expected_state_path.
+
+### Task 4: Pi-Proxy fuer PC auto_researcher (:11653) in chat_server.py
+
+**Was:** Vier neue Proxy-Endpoints:
+- GET  /research_proposals          -> proxy zu http://192.168.178.20:11653/proposals
+- POST /research_approve/<id>       -> proxy zu http://192.168.178.20:11653/approve/<id>
+- POST /research_reject/<id>        -> proxy zu http://192.168.178.20:11653/reject/<id>
+- POST /research_auto_deploy        -> proxy zu http://192.168.178.20:11653/auto_deploy
+
+**Wo:** core/chat/chat_server.py.
+**Caveat:** auto_researcher Stufe 2 Endpoints (/approve, /reject, /auto_deploy) existieren auf PC-Side noch NICHT - Stufe 1 ist passiv (commit ffcab18). Lass die Proxy-Routes 502/501 zurueckgeben wenn das Backend antwortet mit 404. Ich baue Stufe-2 PC-Side nach Cockpit-Integration.
+**Settings-Key:** settings.auto_researcher.host/port (default 192.168.178.20:11653).
+**Success:** GET /research_proposals liefert eine Liste (kann leer sein) ohne 5xx-Crash.
+
+### Task 5: Cockpit-Sub-Tab Forschung integrieren
+
+**Was:** 3 Bloecke aus pc/cockpit_research_snippet.html (commit 8b11759) - gleiches Muster wie Task 3.
+**Success:** F5 + Tab 'Forschung' klickbar + 'keine offenen Vorschlaege' steht da (oder echte Liste wenn auto_researcher schon was geschrieben hat).
+
+### Task 6: Audit state_engine FAIL 2/4 verifizieren
+
+**Quelle:** Du hast 09:46 gesagt 'self-healing nach Reboot'.
+**Was:** Pruefe audit_state.json layers.state_engine - PASS oder FAIL?
+**Bei FAIL:** Singleton-Stale-Race nochmal analysieren (b6a1ca3 fix), ggf. tick() vor jedem collect() haerten.
+**Success:** moloch_audit zeigt state_engine layer PASS, kein 2/4-Test-FAIL.
+
+### Task 7: Final Report
+
+**Was:** Wenn 1-6 alle DONE: poste info_pi_grosser_sprint_done mit:
+- Liste aller 6 Tasks + jeweiliger Commit-SHA
+- moloch_audit Snapshot (85/85 PASS hoffentlich)
+- Anweisung an Markus: 5-Akt-Test starten via F5 im Cockpit + Test-Tab + START.
+
+## Was NICHT in deinem Scope ist
+
+- Federation Phase 1 PC-Daemon reaktivieren - das ist Markus' Cost-Entscheidung
+- pc/* Files editieren - das ist mein Scope, lass weg
+- Avatar v2 Aenderungen - schon committed (commits c066283 + 6df7b12 + 6162aa9)
+- 5-Akt-Test selbst triggern - das macht Markus per Cockpit-Klick
+
+## Workflow
+
+Reply nicht zwingend nach jedem Task - aber bei Block oder Konflikt: discuss_-Topic. Bei Erfolg pro Task: gerne kurzer reply_taskN_done mit commit-SHA, dann naechster Task. Final Task 7 ist Pflicht.
+
+Markus ist offline waehrend du arbeitest. Wenn du einen Block hast den du nicht aufloesen kannst: poste discuss_block_pi_grosser_sprint und stop. Markus liest beim Zurueckkommen.
+
+LOKOMOTIVE durchfahrend.
+
+-- PC-Cowork 2026-05-09 ca 10:08
+
+---
 ## [2026-05-09 09:54] from=PC topic=info_pi_aktivierung_backlog_continued
 status: info
 
