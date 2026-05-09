@@ -1,0 +1,114 @@
+<!--
+  MOLOCH Simulation Cockpit Sub-Tab (Phase 2)
+  ============================================
+  Inject-Anweisung fuer Pi-Opus (gleiches Muster wie cockpit_perf_test_snippet.html):
+    BLOCK A -> Tab-Bar (z.B. neben <button data-tab="test">)
+    BLOCK B -> Tab-Pane-Container (z.B. neben <div id="t-test">)
+    BLOCK C -> Cockpit-script-Block
+
+  Backend (Pi-Proxy auf chat_server.py, analog voice-bridge):
+    GET  /sim_scenarios            -> proxy zu http://PC:11654/scenarios
+    POST /sim_run/<name>           -> proxy zu http://PC:11654/scenarios/<name>/run
+    GET  /sim_run_status/<run_id>  -> proxy zu http://PC:11654/runs/<run_id>
+
+  PC-Backend laeuft schon auf :11654 (pc/simulation_server.py, commit 4700c32).
+  Pi-Proxy ist Teil von task_pi_grosser_sprint.
+
+  Author: Cowork PC-Side (cowork@moloch.local)
+-->
+
+
+<!-- =================== BLOCK A: Tab-Button =================== -->
+<button class="tab-btn" data-tab="sim">Simulation</button>
+
+
+<!-- =================== BLOCK B: Tab-Pane ===================== -->
+<div class="tab" id="t-sim" style="padding:1em;">
+
+  <h2 style="margin-top:0; color:#fc6;">Simulation (Phase 2 - Scenario Replay)</h2>
+
+  <div class="sim-controls" style="background:#222; padding:0.8em; border-radius:6px; margin-bottom:1em;">
+    <label>
+      <strong>Scenario:</strong>
+      <select id="sim-scenario" style="margin-left:0.5em; min-width:240px;">
+        <option value="">(loading...)</option>
+      </select>
+    </label>
+    <button id="sim-start" style="background:#6f6; color:#111; padding:0.5em 1.2em; font-weight:bold; border:none; border-radius:4px; cursor:pointer; margin-left:1em;">START</button>
+    <button id="sim-refresh" style="background:#369; color:#fff; padding:0.5em 1em; border:none; border-radius:4px; cursor:pointer; margin-left:0.5em;">Reload</button>
+    <span id="sim-status" style="margin-left:1em; font-family:monospace; color:#888;">idle</span>
+  </div>
+
+  <div class="sim-detail" style="background:#1a1a1a; padding:0.8em; border-radius:6px; margin-bottom:1em;">
+    <h3 style="margin-top:0; color:#69f;">Scenario-Detail</h3>
+    <div id="sim-name" style="font-weight:bold; color:#fc6;">--</div>
+    <div id="sim-events-count" style="color:#888;">--</div>
+    <div id="sim-expected" style="color:#9c9; margin-top:0.5em;">expected state path: --</div>
+  </div>
+
+  <div class="sim-result" style="background:#1a1a1a; padding:0.8em; border-radius:6px;">
+    <h3 style="margin-top:0; color:#69f;">Letztes Run-Ergebnis</h3>
+    <pre id="sim-result-json" style="color:#888; font-size:11px; overflow-x:auto;">--</pre>
+  </div>
+</div>
+
+
+<!-- =================== BLOCK C: JS ============================ -->
+<script>
+(function(){
+  const SIM_BASE = '';  // same-origin Pi-Proxy
+
+  async function loadScenarios(){
+    const sel = document.getElementById('sim-scenario');
+    const status = document.getElementById('sim-status');
+    sel.innerHTML = '<option value="">(loading...)</option>';
+    try {
+      const resp = await fetch(SIM_BASE + '/sim_scenarios');
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json();
+      sel.innerHTML = '';
+      (data.scenarios || []).forEach(name => {
+        const opt = document.createElement('option');
+        opt.value = name; opt.textContent = name;
+        sel.appendChild(opt);
+      });
+      if (sel.options.length === 0) {
+        sel.innerHTML = '<option value="">(keine Scenarios verfuegbar)</option>';
+      }
+      status.textContent = 'scenarios loaded (' + sel.options.length + ')';
+    } catch(e) {
+      status.textContent = 'error loading: ' + e.message;
+    }
+  }
+
+  async function startScenario(){
+    const name = document.getElementById('sim-scenario').value;
+    const status = document.getElementById('sim-status');
+    if (!name) { status.textContent = 'kein Scenario gewaehlt'; return; }
+    status.textContent = 'starting ' + name + '...';
+    try {
+      const resp = await fetch(SIM_BASE + '/sim_run/' + encodeURIComponent(name), {method:'POST'});
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const run = await resp.json();
+      document.getElementById('sim-name').textContent = run.scenario || name;
+      document.getElementById('sim-events-count').textContent = (run.n_events || 0) + ' events';
+      document.getElementById('sim-expected').textContent =
+        'expected state path: ' + ((run.expected_state_path || []).join(' -> ') || '--');
+      document.getElementById('sim-result-json').textContent = JSON.stringify(run, null, 2);
+      status.textContent = 'run ' + (run.run_id || '?') + ' status=' + (run.status || '?');
+    } catch(e) {
+      status.textContent = 'error: ' + e.message;
+    }
+  }
+
+  document.getElementById('sim-start').addEventListener('click', startScenario);
+  document.getElementById('sim-refresh').addEventListener('click', loadScenarios);
+
+  let loaded = false;
+  document.querySelectorAll('[data-tab="sim"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (!loaded) { loadScenarios(); loaded = true; }
+    });
+  });
+})();
+</script>
