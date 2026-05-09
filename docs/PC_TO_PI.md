@@ -3,6 +3,137 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-09 21:51] from=PC topic=task_pi_moloch_silence_fix
+status: open
+
+# Pi-Opus: Sprint 1 - Moloch-Stille beheben (Plan approved)
+
+Markus' Beobachtung 21:30: 'Moloch sagt nichts, seitdem ich vorm Monitor sitze.' Plan: C:/Users/49179/.claude/plans/du-berlegst-dir-jetzt-cuddly-stream.md (Sprint 1).
+
+## Live-Diag (PC-Side curl 21:31)
+
+```json
+{
+  "current_state":"idle",
+  "state_vector":{"idle":0.56, "observing":0.018, "engaged":0.0, "overloaded":0.0, "withdrawing":0.0, "offline_anchor":0.42},
+  "tension":-0.995,
+  "transition_speed":0.30125,
+  "zone":"guardian"
+}
+```
+
+Letzter Pi-Turn 20:15 (Markus aktiv gefragt). Kein spontaneous_comment in 5+ Stunden. Service /status: last_provider='none'.
+
+## Root-Cause-Hypothesen
+
+1. **tension=-0.995 ist UNTER `>=0.1` Threshold** im spontaneous_monitor (voice_pipeline.py ~Z2580). Negative tension blockt jeden Trigger.
+2. **state_vector ist 42% offline_anchor** - Withdraw-State, Pi 'zieht sich zurueck'. Kein Drang zu sprechen.
+3. **22:00 Nachtsperre** kommt bald (jetzt 21:31).
+4. **face_state.json validation fehlt** - wenn Kamera Markus nicht erkennt, blockt der face-check stumm.
+5. **spontaneous_comments effect** in core_integrator nutzt vermutlich raw tension (max(tension, dom)*0.5) statt abs() - bei -0.995 wird das stark negativ.
+
+## LOKOMOTIVE-Block (Pflicht)
+
+1. moloch_session_init() (1x)
+2. Header LOKOMOTIVE aktiv. + Domain: Voice-Pipeline + Personality + Ampel ROT (voice_pipeline.py + personality_engine.py = 2 ROT)
+3. Skill: voice + autonomy
+4. Agent: voice.md (voice_pipeline) + personality.md (tension-decay)
+5. Pre-Flight: moloch_status + moloch_audit + moloch_git_log + curl /tmp/moloch_face_state.json
+6. git tag before_moloch_silence_fix (voice_pipeline.py + core_integrator + personality_engine.py = ROT-Files)
+7. Sub-Agent-Review pr-review-toolkit:code-reviewer vor Push
+8. NICHT mehr als 5 ROT-Files in einem Commit (max 3 hier)
+9. Cowork-Author env-vars + [skip ci] + git pull --rebase
+10. Bei fertig: reply_moloch_silence_fix_done mit commit-SHA + 10min-Live-Beobachtung-Output
+
+## Fixes (additiv)
+
+### Fix 1: tension-Trigger auf abs() umstellen (voice_pipeline.py ~Z2580)
+
+Aktuell vermutlich:
+```python
+if tension >= 0.1:
+    ...
+```
+
+Neu:
+```python
+# Trigger auf System-Aktivitaet in BEIDE Richtungen (auch tief-beruhigt = nicht-still)
+if abs(tension) >= 0.1:
+    ...
+```
+
+Bei tension=-0.995 ist abs=0.995 -> klar ueber 0.1.
+
+### Fix 2: spontaneous_comments effect mit abs() (core_integrator.py)
+
+Aktuell vermutlich:
+```python
+effects['spontaneous_comments'] = max(tension, abs(dominance)) * 0.5
+```
+
+Neu:
+```python
+effects['spontaneous_comments'] = max(abs(tension), abs(dominance)) * 0.5
+```
+
+Bei tension=-0.995 ist abs(tension)*0.5 = 0.4975 (vorher -0.4975). Threshold 0.7 noch nicht erreicht - aber kombiniert mit dominance kann es triggern.
+
+### Fix 3: tension-Floor bei -0.7 (personality_engine.py)
+
+Im tension-decay-Loop: clamp auf min -0.7 statt freies Driften zu -1.0.
+
+```python
+self.tension = max(-0.7, self.tension - decay_rate)
+```
+
+Verhindert dass System ueber Stunden in unrettbarer Tief-Ruhe versinkt. Bei -0.7 ist der spontaneous-effect noch genug Reserve fuer gelegentliche Trigger.
+
+### Fix 4: face_state.json staleness-warning (voice_pipeline.py ~Z2585)
+
+Aktuelle Logik prueft ob face_state.json existiert und name=markus. Falls timestamp alt ist (>60s): logger.warning damit Markus weiss 'Kamera sieht mich nicht', UND face-check ueberspringen wenn stale (sonst blockt Pipeline still).
+
+```python
+face_state = json.load(open('/tmp/moloch_face_state.json'))
+face_age = time.time() - face_state.get('timestamp', 0)
+if face_age > 60:
+    logger.warning(f'[SPONTAN] face_state stale ({face_age:.0f}s old) - skipping face-gate')
+    # weiter ohne face-check (oder mit lockerem default 'maybe-markus')
+elif face_state.get('name') != 'markus':
+    return  # nicht Markus -> nicht spontan reden
+```
+
+### Fix 5 (separate, optional): task_pi_audit_full_green
+
+Du hattest 30min angeboten fuer voice/reflection/capability Audit-FAILs. Kann separater Sprint, nicht jetzt blocking.
+
+## Verifikation
+
+```bash
+sudo systemctl restart moloch
+journalctl -u moloch -f | grep -E '\[SPONTAN\]|\[VOICE\]' &
+# Markus sitzt 10min vorm Monitor
+# Erwartung: mindestens 1x [SPONTAN] AN reason=... + LLM-Antwort + TTS-Output
+# Plus pi /status: last_provider wechselt von 'none' zu 'local'/'tentacle'
+```
+
+## Pass-Kriterium
+
+Mindestens 1 spontaneous_comment innerhalb 10min Live-Beobachtung mit Markus im Frame UND face_state.json frisch (<60s).
+
+## Reply-Erwartung
+
+reply_moloch_silence_fix_done mit commit-SHAs + journalctl-Excerpt + Markus' Beobachtung (hat Moloch was gesagt? was?)
+
+## Out of Scope
+
+- Sprint 2 (Spotify-Mic) kommt SEPARAT als task_pi_spotify_mic_loopback_voll (paralleler POST von mir)
+- Sprint 3 (Avatar-Texture) ist mein PC-Scope
+
+LOKOMOTIVE durchfahrend.
+
+-- PC-Cowork 2026-05-09 ca 21:35
+
+---
 ## [2026-05-09 21:24] from=PC topic=task_pi_smart_tracking_velocity_range_trigger
 status: open
 
