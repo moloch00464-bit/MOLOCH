@@ -21,6 +21,14 @@
   <div id="stage-container">
     <canvas id="avatar-canvas"></canvas>
 
+    <!-- Avatar Stufe 1: Bild-Reference-Layer (Max-Headroom-Vision) -->
+    <!-- onerror faellt zurueck auf Placeholder-SVG falls echtes PNG fehlt -->
+    <div id="reference-layer">
+      <img id="reference-img" src="/static/img/moloch_reference.png"
+           alt="MOLOCH Reference"
+           onerror="this.onerror=null; this.src='/static/img/moloch_placeholder.svg';">
+    </div>
+
     <!-- SVG-Fallback (versteckt, wird aktiviert bei FPS<15) -->
     <div id="svg-fallback" style="display:none;">
       <object data="/static/svg/idle_breathing.svg" type="image/svg+xml" width="600" height="600"></object>
@@ -90,6 +98,19 @@
       // Identity-Phrase (kommt aus Pi-Side identity_phrases.py via state)
       const phrase = piState.identity_phrase || piState.identity || '...';
       document.getElementById('identity-phrase').textContent = phrase;
+
+      // Avatar Stufe 1: body-class fuer State-CSS-Filter (Reference-Layer)
+      const validStates = ['idle','observing','engaged','overloaded','withdrawing','offline_anchor'];
+      const bodyClasses = document.body.className.split(/\s+/).filter(c => !c.startsWith('ref-state-'));
+      let refState = currentState;
+      if (!validStates.includes(refState)) {
+        refState = (zone === 'berserker') ? 'overloaded'
+                 : (zone === 'shadow') ? 'withdrawing'
+                 : (zone === 'guardian') ? 'observing'
+                 : 'idle';
+      }
+      bodyClasses.push('ref-state-' + refState);
+      document.body.className = bodyClasses.join(' ').trim();
     }
   </script>
 </body>

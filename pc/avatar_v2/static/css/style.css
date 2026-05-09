@@ -52,6 +52,59 @@ html, body {
   font-size: 0.9em;
 }
 
+/* ===== Avatar Stufe 1: Bild-Reference-Layer ===== */
+/* Markus' Max-Headroom-Bild als statisches Reference-Asset, mit
+   State-abhaengigen CSS-Filtern fuer Glow / Pulse / Glitch / Dim.
+   Three.js-Stage bleibt darunter als Hintergrund (Particle-Aura). */
+#reference-layer {
+  position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(70vmin, 600px); height: min(70vmin, 600px);
+  z-index: 50;
+  pointer-events: none;
+  display: flex; align-items: center; justify-content: center;
+  transition: filter 0.6s ease, transform 0.6s ease;
+}
+#reference-img {
+  width: 100%; height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 0 20px #f0f) drop-shadow(0 0 40px #f0f);
+  transition: filter 0.6s ease;
+}
+
+/* State-spezifische Filter — body-class wird vom JS gesetzt */
+body.ref-state-idle #reference-img {
+  filter: drop-shadow(0 0 12px #69f) drop-shadow(0 0 25px #4af) brightness(0.85) saturate(1.1);
+}
+body.ref-state-observing #reference-img {
+  filter: drop-shadow(0 0 18px #6cf) drop-shadow(0 0 35px #4af) brightness(1.0) saturate(1.2);
+}
+body.ref-state-engaged #reference-img {
+  filter: drop-shadow(0 0 25px #fc6) drop-shadow(0 0 50px #f8c) brightness(1.15) saturate(1.4);
+  animation: refPulse 2s ease-in-out infinite;
+}
+body.ref-state-overloaded #reference-img {
+  filter: drop-shadow(0 0 30px #f66) drop-shadow(0 0 60px #f06) brightness(1.2) saturate(1.5) hue-rotate(-15deg);
+  animation: refGlitch 0.4s steps(3) infinite;
+}
+body.ref-state-withdrawing #reference-img {
+  filter: drop-shadow(0 0 10px #c6f) drop-shadow(0 0 20px #93f) brightness(0.65) saturate(0.7);
+}
+body.ref-state-offline_anchor #reference-img {
+  filter: grayscale(1) brightness(0.5) drop-shadow(0 0 8px #888);
+}
+
+@keyframes refPulse {
+  0%, 100% { transform: scale(1.0); }
+  50%      { transform: scale(1.04); }
+}
+@keyframes refGlitch {
+  0%   { transform: translate(0, 0); }
+  33%  { transform: translate(-2px, 1px); }
+  66%  { transform: translate(2px, -1px); }
+  100% { transform: translate(0, 0); }
+}
+
 /* Identity Panel (bottom) */
 #identity-panel {
   position: fixed; bottom: 0; left: 0; right: 0;

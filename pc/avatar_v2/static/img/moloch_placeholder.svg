@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- MOLOCH Placeholder (Max-Headroom Style, Low-Poly Head, Neon Backlight)
+     Wird angezeigt bis Markus echtes moloch_reference.png unter pc/avatar_v2/static/img/ ablegt.
+     Onerror-Fallback im index.html greift auf dieses SVG zurueck. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600" width="600" height="600">
+  <defs>
+    <radialGradient id="bgGrad" cx="50%" cy="50%" r="60%">
+      <stop offset="0%" stop-color="#1a0033" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#000010" stop-opacity="1"/>
+    </radialGradient>
+    <linearGradient id="neonStripe" x1="0" y1="0" x2="1" y2="0.5">
+      <stop offset="0%" stop-color="#ff00aa" stop-opacity="0.0"/>
+      <stop offset="40%" stop-color="#ff00cc" stop-opacity="0.95"/>
+      <stop offset="60%" stop-color="#cc00ff" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#aa00ff" stop-opacity="0.0"/>
+    </linearGradient>
+    <linearGradient id="faceShade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffe6cc"/>
+      <stop offset="50%" stop-color="#ddc4a8"/>
+      <stop offset="100%" stop-color="#9a7a60"/>
+    </linearGradient>
+    <linearGradient id="hairShade" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0%" stop-color="#f5d8e8"/>
+      <stop offset="50%" stop-color="#c8a8d0"/>
+      <stop offset="100%" stop-color="#8866aa"/>
+    </linearGradient>
+    <filter id="bigGlow">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="600" height="600" fill="url(#bgGrad)"/>
+
+  <!-- Neon-Streifen-Backlight (Max-Headroom Style) -->
+  <g opacity="0.85">
+    <rect x="0" y="60"  width="600" height="6" fill="url(#neonStripe)"/>
+    <rect x="0" y="100" width="600" height="6" fill="url(#neonStripe)"/>
+    <rect x="0" y="140" width="600" height="6" fill="url(#neonStripe)"/>
+    <rect x="0" y="180" width="600" height="6" fill="url(#neonStripe)"/>
+    <rect x="0" y="220" width="600" height="6" fill="url(#neonStripe)"/>
+    <rect x="0" y="260" width="600" height="6" fill="url(#neonStripe)"/>
+    <rect x="0" y="300" width="600" height="6" fill="url(#neonStripe)"/>
+    <rect x="0" y="340" width="600" height="6" fill="url(#neonStripe)"/>
+    <rect x="0" y="380" width="600" height="6" fill="url(#neonStripe)"/>
+    <rect x="0" y="420" width="600" height="6" fill="url(#neonStripe)"/>
+  </g>
+
+  <!-- Low-Poly Kopf (vereinfachte Polygone) -->
+  <g filter="url(#bigGlow)" transform="translate(300,300)">
+    <!-- Hair (oben, Pompadour-Style, Low-Poly Facetten) -->
+    <polygon points="-110,-180 -90,-220 -40,-240 30,-245 80,-225 110,-180 95,-150 -100,-150" fill="url(#hairShade)"/>
+    <polygon points="-90,-220 -60,-200 -30,-215 -10,-230 -40,-240" fill="#e8c8e8" opacity="0.7"/>
+    <polygon points="30,-245 60,-220 80,-225 70,-205 50,-220" fill="#e8c8e8" opacity="0.7"/>
+
+    <!-- Gesicht (Low-Poly Facetten) -->
+    <polygon points="-100,-150 100,-150 110,-100 95,-50 80,0 60,40 0,80 -60,40 -80,0 -95,-50 -100,-100" fill="url(#faceShade)"/>
+
+    <!-- Wangen-Schattierung -->
+    <polygon points="-95,-50 -80,-30 -75,10 -85,30" fill="#b89878" opacity="0.4"/>
+    <polygon points="95,-50 80,-30 75,10 85,30" fill="#b89878" opacity="0.4"/>
+
+    <!-- Augenbrauen -->
+    <polygon points="-70,-95 -30,-95 -25,-90 -60,-88" fill="#5a3322"/>
+    <polygon points="30,-95 70,-95 65,-88 30,-90" fill="#5a3322"/>
+
+    <!-- Augen (Cyan/Blau leuchtend) -->
+    <polygon points="-65,-75 -35,-78 -32,-65 -60,-62" fill="#fff"/>
+    <polygon points="-55,-72 -42,-72 -40,-65 -53,-65" fill="#3399ff"/>
+    <polygon points="-50,-70 -45,-70 -45,-67 -50,-67" fill="#000"/>
+
+    <polygon points="35,-78 65,-75 60,-62 32,-65" fill="#fff"/>
+    <polygon points="42,-72 55,-72 53,-65 40,-65" fill="#3399ff"/>
+    <polygon points="45,-70 50,-70 50,-67 45,-67" fill="#000"/>
+
+    <!-- Nase -->
+    <polygon points="-15,-50 15,-50 20,5 0,15 -20,5" fill="#c8a888" opacity="0.7"/>
+    <polygon points="0,-50 5,-30 10,5 0,15" fill="#a87858" opacity="0.5"/>
+
+    <!-- Mund (Lächeln) -->
+    <polygon points="-40,40 40,40 35,55 0,62 -35,55" fill="#a04050"/>
+    <polygon points="-30,42 30,42 25,50 0,55 -25,50" fill="#dd6677"/>
+    <polygon points="-30,52 30,52 25,55 0,58 -25,55" fill="#fff" opacity="0.4"/>
+
+    <!-- Hals-Anschnitt -->
+    <polygon points="-50,80 50,80 60,180 -60,180" fill="#222244"/>
+    <polygon points="-60,180 60,180 80,220 -80,220" fill="#1a1a3a"/>
+  </g>
+
+  <!-- MOLOCH-Schriftzug rechts (vertikal) -->
+  <g transform="translate(540,150)" filter="url(#bigGlow)">
+    <text x="0" y="0"   font-family="Consolas, monospace" font-size="48" font-weight="bold" fill="#cce" letter-spacing="4">M</text>
+    <text x="0" y="60"  font-family="Consolas, monospace" font-size="48" font-weight="bold" fill="#cce" letter-spacing="4">O</text>
+    <text x="0" y="120" font-family="Consolas, monospace" font-size="48" font-weight="bold" fill="#cce" letter-spacing="4">L</text>
+    <text x="0" y="180" font-family="Consolas, monospace" font-size="48" font-weight="bold" fill="#cce" letter-spacing="4">O</text>
+    <text x="0" y="240" font-family="Consolas, monospace" font-size="48" font-weight="bold" fill="#cce" letter-spacing="4">C</text>
+    <text x="0" y="300" font-family="Consolas, monospace" font-size="48" font-weight="bold" fill="#cce" letter-spacing="4">H</text>
+  </g>
+
+  <!-- Hint fuer Markus -->
+  <text x="300" y="585" text-anchor="middle"
+        font-family="Consolas, monospace" font-size="10" fill="#666" opacity="0.6">
+    Placeholder — speichere echtes Bild als pc/avatar_v2/static/img/moloch_reference.png
+  </text>
+</svg>
