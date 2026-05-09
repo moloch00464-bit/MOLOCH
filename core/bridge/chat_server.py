@@ -973,7 +973,7 @@ async function refreshChar(){
 }
 
 // === VOICE-PICKER (PC-Topic 07:24 B) ===
-const VOICE_BRIDGE = "http://192.168.178.20:9002";
+const VOICE_BRIDGE = "";  // same-origin: Pi-Proxy /voices + /sample/<voice>
 let voicePickerLoaded = false;
 async function loadVoicePicker(){
   if(voicePickerLoaded) return;
@@ -2731,6 +2731,53 @@ def tts_speak(req: TextOnly):
         return {"spoken": bool(ok), "via": "pi_piper"}
     except Exception as e:
         raise HTTPException(500, f"TTS error: {e}")
+
+
+def _tts_bridge_url() -> str:
+    """Liest tts_bridge config -> http://host:port (Default 192.168.178.20:9002)."""
+    try:
+        with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        bridge = cfg.get("tts_bridge") or {}
+        host = bridge.get("host", "192.168.178.20")
+        port = int(bridge.get("port", 9002))
+        return f"http://{host}:{port}"
+    except Exception:
+        return "http://192.168.178.20:9002"
+
+
+@app.get("/voices")
+def proxy_voices():
+    """Pi-Side Proxy zu PC-TTS-Bridge /voices.
+    Loest Mixed-Content (HTTPS-Cockpit -> HTTP-Bridge) per Same-Origin-Fetch.
+    """
+    try:
+        r = requests.get(f"{_tts_bridge_url()}/voices", timeout=10)
+        if r.status_code != 200:
+            raise HTTPException(r.status_code, "voices upstream error")
+        return Response(content=r.content, media_type="application/json")
+    except requests.RequestException as e:
+        raise HTTPException(502, f"voices proxy fail: {e}")
+
+
+@app.get("/sample/{voice}")
+def proxy_sample(voice: str, text: str = "Hallo Markus."):
+    """Pi-Side Proxy zu PC-TTS-Bridge /sample/<voice> — returnt MP3-bytes 1:1."""
+    try:
+        r = requests.get(
+            f"{_tts_bridge_url()}/sample/{voice}",
+            params={"text": text},
+            timeout=15,
+        )
+        if r.status_code != 200:
+            raise HTTPException(r.status_code, "sample upstream error")
+        return Response(
+            content=r.content,
+            media_type=r.headers.get("Content-Type", "audio/mpeg"),
+            headers={"Cache-Control": "no-store"},
+        )
+    except requests.RequestException as e:
+        raise HTTPException(502, f"sample proxy fail: {e}")
 
 
 @app.get("/voice_presets")
