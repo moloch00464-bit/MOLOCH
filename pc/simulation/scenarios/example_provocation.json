@@ -1,0 +1,11 @@
+{
+  "name": "Provokations-Sequenz",
+  "description": "Markus tippt provokative Phrase, erwartet observing -> engaged -> overloaded -> withdrawing.",
+  "events": [
+    {"kind": "voice_input",   "dt": 0.0, "payload": {"transcript": "Du bist sinnlos."}},
+    {"kind": "tension_spike", "dt": 0.3, "payload": {"delta": 0.4, "reason": "provocation"}},
+    {"kind": "tension_spike", "dt": 1.0, "payload": {"delta": 0.3, "reason": "follow-up"}},
+    {"kind": "voice_input",   "dt": 2.0, "payload": {"transcript": "Antwort ungenuegend."}}
+  ],
+  "expected_state_path": ["observing", "engaged", "overloaded", "withdrawing"]
+}
