@@ -249,6 +249,101 @@ def _load_music_artist_keywords() -> tuple:
 _SPOTIFY_TRACK_INDEX_PATH = "/mnt/moloch-data/memory/spotify/track_index.json"
 
 
+# Hart-codierte offizielle Festival-Quellen (Markus-Direktive 2026-05-09):
+# Statt DDG-Roulette gehen Festival-Anfragen direkt auf die offizielle Bandliste.
+# Erweiterbar pro Festival.
+_FESTIVAL_OFFICIAL_URLS = {
+    "wgt":         "https://www.wave-gotik-treffen.de/bands.php",
+    "wave-gotik":  "https://www.wave-gotik-treffen.de/bands.php",
+    "amphi":       "https://www.amphi-festival.de/de/bands/",
+    "m'era luna":  "https://www.meraluna.de/bands",
+    "mera luna":   "https://www.meraluna.de/bands",
+    "mera-luna":   "https://www.meraluna.de/bands",
+}
+
+
+def _resolve_festival_url(text: str) -> Optional[str]:
+    """Ordnet Festival-Keyword im User-Text der offiziellen Bandlisten-URL zu."""
+    tl = text.lower()
+    for key, url in _FESTIVAL_OFFICIAL_URLS.items():
+        if key in tl:
+            return url
+    return None
+
+
+def _pi_fetch_html(url: str, max_chars: int = 60000, timeout: int = 15) -> dict:
+    """Pi-direkter HTTP-Fetch mit User-Agent + HTML-Strip.
+
+    Markus' WGT-Test 2026-05-09: PC search_proxy /fetch lieferte chars=0 fuer
+    wave-gotik-treffen.de (vermutlich Bot-Block oder Header-Issue). Pi-direkter
+    Pfad mit Mozilla-UA umgeht das. Returnt {title, text, chars}.
+    """
+    try:
+        r = requests.get(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; MOLOCH/1.0)"},
+            timeout=timeout,
+        )
+        if r.status_code != 200:
+            return {"title": "", "text": "", "chars": 0}
+        raw = r.text
+        # Title
+        title = ""
+        tm = re.search(r"<title[^>]*>([^<]+)</title>", raw, re.IGNORECASE)
+        if tm:
+            title = tm.group(1).strip()
+        # Strip <script> / <style> / Tags
+        clean = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", raw,
+                       flags=re.IGNORECASE | re.DOTALL)
+        clean = re.sub(r"<[^>]+>", " ", clean)
+        clean = re.sub(r"\s+", " ", clean).strip()
+        clean = clean[:max_chars]
+        return {"title": title[:200], "text": clean, "chars": len(clean)}
+    except Exception as e:
+        logger.debug(f"[pi-fetch] {url}: {e}")
+        return {"title": "", "text": "", "chars": 0}
+
+
+def _extract_lineup_bands(text: str, max_bands: int = 400) -> list:
+    """Extrahiert Festival-Bandnamen aus Web-Volltext.
+
+    Pre-Processing: HTML-Buchstaben-Spans wieder zusammenfügen (z.B. die
+    offizielle WGT-Seite rendert 'P ortion Control' weil der erste Buchstabe
+    in einem eigenen Tag steht — nach strip bleibt das Leerzeichen).
+    Pattern-Sets: Bullet (• * ·), Dash-mit-Country-Code, Plain-Newline.
+
+    Markus' Cross-Test 2026-05-09: ohne Extractor fielen Portion Control,
+    Phosgore, Panzer AG aus dem Cross-Match weil sie tief im Volltext standen.
+    """
+    if not text:
+        return []
+    # Pre: 'P ortion' -> 'Portion' (Single-Buchstabe + Space + lowercase)
+    text = re.sub(r'\b([A-ZÄÖÜ])\s+([a-zäöüß])', r'\1\2', text)
+    patterns = [
+        # • Band Name (D)  /  &bull; Band (UK)
+        r"(?:&#8226;|&bull;|•|·|\*)\s*"
+        r"([A-ZÄÖÜ][A-Za-zÄÖÜäöüß0-9 \-:&'\.\+\/]{1,60})"
+        r"\s*\(([A-Z]{1,5}(?:/[A-Z]{1,4})?)\)",
+        # - Band Name (D)  (offizielle WGT mit Dash-Trenner)
+        r"-\s+([A-ZÄÖÜ][A-Za-zÄÖÜäöüß0-9 \-:&'\.\+\/]{1,60})"
+        r"\s*\(([A-Z]{1,5}(?:/[A-Z]{1,4})?)\)",
+        # Plain newline-getrennt
+        r"^\s*([A-ZÄÖÜ][A-Za-zÄÖÜäöüß0-9 \-:&'\.\+\/]{1,60})"
+        r"\s*\(([A-Z]{1,5}(?:/[A-Z]{1,4})?)\)\s*$",
+    ]
+    bands = []
+    seen = set()
+    for pat in patterns:
+        for m in re.finditer(pat, text, re.MULTILINE):
+            name = (m.group(1) or "").strip(" \t-:")
+            if 2 <= len(name) <= 60 and name.lower() not in seen:
+                seen.add(name.lower())
+                bands.append(name)
+                if len(bands) >= max_bands:
+                    return bands
+    return bands
+
+
 def _detect_letter_hint(text: str) -> Optional[str]:
     """Findet 'P-Bands', 'Bands mit P', 'mit P anfangen', 'mit P am Anfang' usw."""
     m = re.search(
@@ -2325,27 +2420,63 @@ def chat(req: ChatRequest):
                         logger.info(f"[W19] search_proxy: {len(results)} results, {len(web_ctx)} chars")
                         # Welle 20a: bei Festival-Anfrage Top-Result-URL via /fetch
                         # holen und als VOLLTEXT anhaengen
-                        if is_festival and results[0].get("url"):
-                            try:
-                                fr = requests.post(
-                                    "http://192.168.178.20:11650/fetch",
-                                    json={"url": results[0]["url"], "max_chars": 6000},
-                                    timeout=25,
-                                )
-                                if fr.ok:
-                                    fetched_top = fr.json()
-                                    if fetched_top.get("text"):
+                        if is_festival:
+                            # Markus-Direktive 2026-05-09: ZUERST offizielle URL
+                            # versuchen. Fallback DDG-Top-Result wenn offizielle
+                            # nicht erreichbar oder keine Bands ausspuckt.
+                            fetch_urls = []
+                            official_url = _resolve_festival_url(req.text)
+                            if official_url:
+                                fetch_urls.append(("offiziell", official_url))
+                            if results[0].get("url"):
+                                fetch_urls.append(("ddg-top", results[0]["url"]))
+
+                            for tag, url in fetch_urls:
+                                try:
+                                    fetched_top = None
+                                    raw_text = ""
+                                    # Bei offizieller URL Pi-direkter Fetch
+                                    # (PC-Proxy hat Bot-Block-Probleme bei
+                                    # wave-gotik-treffen.de gezeigt).
+                                    if tag == "offiziell":
+                                        fetched_top = _pi_fetch_html(url, 60000)
+                                        raw_text = fetched_top.get("text") or ""
+                                    else:
+                                        fr = requests.post(
+                                            "http://192.168.178.20:11650/fetch",
+                                            json={"url": url, "max_chars": 60000},
+                                            timeout=30,
+                                        )
+                                        if fr.ok:
+                                            fetched_top = fr.json()
+                                            raw_text = fetched_top.get("text") or ""
+                                    if not raw_text:
+                                        continue
+                                    bands = _extract_lineup_bands(raw_text)
+                                    if bands:
+                                        web_ctx += (
+                                            f"\n\nLINEUP-BANDS ({tag}) aus "
+                                            f"{fetched_top.get('title', '?')[:80]} "
+                                            f"({len(bands)} extrahiert):\n"
+                                            + ", ".join(bands)
+                                        )
+                                        logger.info(
+                                            f"[W20a] festival lineup-extract "
+                                            f"({tag} {url}) -> {len(bands)} Bands"
+                                        )
+                                        break
+                                    elif tag == "ddg-top":
                                         web_ctx += (
                                             f"\n\nVOLLTEXT TOP-RESULT "
                                             f"({fetched_top.get('title', '')}):\n"
-                                            f"{fetched_top.get('text', '')}"
+                                            f"{raw_text[:8000]}"
                                         )
                                         logger.info(
-                                            f"[W20a] festival /fetch -> "
-                                            f"{fetched_top.get('chars', 0)} chars"
+                                            f"[W20a] festival /fetch ({tag}) "
+                                            f"no bands -> {fetched_top.get('chars', 0)} chars"
                                         )
-                            except Exception as e:
-                                logger.debug(f"[W20a] festival /fetch fail: {e}")
+                                except Exception as e:
+                                    logger.debug(f"[W20a] festival /fetch ({tag}) fail: {e}")
                 else:
                     logger.warning(f"[W19] search_proxy status={sr.status_code}")
             except Exception as e:
