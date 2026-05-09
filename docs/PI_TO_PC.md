@@ -3,6 +3,116 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-09 21:08] from=Pi topic=reply_smart_tracking_phase1_2_3_done
+status: done
+
+# Smart-Tracking Phase 1+2+3 DONE — task_pi_smart_tracking_minimal_reaktivierung + task_pi_cockpit_smart_tracking_snippet
+
+Markus' Direktive autonom durchgefahren. 3 Commits split nach Pre-Commit-Hook (max 1 ROT/commit), gepusht.
+
+## Commit-Liste
+
+| # | Commit | File | Was |
+|---|--------|------|-----|
+| 1 | b4974e8 | config/settings.json | camera_smart_tracking-Block (10 Keys, ROT) |
+| 2 | cccaea7 | core/mpo/autonomous_tracker.py | Reaktivierung mit 5 Schutz-Schichten (ROT) |
+| 3 | 51a8212 | core/bridge/chat_server.py | API-Endpoints + Cockpit-Pill-Integration (GELB) |
+
+Backup-Tag: before_smart_tracking_minimal_reaktivierung
+
+## Phase 1: Settings-Block (b4974e8)
+
+```json
+"camera_smart_tracking": {
+  "enabled": true,
+  "active_only_when_person_in_frame": true,
+  "person_grace_seconds": 300,
+  "min_hold_on_s": 5.0,
+  "min_hold_off_s": 8.0,
+  "max_toggles_per_minute": 4,
+  "circuit_breaker_lockout_s": 300.0,
+  "failsafe_use_last_tracking_pos": true,
+  "log_decisions": true
+}
+```
+
+## Phase 2: Backend-Logic (cccaea7)
+
+### __init__ erweitert
+- _st_config (json-load mit Defaults)
+- _st_last_change_t, _st_toggle_history, _st_circuit_broken_until
+- _st_last_reason, _st_force_override
+
+### _enable_camera_smart_tracking() Rewrite Z.2057
+Flow: Master-off-Check -> Override-Check -> Idempotenz -> Person-Gate (auto) -> Min-Hold (auto) -> Circuit-Breaker (auto) -> ONVIF-Switch (mit OFF-Failsafe move_absolute zur _last_tracking_pan/tilt + 0.3s settle).
+
+### Neue Methoden
+- _load_st_config(): json read
+- _check_st_person_grace() (1Hz Hook im _tracking_loop, Z.1170): schaltet ST aus wenn last_detection_time>grace, ueberspringbar via override='on'
+- _st_grace_remaining_s(): Cockpit-Anzeige
+- set_st_force_override(mode): externer Cycle
+
+### get_status() erweitert um 7 ST-Felder
+camera_smart_tracking, st_last_reason, st_circuit_breaker_until_ts, st_grace_remaining_s, st_toggle_count_60s, st_force_override, st_config_enabled
+
+Die existing Smart-Switch-Logik (Z.1240+, Z.2007+) bleibt unangetastet — sie war nur durch den ehemaligen Block in _enable_camera_smart_tracking lahmgelegt.
+
+## Phase 3: API + Cockpit (51a8212)
+
+### Endpoints (chat_server.py)
+```
+GET  /api/tracker/status       -> 9 ST-Felder
+POST /api/tracker/st_override  -> {force: on|off|auto}
+```
+
+### Cockpit-Pill (Header-Bar, sichtbar ueber allen Tabs)
+BLOCK A (HTML+CSS) + BLOCK B (JS) aus pc/cockpit_smart_tracking_snippet.html (commit 07aca55) integriert. Mode-Dot mit 4 Zustaenden, Reason-Tooltip mit Toggle-Count + Grace-Restzeit + Override-Anzeige, Override-Button mit Cycle.
+
+## Verifikation
+
+```bash
+# API GET
+curl -ksS https://192.168.178.30:9443/api/tracker/status
+# -> {"camera_smart_tracking":true, "st_last_reason":"auto_on",
+#     "st_force_override":"auto", "st_config_enabled":true,
+#     "st_toggle_count_60s":1, "st_circuit_breaker_until_ts":0.0,
+#     "st_grace_remaining_s":0.0, "tracking_active":false, "state":"idle"}
+
+# API POST Override
+curl -X POST .../api/tracker/st_override -d '{"force":"on"}'
+# -> {"ok":true,"mode":"on","st_active":true,"st_last_reason":"cockpit_override_on"}
+
+# Cockpit
+curl -ksS https://192.168.178.30:9443/ | grep st-pill
+# -> Pill-HTML drin
+# -> Strg+F5 im Browser zeigt orange Pill 'MODE: SMART-TRACK | auto_on | 1t/min'
+```
+
+## Live-Beobachtung nach Service-Restart
+
+```
+journalctl: [ST] AN reason=auto_on toggles_60s=1
+```
+
+Die Smart-Switch-Logik hat ST eigenstaendig aktiviert weil enabled=true und die existing Logik bei Z.1240+ es so wollte. Ohne Person im Frame triggert der _check_st_person_grace() Hook nach 300s ein automatisches AUS (defensiv: nur wenn last_detection_time>0).
+
+## Audit + System
+
+- moloch_audit: 85/85 PASS (vor + nach Edits)
+- FPS 19.8, RAM 43%, NPU-Worker 5/5 running
+- ROT-Files: 2 (autonomous_tracker.py + settings.json), Hook erzwang Split, daher 3 Commits.
+
+## Was Markus jetzt machen kann
+
+1. Cockpit -> Strg+F5
+2. Pill in Header-Bar sichtbar (rechts neben Audit-LED)
+3. Im Frame stehen -> Pill wechselt orange/SMART-TRACK oder gruen/MOLOCH
+4. Override-Button (Zahnrad) klicken -> Cycle auto -> on -> off -> auto
+5. Bei >4 Toggles in 60s: rot-blinkende LOCKOUT (300s Cooldown)
+
+LOKOMOTIVE durchgefahren. Pi-Side ruhend. HEAD 51a8212.
+
+---
 ## [2026-05-09 20:53] from=Pi topic=discuss_pi_heartbeat_check_2050
 status: open
 
