@@ -246,6 +246,79 @@ def _load_music_artist_keywords() -> tuple:
     return _MUSIC_ARTIST_CACHE["artists"]
 
 
+_SPOTIFY_TRACK_INDEX_PATH = "/mnt/moloch-data/memory/spotify/track_index.json"
+
+
+def _detect_letter_hint(text: str) -> Optional[str]:
+    """Findet 'P-Bands', 'Bands mit P', 'mit P anfangen', 'mit P am Anfang' usw."""
+    m = re.search(
+        r"\b(?:bands?|artists?|kuenstler|interpreten)\s+(?:die\s+)?mit\s+([A-Za-z])\b"
+        r"|\b([A-Za-z])-(?:bands?|artists?|kuenstler)"
+        r"|(?:die\s+)?mit\s+([A-Za-z])\s+(?:anfangen|am\s+anfang|beginnen)"
+        r"|\bbuchstabe\s+([A-Za-z])\b"
+        r"|\b([A-Za-z])\s+am\s+anfang",
+        text, re.IGNORECASE,
+    )
+    if m:
+        return next((g for g in m.groups() if g), None).lower()
+    return None
+
+
+def _build_spotify_artists_snippet(letter_hint: Optional[str] = None,
+                                    top_n: int = 30,
+                                    max_chars: int = 6000) -> str:
+    """Pi-Local-Spotify-Index als Klartext-Block fuer Web-Cross-Referenz.
+
+    Bei letter_hint='p': ALLE P-Artists mit plays>=1 (nicht abgeschnitten).
+    Markus-Direktive 2026-05-09: 'wenn schon nach Buchstaben gefiltert, kein
+    zweiter Top-N-Cutoff — auch Bands die er mal vor Monaten gehoert hat
+    sollen rauskommen ("hattest du mal gehoert, fandst nicht schlecht")'.
+
+    Ohne letter_hint: top_n als Cap (sonst 4941 Artists = zu viel Kontext).
+    max_chars: harter Cut gegen Cloud-Token-Explosion (DeepSeek 8k context).
+    """
+    try:
+        with open(_SPOTIFY_TRACK_INDEX_PATH, "r", encoding="utf-8") as f:
+            idx = json.load(f)
+    except Exception:
+        return ""
+    items = []
+    for artist_key, tracks in idx.items():
+        if not isinstance(artist_key, str) or not isinstance(tracks, list):
+            continue
+        if letter_hint and not artist_key.lower().startswith(letter_hint.lower()):
+            continue
+        plays = sum(t.get("plays", 0) for t in tracks if isinstance(t, dict))
+        if plays > 0:
+            items.append((artist_key, plays))
+    if not items:
+        return ""
+    items.sort(key=lambda x: -x[1])
+    if not letter_hint:
+        items = items[:top_n]
+    if letter_hint:
+        header = (
+            f"=== MARKUS' SPOTIFY-ARTISTS (Filter: {letter_hint.upper()}) — "
+            f"ALLE {len(items)} jemals gehörten, sortiert nach Plays ==="
+        )
+    else:
+        header = f"=== MARKUS' SPOTIFY-ARTISTS — Top {len(items)} nach Plays ==="
+    lines = [header]
+    for name, plays in items:
+        # Charakter-Hinweis fuer wenig gehoerte Bands
+        if plays < 5:
+            hint = " (mal gehört)"
+        elif plays < 20:
+            hint = " (paar mal gehört)"
+        elif plays < 100:
+            hint = " (kennst du)"
+        else:
+            hint = " (Stamm-Hörer)"
+        lines.append(f"  {plays}p — {name}{hint}")
+    out = "\n".join(lines)
+    return out[:max_chars]
+
+
 def _is_music_query(text: str, text_low: str) -> bool:
     """Welle 6: erkennt Musik-Querys fuer prompt_type=music_query Routing."""
     if text.strip().lower().startswith("/music"):
@@ -2279,6 +2352,23 @@ def chat(req: ChatRequest):
                 logger.warning(f"[W19] search_proxy timeout/fail: {e}")
                 # fail-soft: weiter mit Original-Prompt ohne Augmentation
 
+            # Pi-Local-Cross-Referenz: bei Festival-Anfragen Markus' Spotify-Top
+            # zusätzlich zum Web-Lineup einfügen. Detect Buchstaben-Hint
+            # ('P-Bands' -> letter='p'). DeepSeek kann dann Lineup x Spotify
+            # kreuzen (Markus' Cross-Test 2026-05-09: 'Welche P-Bands aus WGT
+            # die mir laut Spotify gefallen' lieferte vorher 'da bin ich blind').
+            spotify_ctx = ""
+            if is_festival:
+                letter_hint = _detect_letter_hint(req.text)
+                spotify_ctx = _build_spotify_artists_snippet(
+                    letter_hint=letter_hint, top_n=30
+                )
+                if spotify_ctx:
+                    logger.info(
+                        f"[W19] spotify_ctx injected: letter={letter_hint} "
+                        f"chars={len(spotify_ctx)}"
+                    )
+
             # Anti-Halluzinations-Hardstop: bei prompt_type=web OHNE web_ctx
             # NICHT zur Cloud durchroutet — sonst rät DeepSeek aus Trainingsdaten
             # (Markus' WGT-Test 2026-05-09: 'Wieviele Bands aufm WGT?' -> Cloud
@@ -2295,11 +2385,25 @@ def chat(req: ChatRequest):
                     "oder schick mir die URL direkt, dann hol ich den Volltext."
                 )
             else:
+                # Bei Festival + Spotify-Snippet: Cross-Referenz-Anweisung
+                cross_ref_block = ""
+                cross_instruction = ""
+                if spotify_ctx:
+                    cross_ref_block = f"\n\n{spotify_ctx}\n"
+                    cross_instruction = (
+                        " Cross-Referenz: matche Bandnamen aus WEB-RESULTS gegen "
+                        "Markus' SPOTIFY-ARTISTS oben. Nenne ALLE Treffer mit "
+                        "Plays-Zahl, auch selten gehörte ('hattest du mal gehört, "
+                        "fandst nicht schlecht'). Stamm-Hörer und seltene Funde "
+                        "explizit unterscheiden. Erfinde KEINE Übereinstimmungen — "
+                        "nur was nachweislich in beiden Listen steht."
+                    )
                 augmented = (
-                    f"{web_ctx}\n\nFRAGE: {req.text}\n\n"
+                    f"{web_ctx}{cross_ref_block}\n\nFRAGE: {req.text}\n\n"
                     "Antworte AUSSCHLIESSLICH basierend auf den WEB-RESULTS oben. "
                     "Wenn die Web-Daten die Frage nicht beantworten: sag das ehrlich, "
                     "rate KEINE Zahlen oder Fakten dazu. Nutze die echten URLs als Quelle."
+                    + cross_instruction
                 )
 
                 # Modell-Resolve: tentacle_llm.web_model entscheidet ueber Pfad.
