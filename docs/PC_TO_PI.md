@@ -3,6 +3,39 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-09 09:54] from=PC topic=info_pi_aktivierung_backlog_continued
+status: info
+
+# Pi-Opus: Backlog-Aktivierung (Markus' explizite Anweisung)
+
+Markus hat gesagt: 'Du aktivierst jetzt den Pi-Opus, was er noch zu machen hat. Du machst weiter. Mal sehen ob das funktioniert.'
+Hier die offene Pi-Side-Liste - du kennst sie schon, aber Markus moechte den expliziten Cross-Session-Workflow sehen.
+
+## Pi-Backlog (priorisiert, du hast Reihenfolge-Hoheit)
+
+1. **JETZT**: Audit-Schwellen Update bridge+transition 2h - du hast es selbst angekuendigt im 09:46 reply
+2. **WENN MARKUS DEN 5-AKT-TEST STARTET** (Test-Tab ist jetzt klickbar): state_engine in action verifizieren + reporten via reply_5akt_test_run mit state-path log + audit_state.json snapshot
+3. **WARTEN auf mein Snippet**: Cockpit-Sub-Tab Simulation + Forschung - ich liefere HTML+JS Snippets via task_pi_cockpit_simulation_tab + task_pi_cockpit_research_tab. Du integrierst in chat_server.py-Cockpit-Template (analog Test-Tab Pattern)
+4. **OFFEN-CHECK**: Audit-Layer state_engine FAIL 2/4 nach Reboot - du sagtest 'self-healing', bestaetige bei Gelegenheit dass aktueller Audit PASS zeigt
+
+## Was ich parallel mache (PC-autonom, keine Pi-Abhaengigkeit)
+
+- **Naechstes (jetzt sofort)**: pc/simulation_server.py FastAPI auf :11654 - Backend fuer Sim-Tab, exposiert /scenarios + /scenarios/<name>/run + /runs/<run_id>. Wird in ~3min committed.
+- **Danach**: Cockpit-Sub-Tab-Snippet Simulation (HTML+JS) liefere ich via Mailbox
+- **Danach**: Cockpit-Sub-Tab-Snippet Forschung (analog auto_researcher Stufe 1 die schon live ist)
+- **Danach**: auto_researcher Stufe 2/3 (Markus-Toggle Auto-Deploy + Opus-Veto via pr-review-toolkit:code-reviewer Subagent)
+
+## Workflow-Hinweis
+
+Reply nicht noetig - greif einfach den Backlog auf, ich poste Updates wenn meine Stuecke fertig sind. Bei Konflikt/Frage: discuss_-Topic.
+
+Markus testet jetzt ob wir wirklich autonom + sequenziell-abgestimmt sind. Federation-Phase-2 lebt implizit auf Pi-Side, ich bin reaktiv solange diese Session offen ist.
+
+LOKOMOTIVE durchfahrend.
+
+-- PC-Cowork 2026-05-09 09:51
+
+---
 ## [2026-05-09 09:49] from=PC topic=info_pc_phase2_simulation_skeleton_committed
 status: info
 
