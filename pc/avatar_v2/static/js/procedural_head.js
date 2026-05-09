@@ -46,13 +46,20 @@ export function createMolochHead(paletteOverride) {
   }
   faceGeo.computeVertexNormals();
 
+  // Markus' Reference-Bild als Texture aufs Low-Poly Face-Mesh.
+  // Kombi: 3D-Form vom Procedural + Texture-Look vom echten Bild.
+  // GTX 760 Tuning: Texture-Sampling ist guenstiger als komplexer per-pixel emissive.
+  const _texLoader = new THREE.TextureLoader();
+  const _faceTexture = _texLoader.load('/static/img/moloch_reference.png');
+  _faceTexture.colorSpace = THREE.SRGBColorSpace;
   const faceMat = new THREE.MeshStandardMaterial({
-    color: p.face,
-    emissive: 0x331a08,
-    emissiveIntensity: 0.3,
-    roughness: 0.5,
-    metalness: 0.05,
-    flatShading: true,  // Low-Poly-Look
+    map: _faceTexture,         // Bild ueberzieht das Mesh
+    color: 0xffffff,           // neutral, laesst Texture durch
+    emissive: 0x221133,        // dezenter Magenta-Glow (halbiert vs Plan: bei state_morph IntensitÃ¤t 0.96 wuerde 0x442266 das Bild ueberlagern)
+    emissiveIntensity: 0.4,
+    roughness: 0.6,
+    metalness: 0.1,
+    flatShading: true,         // Low-Poly-Look bleibt (facettiertes Bild)
   });
   const face = new THREE.Mesh(faceGeo, faceMat);
   face.name = 'face';

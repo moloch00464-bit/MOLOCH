@@ -16,11 +16,11 @@ export function initScene(canvas) {
 
   const renderer = new THREE.WebGLRenderer({
     canvas: canvas,
-    antialias: true,
+    antialias: false,                                            // GTX 760 Tuning: MSAA off (Texture deckt Aliasing eh)
     alpha: false,
   });
   renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.0)); // GTX 760 Tuning: PixelRatio cap auf 1.0
 
   // ===== Lighting =====
   const ambient = new THREE.AmbientLight(0x223355, 0.6);

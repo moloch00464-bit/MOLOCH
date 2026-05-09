@@ -6,7 +6,7 @@
 <title>MOLOCH Avatar 2.0</title>
 <link rel="stylesheet" href="/static/css/style.css">
 </head>
-<body>
+<body class="three-d-on">
   <!-- Top HUD: 6-State Indicator + FPS + Tension + Zone -->
   <div id="hud-top">
     <span id="hud-state" class="hud-item state-idle">idle</span>
@@ -41,10 +41,10 @@
     const b = document.body;
     b.classList.toggle('three-d-on');
     const on = b.classList.contains('three-d-on');
-    document.getElementById('three-d-toggle').textContent = on ? '🎮 3D AN (GPU-intensive)' : '🖼 2D-Bild (Performance)';
+    document.getElementById('three-d-toggle').textContent = on ? '🎮 3D AN (Texture auf Low-Poly)' : '🖼 2D-Bild (Performance)';
     // FPS-Fallback reset wenn 3D wieder an
     if (on && window.__resetFpsFallback) window.__resetFpsFallback();
-  })();" style="position:fixed; bottom:110px; right:20px; background:rgba(20,20,40,0.7); color:#cce; border:1px solid #345; border-radius:4px; padding:0.4em 0.8em; font-size:0.85em; cursor:pointer; z-index:200;">🖼 2D-Bild (Performance)</button>
+  })();" style="position:fixed; bottom:110px; right:20px; background:rgba(20,20,40,0.7); color:#cce; border:1px solid #345; border-radius:4px; padding:0.4em 0.8em; font-size:0.85em; cursor:pointer; z-index:200;">🎮 3D AN (Texture auf Low-Poly)</button>
 
   <!-- Toggle-Button fuer Reference-Bild Sichtbarkeit -->
   <button id="reference-toggle" onclick="(function(){
