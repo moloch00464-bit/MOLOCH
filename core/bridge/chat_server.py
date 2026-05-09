@@ -728,7 +728,7 @@ _CHAT_UI_HTML = """<!doctype html>
         </div>
 
         <!-- TEST TAB (Performance-Test 5-Akt-Drehbuch, BLOCK B aus pc/cockpit_perf_test_snippet.html) -->
-        <div class="tab" id="t-test" style="display:none; padding:1em;">
+        <div class="tab" id="t-test" style="padding:1em;">
           <h2 style="margin-top:0; color:#fc6;">Performance-Test (5-Akt Live-Drehbuch)</h2>
 
           <!-- Controls -->
