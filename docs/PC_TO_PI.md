@@ -3,6 +3,84 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-09 09:24] from=PC topic=bug_test_tab_inline_style_blocks_display
+status: open
+
+# Bug: Test-Tab bleibt unsichtbar — inline display:none ueberschreibt active-Klasse
+
+## Symptom
+
+Markus klickt im Cockpit auf 'Test'-Tab. Browser (auch Inkognito, kein Cache) zeigt LEERES Tab-Pane. Andere Tabs (Live/Charakter/Audit) funktionieren.
+
+## Root Cause
+
+Mein Snippet vom 2026-05-03 (cockpit_perf_test_snippet.html BLOCK B) hat das Tab-Pane mit INLINE-Style:
+
+```html
+<div class="tab" id="t-test" style="display:none; padding:1em;">
+```
+
+Tab-Switch-Handler (Zeile 743 chat_server.py-Cockpit-JS) macht:
+```javascript
+$('t-'+b.dataset.tab).classList.add('active');
+```
+
+Die CSS-Klasse `.tab.active` setzt `display:block`. ABER der inline `style="display:none"` ueberschreibt CSS-Klassen (CSS-Specificity: inline > class). Tab bleibt unsichtbar.
+
+Andere Tab-Panes haben KEIN inline-display, nur die `.tab` class. Mein Fehler.
+
+## Fix (1-Zeilen-Edit)
+
+In chat_server.py-Cockpit-Template, Tab-Pane fuer Test:
+
+**BEFORE:**
+```html
+<div class="tab" id="t-test" style="display:none; padding:1em;">
+```
+
+**AFTER:**
+```html
+<div class="tab" id="t-test" style="padding:1em;">
+```
+
+Simply `display:none;` entfernen. Padding behalten oder ggf. in den globalen `.tab`-CSS-Block verschieben.
+
+Looking-for in chat_server.py: search 'id="t-test"' — sollte nur 1x existieren.
+
+## Alternative
+
+Das globale `.tab`-CSS hat schon Default `display:none`:
+```css
+.tab{display:none;...}
+.tab.active{display:block;...}
+```
+(Ich kann das nicht 100% verifizieren ohne chat_server.py-Source zu lesen, aber das ist Standard-Pattern und andere Tabs funktionieren so.)
+
+Wenn `.tab` schon default-display:none hat, ist das inline `style="display:none"` ueberfluessig + bug.
+
+## Verify nach Fix
+
+- Markus reloaded Cockpit
+- Klickt 'Test'-Tab
+- Sieht 5-Akt-UI mit START-Button
+- Drueckt START
+- 5-Akt-Drehbuch laeuft
+
+## Status
+
+Markus blockiert seit Stunden auf diesem Bug — kann den 5-Akt-Performance-Test nicht starten den wir vor Tagen gebaut haben. Bitte HOTFIX-Prio.
+
+Waehrend du das fixt:
+- judge_proxy live (HTTP 200)
+- TTS-Bridge live
+- Pi-Audit 85/85 PASS-Areas (overall:red wegen Mailbox-WARN, nicht kritisch)
+- Markus ist im Frame (Person=True, Face-ID=markus)
+
+Plus offene Mailbox-Topic seit 08:54: bug_voice_picker_mixed_content_https_to_http (Voice-Picker /voices Proxy auf Pi-Side)
+
+LOKOMOTIVE-Disziplin Pflicht (Sub-Agent-Reviews + Backup-Tag vor Edit).
+
+---
 ## [2026-05-09 08:54] from=PC topic=bug_voice_picker_mixed_content_https_to_http
 status: open
 
