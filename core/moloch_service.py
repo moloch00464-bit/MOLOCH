@@ -1720,9 +1720,10 @@ class MolochService:
                         except Exception as _e:
                             logger.debug(f"[DECISION] PTZ Fehler: {_e}")
                 elif action == "speak" and self._voice_pipeline:
-                    # Spontane Aussagen DEAKTIVIERT — siehe a701a38 + Follow-Up
-                    # self._voice_pipeline.trigger_spontaneous(reason)
-                    logger.info(f"[DECISION] Speak IGNORIERT (spontan deaktiviert): {reason}")
+                    # Re-aktiviert (Phase-3 Task-1) — hailo-ollama lokal kostenlos.
+                    # Cooldown 600s in voice_pipeline schuetzt vor Spam.
+                    self._voice_pipeline.trigger_spontaneous(reason)
+                    logger.info(f"[DECISION] Speak triggered: {reason}")
                 elif action == "reflect":
                     try:
                         from core.autonomy.introspection import get_introspection
@@ -1746,9 +1747,8 @@ class MolochService:
                             # Laut aussprechen wenn Kommentar vorhanden
                             comment = result.get("comment")
                             if comment and _svc._voice_pipeline:
-                                # Spontane Aussagen DEAKTIVIERT — Reflexion nur stumm geloggt
-                                # _svc._voice_pipeline.trigger_spontaneous(comment)
-                                logger.info(f"[DECISION] Reflexion IGNORIERT (spontan deaktiviert): {comment[:60]}")
+                                _svc._voice_pipeline.trigger_spontaneous(comment)
+                                logger.info(f"[DECISION] Reflexion gesprochen: {comment[:60]}")
 
                         threading.Thread(
                             target=_do_reflect, daemon=True,
@@ -1953,11 +1953,10 @@ class MolochService:
         self._system_watchdog.start()
         logger.info("[START] System-Watchdog gestartet")
 
-        # Spontane Kommentare DEAKTIVIERT — spart API-Kosten, nur Push-to-Talk
-        # if self._voice_pipeline:
-        #     self._voice_pipeline.start_spontaneous_monitor()
-        #     logger.info("[START] Spontane-Kommentare-Monitor gestartet")
-        logger.info("[START] Spontane Kommentare deaktiviert (nur Push-to-Talk)")
+        # Re-aktiviert Phase-3 Task-1: hailo-ollama lokal = keine Cloud-Kosten.
+        if self._voice_pipeline:
+            self._voice_pipeline.start_spontaneous_monitor()
+            logger.info("[START] Spontane-Kommentare-Monitor gestartet (cooldown 600s)")
 
         # Tageszeit-Begruessung (verzoegert, nach Cloud-Init)
         def _startup_greeting():
@@ -3043,9 +3042,12 @@ class MolochService:
                     logger.warning(f"[IPC] Core-Nudge Fehler: {e}")
 
         elif action == 'trigger_spontaneous':
-            # Spontane Kommentare DEAKTIVIERT — spart API-Kosten
             reason = cmd.get('reason', 'claude_impulse')
-            logger.info(f"[IPC] Spontan-Trigger IGNORIERT (deaktiviert): {reason}")
+            if self._voice_pipeline:
+                self._voice_pipeline.trigger_spontaneous(reason)
+                logger.info(f"[IPC] Spontan-Trigger: {reason}")
+            else:
+                logger.warning(f"[IPC] Spontan-Trigger ohne voice_pipeline: {reason}")
 
         elif action == 'trigger_reflect':
             # Selbstreflexion ausloesen
@@ -3073,9 +3075,8 @@ class MolochService:
                                             abs(d_nudge))
                     comment = result.get("comment")
                     if comment and _svc._voice_pipeline:
-                        # Spontane Aussagen DEAKTIVIERT — IPC-Reflect nur stumm geloggt
-                        # _svc._voice_pipeline.trigger_spontaneous(comment)
-                        logger.info(f"[IPC] Reflect IGNORIERT (spontan deaktiviert): {comment[:60]}")
+                        _svc._voice_pipeline.trigger_spontaneous(comment)
+                        logger.info(f"[IPC] Reflect gesprochen: {comment[:60]}")
                     logger.info(f"[IPC] Reflect fertig: {result}")
 
                 import threading
