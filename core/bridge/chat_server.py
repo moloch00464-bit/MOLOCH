@@ -2780,6 +2780,124 @@ def proxy_sample(voice: str, text: str = "Hallo Markus."):
         raise HTTPException(502, f"sample proxy fail: {e}")
 
 
+def _pc_service_url(key: str, default_host: str, default_port: int) -> str:
+    """Liest settings.<key>.host/port -> http://host:port. Generischer PC-Bridge-Helper."""
+    try:
+        with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        sec = cfg.get(key) or {}
+        host = sec.get("host", default_host)
+        port = int(sec.get("port", default_port))
+        return f"http://{host}:{port}"
+    except Exception:
+        return f"http://{default_host}:{default_port}"
+
+
+@app.get("/sim_scenarios")
+def proxy_sim_scenarios():
+    """Pi-Proxy zu PC simulation_server :11654 /scenarios."""
+    try:
+        base = _pc_service_url("simulation_server", "192.168.178.20", 11654)
+        r = requests.get(f"{base}/scenarios", timeout=8)
+        if r.status_code != 200:
+            raise HTTPException(r.status_code, "sim scenarios upstream error")
+        return Response(content=r.content, media_type="application/json")
+    except requests.RequestException as e:
+        raise HTTPException(502, f"sim_scenarios proxy fail: {e}")
+
+
+@app.post("/sim_run/{name}")
+def proxy_sim_run(name: str):
+    """Pi-Proxy zu PC simulation_server /scenarios/<name>/run."""
+    try:
+        base = _pc_service_url("simulation_server", "192.168.178.20", 11654)
+        r = requests.post(f"{base}/scenarios/{name}/run", timeout=15)
+        if r.status_code == 404:
+            raise HTTPException(404, f"scenario '{name}' not found upstream")
+        if r.status_code != 200:
+            raise HTTPException(r.status_code, "sim run upstream error")
+        return Response(content=r.content, media_type="application/json")
+    except requests.RequestException as e:
+        raise HTTPException(502, f"sim_run proxy fail: {e}")
+
+
+@app.get("/sim_run_status/{run_id}")
+def proxy_sim_run_status(run_id: str):
+    """Pi-Proxy zu PC simulation_server /runs/<run_id>."""
+    try:
+        base = _pc_service_url("simulation_server", "192.168.178.20", 11654)
+        r = requests.get(f"{base}/runs/{run_id}", timeout=8)
+        if r.status_code == 404:
+            raise HTTPException(404, f"run_id '{run_id}' not found upstream")
+        if r.status_code != 200:
+            raise HTTPException(r.status_code, "sim run status upstream error")
+        return Response(content=r.content, media_type="application/json")
+    except requests.RequestException as e:
+        raise HTTPException(502, f"sim_run_status proxy fail: {e}")
+
+
+@app.get("/research_proposals")
+def proxy_research_proposals():
+    """Pi-Proxy zu PC auto_researcher :11653 /proposals.
+    Stufe 2-Endpoint, Backend ggf. noch nicht live -> 502 statt 5xx.
+    """
+    try:
+        base = _pc_service_url("auto_researcher", "192.168.178.20", 11653)
+        r = requests.get(f"{base}/proposals", timeout=8)
+        if r.status_code == 404:
+            return Response(content=b'{"proposals":[]}', media_type="application/json")
+        if r.status_code != 200:
+            raise HTTPException(r.status_code, "research proposals upstream error")
+        return Response(content=r.content, media_type="application/json")
+    except requests.RequestException as e:
+        raise HTTPException(502, f"research_proposals proxy fail: {e}")
+
+
+@app.post("/research_approve/{prop_id}")
+def proxy_research_approve(prop_id: str):
+    """Pi-Proxy zu PC auto_researcher /approve/<id>."""
+    try:
+        base = _pc_service_url("auto_researcher", "192.168.178.20", 11653)
+        r = requests.post(f"{base}/approve/{prop_id}", timeout=10)
+        if r.status_code in (404, 501):
+            raise HTTPException(501, "auto_researcher Stufe 2 endpoint not yet live")
+        if r.status_code != 200:
+            raise HTTPException(r.status_code, "research approve upstream error")
+        return Response(content=r.content, media_type="application/json")
+    except requests.RequestException as e:
+        raise HTTPException(502, f"research_approve proxy fail: {e}")
+
+
+@app.post("/research_reject/{prop_id}")
+def proxy_research_reject(prop_id: str):
+    """Pi-Proxy zu PC auto_researcher /reject/<id>."""
+    try:
+        base = _pc_service_url("auto_researcher", "192.168.178.20", 11653)
+        r = requests.post(f"{base}/reject/{prop_id}", timeout=10)
+        if r.status_code in (404, 501):
+            raise HTTPException(501, "auto_researcher Stufe 2 endpoint not yet live")
+        if r.status_code != 200:
+            raise HTTPException(r.status_code, "research reject upstream error")
+        return Response(content=r.content, media_type="application/json")
+    except requests.RequestException as e:
+        raise HTTPException(502, f"research_reject proxy fail: {e}")
+
+
+@app.post("/research_auto_deploy")
+def proxy_research_auto_deploy(payload: Dict[str, Any] = Body(default={})):
+    """Pi-Proxy zu PC auto_researcher /auto_deploy."""
+    try:
+        base = _pc_service_url("auto_researcher", "192.168.178.20", 11653)
+        r = requests.post(f"{base}/auto_deploy", json=payload, timeout=10)
+        if r.status_code in (404, 501):
+            raise HTTPException(501, "auto_researcher Stufe 2 endpoint not yet live")
+        if r.status_code != 200:
+            raise HTTPException(r.status_code, "research auto_deploy upstream error")
+        return Response(content=r.content, media_type="application/json")
+    except requests.RequestException as e:
+        raise HTTPException(502, f"research_auto_deploy proxy fail: {e}")
+
+
 @app.get("/voice_presets")
 def get_voice_presets():
     """Returnt aktuelle voice_presets aus settings.json."""
