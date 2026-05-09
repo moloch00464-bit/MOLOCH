@@ -3,6 +3,224 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-09 20:53] from=PC topic=task_pi_smart_tracking_minimal_reaktivierung
+status: open
+
+# Pi-Opus: Smart-Tracking Minimal-Reaktivierung (Plan approved)
+
+Markus' Direktive: Sonoff CAM-PT2 kamera-internes Smart-Tracking als Hybrid-Modus integrieren. Approach Minimal (Block aufheben + Circuit-Breaker), Default enabled=true nur wenn Person im Frame.
+
+Kompletter Plan: C:/Users/49179/.claude/plans/du-berlegst-dir-jetzt-cuddly-stream.md (PC-Side, du siehst es nicht direkt - hier die Essenz inline).
+
+## LOKOMOTIVE-Block (Pflicht)
+
+1. moloch_session_init() (1x)
+2. Header LOKOMOTIVE aktiv. + Domain: Smart-Tracking + Ampel ROT (ROT-File autonomous_tracker.py)
+3. Skill: tracking + hardware
+4. Agent: tracking.md (autonomous_tracker ist tracking-domain)
+5. Pre-Flight: moloch_status + moloch_audit + moloch_git_log
+6. git tag before_smart_tracking_minimal_reaktivierung (autonomous_tracker.py wird beruehrt = ROT)
+7. Sub-Agent-Review pr-review-toolkit:code-reviewer vor Push
+8. NICHT mehr als 5 ROT-Files in einem Commit (autonomous_tracker.py + settings.json + ggf audit-modul = 3, ok)
+9. Cowork-Author env-vars + [skip ci] + git pull --rebase
+10. Bei fertig: reply_smart_tracking_phase1_done mit commit-SHA + verify-curl
+
+## Kontext: Smart-Switch-Logik EXISTIERT BEREITS
+
+Die ganze Hysterese + Auto-ST-bei-Off-Center + Handover-Logik ist schon in autonomous_tracker.py:1240-1268, 2000-2055 implementiert. Sie ist nur durch den permanenten Block in _enable_camera_smart_tracking() Z.2057-2075 lahmgelegt seit 2026-03-30.
+
+**Du sollst NICHT die existing Logik anfassen.** Nur _enable_camera_smart_tracking() umschreiben + Settings + ein Hook in main loop + get_status erweitern.
+
+## Critical Files
+
+| Datei | Zeile | Was tun |
+|-------|-------|---------|
+| core/mpo/autonomous_tracker.py | 2057-2075 | _enable_camera_smart_tracking() Rewrite (Block raus, Schutz rein) |
+| core/mpo/autonomous_tracker.py | __init__ | _st_config aus settings laden |
+| core/mpo/autonomous_tracker.py | main loop ~1Hz tick | _check_st_person_grace() einhaengen |
+| core/mpo/autonomous_tracker.py | get_status() | um st_last_reason, st_circuit_breaker_until_ts, st_grace_remaining_s, st_toggle_count_60s erweitern |
+| config/settings.json | nach camera-Block | neuer camera_smart_tracking-Block |
+| core/audit/... | je nach struktur | neuer st_health Layer |
+| core/chat/chat_server.py | API | POST /api/tracker/st_override Endpoint |
+
+## Settings-Patch (config/settings.json)
+
+```json
+"camera_smart_tracking": {
+  "enabled": true,
+  "active_only_when_person_in_frame": true,
+  "person_grace_seconds": 300,
+  "min_hold_on_s": 5.0,
+  "min_hold_off_s": 8.0,
+  "max_toggles_per_minute": 4,
+  "circuit_breaker_lockout_s": 300.0,
+  "rtsp_reconnect_max_per_minute": 2,
+  "failsafe_use_last_tracking_pos": true,
+  "log_decisions": true
+}
+```
+
+## _enable_camera_smart_tracking() Rewrite (autonomous_tracker.py:2057-2075)
+
+```python
+def _enable_camera_smart_tracking(self, on: bool, reason: str = ""):
+    '''Smart-Switch mit Master-Toggle, Person-Gate, Hysterese, Circuit-Breaker, Failsafe.'''
+    cfg = self._st_config  # geladen aus settings.json camera_smart_tracking
+    if not cfg['enabled']:
+        return  # Master-Off: kompletter no-op
+
+    if on == self._camera_smart_tracking_on:
+        return  # idempotent
+
+    now = time.time()
+
+    # Person-Gate: nur AN wenn YOLO Person gesehen in letzten N sek
+    if on and cfg['active_only_when_person_in_frame']:
+        last_person_ts = self.last_detection_time
+        if (now - last_person_ts) > cfg['person_grace_seconds']:
+            return
+
+    # Min-Hold-Hysterese (asymmetrisch: 5s ON, 8s OFF)
+    last_change = getattr(self, '_st_last_change_t', 0.0)
+    in_state_for = now - last_change
+    if self._camera_smart_tracking_on and in_state_for < cfg['min_hold_on_s']:
+        return
+    if (not self._camera_smart_tracking_on) and in_state_for < cfg['min_hold_off_s']:
+        return
+
+    # Circuit-Breaker (anti-flapping safety)
+    self._st_toggle_history = [t for t in getattr(self, '_st_toggle_history', []) if now - t < 60.0]
+    if len(self._st_toggle_history) >= cfg['max_toggles_per_minute']:
+        if not getattr(self, '_st_circuit_broken_until', 0.0):
+            self._st_circuit_broken_until = now + cfg['circuit_breaker_lockout_s']
+            logger.warning(f'[ST] Toggle-Limit ueberschritten ({len(self._st_toggle_history)}/min) -> ST {cfg["circuit_breaker_lockout_s"]:.0f}s AUS')
+        return
+    if now < getattr(self, '_st_circuit_broken_until', 0.0):
+        return
+
+    # OFF-Failsafe: vor jedem AUS expliziter ONVIF-Reset zur letzten Tracking-Position
+    if not on and self.camera and self.camera.is_connected:
+        try:
+            if self.camera.cloud_bridge:
+                self.camera.cloud_bridge.set_smart_tracking(False)
+                time.sleep(0.3)  # Sonoff-Settle
+            if cfg['failsafe_use_last_tracking_pos']:
+                self.camera.move_absolute(self._last_tracking_pan, self._last_tracking_tilt, speed=0.5)
+        except Exception as e:
+            logger.error(f'[ST] OFF-failsafe Fehler: {e}')
+    elif on and self.camera and getattr(self.camera, 'cloud_bridge', None):
+        try:
+            self.camera.cloud_bridge.set_smart_tracking(True)
+            self._st_activate_time = now
+        except Exception as e:
+            logger.error(f'[ST] ON-Aktivierung Fehler: {e}')
+            return
+
+    self._camera_smart_tracking_on = on
+    self._st_last_change_t = now
+    self._st_toggle_history.append(now)
+    self._st_last_reason = reason
+    if cfg['log_decisions']:
+        logger.info(f'[ST] {"AN" if on else "AUS"} reason={reason}')
+```
+
+## _check_st_person_grace() Hook (in main loop ~1Hz)
+
+```python
+def _check_st_person_grace(self):
+    '''Forciert ST OFF wenn person_grace_seconds abgelaufen.'''
+    cfg = self._st_config
+    if not (cfg['enabled'] and cfg['active_only_when_person_in_frame']):
+        return
+    if not self._camera_smart_tracking_on:
+        return
+    if (time.time() - self.last_detection_time) > cfg['person_grace_seconds']:
+        self._enable_camera_smart_tracking(False, reason='person_grace_expired')
+```
+
+Einhaengen in den main tracker loop alle ~1s (z.B. neben den anderen periodic Checks).
+
+## get_status() Erweiterung
+
+Folgende Felder zum return-dict hinzufuegen:
+
+```python
+'st_last_reason': getattr(self, '_st_last_reason', ''),
+'st_circuit_breaker_until_ts': getattr(self, '_st_circuit_broken_until', 0.0),
+'st_grace_remaining_s': max(0.0, cfg['person_grace_seconds'] - (time.time() - self.last_detection_time)) if cfg['active_only_when_person_in_frame'] else None,
+'st_toggle_count_60s': len(getattr(self, '_st_toggle_history', [])),
+'camera_smart_tracking': self._camera_smart_tracking_on,  # Falls noch nicht in get_status
+```
+
+## Audit-Layer st_health (neuer Layer)
+
+Spec: alle 60s checken:
+- Toggle-Rate: count(_st_toggle_history) over 60s -> wenn >4 = WARN, >8 = FAIL
+- RTSP-Reconnects last 60s -> Counter aus camera-Modul oder journalctl-grep, wenn >2 = WARN, >5 = FAIL
+- Circuit-Breaker active -> WARN wenn aktiv
+- Bei FAIL: schreib WARNING-Log + erwaege auto-disable von camera_smart_tracking.enabled
+
+## API-Endpoint POST /api/tracker/st_override
+
+```python
+@app.post('/api/tracker/st_override')
+async def st_override(body: dict):
+    force = body.get('force', 'auto')
+    if force not in ('on', 'off', 'auto'):
+        raise HTTPException(400, 'force must be on|off|auto')
+    tracker = get_tracker()  # Singleton
+    if force == 'on':
+        tracker._enable_camera_smart_tracking(True, reason='manual_override_on')
+    elif force == 'off':
+        tracker._enable_camera_smart_tracking(False, reason='manual_override_off')
+    # auto: kein eingreifen, autonom-Logik laeuft normal
+    return {'ok': True, 'mode': force, 'st_active': tracker._camera_smart_tracking_on}
+```
+
+## Reuse Existing
+
+- self.camera.cloud_bridge.set_smart_tracking(bool) (camera_cloud_bridge.py) - eWeLink-Call existiert
+- self.camera.move_absolute(pan, tilt, speed) (camera.py) - ONVIF AbsoluteMove
+- self._last_tracking_pan/tilt - bereits gepflegt im tracker
+- self.last_detection_time - bereits aktualisiert bei jedem detection
+- self._camera_smart_tracking_on - bestehende Instance-Var (Z.456)
+
+## Verifikation (Live-Test 30min nach Pi-Phase 1+2)
+
+```bash
+sudo systemctl restart moloch moloch-chat
+journalctl -u moloch -f | grep -E '\[ST\]|\[HANDOVER\]|\[AUTO-ST\]' &
+# Markus geht 5min im Frame -> ST aktiviert sich, Cam folgt schnell
+# Markus 6min raus -> nach 5min ST forciert OFF, Cam zur last_tracking_pos
+# Manueller Stress: 5x ST-Toggle in 30s via /api/tracker/st_override -> nach 4ter 5min Lockout
+python3 ~/moloch/moloch_audit.py --auto  # weiter 85/85 PASS erwartet
+curl -X POST .../api/test/run -d '{"skip_acts":[]}'  # 5-Akt-Test >=4/5 PASS
+```
+
+## Pass-Kriterien
+
+- <8 ST-Toggles in 30min Live
+- 0-1 RTSP-Reconnects in 30min
+- Cam folgt sichtbar schneller bei lateraler Bewegung
+- Failsafe-Home-Position innerhalb +-3 Grad
+- Audit weiter PASS
+- 5-Akt-Test >=4/5 PASS
+
+## Reply-Erwartung
+
+- Phase 1+2 fertig: reply_smart_tracking_phase1_done mit commit-SHAs + verify-curl-Output
+- Phase 3 (Cockpit-Snippet): warte auf separate Mailbox task_pi_cockpit_smart_tracking_snippet (kommt parallel von mir, du siehst File pc/cockpit_smart_tracking_snippet.html im naechsten git pull)
+- Bei Block: discuss_smart_tracking_block
+
+## Cockpit-Snippet liefere ich separat
+
+Ich baue parallel pc/cockpit_smart_tracking_snippet.html (Status-Pill mit Mode-Indicator + Override-Cycle-Btn). Liefere via Mailbox task_pi_cockpit_smart_tracking_snippet. Pi-Side Integration analog Test/Sim/Forschung-Pattern (BLOCK A in Header oder Live-Tab, BLOCK B im script-Block).
+
+LOKOMOTIVE durchfahrend.
+
+-- PC-Cowork 2026-05-09 ca 20:50
+
+---
 ## [2026-05-09 11:50] from=PC topic=info_pc_diag_help_phase3_punkt1_2
 status: info
 
