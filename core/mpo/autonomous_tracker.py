@@ -465,6 +465,11 @@ class AutonomousTracker:
         self._st_circuit_broken_until = 0.0
         self._st_last_reason = ""
         self._st_force_override = "auto"  # 'auto' | 'on' | 'off'
+        # Velocity+Range Trigger (Folge-Sprint 2026-05-09 21:24): Sliding-Window
+        # ueber BBox-Center, um Mikro-Oszillation (Kopfdrehen, Stuhl-Wackeln)
+        # vom echten Aufstehen/Laufen zu unterscheiden.
+        self._bbox_history: list = []  # list of (ts, cx, cy)
+        self._BBOX_HISTORY_MAX_LEN = 60  # safety cap, ~3s @ 20FPS
         # ST-Bewegungslernen: Kamera-Positionen aufzeichnen
         self._st_learner = STMovementLearner()
 
@@ -2014,6 +2019,30 @@ class AutonomousTracker:
         Kamera-ST ist schneller (Hardware-Sensoren, interner Motor).
         Moloch ist praeziser (BBox-Zentrierung, Face-Tracking).
         """
+        # === Velocity+Range Fast-Path (2026-05-09 Folge-Sprint) ===
+        # Schreibtisch-Sitzen + Kopfdrehen = niedrige range -> ST AUS lassen.
+        # Aufstehen/Laufen = hohe velocity ODER hohe range -> ST sofort AN.
+        # Mittlerer Bereich faellt durch zur existing off-center-Logic.
+        self._record_bbox_position(detection)
+        cfg = self._st_config
+        vel = self._bbox_velocity()
+        rng = self._bbox_range()
+        vel_high = float(cfg.get("velocity_threshold_high", 0.40))
+        vel_low = float(cfg.get("velocity_threshold_low", 0.05))
+        rng_high = float(cfg.get("range_threshold_high", 0.15))
+        rng_low = float(cfg.get("range_threshold_low", 0.05))
+        if vel > vel_high or rng > rng_high:
+            if not self._camera_smart_tracking_on:
+                self._enable_camera_smart_tracking(
+                    True, reason=f"movement vel={vel:.2f} rng={rng:.2f}"
+                )
+            return False
+        if vel < vel_low and rng < rng_low and detection.has_face:
+            if self._camera_smart_tracking_on:
+                self._enable_camera_smart_tracking(
+                    False, reason=f"stable vel={vel:.2f} rng={rng:.2f}"
+                )
+
         # === NEUE LOGIK: Kein Face → ST soll laufen (mit Hysterese) ===
         if not detection.has_face:
             # Hysterese: erst nach N aufeinanderfolgenden face-losen Frames ST einschalten
@@ -2068,6 +2097,45 @@ class AutonomousTracker:
         logger.info(f"[HANDOVER] Face erkannt + Kamera settled ({st_duration:.1f}s) → Moloch uebernimmt")
         self._enable_camera_smart_tracking(False)
         return True
+
+    def _record_bbox_position(self, detection):
+        """Sliding-Window-History der BBox-Center fuer Velocity+Range-Trigger."""
+        if not detection or not getattr(detection, "detected", False):
+            return
+        cx = float(getattr(detection, "center_x", 0.5))
+        cy = float(getattr(detection, "center_y", 0.5))
+        now = time.time()
+        self._bbox_history.append((now, cx, cy))
+        window = float(self._st_config.get("velocity_window_s", 3.0))
+        cutoff = now - window
+        self._bbox_history = [e for e in self._bbox_history if e[0] >= cutoff]
+        if len(self._bbox_history) > self._BBOX_HISTORY_MAX_LEN:
+            self._bbox_history = self._bbox_history[-self._BBOX_HISTORY_MAX_LEN:]
+
+    def _bbox_velocity(self) -> float:
+        """Geschwindigkeit (norm units / sec) ueber letzte 5 Samples."""
+        h = self._bbox_history
+        if len(h) < 2:
+            return 0.0
+        recent = h[-5:] if len(h) >= 5 else h
+        if len(recent) < 2:
+            return 0.0
+        dt = recent[-1][0] - recent[0][0]
+        if dt <= 0:
+            return 0.0
+        dx = recent[-1][1] - recent[0][1]
+        dy = recent[-1][2] - recent[0][2]
+        import math as _math
+        return _math.hypot(dx, dy) / dt
+
+    def _bbox_range(self) -> float:
+        """Raeumliche Amplitude im Sliding-Window (max-min auf der staerkeren Achse)."""
+        h = self._bbox_history
+        if len(h) < 2:
+            return 0.0
+        xs = [e[1] for e in h]
+        ys = [e[2] for e in h]
+        return max(max(xs) - min(xs), max(ys) - min(ys))
 
     def _check_st_person_grace(self):
         """1Hz-Hook: schaltet ST aus wenn Person seit >grace_seconds nicht da.
