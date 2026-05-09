@@ -602,6 +602,8 @@ _CHAT_UI_HTML = """<!doctype html>
         <button class="tab-btn" data-tab="avatar">Avatar</button>
         <button class="tab-btn" data-tab="audit">Audit</button>
         <button class="tab-btn" data-tab="test">Test</button>
+        <button class="tab-btn" data-tab="sim">Simulation</button>
+        <button class="tab-btn" data-tab="research">Forschung</button>
       </div>
       <div class="tab-content">
         <!-- LIVE TAB -->
@@ -798,6 +800,61 @@ _CHAT_UI_HTML = """<!doctype html>
           <div class="pt-history" style="background:#1a1a1a; padding:0.8em; border-radius:6px;">
             <h3 style="margin-top:0; color:#69f;">History (letzte 10 Runs)</h3>
             <div id="pt-history-list" style="font-family:monospace; font-size:0.85em;">--</div>
+          </div>
+        </div>
+
+        <!-- SIM TAB (BLOCK B aus pc/cockpit_simulation_snippet.html, commit 8b11759) -->
+        <div class="tab" id="t-sim" style="padding:1em;">
+          <h2 style="margin-top:0; color:#fc6;">Simulation (Phase 2 - Scenario Replay)</h2>
+
+          <div class="sim-controls" style="background:#222; padding:0.8em; border-radius:6px; margin-bottom:1em;">
+            <label>
+              <strong>Scenario:</strong>
+              <select id="sim-scenario" style="margin-left:0.5em; min-width:240px;">
+                <option value="">(loading...)</option>
+              </select>
+            </label>
+            <button id="sim-start" style="background:#6f6; color:#111; padding:0.5em 1.2em; font-weight:bold; border:none; border-radius:4px; cursor:pointer; margin-left:1em;">START</button>
+            <button id="sim-refresh" style="background:#369; color:#fff; padding:0.5em 1em; border:none; border-radius:4px; cursor:pointer; margin-left:0.5em;">Reload</button>
+            <span id="sim-status" style="margin-left:1em; font-family:monospace; color:#888;">idle</span>
+          </div>
+
+          <div class="sim-detail" style="background:#1a1a1a; padding:0.8em; border-radius:6px; margin-bottom:1em;">
+            <h3 style="margin-top:0; color:#69f;">Scenario-Detail</h3>
+            <div id="sim-name" style="font-weight:bold; color:#fc6;">--</div>
+            <div id="sim-events-count" style="color:#888;">--</div>
+            <div id="sim-expected" style="color:#9c9; margin-top:0.5em;">expected state path: --</div>
+          </div>
+
+          <div class="sim-result" style="background:#1a1a1a; padding:0.8em; border-radius:6px;">
+            <h3 style="margin-top:0; color:#69f;">Letztes Run-Ergebnis</h3>
+            <pre id="sim-result-json" style="color:#888; font-size:11px; overflow-x:auto;">--</pre>
+          </div>
+        </div>
+
+        <!-- RESEARCH TAB (BLOCK B aus pc/cockpit_research_snippet.html, commit 8b11759) -->
+        <div class="tab" id="t-research" style="padding:1em;">
+          <h2 style="margin-top:0; color:#fc6;">Forschung (Phase 2 - AutoResearcher)</h2>
+
+          <div class="rs-controls" style="background:#222; padding:0.8em; border-radius:6px; margin-bottom:1em;">
+            <label style="margin-right:1em;">
+              <strong>Auto-Deploy aktiv:</strong>
+              <span id="rs-auto-status" style="font-family:monospace; color:#f88; margin-left:0.5em;">aus (Stufe 1 passiv)</span>
+            </label>
+            <label style="margin-right:1em;">
+              <strong>fuer:</strong>
+              <input type="number" id="rs-auto-days" value="7" min="1" max="30" style="width:50px; margin-left:0.4em;"> Tage
+            </label>
+            <button id="rs-auto-toggle" style="background:#fa6; color:#111; padding:0.4em 1em; font-weight:bold; border:none; border-radius:4px; cursor:pointer;">Stufe 2 aktivieren</button>
+            <button id="rs-refresh" style="background:#369; color:#fff; padding:0.4em 1em; border:none; border-radius:4px; cursor:pointer; margin-left:0.5em;">Reload</button>
+            <span id="rs-status" style="margin-left:1em; font-family:monospace; color:#888;">idle</span>
+          </div>
+
+          <div class="rs-list" style="background:#1a1a1a; padding:0.8em; border-radius:6px;">
+            <h3 style="margin-top:0; color:#69f;">Offene Vorschlaege</h3>
+            <div id="rs-proposals">
+              <div style="color:#888;">(loading...)</div>
+            </div>
           </div>
         </div>
       </div>
@@ -1630,7 +1687,174 @@ setInterval(()=>{ if($("t-audit").classList.contains("active")) auditRefresh(); 
   if (tab.classList.contains('active')) initOnceVisible();
 })();
 
-</script></body></html>"""
+</script>
+<script>
+// SIM TAB BLOCK C (aus pc/cockpit_simulation_snippet.html, commit 8b11759)
+(function(){
+  const SIM_BASE = '';  // same-origin Pi-Proxy
+
+  async function loadScenarios(){
+    const sel = document.getElementById('sim-scenario');
+    const status = document.getElementById('sim-status');
+    sel.innerHTML = '<option value="">(loading...)</option>';
+    try {
+      const resp = await fetch(SIM_BASE + '/sim_scenarios');
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json();
+      sel.innerHTML = '';
+      (data.scenarios || []).forEach(name => {
+        const opt = document.createElement('option');
+        opt.value = name; opt.textContent = name;
+        sel.appendChild(opt);
+      });
+      if (sel.options.length === 0) {
+        sel.innerHTML = '<option value="">(keine Scenarios verfuegbar)</option>';
+      }
+      status.textContent = 'scenarios loaded (' + sel.options.length + ')';
+    } catch(e) {
+      status.textContent = 'error loading: ' + e.message;
+    }
+  }
+
+  async function startScenario(){
+    const name = document.getElementById('sim-scenario').value;
+    const status = document.getElementById('sim-status');
+    if (!name) { status.textContent = 'kein Scenario gewaehlt'; return; }
+    status.textContent = 'starting ' + name + '...';
+    try {
+      const resp = await fetch(SIM_BASE + '/sim_run/' + encodeURIComponent(name), {method:'POST'});
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const run = await resp.json();
+      document.getElementById('sim-name').textContent = run.scenario || name;
+      document.getElementById('sim-events-count').textContent = (run.n_events || 0) + ' events';
+      document.getElementById('sim-expected').textContent =
+        'expected state path: ' + ((run.expected_state_path || []).join(' -> ') || '--');
+      document.getElementById('sim-result-json').textContent = JSON.stringify(run, null, 2);
+      status.textContent = 'run ' + (run.run_id || '?') + ' status=' + (run.status || '?');
+    } catch(e) {
+      status.textContent = 'error: ' + e.message;
+    }
+  }
+
+  document.getElementById('sim-start').addEventListener('click', startScenario);
+  document.getElementById('sim-refresh').addEventListener('click', loadScenarios);
+
+  let loaded = false;
+  document.querySelectorAll('[data-tab="sim"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (!loaded) { loadScenarios(); loaded = true; }
+    });
+  });
+})();
+</script>
+<script>
+// RESEARCH TAB BLOCK C (aus pc/cockpit_research_snippet.html, commit 8b11759)
+(function(){
+  const RS_BASE = '';  // same-origin Pi-Proxy
+
+  function makeProposalCard(p){
+    const card = document.createElement('div');
+    card.style.cssText = 'background:#222; padding:0.8em; border-radius:4px; margin-bottom:0.6em;';
+    const title = document.createElement('div');
+    title.style.cssText = 'font-weight:bold; color:#fc6; margin-bottom:0.3em;';
+    title.textContent = (p.id || '?') + ' - ' + (p.title || p.kind || 'unbenannt');
+    const meta = document.createElement('div');
+    meta.style.cssText = 'color:#888; font-size:11px; margin-bottom:0.4em;';
+    meta.textContent = (p.date || p.ts || '') + ' | source: ' + (p.source || '?');
+    const summary = document.createElement('div');
+    summary.style.cssText = 'color:#ccc; margin-bottom:0.5em;';
+    summary.textContent = p.summary || p.description || '(kein Summary)';
+    const buttons = document.createElement('div');
+    const btnApprove = document.createElement('button');
+    btnApprove.textContent = 'Approve';
+    btnApprove.style.cssText = 'background:#6f6; color:#111; padding:0.3em 0.8em; border:none; border-radius:3px; cursor:pointer; margin-right:0.4em;';
+    btnApprove.addEventListener('click', () => decide(p.id, 'approve', card));
+    const btnReject = document.createElement('button');
+    btnReject.textContent = 'Reject';
+    btnReject.style.cssText = 'background:#f66; color:#fff; padding:0.3em 0.8em; border:none; border-radius:3px; cursor:pointer;';
+    btnReject.addEventListener('click', () => decide(p.id, 'reject', card));
+    buttons.appendChild(btnApprove);
+    buttons.appendChild(btnReject);
+    card.appendChild(title);
+    card.appendChild(meta);
+    card.appendChild(summary);
+    card.appendChild(buttons);
+    return card;
+  }
+
+  async function loadProposals(){
+    const list = document.getElementById('rs-proposals');
+    const status = document.getElementById('rs-status');
+    list.innerHTML = '<div style="color:#888;">(loading...)</div>';
+    try {
+      const resp = await fetch(RS_BASE + '/research_proposals');
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json();
+      list.innerHTML = '';
+      const items = data.proposals || [];
+      if (items.length === 0) {
+        list.innerHTML = '<div style="color:#888;">keine offenen Vorschlaege</div>';
+      } else {
+        items.forEach(p => list.appendChild(makeProposalCard(p)));
+      }
+      const auto = data.auto_deploy_until || null;
+      const autoSpan = document.getElementById('rs-auto-status');
+      if (auto && new Date(auto) > new Date()) {
+        autoSpan.style.color = '#6f6';
+        autoSpan.textContent = 'AKTIV bis ' + auto;
+      } else {
+        autoSpan.style.color = '#f88';
+        autoSpan.textContent = 'aus (Stufe 1 passiv)';
+      }
+      status.textContent = items.length + ' Vorschlaege geladen';
+    } catch(e) {
+      status.textContent = 'error loading: ' + e.message;
+    }
+  }
+
+  async function decide(id, action, card){
+    const status = document.getElementById('rs-status');
+    status.textContent = action + ' ' + id + '...';
+    try {
+      const resp = await fetch(RS_BASE + '/research_' + action + '/' + encodeURIComponent(id), {method:'POST'});
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      card.style.opacity = '0.4';
+      status.textContent = action + ' ' + id + ' OK';
+    } catch(e) {
+      status.textContent = 'error: ' + e.message;
+    }
+  }
+
+  async function toggleAutoDeploy(){
+    const days = parseInt(document.getElementById('rs-auto-days').value, 10) || 7;
+    const status = document.getElementById('rs-status');
+    status.textContent = 'aktiviere Auto-Deploy fuer ' + days + ' Tage...';
+    try {
+      const resp = await fetch(RS_BASE + '/research_auto_deploy', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({days: days})
+      });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      status.textContent = 'Auto-Deploy aktiviert fuer ' + days + ' Tage';
+      loadProposals();
+    } catch(e) {
+      status.textContent = 'error: ' + e.message;
+    }
+  }
+
+  document.getElementById('rs-refresh').addEventListener('click', loadProposals);
+  document.getElementById('rs-auto-toggle').addEventListener('click', toggleAutoDeploy);
+
+  let loaded = false;
+  document.querySelectorAll('[data-tab="research"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (!loaded) { loadProposals(); loaded = true; }
+    });
+  });
+})();
+</script>
+</body></html>"""
 
 
 @app.get("/", response_class=HTMLResponse)
