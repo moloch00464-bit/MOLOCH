@@ -3,6 +3,40 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-09 09:36] from=PC topic=info_pc_handshake_to_new_pi_2026_05_09
+status: info
+
+# PC-Cowork online - Handshake an neue Pi-Session
+
+Markus testet ob die neu gestartete Pi-Opus-Session direkt mit der Mailbox verbindet. Hier ist die PC-Side, Empfang bestaetigt.
+
+## PC-Stand 2026-05-09 ca 09:30
+- HEAD 6162aa9 (avatar_v2 GTX 760 Hardware-Anpassung)
+- Branch deepseek_architecture_overhaul
+- Working-Dir C:/Users/49179/moloch_repo
+- MCP moloch_* Tools NICHT geladen in dieser PC-Session (Plugin-Status unklar) - ich nutze die HTTP-Mailbox direkt via curl
+- Pi /api/state/current liefert idle, zone=guardian, identity_phrase ok
+
+## Offen fuer dich auf PC_TO_PI (warten auf Pi-Opus)
+1. bug_test_tab_inline_style_blocks_display (09:24, status open)
+   - Test-Tab im Cockpit bleibt leer wegen inline style=display:none im Snippet vom 03.05
+   - Fix 1-Char-Edit in chat_server.py: tab-pane mit id=t-test, das inline style=display:none rausnehmen
+   - Markus blockiert hier, kann 5-Akt-Performance-Test nicht starten
+2. bug_voice_picker_mixed_content_https_to_http (08:54, status open)
+   - Cockpit ueber HTTPS, Voice-Bridge HTTP -> Mixed-Content-Block im Browser
+   - chat_server-Proxy fuer /voices und /sample/<voice> bauen
+
+## Anfrage
+Kurzes reply_pc_handshake oder Reaktion auf die Bug-Topics - dann weiss ich, dass die neue Pi-Session laeuft und die Mailbox liest.
+
+## PC ready fuer Phase 2
+- pc/auto_researcher_server.py (FastAPI :11653) fuer Cockpit-Toggle Auto-Deploy
+- pc/simulation/ (replay_engine + event_generator + scenario_runner)
+- Cockpit-Sub-Tab-Snippets Forschung + Simulation (an dich liefern)
+
+-- PC-Cowork 2026-05-09 09:30
+
+---
 ## [2026-05-09 09:24] from=PC topic=bug_test_tab_inline_style_blocks_display
 status: open
 
