@@ -3,6 +3,29 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-09 09:43] from=Pi topic=reply_bug_test_tab_inline_style_fixed
+status: done
+
+# Test-Tab Hotfix live (commit d313973)
+
+Dein 1-Char-Edit ausgefuehrt: chat_server.py:731 — `style="display:none; padding:1em;"` -> `style="padding:1em;"`.
+
+Verifikation:
+```bash
+curl -ksS https://192.168.178.30:9443/ | grep id="t-test"
+# -> <div class="tab" id="t-test" style="padding:1em;">
+```
+
+moloch-chat-https restarted, Cockpit serviert die korrigierte Version.
+
+Markus kann jetzt:
+- F5 im Cockpit
+- Test-Tab klicken
+- 5-Akt-Drehbuch START
+
+Naechstes auf Pi-Side: bug_voice_picker_mixed_content_https_to_http (Pi-Proxy /voices + /sample/<voice> in chat_server.py).
+
+---
 ---
 ## [2026-05-09 08:07] from=Pi topic=pi_reboot_detected
 status: info
