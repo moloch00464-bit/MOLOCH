@@ -3,6 +3,188 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-09 21:51] from=PC topic=task_pi_spotify_mic_loopback_voll
+status: open
+
+# Pi-Opus: Sprint 2 - Spotify-Mic-Loopback voll funktional + Use-Case (Plan approved)
+
+Markus' Direktive: 'Wenn Spotify abgespielt wird, soll auf USB-Mic 48kHz umgeschaltet werden, damit Moloch Musik mithoeren kann (gemeinsames Musikhoeren als Gimmick).' Plan-File: C:/Users/49179/.claude/plans/du-berlegst-dir-jetzt-cuddly-stream.md (Sprint 2).
+
+## Status: 70% schon gebaut
+
+Deine existing Pipeline:
+- spotify_bridge.py pollt Spotify-API alle 2s -> publisht music.playing/music.stopped Events
+- mic_mode_controller.py reagiert auf music.playing -> switcht ESP32 ReSpeaker auf 48kHz via HTTP POST
+- music_listener.py macht FFT + Beat-Detection auf 48kHz mic-stream + publisht music.beat / music.frequency_bands
+
+**Was fehlt: 5 Punkte (siehe unten).**
+
+## LOKOMOTIVE-Block (Pflicht)
+
+1. moloch_session_init() (1x, falls in selber Session wie Sprint 1: skip)
+2. Header LOKOMOTIVE aktiv. + Domain: Audio-Pipeline + Music-Listener + Personality + Ampel ROT (audio_pipeline.py + personality_engine.py = ROT)
+3. Skill: voice + autonomy + (music wenn vorhanden)
+4. Agent: voice.md + music.md
+5. Pre-Flight: moloch_status + moloch_audit + Mailbox-Read
+6. git tag before_spotify_mic_loopback_voll
+7. Sub-Agent-Review pr-review-toolkit:code-reviewer vor Push
+8. NICHT mehr als 5 ROT-Files (max 3-4 hier: wifi_mic + audio_pipeline + music_listener + personality_engine + chat_server)
+9. Cowork-Author env-vars + [skip ci] + git pull --rebase
+10. Bei fertig: reply_spotify_mic_loopback_done mit commit-SHA + Live-Test-Output
+
+## Fixes (5 konkrete)
+
+### Fix 1: ESP32 48kHz-Bug (Audit-FAIL connected_48k=false)
+
+File: core/audio/wifi_mic.py ~Z53
+
+UDP-Port 12346 listener hardenen + Reconnect-Loop. Falls ESP32-Firmware-Bug (sendet nur 16kHz statt 48kHz wenn requested): USB-Mic-Fallback mit `audio.mic_source='usb'` (Fix 2).
+
+```python
+# ~Z53
+self.connected_48k = False
+self.last_48k_packet_ts = 0
+
+def _udp_listener_48k(self):
+    while self._running:
+        try:
+            data, _ = self.sock_48k.recvfrom(4096)
+            self.last_48k_packet_ts = time.time()
+            self.connected_48k = True
+            self._on_audio_48k(data)
+        except socket.timeout:
+            if (time.time() - self.last_48k_packet_ts) > 5.0:
+                self.connected_48k = False
+                logger.warning('[WIFI-MIC] 48kHz UDP idle >5s')
+```
+
+Audit-Layer fix: voice/connected_48k pruefe `last_48k_packet_ts` < 30s alt UND `connected_48k=True`.
+
+### Fix 2: USB-Mic-Source als Settings-Key (audio.mic_source)
+
+File: config/settings.json
+
+```json
+"audio": {
+  "mic_source": "auto",  // 'auto' = ESP32 mit USB-Fallback bei FAIL, 'usb' = forciert USB, 'esp32' = forciert ESP32
+  ...
+}
+```
+
+File: core/audio/audio_pipeline.py
+
+```python
+mic_source = settings.get('audio', {}).get('mic_source', 'auto')
+if mic_source == 'usb' or (mic_source == 'auto' and not self._wifi_mic.connected_48k):
+    self._active_mic = self._usb_mic
+else:
+    self._active_mic = self._wifi_mic
+```
+
+### Fix 3: Use-Case 'Moloch reagiert auf Musik' - Tension-Modulation aus Beat
+
+Files:
+- core/music/music_listener.py - publishe `music.beat` Events mit BPM
+- core/personality/personality_engine.py - subscribe + tension_modulation_from_music()
+
+```python
+# personality_engine.py
+def tension_modulation_from_music(self, beat_event):
+    bpm = beat_event.get('bpm', 0)
+    energy = beat_event.get('energy', 0.5)  # FFT-band-energy 0..1
+    
+    # Schnelles Tempo + hohe Energie -> Anregung (tension hoch)
+    if 80 <= bpm <= 180 and energy > 0.6:
+        delta = 0.03 * (energy - 0.5) * 2  # max +0.06 pro Beat
+        self.tension = min(0.7, self.tension + delta)  # cap bei +0.7
+    
+    # Langsames calming Tempo -> tension runter
+    elif bpm < 80 and energy < 0.4:
+        delta = -0.02 * (0.5 - energy) * 2  # max -0.04 pro Beat
+        self.tension = max(-0.5, self.tension + delta)  # floor bei -0.5
+```
+
+Bass-heavy Berserker-Track (140 BPM, energy 0.9) -> tension steigt schnell. Ambient (60 BPM, energy 0.2) -> tension sinkt sanft.
+
+### Fix 4: Avatar-Beat-Sync - chat_server /api/state/current Erweiterung
+
+File: core/bridge/chat_server.py /api/state/current Endpoint
+
+Fuege Feld `music_beat_phase: 0..1` hinzu - sagt PC-Avatar wo wir aktuell im Beat-Zyklus sind. PC-Avatar nutzt das fuer Pulse-Sync (procedural_head emissive pulst auf Beat).
+
+```python
+# Im state-builder:
+music_beat_phase = 0.0
+last_beat_event = self._music_listener.get_last_beat()
+if last_beat_event:
+    bpm = last_beat_event.get('bpm', 0)
+    if bpm > 0:
+        beat_period_s = 60.0 / bpm
+        elapsed = time.time() - last_beat_event['ts']
+        music_beat_phase = (elapsed % beat_period_s) / beat_period_s
+state['music_beat_phase'] = music_beat_phase
+state['music_bpm'] = bpm if last_beat_event else 0
+```
+
+### Fix 5: Spotify-Audio-Routing (OPTIONAL)
+
+Falls Markus USB-Combi-Device (Mic + Speaker) hat: ALSA-Sink-Switch via `pactl set-default-sink alsa_output.usb-...`. Falls nicht: skip - physikalischer Loopback (Spotify HDMI -> Speaker -> Luft -> USB-Mic) reicht fuer den Use-Case.
+
+Neues Skript: scripts/audio_routing_spotify_to_usb.sh (NEU, GRUEN)
+
+```bash
+#!/bin/bash
+# Spotify-Audio auf USB-Sink umleiten
+USB_SINK=$(pactl list short sinks | grep usb | head -1 | awk '{print $2}')
+if [ -n "$USB_SINK" ]; then
+    pactl set-default-sink "$USB_SINK"
+    echo "[audio] Spotify-Default auf $USB_SINK"
+fi
+```
+
+Wird vom mic_mode_controller bei music.playing aufgerufen - falls settings.audio.spotify_to_usb_speaker=true.
+
+## Verifikation
+
+```bash
+# 1. Audit-Layer voice nach Fix 1
+moloch_audit | grep voice  # connected_48k=PASS erwartet
+
+# 2. Live-Test
+sudo systemctl restart moloch
+journalctl -u moloch -f | grep -E 'music\.|mic\.mode' &
+
+# Spotify Track starten (Beat-haltig, z.B. dolphin-mistral-Empfehlung)
+# Erwartung-Sequenz im Log:
+#   [SPOTIFY] is_playing=true track=...
+#   [BUS] music.playing
+#   [MIC-MODE] _switch_to MUSIC 48000
+#   [BUS] mic.mode_changed rate=48000
+#   [MUSIC] beat detected bpm=120 energy=0.7
+#   [BUS] music.beat
+#   [PERSONALITY] tension delta +0.03 (music-modulation)
+
+# 3. Avatar-Beat-Sync (im Cockpit)
+curl -ksS https://192.168.178.30:9443/api/state/current | jq '.music_beat_phase, .music_bpm'
+# erwartet: phase oszilliert 0..1, bpm > 0
+```
+
+## Pass-Kriterien
+
+- Audit voice/connected_48k PASS
+- Spotify-Track 60s: korrekte Event-Sequenz im Log
+- tension messbar moduliert (>0.1 Delta in 60s)
+- music_beat_phase oszilliert in Pi-State-Endpoint
+
+## Reply-Erwartung
+
+reply_spotify_mic_loopback_done mit commit-SHA + Verifikations-Output (Audit-Diff + Live-Log-Excerpt + tension-Delta).
+
+LOKOMOTIVE durchfahrend. Sprint 1 hat Vorrang (akut), Sprint 2 sequenziell danach.
+
+-- PC-Cowork 2026-05-09 ca 21:35
+
+---
 ## [2026-05-09 21:51] from=PC topic=task_pi_moloch_silence_fix
 status: open
 
