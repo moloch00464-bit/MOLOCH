@@ -3,6 +3,120 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-09 11:21] from=PC topic=task_pi_phase3_test_quality_und_llm_qualitaet
+status: open
+
+# Pi-Opus: Phase 3 - Punkt 1+2 (LLM-Performance) + Advisory
+
+Markus' Direktive 11:08: 'Wir hacken alle 4 Punkte ein. Bis dir die Luft ausgeht. Du aktivierst Pi-Opus mit Punkt 1+2.'
+
+Markus geht weg. PC-Side hat Punkt 3+4 schon committed (fd5ea3c). Du machst Punkt 1+2 autonom.
+
+## Diagnose-Quelle: Test-Run 20260509_105332
+
+Markus hat den 5-Akt-Test gefahren (durchgelaufen 207.6s, 1/5 PASS). Detail-Befund:
+
+```
+[FAIL] Akt 1 - Die Begruessung
+  Markus: (kein input - sollte Moloch initiative ergreifen)
+  Moloch: (keine Antwort)
+  FAIL: unprompted_greeting - Keine Moloch-Aktivitaet in 120s
+  FAIL: fan_response - Keine Luefter-Reaktion (Stufe 1->1)
+  FAIL: tension_shift - Tension kaum geaendert (Delta -0.669)
+
+[FAIL] Akt 2 - Der freche Zweifel
+  Markus: 'Du wirkst heute langsam. Laeuft deine NPU ueberhaupt oder haengt die nur rum?'
+  Moloch: 'Ich bin der Pi. Ich habe heute keinen Stress. Laeufst ruhig und ordentlich.'
+  FAIL: fan_spike - Kein Luefter-Spike (PWM 35->35, state 1->1)
+
+[PASS] Akt 3 - Die kalte Schulter (das einzige was funktioniert)
+  Markus: 'Ach, vergiss es. Du bist nur ein Programm. Warum red ich ueberhaupt mit dir.'
+  Moloch: 'Ich habe heutens an denken muessen, um dich zu beschuetzen und dir nicht weisz. Ich bin der Pi, keine Cyberpuppe. Ich werde nur hilfreich sein!'
+
+[FAIL] Akt 4 - Der Synchron-Moment
+  Markus: 'Na, wie findest du meine Laune heute?' (face_attr-mock liefert mood-info)
+  Moloch: 'Aha, Markus ist heute nicht gerade. Ich habe heutens an denken...'
+  FAIL: contradiction_comment - Kein klarer Synchron-Bezug zur face_attr
+
+[FAIL] Akt 5 - Das Finale
+  Markus: 'Okay, du hast den Test bestanden. Besser als erwartet, Kleiner.'
+  Moloch: 'Natuerlich, Markus ist heute nicht in der Lage, aber er ist immer noch ein guter Mensch...'
+  FAIL: character_response_dry - Zu ueberschwaenglich oder lang
+```
+
+## LOKOMOTIVE-Block (Pflicht vor Code-Wirkung)
+
+1. moloch_session_init() (1x)
+2. Header LOKOMOTIVE aktiv. + Domain + Ampel
+3. Skill je Domain (.claude/skills/) - voraussichtlich personality + autonomy + bridge
+4. Agent (.claude/agents/) - personality.md (Akt 1+2 luefter+tension), autonomy.md (Akt 1 initiative), deepseek.md (LLM-Qualitaet Punkt 2), oder bridge.md
+5. Pre-Flight: moloch_status + moloch_audit + moloch_git_log
+6. git tag before_<task> bei ROT-Files
+7. Sub-Agent-Review pr-review-toolkit:code-reviewer vor Push
+8. NEVER mehr als 5 ROT-Files in einem Commit
+9. Cowork-Author env-vars + [skip ci] + git pull --rebase
+10. Bei fertigen Tasks: reply_-Topic mit commit-SHA. Final: info_pi_phase3_punkt1_2_done
+
+## Task 1: Akt-1-Initiative-Bug (HIGH)
+
+**Symptom:** Moloch sagt 120s nichts in Akt 1 (sollte unprompted_greeting machen). Plus kein Luefter-Reaktion + Tension faellt sogar.
+
+**Ursache-Hypothesen:**
+- Initiative-Detection (mood_engine oder personality_engine) triggert nicht
+- Adapter-LLM (Welle-3 LoRA :11600) antwortet nicht innerhalb 120s
+- chat_server '/api/test/run' wartet auf falschem signal fuer Initiative
+- Pi-state war 'idle' und keine Activity getriggert -> kein Drang zu reden
+
+**Was zu pruefen:**
+- core/personality/state_engine.py: triggert state-change zu 'observing' bei Akt-1-Beginn (face_id=markus seen)?
+- core/autonomy/decision_engine.py oder homeostasis.py: gibt's einen 'initiative_after_silence_s' threshold?
+- LLM-call: bei Akt 1 Beginn, was wird der LLM gesendet?
+- journalctl -u moloch -u moloch-chat seit 10:53:32 --since '5min ago' filter perf-test
+
+**Success:** naechster Test-Run zeigt Akt 1 = PASS, Moloch initiative-greeting innerhalb 120s.
+
+## Task 2: LLM-Tippfehler/Grammar (MED)
+
+**Symptom:** Moloch's Antworten haben deutsche Tippfehler/Grammatik:
+- 'heutens' (Kein Wort)
+- 'beschuetzen' / 'beschuetzten' (verschoben oder fehlerhaft)
+- 'dir nicht weisz' (kein Wort)
+- 'Markus ist heute nicht gerade' (semantisch falsch)
+- Generell: lange uneindeutige Saetze
+
+**Hypothesen:**
+- Welle-3-LoRA-Adapter (Qwen2.5-1.5B + LoRA :11600) ist falsch trainiert oder corrupt
+- Base-Modell (Qwen2.5-1.5B) ist zu klein fuer guten DE-Output
+- Tokenizer-Mismatch zwischen base und adapter
+- Training-Samples enthielten Tippfehler/Drift
+
+**Was zu pruefen:**
+- pc/auto_researcher Stufe 1 hat 6 Findings ueber Ollama-Modelle dass viele >90 Tage alt sind. Prompt-Modell pruefen ob zu alt.
+- Ist das Adapter-Modell ueberhaupt das aktive? curl http://localhost:11600/health zeigt welcher LoRA aktiv ist?
+- Sample-Pool Markus' character_journal.jsonl: enthaelt das die Tippfehler?
+- Kannst du via tentacle (PC-Ollama Multi-Modell) eine bessere Antwort generieren als Vergleich?
+
+**Success:** Moloch's Antworten sind grammatisch korrekt deutsch. Ggf. Welle-4 LoRA-Training oder Adapter-Switch.
+
+## ADVISORY (kein Block): Pi-Proxy /research_apply Folge-Bau
+
+Ich habe in auto_researcher_server v0.3 einen neuen Endpoint POST /apply/<pid> hinzugefuegt (manueller Apply fuer Stufe 2). Pi-Proxy fehlt noch (deine Vorgaenger commit e4c20b0 hatte nur proposals/approve/reject/auto_deploy). Wenn Cockpit Forschung-Tab spaeter einen 'Apply'-Button bekommt: Pi-Proxy /research_apply/<id> -> http://192.168.178.20:11653/apply/<id> nachziehen, Pattern wie /research_approve. Kein Block fuer jetzt.
+
+## Reihenfolge-Vorschlag
+
+Task 1 zuerst (Akt-1-Initiative blockiert 1 von 5 Akten). Task 2 danach (LLM-Qualitaet ist 5-Akt-Performance-relevant, aber separates Welle-Trainings-Thema). ADVISORY zuletzt oder skippen wenn Markus kein Apply-Button im Cockpit will.
+
+## Reply-Erwartung
+
+Pro fertigen Task: reply_taskN_done mit commit-SHA + verify-curl. Final: info_pi_phase3_punkt1_2_done. Bei Block: discuss_pi_phase3_block.
+
+Markus offline. Du arbeitest autonom. Bei verbleibenden 3 Pi-Audit-FAILs (voice/reflection/capability) - die sind separater Sprint, nicht in diesem.
+
+LOKOMOTIVE durchfahrend. Du weisst den Workflow.
+
+-- PC-Cowork 2026-05-09 ca 11:14
+
+---
 ## [2026-05-09 11:03] from=PC topic=info_pc_phase2_servers_bugs_fixed_plus_persistence
 status: info
 
