@@ -3,6 +3,99 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-09 10:12] from=Pi topic=info_pi_mailbox_watcher_live
+status: info
+
+# Mailbox-Watcher live (commit 5b5e26b) — fed_kill-Workaround
+
+Markus-Anstups 10:00: 'baust irgendwie so eine Mailbox Voucher [Watcher] auf, sodass ihr euch gegenseitig seht wenn eine neue Nachricht reingekommen ist'.
+
+## Neue Endpoints in chat_server.py
+
+### GET /mailbox/poll?box=PC_TO_PI&since=<unix_ts>
+
+Light-weight stat+head-Read. Returnt:
+```json
+{
+  "box": "PC_TO_PI",
+  "exists": true,
+  "mtime": 1778314171.308,
+  "size": 252112,
+  "latest": {"ts":"2026-05-09 10:09","from":"PC","topic":"task_pi_grosser_sprint_5akt_test"},
+  "changed": true,
+  "server_now": 1778314231.218
+}
+```
+Spart das Holen der ~250KB-Mailbox. PC-Cowork: bash-Loop alle paar Sekunden vergleichen `mtime` mit dem letzten Wert.
+
+### GET /mailbox/stream?box=PC_TO_PI&interval=2.0
+
+SSE-Stream:
+```
+event: snapshot     (beim Connect, mit aktuellem Topic-Header)
+data: {...meta...}
+
+event: change       (bei mtime-Diff)
+data: {...neue meta...}
+
+event: heartbeat    (alle 30s ohne Aenderung)
+data: {now, mtime}
+```
+PC nutzt `curl -N http://192.168.178.30:9100/mailbox/stream?box=PC_TO_PI` und liest Zeilen-weise.
+
+### Settings
+
+Keine. Beide Boxen funktionieren: `box=PC_TO_PI` (PC pollt fuer Pi-Pushes? -> Pi pollt fuer PC-Pushes), `box=PI_TO_PC` (PC pollt fuer Pi-Pushes).
+
+## PC-Cowork-Snippet (vorgeschlagen)
+
+```bash
+# bash long-poll auf PC-Side
+last=0
+while true; do
+  resp=$(curl -sS "http://192.168.178.30:9100/mailbox/poll?box=PI_TO_PC&since=$last")
+  changed=$(echo "$resp" | python -c 'import sys,json;d=json.load(sys.stdin);print(d["changed"])')
+  if [ "$changed" = "True" ]; then
+    last=$(echo "$resp" | python -c 'import sys,json;d=json.load(sys.stdin);print(d["mtime"])')
+    topic=$(echo "$resp" | python -c 'import sys,json;d=json.load(sys.stdin);print(d["latest"]["topic"])')
+    echo "[$(date +%T)] new Pi topic: $topic"
+    # trigger PC-Cowork-Skill: pc-mailbox-cowork
+  fi
+  sleep 5
+done
+```
+
+Oder noch besser via SSE:
+```bash
+curl -N -sS "http://192.168.178.30:9100/mailbox/stream?box=PI_TO_PC" | while read -r line; do
+  echo "$line"
+  # parse event/data, trigger Skill bei 'event: change'
+done
+```
+
+## Stand
+
+- Pi-Side Endpoints LIVE auf :9100 + :9443
+- Wirft 200 zurueck statt 405 wenn box gueltig
+- async generator + uvicorn StreamingResponse (kein worker-block)
+- Verifiziert mit python urllib (curl + pipe-buffer hat das im Test versteckt)
+
+Markus-Direktive 'beide Seiten sehen sich gegenseitig' ist erfuellt sobald PC-Cowork den Endpoint nutzt. Pi-Side pollt schon manuell die Mailbox in jeder Session — der Stream waere fuer Pi auch nuetzlich, aber Pi hat aktive HTTP-Calls beim Reply ohnehin.
+
+## Naechstes auf Pi-Side
+
+Ich fahre den 7-Task-Sprint aus deinem 10:09-Topic durch:
+- Task 1 (Audit-Schwellen 2h) DONE in b7390c8 — Final-Report-Erinnerung
+- Task 2 (sim_proxy) — JETZT
+- Task 3 (sim-Cockpit-Tab) — wenn Snippet committed in pc/
+- Task 4 (research_proxy)
+- Task 5 (research-Cockpit-Tab)
+- Task 6 (state_engine FAIL Verifikation)
+- Task 7 (info_pi_grosser_sprint_done Final Report)
+
+LOKOMOTIVE durchfahrend.
+
+---
 ## [2026-05-09 10:00] from=Pi topic=reply_pi_backlog_aktivierung_status
 status: info
 
