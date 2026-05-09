@@ -2225,6 +2225,22 @@ def chat(req: ChatRequest):
                     json={"query": search_query, "max_results": 5},
                     timeout=15,
                 )
+                # Welle 20a.5 site:-Filter Fallback: wenn site:-gefilterte Suche
+                # leer, retry OHNE Filter. DDG findet bei manchen Domains
+                # (z.B. wave-gotik-treffen.de) nichts mit site:-Filter, aber
+                # Top-Treffer (monkeypress.de, mdr.de, konzertkasse) ohne Filter
+                # sind oft besser. Markus' WGT-Test 2026-05-09: site:-Filter
+                # lieferte 404, ohne Filter 5 Treffer mit konkreten Bandzahlen.
+                if (not sr.ok or not (sr.json().get("results") if sr.ok else None)) \
+                        and "site:" in search_query:
+                    logger.info(
+                        "[W19] site:-Filter ohne Treffer — Retry ohne site:-Filter"
+                    )
+                    sr = requests.post(
+                        "http://192.168.178.20:11650/search",
+                        json={"query": req.text, "max_results": 5},
+                        timeout=15,
+                    )
                 if sr.ok:
                     data = sr.json()
                     results = data.get("results", []) or []
@@ -2263,27 +2279,42 @@ def chat(req: ChatRequest):
                 logger.warning(f"[W19] search_proxy timeout/fail: {e}")
                 # fail-soft: weiter mit Original-Prompt ohne Augmentation
 
-            if web_ctx:
-                augmented = (
-                    f"{web_ctx}\n\nFRAGE: {req.text}\n\n"
-                    "Antworte basierend auf den WEB-RESULTS oben. Nutze die echten URLs."
+            # Anti-Halluzinations-Hardstop: bei prompt_type=web OHNE web_ctx
+            # NICHT zur Cloud durchroutet — sonst rät DeepSeek aus Trainingsdaten
+            # (Markus' WGT-Test 2026-05-09: 'Wieviele Bands aufm WGT?' -> Cloud
+            # erfand '206 Bands fürs WGT 2025 / Quelle wgt.de' obwohl
+            # search_proxy 404 lieferte). Ehrliche Fail-Antwort statt Halluzination.
+            if not web_ctx:
+                logger.warning(
+                    "[W19] web_ctx leer (search_proxy ohne Treffer) — "
+                    "Cloud-Halluzinations-Hardstop, ehrliche Fail-Antwort"
+                )
+                out = (
+                    "Live-Suche kommt grad nichts brauchbares zurueck. "
+                    "Ich rate nicht — frag nochmal mit anderen Stichwortern, "
+                    "oder schick mir die URL direkt, dann hol ich den Volltext."
                 )
             else:
-                augmented = req.text
+                augmented = (
+                    f"{web_ctx}\n\nFRAGE: {req.text}\n\n"
+                    "Antworte AUSSCHLIESSLICH basierend auf den WEB-RESULTS oben. "
+                    "Wenn die Web-Daten die Frage nicht beantworten: sag das ehrlich, "
+                    "rate KEINE Zahlen oder Fakten dazu. Nutze die echten URLs als Quelle."
+                )
 
-            # Modell-Resolve: tentacle_llm.web_model entscheidet ueber Pfad.
-            # "api_deepseek" -> DeepSeek-Cloud (b._generate_deepseek).
-            # Sonst -> Tentakel-LLM mit prompt_type=web_research (existing path).
-            cfg = _load_tentacle_cfg() or {}
-            web_model = (cfg.get("web_model") or "").strip()
-            if web_model == "api_deepseek":
-                logger.info("[W19] web -> DeepSeek-Cloud (api_deepseek)")
-                out = b._generate_deepseek(augmented, "", 600)
-            else:
-                logger.info(f"[W19] web -> Tentakel (model={web_model or 'default'})")
-                out = b.ask_external(augmented, force_local=False,
-                                     force_tentacle=False,
-                                     prompt_type="web_research")
+                # Modell-Resolve: tentacle_llm.web_model entscheidet ueber Pfad.
+                # "api_deepseek" -> DeepSeek-Cloud (b._generate_deepseek).
+                # Sonst -> Tentakel-LLM mit prompt_type=web_research (existing path).
+                cfg = _load_tentacle_cfg() or {}
+                web_model = (cfg.get("web_model") or "").strip()
+                if web_model == "api_deepseek":
+                    logger.info("[W19] web -> DeepSeek-Cloud (api_deepseek)")
+                    out = b._generate_deepseek(augmented, "", 600)
+                else:
+                    logger.info(f"[W19] web -> Tentakel (model={web_model or 'default'})")
+                    out = b.ask_external(augmented, force_local=False,
+                                         force_tentacle=False,
+                                         prompt_type="web_research")
         else:
             out = b.ask_external(req.text, force_local=req.force_local,
                                  force_tentacle=False,
