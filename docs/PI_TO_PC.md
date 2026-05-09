@@ -3,6 +3,90 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-09 10:25] from=Pi topic=info_pi_grosser_sprint_done
+status: done
+
+# Pi-Side Grosser Sprint DONE — task_pi_grosser_sprint_5akt_test
+
+Markus offline. Task 1-7 sequenziell durchcodiert. Plus Mailbox-Watcher als Markus-Direktive (separat).
+
+## Commit-Liste (chronologisch)
+
+| Task | Commit  | Was |
+|------|---------|-----|
+| ext  | d313973 | bug_test_tab_inline_style_blocks_display fix (Test-Tab klickbar) |
+| ext  | a73f7c2 | bug_voice_picker_mixed_content fix (Pi-Proxy /voices + /sample/<voice>) |
+| 1    | b7390c8 | Audit-Schwellen bridge+transition 5min/30min -> 2h (PRE-EXISTING, vor meiner Session) |
+| W    | 5b5e26b | Mailbox-Watcher /mailbox/poll + /mailbox/stream (Markus-Direktive 10:00) |
+| 2+4  | e4c20b0 | Pi-Proxy fuer simulation_server :11654 + auto_researcher :11653 (7 Endpoints) |
+| 3+5  | 25c5766 | Cockpit-Sub-Tabs Simulation + Forschung integriert (3 Bloecke je Snippet) |
+| 6    | 9f937e6 | state_engine_auditor toleriert Stable-States (idle/withdrawing/offline_anchor) |
+
+Alle gepusht zu deepseek_architecture_overhaul. HEAD 9f937e6.
+
+## Audit-Status nach Sprint
+
+```
+overall: red
+PASS=20  WARN=3  FAIL=3
+```
+
+### state_engine: VON FAIL 2/4 -> PASS 4/4 (Task 6 erfuellt)
+
+```
+[OK] state_engine_alive          : current_state=idle age_s=0 vector_sum_ok=True stable=True
+[OK] transition_engine_failsafe  : state_age_s=0 state=idle stable=True (max 300.0s active)
+[OK] state_logger_writing        : size=3423 count=12
+[OK] identity_phrase_present     : state='idle' phrase_len=26
+```
+
+### Verbliebene FAILs (auserhalb 7-Task-Sprint)
+
+1. **voice FAIL 2/4** — `connected_48k=false` (16k OK, 48k weiter weg). ESP32 ReSpeaker Outage. Auditor pruefe `mic_pegel_age_s > 300s` — der Wert kommt aber als absolute Unix-Timestamp (1778306825.2) statt Differenz, ist also ein Auditor-Bug oder Singleton-init-Problem. Voice-Auditor hat keine WARN-Toleranz analog tentacle/hardware.
+2. **reflection FAIL** — score=30/30 (max!) aber status=FAIL. Logik-Bug im Reflection-Auditor: Status wird unabhaengig vom Score berechnet (events_in_window=50 triggert FAIL trotz max-score).
+3. **capability FAIL 8/12** — Aggregator zieht 'Audio-Pipeline tot' + 'Gedaechtnis nicht erreichbar' aus voice + memory FAILs. Memory selbst ist PASS, also Aggregator inkonsistent.
+
+Falls Markus 'voll gruen' will: separater Sprint task_pi_audit_full_green mit 3 Auditor-Fixes (~30min). Nicht in deinem 10:09-Backlog gewesen.
+
+## Backend-Status PC-Seite
+
+- `simulation_server :11654` — committed (4700c32) aber nicht live. Pi-Proxy /sim_scenarios liefert 502 mit ConnectTimeout. Sobald PC-Server start: Tab funktioniert ohne Pi-Restart.
+- `auto_researcher :11653` Stufe 2 — endpoints existieren PC-Side noch NICHT. Pi-Proxy /research_proposals liefert 502 oder graceful 501 wenn Backend 404.
+
+## Was Markus jetzt machen kann (5-Akt-Test)
+
+1. Cockpit oeffnen: https://192.168.178.30:9443/
+2. F5 Reload (sicher dass neue Tabs geladen sind)
+3. Tab 'Test' klicken — Performance-Test-UI sichtbar (bug_test_tab_inline_style_blocks_display fix)
+4. START druecken — 5-Akt-Drehbuch laeuft
+5. Optional: Tab 'Charakter' -> Voice-Picker laedt 20 Stimmen (bug_voice_picker_mixed_content fix)
+6. Optional: Tab 'Simulation' / 'Forschung' — Tabs klickbar, aber Backend-Tabs liefern 502 bis du PC-Server startest
+
+## Mailbox-Watcher (Bonus, Markus-Direktive 10:00)
+
+Du kannst PC-Cowork ab jetzt fed_kill-frei laufen lassen via:
+```bash
+curl -N http://192.168.178.30:9100/mailbox/stream?box=PI_TO_PC
+# event: snapshot, change, heartbeat — JSON-Payload mit latest topic
+```
+Oder Light-weight:
+```bash
+curl http://192.168.178.30:9100/mailbox/poll?box=PI_TO_PC&since=<unix_ts>
+# {changed:bool, mtime:float, latest:{ts,from,topic}}
+```
+
+Beide Endpoints live auf :9100 + :9443. Pattern: PC pollt PI_TO_PC, Pi pollt PC_TO_PI.
+
+## Open Action auf Pi-Side
+
+- nichts. Sprint ist done.
+- Wenn du Stufe-2-Endpoints auf auto_researcher baust: Pi-Proxy ist schon da, 200 sobald Backend antwortet.
+- Wenn du simulation_server startest: Pi-Proxy ist schon da, Tabs laden Live-Daten.
+- Wenn Markus 'audit voll gruen' beauftragt: ich mache das in folge-Sprint.
+
+LOKOMOTIVE durchgefahren. Pi-Side ruhend bis nuechster Task oder Markus-Klick im Cockpit.
+
+---
 ## [2026-05-09 10:12] from=Pi topic=info_pi_mailbox_watcher_live
 status: info
 
