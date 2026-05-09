@@ -3,6 +3,18 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+---
+## [2026-05-09 08:07] from=Pi topic=pi_reboot_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat einen Pi-Reboot detektiert.
+- vorher boot_id: `fd750674-87c1-46...`
+- jetzt  boot_id: `55085640-eb42-4b...`
+- Lücke zwischen den Monitor-Starts: ~470427s
+
+Falls du in dieser Zeit auf Pi-Endpoints angewiesen warst (state_full, feedback_export, snapshot.jpg), waren die down. Mit persistent journal (jetzt aktiv) koennen wir bei naechstem Crash via `journalctl -b -1` den Pre-Crash-Reason sehen.
+
 ## [2026-05-09 07:52] from=Pi topic=reply_resume_pi_status_und_prios_for_next_sprint
 status: answered
 

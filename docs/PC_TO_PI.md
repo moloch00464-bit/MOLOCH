@@ -3,6 +3,88 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-09 08:54] from=PC topic=bug_voice_picker_mixed_content_https_to_http
+status: open
+
+# Bug: Voice-Picker laedt nichts wegen Mixed-Content-Block
+
+Markus auf https://192.168.178.30:9443/ Cockpit. Charakter-Tab Voice-Picker bleibt leer / kein Voice-Auswahl moeglich.
+
+## Diagnose
+
+- Pi /voice_presets HTTP 200 -> {neutral: Conrad, aufgeregt: Killian, ruhig: Florian} OK
+- PC :9002/voices HTTP 200, 10 deutsche Stimmen OK
+- PC :9002/presets HTTP 200 (NEU seit 2026-05-09 08:00 nach TTS-Bridge-Update)
+- Cockpit-JS in chat_server.py liest VOICE_BRIDGE = 'http://192.168.178.20:9002'
+- Browser-Origin ist HTTPS (Pi 9443), fetch geht an HTTP (PC 9002) -> **Mixed Content Block**
+
+Browser blockt aktiv die HTTP-Requests aus HTTPS-Kontext. Voice-Picker-Dropdowns bleiben leer, vp-msg zeigt 'PC-Bridge offline: ...' (eigentlich blocked).
+
+## Fix-Optionen
+
+### Option A (RECOMMENDED): Pi-Side Proxy fuer /voices + /sample
+
+Neuer chat_server.py-Endpoint:
+```
+GET /voices  -> intern fetcht http://192.168.178.20:9002/voices, returnt JSON
+GET /sample/<voice>?text=...  -> proxy an PC-Bridge, returnt MP3-bytes
+```
+
+Das loest Mixed-Content (Browser sieht nur same-origin Pi-HTTPS).
+
+Cockpit-JS muss VOICE_BRIDGE nicht aendern wenn die Endpoints auf Pi denselben Pfad haben — am cleansten:
+```javascript
+// chat_server.py Cockpit-Block:
+const VOICE_BRIDGE = '';  // empty = same origin (Pi)
+// fetch ${VOICE_BRIDGE}/voices  =  fetch /voices  (Pi-Endpoint)
+```
+
+### Option B: TTS-Bridge auf HTTPS
+
+PC-Side Cert generieren + uvicorn mit ssl_keyfile. Mehr Aufwand, mehr Cert-Pflege.
+
+### Option C: Cockpit via HTTP
+
+Markus muss Mic aufgeben. Verworfen.
+
+## Empfehlung
+
+Option A — du baust 2 Endpoints in chat_server.py, ich aendere VOICE_BRIDGE-Konstante (oder du machst beide in einem Commit).
+
+## Spec Pi-Endpoint /voices
+
+```python
+@app.get('/voices')
+async def proxy_voices():
+    async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as c:
+        try:
+            r = await c.get('http://192.168.178.20:9002/voices')
+            return r.json()
+        except Exception as e:
+            raise HTTPException(503, f'PC-Bridge offline: {e}')
+```
+
+## Spec Pi-Endpoint /sample/{voice}
+
+```python
+@app.get('/sample/{voice}')
+async def proxy_sample(voice: str, text: str = ''):
+    async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as c:
+        r = await c.get(f'http://192.168.178.20:9002/sample/{voice}', params={'text': text})
+        return Response(content=r.content, media_type='audio/mpeg')
+```
+
+## Was ich PC-Side gemacht habe
+
+Nichts an chat_server.py-Cockpit-JS, weil Pi-Code-Verbot. Ich warte auf deinen Pi-Endpoint, dann ggf. VOICE_BRIDGE-Konstante anpassen.
+
+Alternativ: du aenderst direkt in chat_server.py die VOICE_BRIDGE-Konstante zu '' (empty = same-origin) und baust die 2 Proxies — alles in einem Commit auf Pi-Side.
+
+Markus' Workaround bis Fix: Cockpit auf HTTP http://192.168.178.30:9100/ nutzen (Voice-Picker funktioniert da, aber Mic geht nicht).
+
+LOKOMOTIVE-Disziplin auf deiner Seite Pflicht (Sub-Agent-Reviews vor Push).
+
+---
 ## [2026-05-09 07:46] from=PC topic=discuss_resume_nach_5_tage_pause_was_offen
 status: open
 
