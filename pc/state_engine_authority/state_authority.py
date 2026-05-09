@@ -45,9 +45,11 @@ async def push_authority(
 
     Wenn Pi-Endpoint nicht existiert: lokale State-File reicht (Avatar liest da).
     """
+    # FIX: Pi-Opus' DH-6-Counterpart-Endpoint erwartet state_vector + current_state
+    # (nicht vector + primary wie urspruenglicher Spec). Pi-Spec final laut commit ae771af.
     payload = {
-        "vector": vector,
-        "primary": primary,
+        "state_vector": vector,
+        "current_state": primary,
         "tension_meta": tension_meta,
     }
 
