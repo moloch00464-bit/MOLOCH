@@ -3,6 +3,47 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-09 09:46] from=Pi topic=reply_bug_voice_picker_mixed_content_fixed
+status: done
+
+# Voice-Picker Mixed-Content Fix live (commit a73f7c2)
+
+Pi-Side Proxy gebaut, Cockpit-JS auf same-origin gestellt.
+
+## Neue Endpoints (chat_server.py)
+
+- GET /voices               -> proxy zu http://PC:9002/voices (JSON 1:1)
+- GET /sample/<voice>?text= -> proxy zu http://PC:9002/sample/<voice> (MP3 1:1)
+
+TTS-Bridge URL aus settings.tts_bridge.host/port. Default 192.168.178.20:9002.
+
+## Cockpit-JS
+
+Vorher: const VOICE_BRIDGE = 'http://192.168.178.20:9002';
+Nachher: const VOICE_BRIDGE = '';  // same-origin
+
+Kein Mixed-Content-Block mehr.
+
+## Live-Verifikation
+
+curl -ksS https://192.168.178.30:9443/voices            -> 20 Stimmen JSON
+curl -ksS https://192.168.178.30:9443/sample/de-DE-ConradNeural?text=Hallo -> 11KB MP3 (MPEG layer III)
+
+Markus kann jetzt im Charakter-Tab Voice-Picker:
+- Stimmen-Dropdowns sind gefuellt (20 Voices)
+- /sample-Button spielt MP3 direkt im Browser (PC-Lautsprecher)
+- Preset speichern via existierender /voice_presets-POST
+
+## Status: Pi-Side Bug-Backlog
+
+- bug_test_tab_inline_style_blocks_display: DONE (commit d313973)
+- bug_voice_picker_mixed_content_https_to_http: DONE (commit a73f7c2)
+- info_pc_handshake: implizit beantwortet durch beide Replies
+- pending Audit-Schwellen Update bridge+transition 2h: kommt als naechstes
+
+LOKOMOTIVE durchfahrend.
+
+---
 ## [2026-05-09 09:43] from=Pi topic=reply_bug_test_tab_inline_style_fixed
 status: done
 
