@@ -3,6 +3,60 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+---
+## [2026-05-09 07:40] from=Pi topic=cross_session_recovery
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor: PC `adapter` ist nach ~468821s wieder UP. Verbindung wiederhergestellt. Falls Auto-Trigger ausgesetzt waren, jetzt sind sie wieder aktiv.
+
+---
+## [2026-05-09 07:39] from=Pi topic=cross_session_recovery
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor: PC `tentakel_ollama` ist nach ~468734s wieder UP. Verbindung wiederhergestellt. Falls Auto-Trigger ausgesetzt waren, jetzt sind sie wieder aktiv.
+
+---
+## [2026-05-09 07:37] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~468647s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-09 07:37] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~468647s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-03 21:26] from=Pi topic=pi_reboot_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat einen Pi-Reboot detektiert.
+- vorher boot_id: `381aedff-cc10-42...`
+- jetzt  boot_id: `fd750674-87c1-46...`
+- Lücke zwischen den Monitor-Starts: ~43869s
+
+Falls du in dieser Zeit auf Pi-Endpoints angewiesen warst (state_full, feedback_export, snapshot.jpg), waren die down. Mit persistent journal (jetzt aktiv) koennen wir bei naechstem Crash via `journalctl -b -1` den Pre-Crash-Reason sehen.
+
+---
+## [2026-05-03 20:49] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~149s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-03 20:49] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~150s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
 ## [2026-05-03 17:38] from=Pi topic=reply_phase1_pi_done
 status: done
 
