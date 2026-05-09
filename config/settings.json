@@ -47,7 +47,12 @@
     "circuit_breaker_lockout_s": 300.0,
     "rtsp_reconnect_max_per_minute": 2,
     "failsafe_use_last_tracking_pos": true,
-    "log_decisions": true
+    "log_decisions": true,
+    "velocity_window_s": 3.0,
+    "velocity_threshold_high": 0.40,
+    "velocity_threshold_low": 0.05,
+    "range_threshold_high": 0.15,
+    "range_threshold_low": 0.05
   },
   "learner": {
     "flash_enabled": true
