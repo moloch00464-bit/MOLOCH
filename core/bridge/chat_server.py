@@ -2231,6 +2231,38 @@ def personality_view():
     return out
 
 
+@app.post("/api/state/authority")
+def api_state_authority(req: dict = Body(...)):
+    """DH-6 PC-Authority -> Pi-Reflector.
+
+    PC state_engine_authority pusht den autoritativen 6-State-Vector
+    (EMA-gefiltert + SafetyLayer-validiert) an Pi. Pi nimmt den
+    State an, ruft state_engine.apply_pc_authority(vector, current_state)
+    und liefert den resultierenden Snapshot zurueck.
+
+    Body:
+      {
+        'state_vector': {idle: 0.1, observing: 0.6, engaged: 0.3, ...},
+        'current_state': 'observing'   (optional - sonst argmax)
+      }
+
+    Response: snapshot wie /api/state/current.
+    """
+    try:
+        vector = req.get("state_vector") or {}
+        current_state = req.get("current_state")
+        if not isinstance(vector, dict) or not vector:
+            raise HTTPException(400, "state_vector dict required")
+        from core.personality.state_engine import get_state_engine
+        snap = get_state_engine().apply_pc_authority(vector, current_state)
+        return snap
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"/api/state/authority Fehler: {e}")
+        raise HTTPException(500, f"authority push failed: {e}")
+
+
 @app.get("/api/state/current")
 def api_state_current():
     """Phase 1 Pi-Side State-Endpoint (Drei-Hirn-Synthese).
