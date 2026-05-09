@@ -1542,6 +1542,11 @@ setInterval(()=>{ if($("t-audit").classList.contains("active")) auditRefresh(); 
   const reportActs = document.getElementById('pt-report-acts');
   const historyList = document.getElementById('pt-history-list');
 
+  // Skip-Checkboxen bei Tab-Init zwangsweise leeren — Browser-Cache/Extension
+  // hat in PC-Mailbox 10:45 bug_pi_test_engine_runs_zero_acts alle 5 gechecked
+  // obwohl User nichts angekreuzt hatte. Reset on load = robust.
+  tab.querySelectorAll('.pt-skip').forEach(function(cb){ cb.checked = false; });
+
   function setStatus(text, color){ statusEl.textContent = text; statusEl.style.color = color || '#888'; }
   function appendLog(line){ logEl.textContent += line + '\\n'; logEl.scrollTop = logEl.scrollHeight; }
   function setActIcon(actIdx, icon, detail){
@@ -4134,6 +4139,19 @@ def api_test_run(req: Optional[Dict[str, Any]] = Body(default=None)):
     body = req or {}
     judge = body.get("judge", "heuristik")
     skip_acts = body.get("skip_acts") or []
+
+    # Diagnose-Log: Cockpit-Bug mit Browser-Cache/Extension fuehrte zu skip_acts=[1..5]
+    # obwohl User keine Checkbox checkte (PC-Mailbox 10:45 bug_pi_test_engine_runs_zero_acts).
+    logger.info(f"[perf-test] /api/test/run body={body}")
+
+    # Validierung: alle 5 skippen = 0 Akte = sinnloser FAIL-Run.
+    # Wenn Cockpit das schickt, ist das ein Browser-State-Bug.
+    if isinstance(skip_acts, list) and len(set(skip_acts) & {1, 2, 3, 4, 5}) == 5:
+        raise HTTPException(
+            400,
+            "skip_acts enthaelt alle 5 Akte — wuerde 0-Akt-Run produzieren. "
+            "Browser-Cache reset (Strg+F5) oder Skip-Checkboxen leeren."
+        )
 
     # 409 wenn schon ein Run laeuft
     active = _perf_test_active_run_id()
