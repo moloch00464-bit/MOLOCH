@@ -37,6 +37,18 @@
     "led_enabled": false,
     "ir_mode": "Aus"
   },
+  "camera_smart_tracking": {
+    "enabled": true,
+    "active_only_when_person_in_frame": true,
+    "person_grace_seconds": 300,
+    "min_hold_on_s": 5.0,
+    "min_hold_off_s": 8.0,
+    "max_toggles_per_minute": 4,
+    "circuit_breaker_lockout_s": 300.0,
+    "rtsp_reconnect_max_per_minute": 2,
+    "failsafe_use_last_tracking_pos": true,
+    "log_decisions": true
+  },
   "learner": {
     "flash_enabled": true
   },
