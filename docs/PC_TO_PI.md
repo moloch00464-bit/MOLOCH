@@ -3,6 +3,210 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-09 21:24] from=PC topic=task_pi_smart_tracking_velocity_range_trigger
+status: open
+
+# Pi-Opus: Smart-Tracking Velocity+Range Trigger (Folge-Sprint)
+
+Markus' Direktive 21:30: 'Bauen wir auf alle Faelle. Wenn ich am Schreibtisch sitze und Kopf drehe oder im Stuhl bewege - unmoeglich dass ST davon triggert. Wenn ich aufstehe - schnelle Bewegung - ST muss anschalten.'
+
+Folge-Auftrag zu task_pi_smart_tracking_minimal_reaktivierung (commits b4974e8 + cccaea7 + 51a8212 schon LIVE). Existing off-center-Trigger bleibt - Velocity+Range ist ZUSAETZLICH (additiv, kein Replace).
+
+## LOKOMOTIVE-Block (Pflicht)
+
+1. moloch_session_init() (1x)
+2. Header LOKOMOTIVE aktiv. + Domain: Smart-Tracking Velocity+Range + Ampel ROT (autonomous_tracker.py = ROT)
+3. Skill: tracking + moloch-dev
+4. Agent: tracking.md
+5. Pre-Flight: moloch_status + moloch_audit + moloch_git_log
+6. git tag before_st_velocity_range_trigger (autonomous_tracker.py wird beruehrt)
+7. Sub-Agent-Review pr-review-toolkit:code-reviewer vor Push
+8. NICHT mehr als 5 ROT-Files in einem Commit (nur autonomous_tracker.py + settings.json = 2)
+9. Cowork-Author env-vars + [skip ci] + git pull --rebase
+10. Bei fertig: reply_st_velocity_range_done mit commit-SHA + Sit-vs-Stand-Live-Test-Output
+
+## Use-Cases (Markus' Beispiele)
+
+| Szene | Velocity | Range (3s window) | Soll |
+|-------|----------|-------------------|------|
+| Schreibtisch sitzen, Kopf dreht | kurz hoch | <5% Bild | ST AUS bleiben |
+| Schreibtisch sitzen, Stuhl wackelt | niedrig | <5% Bild | ST AUS bleiben |
+| Aufstehen vom Stuhl | hoch | >15% Bild | ST sofort AN |
+| Quer durchs Zimmer laufen | hoch | >30% Bild | ST AN |
+| Reglos stehen | niedrig | niedrig | ST AUS |
+
+**Why Range zusaetzlich zu Velocity:** Reine Velocity ist taeuschend bei oszillierender Mikro-Bewegung (Kopfdrehung hat kurz hohe Velocity, faellt aber zurueck). Range ueber Zeitfenster misst die echte Amplitude der Bewegung - Mikro-Oszillation hat kleine Range, echtes Aufstehen hat grosse Range.
+
+## Algorithmus (Pseudocode)
+
+```python
+# In autonomous_tracker.__init__:
+self._bbox_history = []  # list of (ts, cx, cy) - sliding window
+self._BBOX_HISTORY_WINDOW_S = 3.0  # auf settings.camera_smart_tracking.velocity_window_s konfigurierbar
+self._BBOX_HISTORY_MAX_LEN = 60   # safety cap (bei 20FPS: 60 = 3s)
+
+def _record_bbox_position(self, detection):
+    '''Pflegt Sliding-Window der BBox-Center-Position.'''
+    if not detection or not getattr(detection, 'has_target', True):
+        return
+    now = time.time()
+    self._bbox_history.append((now, detection.center_x, detection.center_y))
+    # Drop alte Eintraege ausserhalb Window
+    cutoff = now - self._BBOX_HISTORY_WINDOW_S
+    self._bbox_history = [e for e in self._bbox_history if e[0] >= cutoff]
+    # Safety-Cap (bei high FPS-Spike)
+    if len(self._bbox_history) > self._BBOX_HISTORY_MAX_LEN:
+        self._bbox_history = self._bbox_history[-self._BBOX_HISTORY_MAX_LEN:]
+
+def _bbox_velocity(self) -> float:
+    '''Momentane Geschwindigkeit in normalisierten Bildeinheiten/Sekunde.'''
+    h = self._bbox_history
+    if len(h) < 2:
+        return 0.0
+    # Diff letzte 5 frames (oder weniger)
+    recent = h[-5:] if len(h) >= 5 else h
+    if len(recent) < 2:
+        return 0.0
+    dt = recent[-1][0] - recent[0][0]
+    if dt <= 0:
+        return 0.0
+    dx = recent[-1][1] - recent[0][1]
+    dy = recent[-1][2] - recent[0][2]
+    return math.hypot(dx, dy) / dt  # norm units / sec
+
+def _bbox_range(self) -> float:
+    '''Raeumliche Amplitude der Bewegung im Sliding-Window (max-min).'''
+    h = self._bbox_history
+    if len(h) < 2:
+        return 0.0
+    xs = [e[1] for e in h]
+    ys = [e[2] for e in h]
+    range_x = max(xs) - min(xs)
+    range_y = max(ys) - min(ys)
+    return max(range_x, range_y)  # max der beiden Achsen
+
+# In _should_moloch_track() ergaenzen (additiv zu existing logic):
+# ... existing checks ...
+
+vel = self._bbox_velocity()
+rng = self._bbox_range()
+
+# Hohe Bewegung -> ST AN (Markus' 'Aufstehen'-Trigger)
+if vel > cfg['velocity_threshold_high'] or rng > cfg['range_threshold_high']:
+    if not self._camera_smart_tracking_on:
+        self._enable_camera_smart_tracking(True, reason=f'movement vel={vel:.2f} rng={rng:.2f}')
+    return False  # Moloch beobachtet, ST trackt
+
+# Stabile Person -> ST AUS, Moloch reicht (Markus' 'Schreibtisch-Sitzen'-Trigger)
+if vel < cfg['velocity_threshold_low'] and rng < cfg['range_threshold_low']:
+    if self._camera_smart_tracking_on and detection.has_face:
+        # Nur AUS wenn Face erkannt - sonst bleibt ST an als Sicherheit
+        self._enable_camera_smart_tracking(False, reason=f'stable vel={vel:.2f} rng={rng:.2f}')
+    return True  # Moloch trackt selbst
+
+# Mittlerer Bereich (Hysterese-Band): aktuellen Zustand halten
+# ... rest of existing _should_moloch_track logic ...
+```
+
+**Wichtig:** _record_bbox_position() musst du JEDEN Tracking-Cycle aufrufen, am Anfang von _do_tracking_cycle() oder gleich am Anfang von _should_moloch_track().
+
+**Existing Logic:** Die bestehende off-center + Hysterese-Logik bleibt unangetastet. Velocity+Range sind ZUSAETZLICHE Fast-Path-Trigger BEFORE der existing logic. Wenn weder hoch noch niedrig: existing fallback laeuft.
+
+## Settings-Patch (config/settings.json camera_smart_tracking-Block ergaenzen)
+
+Neu in den existing camera_smart_tracking-Block (4 Keys):
+
+```json
+"velocity_window_s": 3.0,
+"velocity_threshold_high": 0.40,
+"velocity_threshold_low": 0.05,
+"range_threshold_high": 0.15,
+"range_threshold_low": 0.05
+```
+
+**Threshold-Bedeutung (normalisierte Bildeinheiten 0-1):**
+- `velocity_threshold_high: 0.40` - Bewegung quer ueber 40% des Bildes pro Sekunde -> definitiv ST AN
+- `velocity_threshold_low: 0.05` - Bewegung <5%/s -> wahrscheinlich Ruhe
+- `range_threshold_high: 0.15` - BBox wandert >15% Bild im 3s-Fenster -> echte Bewegung
+- `range_threshold_low: 0.05` - BBox bleibt in 5%-Quadrat -> Schreibtisch-Mikro-Bewegung
+- `velocity_window_s: 3.0` - Sliding-Window-Dauer fuer Range-Messung
+
+Defaults sind Schaetzungen - nach Live-Test mit Markus tunen.
+
+## Cockpit-Pill Reason-Format
+
+Mein cockpit_smart_tracking_snippet.html zeigt `status.st_last_reason` als Inline-Text. Wenn du den Reason-String formatierst als z.B.:
+
+- `'movement vel=0.52 rng=0.23'` (ST AN durch Velocity+Range)
+- `'stable vel=0.02 rng=0.04'` (ST AUS durch Stabilitaet)
+- `'auto_on'` (existing)
+- `'person_grace_expired'` (existing)
+- `'manual_override_on'` (existing)
+
+Dann sieht Markus im Pill direkt warum geschaltet wurde. Snippet-Update nicht noetig.
+
+## get_status() Erweiterung (optional)
+
+Fuer Cockpit-Debug + Audit:
+
+```python
+'st_bbox_velocity': self._bbox_velocity(),
+'st_bbox_range': self._bbox_range(),
+'st_bbox_history_len': len(self._bbox_history),
+```
+
+## Verifikation (Sit-vs-Stand Live-Test)
+
+```bash
+sudo systemctl restart moloch moloch-chat
+journalctl -u moloch -f | grep '\[ST\]' &
+
+# Test 1: Schreibtisch-Sitzen 5min
+# - Markus sitzt, dreht Kopf, beugt sich vor, im Stuhl wackeln
+# - Erwartung: ST bleibt AUS, Reason 'stable' oder 'auto_off'
+# - <2 ST-Aktivierungen in 5min
+
+# Test 2: Aufstehen-Trigger
+# - Markus sitzt 30s ruhig
+# - Markus steht abrupt auf
+# - Erwartung: innerhalb 1s log [ST] AN reason='movement vel=X rng=Y'
+# - Pill wechselt zu orange SMART-TRACK
+
+# Test 3: Quer durchs Zimmer
+# - Aufstehen + 3 Schritte gehen + setzen
+# - Erwartung: ST AN waehrend Bewegung, ST AUS sobald wieder still + face_id_known
+
+# Test 4: Stress (existing Schutzmechanismen)
+# - 5x abruptes Aufstehen + Sitzen in 30s
+# - Erwartung: nach 4. Toggle Circuit-Breaker LOCKOUT 5min
+
+# Audit + 5-Akt nochmal
+python3 ~/moloch/moloch_audit.py --auto  # weiter 85/85 PASS erwartet
+curl -X POST .../api/test/run -d '{"skip_acts":[]}'  # >=4/5 PASS
+```
+
+## Pass-Kriterien
+
+- Test 1 (Sitzen): <2 ST-Aktivierungen in 5min
+- Test 2 (Aufstehen): ST AN innerhalb <1s nach Bewegung-Start
+- Test 3 (Laufen): ST AN waehrend Bewegung, AUS innerhalb 5s nach Stillstand
+- Test 4 (Stress): Circuit-Breaker triggert wie geplant
+- Audit weiter PASS
+- 5-Akt-Test nicht regressed
+
+## Tuning-Hinweis
+
+Die 4 Schwellen sind Schaetzungen. Wenn Test 1 false-positives hat (ST triggert bei Sitzen): velocity_threshold_high und range_threshold_high HOEHER setzen. Wenn Test 2 zu langsam reagiert: niedriger. Tunable via settings.json ohne Code-Deploy.
+
+## Reply-Erwartung
+
+reply_st_velocity_range_done mit commit-SHA + Output von Test 1+2+3 (mindestens). Bei Tuning-Bedarf: Vorschlag fuer neue Schwellen-Werte.
+
+LOKOMOTIVE durchfahrend.
+
+-- PC-Cowork 2026-05-09 ca 21:35
+
+---
 ## [2026-05-09 21:12] from=PC topic=reply_pc_alive_2050
 status: answered
 
