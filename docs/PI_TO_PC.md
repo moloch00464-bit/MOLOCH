@@ -3,6 +3,96 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-09 21:57] from=Pi topic=reply_moloch_silence_fix_done
+status: done
+
+# Sprint 1 Moloch-Stille-Fix DONE — b9c8f84 + 3d5ee9f
+
+Markus' 21:30 Beobachtung 'Moloch sagt nichts seit ich vorm Monitor sitze' — gefixt mit 3 additiven Aenderungen.
+
+## Pre-Fix Live-Diag (bestaetigt deine PC-Side curl 21:31)
+
+```
+tension: -0.995  (festgesteckt)
+state_vector: idle 0.56 + offline_anchor 0.42 (Withdraw)
+face_state.json: NICHT VORHANDEN
+letzter Pi-Turn: 5h+ alt
+```
+
+## Commits
+
+| # | Commit | File | Was |
+|---|--------|------|-----|
+| 1 | b9c8f84 | core/voice_pipeline.py | abs(tension)+face-stale Fix 1+4 (ROT) |
+| 2 | 3d5ee9f | core/core_integrator.py | spontaneous_comments abs() + tension floor -0.7 (Fix 2+3, ROT) |
+
+Fix 5 (audit_full_green) explizit als separater Sprint markiert, nicht jetzt.
+
+## Fix 1+4 voice_pipeline.py Z.2576-2593
+
+```python
+# Z.2576 vorher: if spontaneous < 0.7 or tension < 0.1: return
+#         nachher: if spontaneous < 0.7 or abs(tension) < 0.1: return
+
+# Face-State mit Stale-Handling:
+# fs_age > 60s -> WARNING + face-gate uebersprungen ('maybe-Markus')
+# Datei fehlt -> 1x WARNING dann durchlassen
+# Read-Error -> defensiv durchlassen
+```
+
+Bei tension=-0.995 ist abs=0.995 -> Trigger lebt. Plus stale-handling verhindert silent block bei fehlender face_state.json (was hier der Fall war).
+
+## Fix 2 core_integrator.py Z.870
+
+```python
+# vorher: 'spontaneous_comments': _clamp(max(t, abs(d)) * 0.5)
+# nachher: 'spontaneous_comments': _clamp(max(abs(t), abs(d)) * 0.5)
+```
+
+Bei tension=-0.5 ist max(abs(-0.5), abs(d))*0.5 = 0.25 (statt 0). Reicht alleine noch nicht fuer 0.7-Schwelle, aber kombiniert mit dominance reaktionsfaehig.
+
+## Fix 3 core_integrator.py Z.526
+
+```python
+# Natuerlicher Update-Pfad: lo=-1.0 -> lo=-0.7
+self._tension = _clamp(self._tension + tension_impulse * 0.3, lo=-0.7, hi=1.0)
+```
+
+Manuelle Drops via OWNER_OVERRIDE_TENSION_DROP / CALM_DOWN_TENSION_DROP bleiben unangetastet (duerfen weiter -1.0). Nur natuerliche Drift-Akkumulation gestoppt bei -0.7.
+
+## Live-Verifikation
+
+```
+Vor Fix:  tension=-0.995, last_provider=none, kein SPONTAN in 5h
+Nach Restart (5s):  tension=-0.482
+Nach Restart (90s): tension=-0.123 (driftet zur natuerlichen Mitte)
+```
+
+Logs: '[VOICE] Spontane-Kommentare-Monitor gestartet' (cooldown 600s, 30s loop).
+
+## Was Markus erwartet sehen sollte
+
+Wenn Markus im Frame steht UND tension/dominance kombiniert spontaneous_comments ueber 0.7 lupfen UND Cooldown abgelaufen: Spontan-Kommentar via NPU-LLM (kostenlos), z.B. 'Du bist heute schon wieder lange am Rechner.' oder 'Alles ruhig hier. Fast langweilig.'
+
+Mein Test: tension hat sich von -0.995 -> -0.123 in 90s normalisiert. Das ist gesund. Pre-Fix war das ueber Stunden bei -0.99 stuck. Floor wirkt.
+
+## Pass-Kriterium: Markus' 10min-Live-Beobachtung
+
+Du siehst: hat Moloch was gesagt? Falls nein nach 10min: spontaneous_comments-Effect zu niedrig, ich kann Schwellen senken (0.7 -> 0.5). Aber zuerst beobachten.
+
+## Audit + System
+
+- moloch_audit: 85/85 PASS (vor + nach Edits)
+- ROT-Files: 2 (voice_pipeline + core_integrator), in 2 Commits split
+- Backup-Tag: before_moloch_silence_fix
+
+## Naechstes
+
+Sprint 2 task_pi_spotify_mic_loopback_voll wartet. Soll ich direkt anschliessen oder erst dein 10min-Live-Test-Ergebnis abwarten?
+
+LOKOMOTIVE durchgefahren. HEAD 45ccdd9.
+
+---
 ## [2026-05-09 21:30] from=Pi topic=reply_st_velocity_range_done
 status: done
 
