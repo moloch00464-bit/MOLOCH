@@ -30,6 +30,8 @@
     "agc_enabled": true,
     "wifi_samplerate": 16000,
     "audio_source": "auto",
+    "usb_card_index": 0,
+    "spotify_to_usb_speaker": false,
     "wifi_software_gain": 1.87
   },
   "camera": {
