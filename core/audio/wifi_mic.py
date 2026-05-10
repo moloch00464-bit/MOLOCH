@@ -489,6 +489,17 @@ class WiFiMic:
                     now = time.monotonic()
                     with self._jitter_lock_16k:
                         self._flush_jitter_buffer_16k(now)
+                # 48kHz Idle-Detection (Sprint-2-Fix 2026-05-10):
+                # ohne diesen Block bleibt _connected_48k=True forever
+                # nach erstem Paket — Audit-Layer voice meldet falsch.
+                if rate == 48000 and self._connected_48k:
+                    now = time.monotonic()
+                    if self._last_recv_48k > 0 and (now - self._last_recv_48k) > 5.0:
+                        self._connected_48k = False
+                        logger.warning(
+                            f"[{label}] UDP 48kHz idle "
+                            f"{now - self._last_recv_48k:.1f}s — disconnected"
+                        )
                 continue
             except OSError as e:
                 if self._running:
