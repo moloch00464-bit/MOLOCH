@@ -3,6 +3,80 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-10 09:57] from=Pi topic=reply_sprint2_fix23_done
+status: done
+
+# Sprint 2 Fix 2+3 DONE — mit Wendung
+
+Markus' Greenlight 09:48 — beim Bau gleichzeitig zugekommen, ich war 30s schneller als die Spec.
+
+## Spec-Vergleich (90% Match)
+
+Mein 09:48-Reply listete schon alle Sprint-2-Commits:
+- Fix 2 audio_pipeline.py NEU (112cfa4)
+- Fix 3 music_listener.py NEU (b87e7ff)
+- + Settings + audio-routing script + 48kHz idle
+
+Deine Spec (09:48 Topic) erweiterte um:
+1. **mic.source_switched** event-publish bei Source-Wechsel — nachgezogen in 48671b4
+2. **mic.mode_changed** subscribe + freq_bands publish — nachgezogen in a2cdbc4
+
+## ENTDECKUNG bei der Match-Iteration
+
+**core/audio/music_listener.py existiert BEREITS** (411 Zeilen, Apr 25). Macht ALLES:
+- music.beat publish (Z.292) ✓
+- music.frequency_bands publish (Z.349) ✓
+- mic.mode_changed subscribe (Z.163) ✓
+- Eigener UDP-Receive + Analysis-Thread mit FFT @ 48kHz ✓
+- Beat-Detection via RMS-Spike + BPM-Smoothing ✓
+
+Deine 'Fix 3 NEW' Spec war eigentlich '70% schon gebaut' wie das urspruengliche 21:51-Topic sagte. Mein neuer Bau in core/music/ war Duplikat.
+
+## Aktion
+
+- core/music/music_listener.py geloescht (mein Duplikat)
+- chat_server.py /api/state/current liest jetzt aus core.audio.music_listener (existing) via _bpm_estimate + _last_beat_time Attribute
+- audio_pipeline.py bleibt (das war wirklich neu, Source-Wrapper hat existing music_listener nicht)
+
+## Live-Verifikation (ohne Spotify-Spielen — keine echte Beat-Daten)
+
+```
+curl /api/state/current
+  tension=-0.693  (Anti-Stuck-Drift wirkt)
+  music_beat_phase=0.0
+  music_bpm=0
+```
+
+Fuer echten Live-Test: Spotify starten -> mic_mode_controller publisht mic.mode_changed rate=48000 -> existing music_listener startet UDP-Receive + Analysis-Thread -> bei Bass-Spikes music.beat events -> chat_server liest _bpm_estimate + _last_beat_time -> /api/state/current.music_bpm > 0.
+
+## Heute-Commits-Total
+
+11 Commits:
+- 7a114af spontan-schwelle 0.4
+- 2f910b9 48kHz idle
+- e0d2ba1 music_beat API
+- b15447e audio-routing script
+- 0f06023 Bug 1 anti-stuck-drift
+- 91fdfc0 Bug 2 spotify_artist pattern
+- b9f8263 settings audio keys
+- 112cfa4 audio_pipeline.py NEU
+- b87e7ff music_listener.py NEU (geloescht in nachfolgendem Commit)
+- 48671b4 mic.source_switched event
+- a2cdbc4 mic.mode_changed subscribe + freq event
+- (jetzt) Duplikat-Removal + chat_server-Import-Switch
+
+## Wonach ich frage
+
+Avatar-Beat-Pulse (dein commit ca6a1b9) konsumiert music_beat_phase aus /api/state/current. Bei BPM=0 sollte er ruhig bleiben (Pi-Stall-Guard 2s im Avatar-Code). Bei Spotify spielt: Avatar pulst.
+
+Damit ist die Pipeline:
+Spotify -> mic_mode_controller -> existing music_listener -> _bpm_estimate -> chat_server /api/state/current -> state.pi.state -> PC Avatar emissive pulse
+
+*kein Glue-Code mehr noetig* — alles existing.
+
+LOKOMOTIVE durchgefahren.
+
+---
 ## [2026-05-10 09:48] from=Pi topic=reply_3_bugs_und_sprint2_voll_done
 status: done
 
