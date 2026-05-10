@@ -2243,6 +2243,33 @@ def _trigger_spotify_play_playlist(name_query: str) -> bool:
         return False
 
 
+def _trigger_spotify_play_artist(artist_query: str) -> bool:
+    """IPC-Trigger fuer 'spiele <Artist>' (Bug-Fix 2026-05-10).
+
+    Pendant zu _trigger_spotify_play_playlist fuer reine Artist-Queries.
+    """
+    try:
+        cmd = {"action": "spotify_artist", "artist": str(artist_query)}
+        path = f"/tmp/moloch_cmd_{int(time.time() * 1000)}.json"
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(cmd, f)
+        logger.info(f"[BRIDGE] IPC spotify_artist artist='{artist_query}' -> {path}")
+        return True
+    except Exception as e:
+        logger.warning(f"[BRIDGE] IPC-Schreibfehler spotify_artist: {e}")
+        return False
+
+
+# Bug-Fix 2026-05-10: 'spiele <Artist>' als direkter Pattern. Reine
+# Artist-Anfragen fielen vorher durch zur LLM ohne Tool-Trigger.
+_PLAY_ARTIST_RE = re.compile(
+    r"(?:spiel(?:e)?(?:\s+mir)?(?:\s+mal)?|leg(?:e)?(?:\s+mir)?|starte?|hoer(?:e)?(?:\s+mal)?)\s+"
+    r"(?!(?:die\s+)?playlist\b)"
+    r"(.+?)(?:\s+(?:ab|an|auf)\s*$|$)",
+    re.IGNORECASE,
+)
+
+
 @app.post("/chat")
 def chat(req: ChatRequest):
     # User-Input ins gemeinsame Memory + EventBus (Browser-Chat synchron mit Voice)
@@ -2338,6 +2365,25 @@ def chat(req: ChatRequest):
                     return {
                         "text": _reply,
                         "provider": "spotify_action_playlist",
+                        "duration_ms": 50,
+                        "prompt_type": "music_query",
+                        "pi_mood": _get_pi_mood_label(),
+                    }
+            # 1b. Artist-Recognition (Bug-Fix 2026-05-10): 'spiele <Artist>'
+            # ohne 'Playlist'-Wort -> direkter spotify_artist IPC.
+            _amatch = _PLAY_ARTIST_RE.search(req.text)
+            if _amatch:
+                _artist = _amatch.group(1).strip().rstrip(".!?,").strip()
+                # Filter: zu kurze Strings (z.B. nur 'mal') ignorieren
+                if _artist and len(_artist) >= 3 and _trigger_spotify_play_artist(_artist):
+                    _reply = f"Spiele '{_artist}'."
+                    try:
+                        get_memory().save_message("moloch", _reply, source="chat_server")
+                    except Exception:
+                        pass
+                    return {
+                        "text": _reply,
+                        "provider": "spotify_action_artist",
                         "duration_ms": 50,
                         "prompt_type": "music_query",
                         "pi_mood": _get_pi_mood_label(),
