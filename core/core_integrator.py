@@ -529,6 +529,25 @@ class CoreIntegrator:
             # Owner-Override + Calm-Down (Z.261, 308) duerfen weiter -1.0 erreichen.
             self._tension = _clamp(self._tension + tension_impulse * 0.3, lo=-0.7, hi=1.0)
 
+            # Anti-Stuck-Drift (Bug-Fix 2026-05-10): Markus' Anwesenheit
+            # zieht tension via markus_recognized=-0.4*0.3=-0.12 dauerhaft
+            # zum Floor. Equilibrium liegt mathematisch unter -0.7, tension
+            # klemmt EXAKT bei -0.7 fest. Selbstheilung: wenn >5 Ticks am
+            # Floor stuck, einmaliger +0.025 Pull zur Mitte — uebersteigt
+            # impulse*0.3=-0.017, tension befreit sich allmaehlich.
+            FLOOR_TENSION = -0.7
+            STUCK_THRESHOLD = 0.001
+            STUCK_TICKS_BEFORE_DRIFT = 5
+            STUCK_DRIFT = 0.025
+            if abs(self._tension - FLOOR_TENSION) < STUCK_THRESHOLD:
+                self._stuck_at_floor_count = getattr(self, "_stuck_at_floor_count", 0) + 1
+                if self._stuck_at_floor_count > STUCK_TICKS_BEFORE_DRIFT:
+                    self._tension = _clamp(self._tension + STUCK_DRIFT, lo=-0.7, hi=1.0)
+                    if self._tension > FLOOR_TENSION + 0.05:
+                        self._stuck_at_floor_count = 0
+            else:
+                self._stuck_at_floor_count = 0
+
             # CPU Selbstschutz: Tension deckeln bei Ueberhitzung
             if self._cpu_temp_normalized > 0.9:
                 self._tension = min(self._tension, 0.8)
