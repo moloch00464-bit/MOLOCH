@@ -42,6 +42,24 @@ class MusicListener:
         self._beat_intervals: deque = deque(maxlen=_BEAT_HISTORY_LEN)
         self._energy_history: deque = deque(maxlen=20)
         self._last_freq_bands = {"bass": 0.0, "mid": 0.0, "treble": 0.0, "ts": 0.0}
+        # PC-Spec: mic.mode_changed subscribe -> Auto-Start bei rate==48000
+        try:
+            from core.moloch_event_bus import get_event_bus
+            get_event_bus().subscribe("mic.mode_changed", self._on_mic_mode_changed)
+        except Exception as e:
+            logger.debug(f"[music_listener] event_bus subscribe fail: {e}")
+
+    def _on_mic_mode_changed(self, event):
+        """Subscribe-Handler fuer mic.mode_changed events (PC-Spec)."""
+        try:
+            data = event.get("data", {}) if isinstance(event, dict) else {}
+            rate = int(data.get("rate", 0))
+            if rate == 48000:
+                self.start()
+            elif rate == 16000:
+                self.stop()
+        except Exception as e:
+            logger.debug(f"[music_listener] mic.mode_changed handler err: {e}")
 
     def start(self):
         """Setzt running-Flag. Audio-Akquise faellt unter audio_pipeline."""
@@ -82,10 +100,26 @@ class MusicListener:
                     bass = float(np.mean(spec[2:9]))
                     mid = float(np.mean(spec[10:50]))
                     treble = float(np.mean(spec[50:200]))
+                    now_ts = time.time()
                     self._last_freq_bands = {
-                        "bass": bass, "mid": mid, "treble": treble,
-                        "ts": time.time(),
+                        "bass": bass, "mid": mid, "treble": treble, "ts": now_ts,
                     }
+                    # PC-Spec: music.frequency_bands event-publish
+                    # gedrosselt auf alle ~500ms (sonst Event-Spam)
+                    if not hasattr(self, "_last_freq_publish_ts"):
+                        self._last_freq_publish_ts = 0.0
+                    if now_ts - self._last_freq_publish_ts > 0.5:
+                        self._last_freq_publish_ts = now_ts
+                        try:
+                            from core.moloch_event_bus import get_event_bus
+                            get_event_bus().publish(
+                                "music.frequency_bands",
+                                {"low": round(bass, 4), "mid": round(mid, 4),
+                                 "high": round(treble, 4), "ts": now_ts},
+                                source="music_listener", priority=3,
+                            )
+                        except Exception:
+                            pass
             except Exception:
                 pass
 
