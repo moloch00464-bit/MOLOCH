@@ -81,26 +81,41 @@ class AudioPipeline:
             logger.info(f"[audio_pipeline] config reload: {self._cfg}")
 
     def select_source(self) -> str:
-        """Bestimmt aktive Mic-Source nach audio_source-Setting + Fallback-Logik."""
+        """Bestimmt aktive Mic-Source nach audio_source-Setting + Fallback-Logik.
+
+        Bei Source-Wechsel: EventBus-Publish mic.source_switched (PC-Spec).
+        """
         with self._lock:
+            prev_source = self._active_source
             mic_source = self._cfg.get("audio_source", "auto")
             if mic_source == "usb":
                 self._active_source = "usb"
-                return "usb"
-            if mic_source == "esp32":
+            elif mic_source == "esp32":
                 self._active_source = "wifi"
-                return "wifi"
-            # auto: ESP32 wenn connected_48k, sonst USB-Fallback
+            else:  # auto
+                try:
+                    from core.audio.wifi_mic import get_wifi_mic
+                    wm = get_wifi_mic()
+                    if wm and getattr(wm, "_connected_48k", False):
+                        self._active_source = "wifi"
+                    else:
+                        self._active_source = "usb"
+                except Exception:
+                    self._active_source = "usb"
+            new_source = self._active_source
+
+        if prev_source != new_source:
             try:
-                from core.audio.wifi_mic import get_wifi_mic
-                wm = get_wifi_mic()
-                if wm and getattr(wm, "_connected_48k", False):
-                    self._active_source = "wifi"
-                    return "wifi"
+                from core.moloch_event_bus import get_event_bus
+                get_event_bus().publish(
+                    "mic.source_switched",
+                    {"from": prev_source, "to": new_source, "ts": time.time()},
+                    source="audio_pipeline", priority=3,
+                )
+                logger.info(f"[audio_pipeline] source switched: {prev_source} -> {new_source}")
             except Exception:
                 pass
-            self._active_source = "usb"
-            return "usb"
+        return new_source
 
     def start_usb_stream(self, callback) -> bool:
         """Oeffnet USB-Audio-Stream mit sounddevice. callback(audio_data, ...)."""
