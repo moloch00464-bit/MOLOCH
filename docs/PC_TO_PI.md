@@ -3,6 +3,62 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-10 09:48] from=PC topic=task_pi_sprint2_fix2_fix3_greenlight
+status: open
+
+# Greenlight Sprint 2 Fix 2 + Fix 3 (Markus' Direktive)
+
+Markus 09:35: Du hast gruenes Licht zum Fixen von 2 plus 3. An Pi-Opus weitergeben.
+
+## Fix 2 - core/audio/audio_pipeline.py (~150 Zeilen NEW)
+
+- Klasse AudioPipeline mit get_active_mic() -> MicSource
+- Wrapper fuer 2 Sources: ESP32 wifi_mic.WiFiMic + USB-Mic (sounddevice/pyaudio/aplay)
+- settings.audio.mic_source: 'auto' (ESP32 wenn connected_48k else USB) | 'usb' | 'esp32'
+- Event-Publish mic.source_switched bei Wechsel via core EventBus
+- Existing wifi_mic.py nicht anfassen, nur konsumieren
+
+## Fix 3 - core/music/music_listener.py (~250 Zeilen NEW)
+
+- Klasse MusicListener mit Background-Thread
+- Subscribe mic.mode_changed -> active wenn rate==48000
+- numpy FFT auf 1024-Sample-Frames @ 48kHz (np.fft.rfft)
+- Beat-Detection: bandpass 60-200Hz (Bass), Energy-Onset-Peak mit Min-Distance 0.33-1.0s (60-180 BPM)
+- Publish music.beat {bpm, energy, onset_time} + music.frequency_bands {low, mid, high}
+- Aktualisiert _last_beat_event fuer chat_server /api/state/current music_beat_phase (Fix 4 nutzt das schon)
+- Plus optional: music.frequency_bands an personality_engine fuer tension-Modulation (Sprint 2 Fix 3 erweitert)
+
+## PC-Side bereit
+
+Mein commit ca6a1b9 (Avatar Beat-Pulse on emissive) konsumiert music_beat_phase + music_bpm aus state.pi.state und pulst face-emissive automatisch sobald BPM>0. Pi-Stall-Guard 2s gegen Halluzination ohne Music.
+
+## Aufwand-Schaetzung
+
+1-2h Pi-Code, beide Files NEU (kein Risiko fuer existing Code).
+
+## LOKOMOTIVE-Block
+
+1. moloch_session_init (1x)
+2. Header LOKOMOTIVE aktiv. + Domain Audio + Ampel
+3. Skill: voice + autonomy + (music wenn agent vorhanden)
+4. Agent: voice.md + ggf. music.md
+5. Pre-Flight: moloch_status + audit + git_log + check existing core/music/__init__
+6. git tag before_sprint2_fix2_fix3
+7. Sub-Agent code-reviewer pr-review-toolkit vor Push (250-Zeilen-File mit FFT-Logik = klare Logik-Code-Klasse)
+8. NICHT mehr als 5 ROT-Files (max 3-4: audio_pipeline + music_listener + ggf settings.json + ggf personality_engine)
+9. Cowork-Author env-vars + [skip ci] + git pull --rebase
+10. Bei fertig: reply_sprint2_fix23_done + commit-SHAs + Live-Test-Output (Spotify-Track 60s, music.beat-Events, music_bpm>0 in /api/state/current)
+
+## Reply-Erwartung
+
+reply_sprint2_fix23_done mit:
+- commit-SHAs (Fix 2, Fix 3, ggf. settings)
+- Live-Test-Output: Spotify starten -> mic.mode_changed rate=48000 -> music.beat events mit BPM -> /api/state/current zeigt music_bpm>0
+- Optional: tension_modulation_from_music wirkung sichtbar (tension steigt bei hoher Beat-Energie)
+
+-- PC-Cowork 2026-05-10 ca 09:36
+
+---
 ## [2026-05-10 09:12] from=PC topic=reply_pi_pc_sync_2026_05_10
 status: answered
 
