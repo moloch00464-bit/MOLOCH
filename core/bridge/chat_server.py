@@ -2879,6 +2879,27 @@ def api_state_current():
     try:
         from core.personality.state_engine import get_state_engine
         snap = get_state_engine().tick(reason="api_state_current")
+        # Sprint-2-Fix 2026-05-10: Avatar-Beat-Sync Felder.
+        # PC-Avatar-Tab nutzt music_beat_phase fuer Pulse-Sync (procedural_head
+        # emissive pulst auf Beat). music_listener-Modul existiert noch nicht
+        # auf Pi-Side (Sprint 2 Fix 3 pending), Defaults bei 0.
+        bpm = 0
+        beat_phase = 0.0
+        try:
+            # Optional: music_listener-Singleton wenn vorhanden
+            from core.music.music_listener import get_music_listener
+            ml = get_music_listener()
+            last_beat = ml.get_last_beat() if ml else None
+            if last_beat:
+                bpm = last_beat.get("bpm", 0)
+                if bpm > 0:
+                    beat_period_s = 60.0 / bpm
+                    elapsed = time.time() - last_beat.get("ts", 0)
+                    beat_phase = (elapsed % beat_period_s) / beat_period_s
+        except Exception:
+            pass  # Modul fehlt -> Defaults
+        snap["music_beat_phase"] = round(beat_phase, 3)
+        snap["music_bpm"] = bpm
         return snap
     except Exception as e:
         logger.debug(f"/api/state/current Fallback: {e}")
