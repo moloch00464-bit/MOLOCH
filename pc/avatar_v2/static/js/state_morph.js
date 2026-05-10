@@ -20,9 +20,15 @@ const STATE_MORPH = {
 };
 
 const TRANSITION_LERP = 0.05;  // smooth state-Morph (per frame)
+const BEAT_PULSE_AMPLITUDE = 0.4;  // Max emissive-Boost on Beat-Onset
 
 let _currentMorph = { ...STATE_MORPH.idle };
 let _targetMorph = { ...STATE_MORPH.idle };
+
+// Music-Beat-Sync (Pi liefert music_beat_phase 0..1 + music_bpm via Sprint 2 Fix 4)
+let _musicBeatPhase = 0;     // letzter bekannter beat-phase aus Pi-state
+let _musicBpm = 0;            // aktueller BPM (0 = keine Musik)
+let _beatPhaseUpdateMs = 0;  // performance.now() beim letzten Pi-state-update
 
 /**
  * Setzt Ziel-Morph basierend auf state-Object.
@@ -40,6 +46,15 @@ export function applyStateMorph(sceneObjects, state) {
   if (tension > 0.5) {
     _targetMorph.deform += (tension - 0.5) * 0.4;
     _targetMorph.emissive_intensity += (tension - 0.5) * 0.4;
+  }
+
+  // Music-Beat-Sync: cache phase + bpm aus Pi-state (Sprint 2 Fix 4 Felder)
+  // Wir extrapolieren in tickStateMorph zwischen Pi-state-updates (200ms Polling
+  // ist viel laenger als Frame-Rate, sonst kein gleichmaessiger Pulse).
+  if (typeof piState.music_bpm === 'number') {
+    _musicBpm = piState.music_bpm;
+    _musicBeatPhase = piState.music_beat_phase ?? 0;
+    _beatPhaseUpdateMs = performance.now();
   }
 }
 
@@ -66,9 +81,23 @@ export function tickStateMorph(sceneObjects, dt) {
   sceneObjects.avatar.rotation.x += _currentMorph.rotation_speed * dt * 0.5;
   sceneObjects.avatar.rotation.y += _currentMorph.rotation_speed * dt;
 
-  // Apply Emissive
+  // Music-Beat-Pulse (overlay on emissive). Sprint 2 Fix 4 liefert phase+bpm.
+  // Extrapoliere phase basierend auf elapsed time seit letztem Pi-state-update.
+  // Cosinus-Pulse: peak=BEAT_PULSE_AMPLITUDE am Beat-Onset (phase=0), 0 dazwischen.
+  // Pi-Stall-Guard: bei >2s ohne Pi-state-update keine Pulse-Halluzination.
+  let beatBoost = 0;
+  if (_musicBpm > 0) {
+    const elapsedS = (performance.now() - _beatPhaseUpdateMs) / 1000;
+    if (elapsedS <= 2.0) {  // Schutz gegen Pi-down: simuliere keine Musik die laengst aus ist
+      const beatPeriodS = 60.0 / _musicBpm;
+      const extrapolatedPhase = (_musicBeatPhase + elapsedS / beatPeriodS) % 1.0;
+      beatBoost = BEAT_PULSE_AMPLITUDE * Math.max(0, Math.cos(extrapolatedPhase * Math.PI * 2));
+    }
+  }
+
+  // Apply Emissive (state-morph base + music-beat overlay)
   if (sceneObjects.material && sceneObjects.material.emissiveIntensity !== undefined) {
-    sceneObjects.material.emissiveIntensity = _currentMorph.emissive_intensity;
+    sceneObjects.material.emissiveIntensity = _currentMorph.emissive_intensity + beatBoost;
   }
 }
 
