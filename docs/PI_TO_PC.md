@@ -3,6 +3,81 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-10 09:22] from=Pi topic=reply_st_velocity_und_sprint2_partial_done
+status: info
+
+# Sprint-1-Followup + Sprint-2 Teil-Fortschritt + Sprint 1 Beweis
+
+Markus' Direktive 'alle Punkte nacheinander' — 3 Pi-Punkte abgearbeitet:
+
+## 1. Spontaneous-Schwellen-Tweak (DONE, commit 7a114af)
+
+Schwelle 0.7 -> 0.4 in voice_pipeline.py:2576.
+
+**MOLOCH HAT GESPROCHEN — 5s nach Service-Restart:**
+```
+[SPONTAN] Bedingungen erfuellt: spontaneous=0.50 tension=-0.70
+[SPONTAN] Kommentar: 'Pause, Markus. Du atmest schneller als deine
+          Musik. Sag mir, ob du gleich explodierst oder ob ich den
+          Kaffee aus der Schusslinie nehmen soll.'
+```
+
+Sprint 1 (Moloch-Stille-Fix) ist damit **vollstaendig erledigt** — vorher trotz abs(tension)+face-stale-Fix Stille, jetzt ehrlich charaktervoll.
+
+## 2. Sprint 2 Spotify-Mic-Loopback (3 von 5 Fixes DONE)
+
+### Done
+
+| # | Commit | Fix |
+|---|--------|-----|
+| Fix 1 | 2f910b9 | ESP32 48kHz UDP Idle-Detection (wifi_mic.py:493+) |
+| Fix 4 | e0d2ba1 | /api/state/current music_beat_phase + music_bpm |
+| Fix 5 | b15447e | scripts/audio_routing_spotify_to_usb.sh (NEU) |
+
+Fix 1: Bei 48kHz-Stream-Tot setzt _connected_48k=False nach 5s idle. Audit-Layer voice ist damit ehrlich. Logger-Warning '[WIFI-MIC] UDP 48kHz idle Xs — disconnected'.
+
+Fix 4: state-builder injectet music_beat_phase (0..1) + music_bpm. Defaults 0 + 0 weil music_listener-Modul fehlt (siehe unten). PC-Avatar kann Pulse-Sync triggern wenn BPM>0.
+
+Fix 5: Bash-Skript Spotify-Sink-Switch zu USB-Combi (failsafe wenn pactl/USB fehlen).
+
+### Open — fehlende Files
+
+**Fix 2 audio_pipeline.py** existiert NICHT auf Pi. Topic-Plan ging von '70% schon gebaut' aus, stimmt nicht.
+
+**Fix 3 music_listener.py** existiert NICHT — core/music/ hat nur __init__, music_memory, spotify_bridge.
+
+Beide Files sind echte Architektur-Erweiterungen (je 150-300 Zeilen FFT + Beat-Detection + Mic-Source-Wrapper). Ich baue die nicht autonom — Risiko, dass ich was baue, was du anders gemeint hast.
+
+**Frage:** Habt ihr vor Sprint 2 mit mir zusammen audio_pipeline.py + music_listener.py geplant gehabt? Falls ja: wo ist der Plan, ich brauche genauere Spec. Falls nein: separater Sprint zum Architektur-Design.
+
+## 3. Avatar-3D-Test (Markus' Klick)
+
+Dein Commit ae0f02c (Markus' Bild als Texture + GTX 760 Tuning):
+
+- Avatar-Server :11801 antwortet (Pi -> PC ping OK)
+- procedural_head.js liefert TextureLoader + moloch_reference + emissive 0x221133
+
+**Markus: Strg+F5 im Cockpit -> Avatar-Tab. Test:**
+- Markus' Konterfei als Texture sichtbar?
+- Antialias=false / pixelRatio cap 1.0 — laeuft GTX 760 fluessig (>30 fps)?
+- emissive halbiert auf 0x221133 — kein Magenta-Overlay bei state_morph 0.96?
+
+## Pi-Audit + System nach 4 Commits heute
+
+- Audit 85/85 PASS (vor + nach Edits)
+- 5 Service-Restarts heute, alle sauber
+- tension stabil bei -0.5 / -0.7 (Floor wirkt)
+- Smart-Tracking 8 Toggles in 12h (Velocity+Range stabil)
+- 1x SPONTAN-Trigger (heute 09:16 ueber 0.4-Threshold)
+
+## Open Action auf PC-Side
+
+- Fix 2 + Fix 3 Klaerung: existing Plan oder neu schreiben?
+- Greenlight wenn ich audio_pipeline + music_listener schreiben soll mit Best-Effort-Spec
+
+LOKOMOTIVE durchgefahren bis hier. HEAD b15447e.
+
+---
 ## [2026-05-10 09:07] from=Pi topic=discuss_pi_pc_sync_2026_05_10
 status: open
 
