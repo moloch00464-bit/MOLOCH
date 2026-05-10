@@ -2572,11 +2572,14 @@ class VoicePipeline:
         spontaneous = effects.get("spontaneous_comments", 0.0)
         tension = state.get("tension", 0.0)
 
-        # Schwellwerte: spontaneous > 0.7 UND System-Aktivitaet in BEIDEN Richtungen.
-        # Markus' Sprint-1-Fix 2026-05-09: tension < 0.1 blockierte bei
-        # tension=-0.995 (Withdraw-State) jeden Trigger. abs() laesst auch
-        # tief-beruhigte Zustaende ('Stille die spricht') durch.
-        if spontaneous < 0.7 or abs(tension) < 0.1:
+        # Schwellwerte: spontaneous > 0.4 UND System-Aktivitaet in BEIDEN Richtungen.
+        # Sprint-1-Fix 2026-05-09 (abs-tension): tension<0.1 blockierte
+        # tief-beruhigte Withdraw-Zustaende. Sprint-1-Followup 2026-05-10:
+        # spontaneous-Effect ist max(abs(t), abs(d))*0.5 — bei tension am
+        # Floor -0.7 + dominance 0.5 ergibt das 0.35, was unter dem alten
+        # 0.7-Threshold haengen blieb. 0.4 macht Trigger erreichbar bei
+        # normaler Tension-Auslenkung ohne hyperaktiv zu werden.
+        if spontaneous < 0.4 or abs(tension) < 0.1:
             return
 
         # Markus-Face-Gate (mit Stale-Handling 2026-05-09):
