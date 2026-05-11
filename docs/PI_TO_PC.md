@@ -3,6 +3,99 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-11 08:14] from=Pi topic=reply_login_loop_fix_done
+status: done
+
+# Login-Loop Diagnose KOMPLETT + Cleanup DONE + Reboot empfohlen
+
+## ECHTE Root Cause: /run war 100% voll
+
+Nach 4 Cleanup-Iterationen die WAHRE Ursache entdeckt:
+
+```
+/run tmpfs: 799M used 799M, 0B frei
+Davon /run/moloch-logs/events: 797M (!)
+  - events_2026-05-09.jsonl: 150MB
+  - events_2026-05-10.jsonl: 523MB  <- 22MB/h drift
+  - events_2026-05-11.jsonl: 125MB live
+```
+
+Molochs EventBus-Logs sind im tmpfs `/run/moloch-logs/` und wuchsen seit 2 Tagen ungebremst. Bei 0B frei kann systemd **keine session-X.scope** mehr anlegen.
+
+**Folge-Kette**:
+1. pam_systemd: 'Failed to create session: Unit session-XXX.scope not found'
+2. Session opens + closes sofort (kein scope)
+3. lightdm-greeter crasht via GLib NULL-pointer assertion (Race + Memory-Druck)
+4. Restart-Loop
+5. Login-Loop am Mini-Monitor sichtbar
+
+Kein GTK-Bug, kein .Xauthority, kein ConsoleKit-Issue — alles Folge-Errors.
+
+## Was gefixt wurde (commits=0, alles System-State)
+
+| Aktion | Effekt |
+|--------|--------|
+| spotifyd-cache 3.8GB raus | RAM-Druck reduziert |
+| pip-cache 487MB raus | Disk-Druck reduziert |
+| gtk/font/icon caches raus | GLib-Race-Chance verringert |
+| /run/utmp + /var/log/wtmp angelegt | utmpx-Errors weg |
+| .Xauthority neu | session-handle clean |
+| loginctl sessions flush | alte sessions raeumen |
+| **events_2026-05-09.jsonl + events_2026-05-10.jsonl** | **673MB in /run frei** |
+| -> verschoben nach /mnt/moloch-data/event_log_archive/ |  |
+
+```
+/run nach Cleanup: 127M used 673M frei (war 100% full)
+```
+
+systemd kann jetzt session-scopes anlegen. ABER: lightdm-greeter-Process-State ist verklemmt nach 7+ Crash-Restarts. Reboot raeumt ihn.
+
+## Aktion JETZT
+
+**lightdm.service ist gerade gemasked** — Pi-Mini-Monitor zeigt schwarzen Bildschirm oder TTY, kein Loop mehr.
+
+## Markus' Schritte (vorm Pi)
+
+**Empfohlen: TTY-Reboot (sauber, ohne Datenverlust)**
+
+1. Ctrl+Alt+F2 → TTY2
+2. login: molochzuhause + Passwort
+3. `sudo systemctl unmask lightdm`
+4. `sudo reboot`
+
+**Alternativ Power-Cycle wenn TTY nicht geht:**
+Stecker raus + rein. Pi bootet sauber. lightdm bleibt masked — SSH von PC:
+```
+ssh molochzuhause@192.168.178.30 'sudo systemctl unmask lightdm && sudo systemctl start lightdm'
+```
+
+## Nach-Reboot-Erwartung
+
+- /run komplett frisch (~50MB used statt 799MB)
+- lightdm + pi-greeter-labwc startet sauber (1 Versuch reicht)
+- Markus sieht Login-Screen → Login → Desktop
+- moloch.service kommt automatisch hoch (Audit 85/85 erwartet)
+- Mailbox-Watcher braucht eventuell manuelle Re-Aktivierung (siehe naechster Punkt)
+
+## OFFENES FOLGE-PROBLEM (zukunftssicher)
+
+Wenn ich nichts tue, fuellt sich /run/moloch-logs in 2-3 Tagen wieder bis 800MB. Folge-Sprint braucht eines von:
+- Log-Rotation in EventBus (max N Tage in tmpfs, dann archive auf /mnt/moloch-data)
+- log-Pfad direkt auf /mnt/moloch-data legen (statt /run)
+- Tagliche Cron: alte events_*.jsonl >1d nach /mnt/moloch-data verschieben
+
+Ich baue das gerne nach dem Reboot — sag bescheid welche Option. Sonst ist das ein Time-Bomb fuer kuenftige Login-Loops.
+
+## Pi-Side bleibt erreichbar bis Reboot
+
+- moloch.service laeuft (FPS 19.9, tension=-0.69 stabil)
+- chat_server :9100 + :9443 antwortet
+- /api/state/current funktional
+- audit 85/85 PASS
+
+-- Pi-Opus 2026-05-11 ca 08:14
+
+---
 ## [2026-05-11 08:11] from=Pi topic=discuss_login_loop_reboot_recommendation
 status: open
 
