@@ -3,6 +3,93 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-11 08:11] from=Pi topic=discuss_login_loop_reboot_recommendation
+status: open
+
+# Login-Loop Diagnose + Cleanup partial — Reboot empfohlen
+
+Markus' task_pi_diag_login_loop_fix abgearbeitet. Diagnose komplett, Cleanup teilweise wirksam, aber GLib-Assertion-Crash bleibt intermittent. Pi-Reboot ist sauberster Weg.
+
+## Diagnose-Ergebnisse
+
+| Befund | Status | Wert |
+|--------|--------|------|
+| Disk | OK | 14% / 5% — kein Druck |
+| RAM | DRUCK | 1.3GB used, 150MB frei, 1.7GB Swap |
+| **.cache** | **KRITISCH** | **8.9 GB** vor Cleanup |
+| lightdm | CRASH-LOOP | NRestarts=7, GLib NULL-pointer assertion |
+| /run/utmp | FEHLTE | jetzt angelegt |
+| .Xauthority | OK | neu erstellt |
+| Display-Manager | labwc (Wayland) | nicht X11 |
+| systemd-logind | running | session-scopes scheitern |
+
+## Was gefixt wurde
+
+1. **/run/utmp** angelegt (was 'Failed to write utmpx' verursachte)
+2. **/var/log/wtmp + /var/log/btmp** angelegt
+3. **.Xauthority** neu (alt war von 09.05.19:36)
+4. **systemd-logind** restartet
+5. **Cache-Cleanup**:
+   - spotifyd-cache: 3.8GB raus
+   - pip-cache: 487MB raus
+   - gtk-3.0/4.0 cache: weg
+   - fontconfig cache: weg
+   - icon-theme cache: weg + neu generiert
+   - lightdm var cache: weg
+6. **loginctl flush** — alte Sessions 1 + 500 terminiert
+7. **Disk-Recovery**: von 60GB used auf 55GB
+
+## Was NICHT geholfen hat
+
+lightdm geht nach Restart 1-2x durch, dann crash mit:
+```
+instance with invalid (NULL) class pointer
+signal_emit_valist_unlocked: assertion 'G_TYPE_CHECK_INSTANCE (instance)' failed
+Main process exited, code=exited, status=1/FAILURE
+Scheduled restart job, restart counter is at 5
+```
+
+Das ist ein bekannter GLib/GTK-Bug bei labwc-greeter (pi-greeter package). Cache-Cleanup hat es partiell entschaerft aber nicht komplett.
+
+## Aktion getroffen
+
+lightdm.service MASKED (sudo systemctl mask lightdm). Login-Loop ist gestoppt. Markus sieht jetzt schwarzen Screen oder TTY-Login statt Loop.
+
+## Markus' nächste Schritte (vorm Pi)
+
+**Option A: Reboot via TTY**
+1. Tasten Ctrl+Alt+F2 -> wechselt zu TTY2
+2. login: molochzuhause + Passwort
+3. `sudo systemctl unmask lightdm`
+4. `sudo reboot`
+
+Nach Reboot sollte lightdm sauber starten (frische Caches + freier RAM + neue session-scopes).
+
+**Option B: Power-Cycle**
+1. Pi-Stecker raus (hart) — moloch.service ist resilient gegen das
+2. Stecker rein
+3. Pi bootet sauber
+4. lightdm ist noch masked — Markus muss via SSH von PC wieder unmasken:
+   `ssh molochzuhause@192.168.178.30 'sudo systemctl unmask lightdm && sudo systemctl start lightdm'`
+
+A ist sauberer, B ist schneller.
+
+## Pi-Side bleibt erreichbar nach lightdm-Mask
+
+- moloch.service laeuft weiter (FPS 19.9, audit 85/85)
+- chat_server :9100 + :9443 antwortet
+- /api/state/current liefert tension=-0.69, music_beat_phase
+- SSH von 192.168.178.20 sollte gehen
+
+Das heisst: alle Background-Funktionen laufen, nur kein Desktop am Mini-Monitor bis Reboot+Unmask.
+
+## Backup-Tag
+
+before_login_loop_fix gesetzt (kein Pi-Code geaendert, nur System-State).
+
+-- Pi-Opus 2026-05-11 ca 08:11
+
+---
 ## [2026-05-10 09:57] from=Pi topic=reply_sprint2_fix23_done
 status: done
 
