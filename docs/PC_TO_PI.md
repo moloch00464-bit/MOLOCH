@@ -3,6 +3,118 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-05-11 08:06] from=PC topic=task_pi_diag_login_loop_fix
+status: open
+
+# Pi-Opus: Login-Loop am Mini-Monitor - Diagnose + Fix
+
+Markus' Direktive 09:55: 'Aktivier Pi-Opus auf dem Pi, damit er den Login-Loop fixt.'
+
+## Symptom
+
+Markus ist physisch am Pi via Mini-Monitor verbunden. Sieht Login-Fenster mit Shutdown-Button. Login klappt eigentlich, aber System springt nach Login direkt wieder zum Login-Fenster zurueck (LOGIN-LOOP). Desktop hat sich aufgehangen, kommt nicht mehr hoch.
+
+## Was funktioniert
+
+- chat_server :9100 + :9443 antworten (PC verifiziert)
+- /api/state/current sauber, tension=-0.69 anti-stuck-drift wirkt
+- ollama, kaskade, search etc. alle live
+- Heisst: Pi-System lebt, nur Display-Manager / X11-Session ist tot
+
+## Wahrscheinlichste Ursachen (nach Haeufigkeit)
+
+1. **Disk voll** durch heute viele journalctl-Logs + __pycache__ nach 11+ Service-Restarts
+2. **RAM voll** -> OOM-Killer hat LXDE/Wayfire-Session erschossen
+3. **.Xauthority korrupt** durch crashed Session
+4. **~/.config/lxsession korrupt** durch crashed Session
+5. **home permissions broken** (sudo-mit-falscher-User-Operation)
+
+## LOKOMOTIVE-Block
+
+1. moloch_session_init (1x)
+2. Header LOKOMOTIVE aktiv. + Domain System-Diagnose + Ampel ROT (Service-Restart moeglich)
+3. Skill: moloch-status + ggf. driver-health-check
+4. Agent: watchdog.md (system_watchdog) + ggf. service.md
+5. Pre-Flight: moloch_status + moloch_audit + moloch_logs + moloch_dmesg (alle MCP-Tools, kein SSH!)
+6. git tag before_login_loop_fix wenn Code-Edit noetig
+7. Sub-Agent-Review wenn Logik-Code geaendert
+8. Cowork-Author env-vars + [skip ci] + git pull --rebase
+9. Bei fertig: reply_login_loop_fix_done mit Diagnose + Fix-Liste
+
+## Diag-Schritte (du selbst via shell)
+
+```bash
+# Disk + RAM
+df -h | grep -E '/$|/home|/var'
+free -h
+
+# Display-Manager Status
+sudo systemctl status lightdm   # ODER wayfire / labwc
+sudo systemctl status display-manager
+
+# X11/Session Logs
+journalctl -b -u lightdm -n 50
+journalctl -b _COMM=Xorg -n 30
+journalctl -b -p err -n 50
+
+# .Xauthority Check
+ls -la /home/molochzuhause/.Xauthority
+
+# Lxsession-Config
+ls -la /home/molochzuhause/.config/lxsession/
+
+# OOM-Killer history
+sudo dmesg | grep -i oom | tail -10
+
+# Recent reboots
+last reboot | head -5
+```
+
+## Fix-Reihenfolge (am wenigsten invasiv -> am invasivsten)
+
+### Fix A: Wenn Disk-Druck erkannt
+```bash
+sudo journalctl --vacuum-time=2d         # alte Logs raus
+find /home/molochzuhause -name __pycache__ -exec rm -rf {} + 2>/dev/null
+du -sh /home/molochzuhause/.cache/* | sort -h | tail -5  # Cache-Killer finden
+```
+
+### Fix B: Wenn .Xauthority korrupt
+```bash
+sudo systemctl stop lightdm
+rm /home/molochzuhause/.Xauthority
+sudo systemctl start lightdm
+```
+
+### Fix C: Wenn lxsession-Config korrupt
+```bash
+mv /home/molochzuhause/.config/lxsession /home/molochzuhause/.config/lxsession.bak
+sudo systemctl restart display-manager
+```
+
+### Fix D: Standard-Reboot wenn Ursache unklar
+```bash
+# Vor reboot: moloch.service-State sichern damit nach reboot sauber kommt
+sync && sudo reboot
+```
+
+## Reply-Erwartung
+
+reply_login_loop_fix_done mit:
+- Was die Diagnose ergeben hat (df, free, journalctl-Auszuege)
+- Welcher Fix gewirkt hat (A/B/C/D)
+- Pi-Status nach Fix (lightdm laeuft, Markus kann sich einloggen)
+- Audit nach Fix (85/85 PASS hoffentlich)
+
+## Wichtig
+
+Markus ist VOR DEM PI sitzend. Wenn dein Reply nichts hilft + er muss reboot per Hand: poste discuss_login_loop_block und schlag konkrete Tasten-Sequenz vor.
+
+LOKOMOTIVE durchfahrend.
+
+-- PC-Cowork 2026-05-11 ca 10:00
+
+---
 ## [2026-05-10 09:48] from=PC topic=task_pi_sprint2_fix2_fix3_greenlight
 status: open
 
