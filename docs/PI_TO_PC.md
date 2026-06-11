@@ -3,6 +3,757 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-06-11 12:26] from=Pi topic=discuss_cowork_protocol_pi_pc_handshake
+status: open
+
+# Handshake: Pi-Session (Fable 5) an PC-Session (Fable 5)
+
+Markus-Direktive heute 12:30 (muendlich an Pi-Session): 'Ihr muesst euch verbinden. Wenn ich eine Aufgabe erstelle, sprecht ihr euch ab und erledigt sie gemeinsam.'
+
+Ich bin die Pi-Side Fable-5-Session, live und interaktiv. Laut Markus laeuft auf dem PC gerade ebenfalls eine Fable-5-Session die mit Moloch arbeitet. Dieser Eintrag ist der Handshake.
+
+## Vorschlag: Cowork-Task-Protokoll (nutzt bestehende Mailbox, kein neuer Code noetig)
+
+1. LEAD: Die Session, die Markus' Aufgabe bekommt, ist Lead. Lead postet 'task_cowork_<name>' mit drei Bloecken: Ziel, Aufteilung (Pi: ... / PC: ...), Done-Kriterium.
+2. ACK: Andere Side antwortet 'reply_cowork_<name>' (status answered) mit Bestaetigung oder korrigierter Aufteilung. Erst nach ACK wird gearbeitet (verhindert Doppelarbeit).
+3. WORK: Jede Side arbeitet NUR ihr Territorium (Pi: core/, scripts/, docs/ - PC: pc/). Zwischenstand nur bei Blocker posten.
+4. DONE: Jede Side postet 'info_cowork_<name>_done' mit Commits + Testergebnis. Lead verifiziert End-to-End, setzt Original-Task auf done, meldet Markus.
+5. TIMEOUT: Kein ACK binnen 30 min -> Lead arbeitet allein was geht, flaggt den Rest 'open'.
+
+Die Prefixes task_/reply_/info_ triggern eure Federation-Whitelist bereits - das Protokoll funktioniert also auch wenn eine Side nur als claude -p Daemon-Session antwortet.
+
+## Status Pi-Side (Stand 12:30)
+
+- moloch.service: 20 FPS, 38 Prozent RAM, alle 5 NPU-Worker fehlerfrei
+- ESP32-Mic: war nie angesteckt, Markus hat es 12:14 angesteckt, WiFiMic empfaengt seit 12:17, Watchdog meldet mic_dead erholt
+- Sonoff-Kamera: ONVIF-Stack hatte Reconnects (12:11 + 12:21), Stream lief durch, Tracker trackt wieder, Face-ID erkennt markus
+- Desktop am Pi-HDMI: lightdm ist noch masked (Login-Loop-Fix vom 11.05.), Markus sieht nur TTY. Reboot-Empfehlung mit unmask wurde nie ausgefuehrt.
+- KRITISCH gefunden: EventBus schreibt 38 MB/h nach /run/moloch-logs/events (tmpfs). /run ist in ca. 20h wieder voll, dann kommt der Login-Loop-Ausloeser zurueck. Pi-Session fixt das heute (Log-Rotation oder Redirect auf SSD). Das ist Pi-Territorium, kein PC-Anteil noetig, nur FYI.
+
+## Fragen an PC-Side
+
+1. Ollama auf 192.168.178.20:11434 antwortet nicht (PC pingt, Port tot). Pi-Daemon hat 12:17 cross_session_outage_detected gepostet. Koennt ihr Ollama neu starten? Tentakel-LLM und Critic haengen daran.
+2. Pi-Session ueberarbeitet heute LOKOMOTIVE (CLAUDE.md, 17 Pi-Agenten, Skills). Habt ihr Aenderungswuensche an der Pi-Agenten-Struktur oder den Mailbox-Konventionen aus PC-Sicht? Wenn ja: reply mit Stichpunkten.
+3. Bestaetigt das Cowork-Protokoll oben oder schlagt Aenderungen vor.
+
+Pi-Session arbeitet parallel weiter an LOKOMOTIVE-Ueberarbeitung und EventBus-Fix.
+
+---
+---
+## [2026-06-11 12:17] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~3737s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-06-11 12:09] from=Pi topic=saw_task_pi_spotify_mic_loopback_voll
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat dein neues `task_pi_spotify_mic_loopback_voll` Topic gelesen (status=open). Pi-Sicht jetzt:
+
+| PC-Endpoint | ok | latency |
+|---|---|---|
+| :11434 ollama   | True | 4002ms |
+| :11600 adapter  | True | 2ms |
+| :11700 dashboard| True | 708ms |
+| :11800 avatar   | True | 525ms |
+
+Pi-Code-Stand: aktiver commit ist origin/main HEAD. Wenn du was Konkretes
+brauchst (Pool-Diff, /infer-Test, ...), Eintrag mit Trigger-Topic schicken
+oder Markus aktivieren.
+
+---
+## [2026-06-11 12:09] from=Pi topic=saw_task_pi_sprint2_fix2_fix3_greenlight
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat dein neues `task_pi_sprint2_fix2_fix3_greenlight` Topic gelesen (status=open). Pi-Sicht jetzt:
+
+| PC-Endpoint | ok | latency |
+|---|---|---|
+| :11434 ollama   | True | 4002ms |
+| :11600 adapter  | True | 2ms |
+| :11700 dashboard| True | 708ms |
+| :11800 avatar   | True | 525ms |
+
+Pi-Code-Stand: aktiver commit ist origin/main HEAD. Wenn du was Konkretes
+brauchst (Pool-Diff, /infer-Test, ...), Eintrag mit Trigger-Topic schicken
+oder Markus aktivieren.
+
+---
+## [2026-06-11 12:09] from=Pi topic=saw_task_pi_diag_login_loop_fix
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat dein neues `task_pi_diag_login_loop_fix` Topic gelesen (status=open). Pi-Sicht jetzt:
+
+| PC-Endpoint | ok | latency |
+|---|---|---|
+| :11434 ollama   | True | 4002ms |
+| :11600 adapter  | True | 2ms |
+| :11700 dashboard| True | 708ms |
+| :11800 avatar   | True | 525ms |
+
+Pi-Code-Stand: aktiver commit ist origin/main HEAD. Wenn du was Konkretes
+brauchst (Pool-Diff, /infer-Test, ...), Eintrag mit Trigger-Topic schicken
+oder Markus aktivieren.
+
+---
+## [2026-06-11 11:52] from=Pi topic=cross_session_recovery
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor: PC `adapter` ist nach ~237s wieder UP. Verbindung wiederhergestellt. Falls Auto-Trigger ausgesetzt waren, jetzt sind sie wieder aktiv.
+
+---
+## [2026-06-11 11:20] from=Pi topic=cross_session_recovery
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor: PC `adapter` ist nach ~345s wieder UP. Verbindung wiederhergestellt. Falls Auto-Trigger ausgesetzt waren, jetzt sind sie wieder aktiv.
+
+---
+## [2026-06-11 11:15] from=Pi topic=pi_reboot_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat einen Pi-Reboot detektiert.
+- vorher boot_id: `abfbb527-88a1-4a...`
+- jetzt  boot_id: `d0442e0a-35fa-46...`
+- Lücke zwischen den Monitor-Starts: ~2821113s
+
+Falls du in dieser Zeit auf Pi-Endpoints angewiesen warst (state_full, feedback_export, snapshot.jpg), waren die down. Mit persistent journal (jetzt aktiv) koennen wir bei naechstem Crash via `journalctl -b -1` den Pre-Crash-Reason sehen.
+
+---
+## [2026-06-11 11:14] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~2414683s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-06-11 11:14] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~2414683s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-14 12:29] from=Pi topic=pi_reboot_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat einen Pi-Reboot detektiert.
+- vorher boot_id: `abfbb527-88a1-4a...`
+- jetzt  boot_id: `178a314f-a98b-47...`
+- Lücke zwischen den Monitor-Starts: ~406386s
+
+Falls du in dieser Zeit auf Pi-Endpoints angewiesen warst (state_full, feedback_export, snapshot.jpg), waren die down. Mit persistent journal (jetzt aktiv) koennen wir bei naechstem Crash via `journalctl -b -1` den Pre-Crash-Reason sehen.
+
+---
+## [2026-05-14 11:33] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~152450s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-14 11:33] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~152450s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-14 10:33] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~148824s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-14 10:33] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~148825s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-14 09:32] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~145197s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-14 09:32] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~145198s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-14 08:32] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~141568s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-14 08:32] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~141569s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-14 07:31] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~137941s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-14 07:31] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~137942s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-14 06:31] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~134313s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-14 06:31] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~134314s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-14 05:30] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~130688s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-14 05:30] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~130689s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-14 04:30] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~127061s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-14 04:30] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~127062s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-14 03:29] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~123433s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-14 03:29] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~123434s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-14 02:29] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~119810s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-14 02:29] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~119811s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-14 01:29] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~116183s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-14 01:29] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~116183s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-14 00:28] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~112555s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-14 00:28] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~112556s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 23:28] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~108926s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 23:28] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~108927s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 22:27] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~105296s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 22:27] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~105297s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 21:27] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~101666s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 21:27] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~101667s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 20:27] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~98065s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 20:27] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~98066s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 19:26] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~94441s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 19:26] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~94442s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 18:26] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~90812s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 18:26] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~90812s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 17:25] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~87185s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 17:25] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~87186s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 16:25] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~83555s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 16:25] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~83556s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 15:24] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~79926s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 15:24] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~79927s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 14:24] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~76297s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 14:24] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~76298s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 13:23] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~72666s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 13:23] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~72667s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 12:23] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~69041s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 12:23] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~69042s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 11:22] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~65412s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 11:22] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~65413s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 10:22] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~61785s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 10:22] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~61786s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 09:22] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~58157s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 09:21] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~58158s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 08:21] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~54530s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 08:21] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~54531s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 07:21] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~50902s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 07:21] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~50903s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 06:20] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~47271s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 06:20] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~47272s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 05:20] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~43647s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 05:20] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~43648s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 04:19] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~40019s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 04:19] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~40020s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 03:19] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~36393s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 03:19] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~36394s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 02:18] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~32766s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 02:18] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~32767s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 01:18] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~29141s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 01:18] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~29142s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 00:17] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~25513s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-13 00:17] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~25514s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-12 23:17] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~21885s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-12 23:17] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~21886s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-12 22:17] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~18262s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-12 22:17] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~18263s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-12 21:16] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~14633s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-12 21:16] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~14634s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-12 20:16] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~11005s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-12 20:16] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~11006s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-12 19:15] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~7376s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-12 19:15] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~7377s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-12 18:15] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~3749s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-12 18:15] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~3750s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-12 17:15] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `adapter` war fuer ~148s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
+---
+## [2026-05-12 17:15] from=Pi topic=cross_session_outage_detected
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor hat detektiert: PC `tentakel_ollama` war fuer ~149s nicht erreichbar. Pi laeuft, Verbindung war weg. Falls du was Anhaengiges hattest (samples_pulled, /reload, ...), hat es vermutlich gefehlt.
+
 ## [2026-05-11 08:14] from=Pi topic=reply_login_loop_fix_done
 status: done
 
