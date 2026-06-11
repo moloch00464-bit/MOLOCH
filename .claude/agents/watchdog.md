@@ -27,8 +27,17 @@ Lies IMMER zuerst: `CLAUDE.md` und `docs/DANGER_MAP.md`.
 | CPU-Temp | > 85°C | Service-Stopp |
 | RAM | > 90% | Homeostasis-Trigger |
 | Disk Root | > 90% | Log-Rotation |
+| /run tmpfs | > 80% | WARN + Markus-Notify (799 MB klein!) |
 | Netzwerk | Ping 192.168.178.1 | alle 30s |
 | LLM | hailo-ollama Port 8000 | alle 60s |
+
+## Lehre aus Login-Loop 2026-05-11 (/run-voll-Incident)
+- EventBus-Telemetrie (~1 GB/Tag) lief via Symlink `logs/events` in /run (tmpfs).
+  /run voll → systemd kann keine session-scopes anlegen → Login-Loop am Monitor.
+- Fix 2026-06-11: Symlink zeigt auf /mnt/moloch-data/event_logs (ext4 SSD),
+  Rotation via `scripts/rotate_event_logs.sh` (gzip nach 1 Tag, 14 Tage Retention).
+- Beim Schreiben neuer Checks: tmpfs-Mounts (/run, /dev/shm) mit pruefen —
+  Disk-Root-Check allein haette den Incident NICHT erkannt.
 
 ## Kritische Regeln
 - Watchdog laeuft als eigener Thread — KEIN blocking in Check-Funktionen (max 2s pro Check)

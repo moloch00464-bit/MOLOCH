@@ -26,9 +26,10 @@ Lies IMMER zuerst: `CLAUDE.md` und `agents/AGENT_TRACKING.md`.
 - Max 20 Bewegungen/Minute
 - Sonoff Pan INVERTIERT: positiver Wert = physisch LINKS
 
-## Offener Bug (PRIO 3)
-- `autonomous_tracker.py` → `_track_tracking_target()`: Nach 8s am mechanischen
-  Anschlag → SEARCH starten (STUCK-AT-LIMIT Erkennung fehlt)
+## Geloeste Bugs (FINGER WEG)
+- STUCK-AT-LIMIT: nach 8s am mechanischen Anschlag startet SEARCH
+  (gefixt Commit 8be3a67, 2026-03-30) — `_track_tracking_target()` nicht
+  erneut anfassen. Ursache war False-Positive-Detection an Wand/Decke.
 
 ## Agent-Lock (PFLICHT)
 ```bash

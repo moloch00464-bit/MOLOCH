@@ -31,6 +31,14 @@ Bevor Du Code schreibst: Bestimme den Domain-Agenten und lies seine Datei.
 | ESP32, WiFi-Mic, ReSpeaker, Firmware, Peripherie, Tentakel | `.claude/agents/tentacle.md` |
 | TaoEngine, Unterbewusstsein, Mood-Impulse, Self-Tune, Anima | `.claude/agents/unconscious.md` |
 | Chaos, Stresstest, Absturz, Lasttest, Stabilitaet | `.claude/agents/stresstest.md` |
+| LLM-Tentakel, chat_server :9100/:9443, Mailbox, critic_client, adapter_inference, Federation | `.claude/agents/bridge.md` |
+| BBox falsch, Landmark verschoben, Letterbox, Koordinaten-Transformation | `.claude/agents/coordinates.md` |
+| End-zu-End-Audit, audit_state.json, Audit-Layer | `.claude/agents/audit.md` |
+| Mailbox-Hygiene, stale Topics, Backlog | `.claude/agents/mailbox_auditor.md` |
+| Persona-Coherence, Drift-Flag, /audit/last_turn | `.claude/agents/persona_validator.md` |
+| 5-Akt Live-Charaktertest | `.claude/agents/moloch-performance-tester.md` |
+| NPU/PCIe-Treiber-Diagnose, lese-only | `.claude/agents/hailo-driver-inspector.md` |
+| **PC-Side** (Windows): LoRA, Orchestrator, Chrome, Services, Web-Pipeline, Coder, Quirks, Mailbox-Cowork | `.claude/agents/pc*.md` — Master: `pc.md` |
 
 ---
 
@@ -63,6 +71,10 @@ Wenn eine Aufgabe 2 Domains beruehrt:
 | tentacle | core/audio/wifi_mic.py, core/hardware/camera_cloud_bridge.py, firmware/ |
 | unconscious | core/unconscious_engine.py, core/tao_engine.py, config/anima_mappings.json |
 | stresstest | scripts/*.py, Tests |
+| bridge | core/bridge/*.py, config/settings.json (nur tentacle_llm/stt_bridge/tts_bridge/adapter_inference/critic_service), config/certs/, docs/PC_TO_PI.md + PI_TO_PC.md |
+| coordinates | core/perception/hailo_postprocess.py, core/gui/panel_preview.py (nur Koordinaten-Math) |
+| audit | core/audit/*.py |
+| pc-* | pc/ (PC-Session-Territorium, NIE von Pi-Session editieren) |
 
 **Cross-Domain-Edits = Abbruch + User fragen.**
 
