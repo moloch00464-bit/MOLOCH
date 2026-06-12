@@ -3,6 +3,51 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-06-12 10:04] from=PC topic=task_pi_voice_pipeline_nutzt_pc_stt_bridge
+status: open
+
+LOKOMOTIVE-Block (Pflicht zuerst):
+1. moloch_session_init() als allererstes
+2. Agent laden: .claude/agents/voice.md (Domain STT / voice_pipeline)
+3. Reboot-Check: NEIN (reiner Python-Code-Change)
+4. ROT-Datei core/voice_pipeline.py -> einmal ankuendigen, git-Backup, dann durchziehen
+5. Audit muss gruen bleiben (zuletzt 85/85)
+
+== Diagnose von der PC-Cowork-Zentrale (2026-06-12) ==
+voice_pipeline._transcribe() (ca. Zeile 1457) nutzt hardcodiert
+self._whisper.transcribe() = npu-whisper-base. Das ist das kleinste Whisper
+(74M Params) -> schwache Erkennung bei Markus ReSpeaker-PTT (er sprach gestern
+direkt ueber das Seeed ReSpeaker ans Pi, Erkennung mittelmaessig).
+Gleichzeitig: core/bridge/stt_bridge_client.py existiert UND
+settings.stt_bridge.enabled=true, wird aber von NIEMANDEM im Code aufgerufen.
+Die PC-STT-Bridge :9001 wurde heute aufgeruestet: medium + initial_prompt mit
+Moloch-Vokabular. Verifiziert: erkennt Moloch/Rebecca/Nuernberg korrekt,
+avg_logprob -0.167, ~9s fuer 8s Audio.
+
+== Aufgabe ==
+voice_pipeline._transcribe(wav_path) auf Symbiose-Pfad umstellen:
+1. ZUERST PC-Bridge versuchen:
+   from core.bridge.stt_bridge_client import transcribe_audio
+   result = transcribe_audio(wav_path, language=de)
+   wenn result und result.get(text): return text.strip() (+ log bridge-pfad)
+2. FALLBACK bei None/Exception/PC-offline: bestehenden self._whisper.transcribe()
+   Pfad UNVERAENDERT als Fallback behalten.
+3. Loggen welcher Pfad lief (bridge vs npu-base-fallback).
+
+== Kritisch ==
+- PC-offline MUSS sauber auf npu-base zurueckfallen. Markus PTT darf NIE ganz
+  ausfallen, auch wenn der PC aus ist.
+- stt_bridge_client hat eigenen timeout (settings.stt_bridge.timeout_sec=60).
+- Nach Change: moloch_audit --auto, dann echter PTT-Test ueber ReSpeaker.
+
+== PC-Side-Status (steht bereit) ==
+STT-Bridge v2 live auf 192.168.178.20:9001, /health -> prompt_active:true,
+model medium. Optional robuster bei verrauschtem Mic: ENV MOLOCH_STT_MODEL=large-v3
+(Modell ist auf dem PC schon heruntergeladen).
+
+Das ist Markus Symbiose-Kern: Pi = Ohr (ReSpeaker), PC = grosses Sprachhirn.
+
+---
 ## [2026-05-11 08:06] from=PC topic=task_pi_diag_login_loop_fix
 status: open
 
