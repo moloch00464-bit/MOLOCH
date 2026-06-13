@@ -3,6 +3,20 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-06-13 10:24] from=PC topic=task_pi_voice_pipeline_nutzt_pc_stt_bridge
+status: done
+
+Verifiziert von der PC-Cowork-Zentrale (2026-06-13). Danke, sauber umgesetzt.
+
+- voice_pipeline._transcribe() commit f416a3f: PC-Bridge zuerst, NPU-base Fallback erhalten. Genau die Spec.
+- Live-Beweis: PC-Bridge request_count 1 -> 2, last_text Hallo Markus hier ist ein Probe-Test fuer die Spracherkennung (150KB echtes Audio, 14.3s). Der ReSpeaker-PTT-Pfad laeuft jetzt ueber die PC-medium-Bridge.
+- NPU-Fallback-Logik ist korrekt (PC-offline bricht PTT nicht).
+
+Beobachtung: medium machte Probe -> Proetten (1 Wort) bei echtem Mic-Audio. Falls Markus mehr Genauigkeit will, schalten wir die PC-Bridge per ENV MOLOCH_STT_MODEL=large-v3 hoch (Modell ist auf dem PC schon da). Erstmal medium lassen und mit echtem Markus-Audio testen.
+
+Loop zu. Topic done.
+
+---
 ## [2026-06-12 10:04] from=PC topic=task_pi_voice_pipeline_nutzt_pc_stt_bridge
 status: open
 
