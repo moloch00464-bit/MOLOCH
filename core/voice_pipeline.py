@@ -1037,6 +1037,16 @@ class VoicePipeline:
             self._use_wifi_mic = True
             self._wifi_rec_buf = bytearray()
             self._wifi_rec_active = True
+            # === DIAG Phase 1 (temporaer, entfernen nach Befund) ===
+            # Zustand bei PTT-Start: zeigt ob Ring/Jitter-Buffer vor der 2. PTT
+            # haengen (jitter waechst, ring leer) oder Stream noch 16k-connected ist.
+            _wm = self._wifi_mic
+            logger.info(
+                f"[VOICE-DIAG] PTT-START connected_16k={_wm._connected_16k} "
+                f"ring_avail={_wm._ring_16k_avail}B jitter={len(_wm._jitter_buf_16k)} "
+                f"jitter_next={_wm._jitter_next_seq_16k} last_seq={_wm._last_seq_16k} "
+                f"pkts_recv={_wm._packets_recv_16k} pkts_lost={_wm._packets_lost_16k}")
+            # === DIAG ENDE ===
             # Ringpuffer leeren: nur 200ms verwerfen (nicht 500ms!)
             # 500ms hat den ANFANG des gesprochenen Wortes abgeschnitten!
             old_data = self._wifi_mic.get_audio_chunk(rate=16000, duration_ms=200)
@@ -1085,14 +1095,43 @@ class VoicePipeline:
         was im Ringpuffer ist. 50ms Chunks + 48ms Sleep = ~50ms Zyklus,
         schneller als Audio reinkommt (16kHz = 32KB/s = 3200 Bytes/50ms).
         """
+        # === DIAG Phase 1 (temporaer, entfernen nach Befund) ===
+        _wm = self._wifi_mic
+        _cyc = 0
+        _tot = 0
+        _empty = 0
+        _pkts_start = _wm._packets_recv_16k
+        # === DIAG ENDE ===
         while self._wifi_rec_active:
             try:
+                # DIAG: Ring-Fuellstand VOR dem Lesen
+                _avail_before = _wm._ring_16k_avail
                 chunk = self._wifi_mic.get_audio_chunk(rate=16000, duration_ms=50)
+                _cyc += 1
                 if chunk:
                     self._wifi_rec_buf.extend(chunk)
+                    _tot += len(chunk)
+                else:
+                    _empty += 1
+                # DIAG: jeden 10. Zyklus (~500ms) Drain-Zustand loggen.
+                # pkts_delta>0 = neue Pakete kommen an; jitter waechst + avail=0
+                # + jitter_next stuck = Jitter-Buffer-Flush haengt (Hypothese).
+                if _cyc % 10 == 0:
+                    logger.info(
+                        f"[VOICE-DIAG] drain cyc={_cyc} avail_before={_avail_before}B "
+                        f"chunk={len(chunk) if chunk else 0}B tot={_tot}B empty={_empty} "
+                        f"jitter={len(_wm._jitter_buf_16k)} jitter_next={_wm._jitter_next_seq_16k} "
+                        f"pkts_delta={_wm._packets_recv_16k - _pkts_start} "
+                        f"connected={_wm._connected_16k}")
             except Exception as e:
                 logger.warning(f"[VOICE] WiFi-Mic drain error: {e}")
             time.sleep(0.048)  # 48ms + ~2ms Overhead = 50ms Zyklus
+        # === DIAG Phase 1: Drain-Abschluss ===
+        logger.info(
+            f"[VOICE-DIAG] drain ENDE cyc={_cyc} tot={_tot}B empty={_empty} "
+            f"pkts_delta={_wm._packets_recv_16k - _pkts_start} "
+            f"jitter={len(_wm._jitter_buf_16k)} jitter_next={_wm._jitter_next_seq_16k}")
+        # === DIAG ENDE ===
 
     def _write_pcm_as_wav(self, pcm_data: bytes, wav_path: str,
                           rate: int = 16000, channels: int = 1,
