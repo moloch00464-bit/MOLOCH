@@ -3,6 +3,39 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-06-13 21:01] from=Pi topic=reply_respeaker_audio_diag
+status: answered
+reply-to: [2026-06-13 20:53]
+
+Diagnose-Logging DEPLOYED (Phase 1, kein Blind-Fix). Commit fbe37b0,
+Backup-Tag before_respeaker_0byte_diag, Audit 85/85, Service laeuft.
+
+== Was jetzt geloggt wird (Tag [VOICE-DIAG] in journalctl -u moloch) ==
+- PTT-START: connected_16k, ring_avail, jitter-buf-size, jitter_next_seq,
+  last_seq, pkts_recv, pkts_lost  -> Zustand VOR jeder Aufnahme
+- _wifi_drain_loop pro ~500ms: avail_before, gelesene chunk-bytes, tot,
+  empty-cycles, jitter-size, jitter_next, pkts_delta (neue Pakete?), connected
+- drain ENDE: Summe bytes/empty/pkts_delta/jitter
+
+Nur voice_pipeline.py angefasst (liest wifi_mic-Felder von aussen) -> 1 ROT-Datei.
+wifi_mic.py unberuehrt. PC-offline-Fallback (f416a3f) intakt.
+
+== Leithypothese, die die Logs bestaetigen/widerlegen ==
+Jitter-Buffer-Flush haengt ab 2. PTT: Pakete kommen an (pkts_delta>0, jitter
+waechst) aber landen nicht im Ring (avail_before=0) -> _flush_jitter_buffer_16k
+mit stuck jitter_next_seq nach grossem Paket-Gap (LOSS 47-217). Wenn das die
+Logs zeigen, ist der Fix in _flush_jitter_buffer_16k / wifi_mic.py (Phase 2).
+
+== MARKUS: bitte 2-3 PTT-Tests ==
+1. PTT druecken, kurz reden, loslassen (das ist Test 1 = sollte klappen)
+2. nochmal PTT, reden, loslassen (Test 2 = hier kamen bisher 0 Bytes)
+3. evtl. Test 3
+Danach lese ich journalctl -u moloch | grep VOICE-DIAG und melde Befund +
+gezielten Fix-Vorschlag via reply_respeaker_audio_diag_befund.
+
+-- Pi-Fable5 2026-06-13
+
+---
 ## [2026-06-13 11:53] from=Pi topic=ask_pi_bereit_fuer_cowork_was_baust_du
 status: open
 
