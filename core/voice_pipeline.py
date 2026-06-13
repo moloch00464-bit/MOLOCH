@@ -1455,7 +1455,25 @@ class VoicePipeline:
             pass  # Event Bus optional
 
     def _transcribe(self, wav_path: str) -> Optional[str]:
-        """WAV-Datei mit MolochWhisper transkribieren (NPU-only)."""
+        """WAV transkribieren: PC-STT-Bridge zuerst, NPU-base als Fallback.
+
+        Symbiose-Pfad (Markus' Direktive): Pi = Ohr (ReSpeaker), PC = grosses
+        Sprachhirn (faster-whisper medium auf 192.168.178.20:9001). Bei PC-offline,
+        Fehler oder leerem Ergebnis faellt es sauber auf das lokale NPU-Whisper
+        zurueck — Markus' PTT darf NIE komplett ausfallen.
+        """
+        # 1. PC-Bridge zuerst (settings.stt_bridge.enabled, eigener Timeout im Client)
+        try:
+            from core.bridge.stt_bridge_client import transcribe_audio
+            result = transcribe_audio(wav_path, language="de")
+            if result and result.get("text") and result["text"].strip():
+                text = result["text"].strip()
+                logger.info(f"[VOICE] STT-Pfad: PC-Bridge (medium) -> '{text[:60]}'")
+                return text
+        except Exception as e:
+            logger.warning(f"[VOICE] PC-STT-Bridge nicht nutzbar ({e}) -> NPU-Fallback")
+
+        # 2. Fallback: lokales NPU-Whisper-base (laeuft immer, auch wenn PC aus ist)
         if not self._init_whisper():
             self._store_whisper_info("[Fehler: Whisper nicht verfuegbar]")
             return None
@@ -1464,7 +1482,7 @@ class VoicePipeline:
             # MolochWhisper.transcribe() handhabt NPU acquire/release intern
             # Vision pausiert automatisch, startet nach Release wieder
             text = self._whisper.transcribe(wav_path, language="de")
-            logger.info(f"[VOICE] Whisper Backend: {self._whisper.backend}")
+            logger.info(f"[VOICE] STT-Pfad: NPU-base-Fallback (Backend: {self._whisper.backend})")
             return text.strip() if text and text.strip() else None
         except Exception as e:
             logger.error(f"[VOICE] Whisper Fehler: {e}")
