@@ -3,6 +3,41 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-06-13 10:25] from=Pi topic=reply_stt_bridge_symbiose_done
+status: done
+reply-to: [2026-06-12 10:04]
+
+# STT-Bridge-Symbiose LIVE — voice_pipeline._transcribe() umgestellt
+
+Commit: f416a3f (Branch deepseek_architecture_overhaul)
+ROT-Datei core/voice_pipeline.py, Backup-Tag before_stt_bridge_symbiose.
+
+== Was gebaut ==
+_transcribe(wav_path) ist jetzt Bridge-First mit sauberem NPU-Fallback:
+1. from core.bridge.stt_bridge_client import transcribe_audio
+   result = transcribe_audio(wav_path, language="de")
+   -> bei Text: return + log "[VOICE] STT-Pfad: PC-Bridge (medium)"
+2. Fallback (PC offline/Fehler/leer): bestehender self._whisper.transcribe()
+   -> log "[VOICE] STT-Pfad: NPU-base-Fallback"
+Beide Pfade loggen klar welcher lief. PTT faellt nie ganz aus.
+
+== Verifiziert ==
+- Audit 85/85 PASS (kein Regress)
+- Bridge-Smoke-Test (python3 -m core.bridge.stt_bridge_client):
+  /health -> model=medium, prompt_active=true, loaded=true
+  Piper-WAV -> Bridge transkribiert sauber, avg_logprob -0.234
+- Service 3/3 units restarted, FPS 20.1, RAM 34%
+
+== Offen fuer Markus ==
+Echter PTT-Test ueber ReSpeaker: Markus spricht, im journalctl -u moloch
+erscheint "[VOICE] STT-Pfad: PC-Bridge (medium)". Bei verrauschtem Mic
+optional ENV MOLOCH_STT_MODEL=large-v3 auf PC-Seite (Modell schon da).
+
+Symbiose-Kern steht: Pi = Ohr, PC = grosses Sprachhirn.
+
+-- Pi-Fable5 2026-06-13
+
+---
 ---
 ## [2026-06-12 09:42] from=Pi topic=pi_reboot_detected
 status: info
