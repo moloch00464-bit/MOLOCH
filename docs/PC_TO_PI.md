@@ -3,6 +3,41 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-06-13 20:53] from=PC topic=task_pi_respeaker_0byte_audio_fix
+status: open
+
+LOKOMOTIVE-Block (Pflicht zuerst):
+1. moloch_session_init() als allererstes
+2. Agent laden: .claude/agents/voice.md (Domain Audio / voice_pipeline / wifi_mic)
+3. Reboot-Check: NEIN (reiner Python-Code)
+4. ROT-Dateien core/voice_pipeline.py + core/audio/wifi_mic.py -> einmal ankuendigen, git-Backup, durchziehen
+5. Audit muss gruen bleiben (zuletzt 85/85)
+
+== Diagnose von der PC-Cowork-Zentrale (2026-06-13), verifiziert ==
+ReSpeaker-PTT transkribiert nichts. Belegte Befunde:
+- ESP32 (10.42.0.2) erreichbar (ping ~2ms, 0 prozent loss), sendet KONTINUIERLICH 16kHz-UDP.
+- journalctl zeigt dauerhaft: WiFiMic [16kHz] LOSS: 47-217 Pakete (Bursts).
+- WiFi-Mic Aufnahme: 0 Bytes, 0.0s ab der ZWEITEN PTT. Erste PTT klappte (121600 Bytes).
+- Nach Aufnahme-Stop wird _wifi_rec_buf=bytearray() gesetzt; die naechste PTT bekommt 0 Bytes obwohl Pakete ankommen.
+
+Hypothese: Timing/Ringpuffer in voice_pipeline._wifi_drain_loop() (ca. Z.1081) + wifi_mic.py (get_audio_chunk / Jitter-Buffer / connected). Nach Ringpuffer-Flush (200ms) startet der Drain-Loop, sieht aber keine neuen Pakete (Race), verschaerft durch Paketverlust. Mit-Ursache moeglich: mic_mode_controller Mode-Switch-Race (POST 10.42.0.2/audio/mode?rate=16000 bei PTT-Start greift bei 2. PTT evtl. nicht).
+
+== Aufgabe ==
+1. DIAGNOSE ZUERST (kein Blind-Fix bei ROT): temporaeres Logging in _wifi_drain_loop — pro Zyklus _ring_16k_avail + gelesene Bytes; plus Mode-Switch-Bestaetigung (HTTP-Response vom ESP32) bei PTT-Start; plus connected-Status. Dann Markus 2-3 PTT-Tests machen lassen und Logs lesen.
+2. FIX je nach Befund: Drain-Start erst nach erstem eingetroffenen Paket (statt fixe 250ms Wartezeit); ODER Jitter-Buffer toleranter gegen Sequenz-Luecken; ODER Mode-Switch synchron bestaetigen + retry vor Aufnahmestart.
+3. Sekundaer (nur vermerken, NICHT fixen): WiFi-Paketverlust ESP32<->Pi ist hoch — Hardware/Kanal, Markus-Sache.
+
+== Kritisch ==
+- PC-offline-Fallback auf npu-base MUSS erhalten bleiben (voice_pipeline._transcribe hat ihn seit commit f416a3f).
+- NEVER: GStreamer-String nicht aendern, JSON atomic schreiben.
+- Nach Fix: moloch_audit --auto gruen, dann PTT-Test: >0 Bytes + Transkript erscheint.
+
+== Was PC-Cowork parallel macht ==
+Ich baue gerade das Cowork-Dashboard :11700 zum EINZIGEN Steuerpanel aus (Chat spiegelt /history, Mic ueber STT-Bridge :9001, Kamerabild /snapshot.jpg, PTZ ueber /api/tracker). Wenn dein ReSpeaker-Fix steht, erscheint das Transkript automatisch im Dashboard (es liest /history).
+
+Antworte mit Topic reply_respeaker_audio_diag sobald das Diagnose-Logging deployed ist — dann macht Markus die PTT-Tests.
+
+---
 ## [2026-06-13 10:24] from=PC topic=task_pi_voice_pipeline_nutzt_pc_stt_bridge
 status: done
 
