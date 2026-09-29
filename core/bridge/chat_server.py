@@ -4455,25 +4455,34 @@ _VERIFY_VALID_TYPES = {
 }
 
 
+_verify_lock = threading.Lock()
+_verify_proc: Optional[subprocess.Popen] = None
+
+
 def _spawn_closed_loop_run(verify_type: str = "all") -> Dict:
     """Fire-and-forget Spawn des Closed-Loop-Orchestrators.
 
     Verify dauert bis zu 3 Min — kein Warten, kein capture. Ergebnis landet
     in /dev/shm/closed_loop_state.json (vom Orchestrator selbst geschrieben).
     """
+    global _verify_proc
     rid = str(uuid.uuid4())[:8]
     vt = verify_type if verify_type in _VERIFY_VALID_TYPES else "all"
     args = ["python3", "-m", "core.audit.closed_loop.closed_loop_orchestrator",
             f"--{vt}"]
-    try:
-        subprocess.Popen(
-            args,
-            cwd="/home/molochzuhause/moloch",
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except Exception as e:
-        raise HTTPException(500, f"Verify-Spawn fehlgeschlagen: {e}")
+    with _verify_lock:
+        # Nur ein Lauf gleichzeitig: jeder Lauf faehrt PTZ/LED/Fan/TTS physisch
+        if _verify_proc is not None and _verify_proc.poll() is None:
+            raise HTTPException(409, "Closed-Loop-Verify laeuft bereits")
+        try:
+            _verify_proc = subprocess.Popen(
+                args,
+                cwd="/home/molochzuhause/moloch",
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception as e:
+            raise HTTPException(500, f"Verify-Spawn fehlgeschlagen: {e}")
     return {
         "run_id": rid,
         "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
