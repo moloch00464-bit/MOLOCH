@@ -50,6 +50,14 @@ TRACKING_JITTER_LIMIT = 60
 FACE_RECOGNITION_MIN_SIM = 0.50
 
 
+def _write_impulse(payload: dict) -> None:
+    """Atomar schreiben: der Service pollt die Datei parallel (NEVER #6)."""
+    tmp = IMPULSE_PATH + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(payload, f)
+    os.replace(tmp, IMPULSE_PATH)
+
+
 class UnconsciousEngine:
     """Unterbewusstsein — bewertet intern Zustaende und sendet Impulse."""
 
@@ -76,6 +84,7 @@ class UnconsciousEngine:
         # Cooldown pro Impuls-Typ: gleicher Impuls nicht oefter als X Sekunden
         self._impulse_cooldown = 30.0
         self._cooldowns = {}  # {impuls_key: last_time}
+        self._mood_state = None  # "shadow" | "guardian" | None (Flanken-Erkennung)
         # Trend-Tracking: RAM und FPS ueber Zeit beobachten
         self._ram_history = []  # [(timestamp, ram_mb)]
         self._fps_history = []  # [(timestamp, fps)]
@@ -163,13 +172,22 @@ class UnconsciousEngine:
         # SCHICHT 1: MOOD — Persoenlichkeits-Impulse
         # ================================================================
 
-        # Regel 1: Hohe Tension + kein Gesicht → Shadow-Impuls
+        # Regel 1/2 flankengesteuert: Impuls nur beim Eintritt in den Zustand.
+        # Pegelgesteuert hielt der Impuls (unknown_person +Tension) seine eigene
+        # Bedingung wahr und die 120s-Input-TTL lief nie ab (Dominance-Pin).
+        mood_state = None
         if tension > TENSION_HIGH and not face_active:
-            self._mood_push("shadow", "Tension hoch, niemand da")
-
-        # Regel 2: Niedrige Tension + Gesicht aktiv → Guardian-Impuls
+            mood_state = "shadow"
         elif tension < TENSION_LOW and face_active:
-            self._mood_push("guardian", "Ruhig, Markus ist da")
+            mood_state = "guardian"
+
+        if mood_state is None:
+            self._mood_state = None
+        elif mood_state != self._mood_state:
+            reason = ("Tension hoch, niemand da" if mood_state == "shadow"
+                      else "Ruhig, Markus ist da")
+            if self._mood_push(mood_state, reason):
+                self._mood_state = mood_state
 
         # ================================================================
         # SCHICHT 2: PIPELINE — System-Gesundheit und Self-Tune
@@ -232,7 +250,7 @@ class UnconsciousEngine:
     def _mood_push(self, impulse: str, reason: str = ""):
         """Schreibt Mood-Impuls in /dev/shm/moloch_impulse.json mit Cooldown."""
         if not self._check_cooldown(f"mood_{impulse}"):
-            return
+            return False
 
         payload = {
             "source": "unconscious",
@@ -243,11 +261,12 @@ class UnconsciousEngine:
         }
 
         try:
-            with open(IMPULSE_PATH, "w") as f:
-                json.dump(payload, f)
+            _write_impulse(payload)
             logger.info("[UNCONSCIOUS] Mood: %s (%s)", impulse, reason)
+            return True
         except Exception as e:
             logger.error("[UNCONSCIOUS] Mood-Write fehlgeschlagen: %s", e)
+            return False
 
     def _self_tune_push(self, section: str, key: str, step: float, reason: str):
         """Schreibt Self-Tune Impuls — Parameter soll geaendert werden.
@@ -298,8 +317,7 @@ class UnconsciousEngine:
         }
 
         try:
-            with open(IMPULSE_PATH, "w") as f:
-                json.dump(payload, f)
+            _write_impulse(payload)
             self._tune_count_hour += 1
             logger.info("[UNCONSCIOUS] Tune: %s.%s %s → %s (%s)",
                         section, key, current, new_val, reason)
