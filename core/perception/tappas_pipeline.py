@@ -793,6 +793,13 @@ class TappasPipeline:
         with self._face_db_lock:
             self._face_db = face_db
         logger.info(f"Face-DB aktualisiert: {len(self._face_db)} Personen")
+        # Live-face_id kommt aus dem FaceWorker, der eine eigene DB-Kopie haelt
+        fw = getattr(self, "_face_worker", None)
+        if fw is not None:
+            try:
+                fw.reload_face_db()
+            except Exception as e:
+                logger.warning(f"FaceWorker Face-DB Reload fehlgeschlagen: {e}")
 
     # =====================================================================
     # Live-Enrollment
