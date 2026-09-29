@@ -55,7 +55,12 @@ OCR_CHARSET = (
 
 
 def _grab_shm_frame() -> Optional[np.ndarray]:
-    """Aktuellen Frame aus SHM lesen (640x360 BGR)."""
+    """Aktuellen Frame aus SHM lesen, als BGR (640x360).
+
+    TappasPipeline schreibt den GStreamer-Frame als RGB in den SHM; alle
+    Aufrufer hier erwarten BGR (Vertrag der frame-Parameter) und wandeln
+    selbst nach RGB. Deshalb hier einmal RGB -> BGR.
+    """
     try:
         with open(SHM_FRAME_PATH, "rb") as f:
             header = f.read(SHM_HEADER_SIZE)
@@ -65,7 +70,11 @@ def _grab_shm_frame() -> Optional[np.ndarray]:
             data = f.read(h * w * c)
             if len(data) != h * w * c:
                 return None
-            return np.frombuffer(data, dtype=np.uint8).reshape((h, w, c))
+            frame = np.frombuffer(data, dtype=np.uint8).reshape((h, w, c))
+            if c == 3:
+                import cv2
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            return frame
     except Exception:
         return None
 
