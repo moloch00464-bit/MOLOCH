@@ -94,7 +94,7 @@ def collect() -> Dict[str, Any]:
             try:
                 workers[name] = {
                     "loaded": bool(h.get("models_loaded", h.get("loaded", False))),
-                    "running": bool(h.get("running", False)),
+                    "running": bool(h.get("running", True)),  # fehlt Key: nicht als tot werten
                     "inferences": int(h.get("total_inferences", h.get("inferences", 0)) or 0),
                     "errors": int(h.get("total_errors", h.get("errors", 0)) or 0),
                     "queue": int(h.get("queue_size", h.get("queue", 0)) or 0),
@@ -134,6 +134,19 @@ def collect() -> Dict[str, Any]:
         status = "WARN"
     else:
         status = "PASS"
+
+    # Tote Worker (laut Docstring: 1 tot = WARN, >1 tot = FAIL). Vorher gingen
+    # sie gar nicht in den Status ein - alle Worker tot ergab trotzdem PASS.
+    dead = sorted(n for n, w in workers.items()
+                  if "error" in w or not w.get("loaded") or not w.get("running"))
+    detail["dead_workers"] = dead
+    if status != "FAIL" and hailo_present:
+        if not workers:
+            status = "WARN"  # worker_health fehlt im Status-JSON
+        elif len(dead) > 1:
+            status = "FAIL"
+        elif len(dead) == 1:
+            status = "WARN"
 
     return {
         "score": score,
