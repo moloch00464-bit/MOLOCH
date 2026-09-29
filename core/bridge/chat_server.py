@@ -10,6 +10,7 @@ Endpoints:
   POST /chat       -> {text, force_local?, use_reason?} -> {text, provider, duration_ms}
 """
 import asyncio
+import hmac
 import logging
 import os
 import re
@@ -32,7 +33,7 @@ from typing import Any, Dict, Optional, Tuple
 import uvicorn
 from fastapi import BackgroundTasks, Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 sys.path.insert(0, os.path.expanduser("~/moloch"))
@@ -53,6 +54,33 @@ app = FastAPI(title="MOLOCH Chat-Server", version="1.0")
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
 )
+
+# Opt-in API-Token: gesetzt via MOLOCH_API_TOKEN -> alle schreibenden Routen und
+# sensible GETs verlangen Header "X-Moloch-Token". Ohne Token: Verhalten wie bisher.
+# Loopback bleibt frei (lokale Prozesse, PC ueber SSH-Tunnel localhost:9000).
+_API_TOKEN = os.environ.get("MOLOCH_API_TOKEN", "").strip()
+_PROTECTED_GET = ("/snapshot.jpg", "/feedback_export", "/history")
+_LOOPBACK = ("127.0.0.1", "::1", "localhost")
+
+
+def _needs_token(method: str, path: str) -> bool:
+    if method in ("POST", "PUT", "PATCH", "DELETE"):
+        return True
+    return method == "GET" and path in _PROTECTED_GET
+
+
+@app.middleware("http")
+async def _api_token_guard(request, call_next):
+    if (_API_TOKEN and _needs_token(request.method, request.url.path)
+            and (request.client is None or request.client.host not in _LOOPBACK)):
+        supplied = request.headers.get("x-moloch-token", "")
+        if not hmac.compare_digest(supplied.encode(), _API_TOKEN.encode()):
+            return JSONResponse({"detail": "X-Moloch-Token fehlt oder falsch"}, status_code=401)
+    return await call_next(request)
+
+
+if not _API_TOKEN:
+    logger.warning("MOLOCH_API_TOKEN nicht gesetzt - alle Routen ohne Auth erreichbar (LAN)")
 
 # PC-Heartbeat-Tracking (Task 5d): letzter empfangener PC-Online-Timestamp
 _pc_online_ts: float = 0.0
