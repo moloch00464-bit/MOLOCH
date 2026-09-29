@@ -36,11 +36,26 @@ def _atomic_ipc_cmd(action: str, params: Optional[Dict[str, Any]] = None) -> boo
         return False
 
 
+_LED_COLORS = {
+    "red": "rot", "green": "gruen", "blue": "blau", "yellow": "gelb",
+    "magenta": "magenta", "cyan": "cyan", "white": "weiss", "off": "aus",
+}
+
+
+def _relative_move(pos_dir: str, neg_dir: str, angle: float, limit: float) -> Dict[str, Any]:
+    """Relative PTZ-Bewegung ueber die Service-Aktion ptz_move."""
+    angle = max(-limit, min(limit, float(angle)))
+    if angle == 0:
+        return {"ok": True, "angle": 0.0, "note": "keine Bewegung"}
+    direction = pos_dir if angle > 0 else neg_dir
+    ok = _atomic_ipc_cmd("ptz_move", {"direction": direction, "step": abs(angle)})
+    return {"ok": ok, "angle": angle, "direction": direction}
+
+
 def ptz_pan(angle: float) -> Dict[str, Any]:
-    """Pan-Bewegung in Grad. NEVER 2: Sonoff invertiert, positive=LINKS (Vorzeichen vom Service erwartet)."""
+    """Relative Pan-Bewegung in Grad. NEVER 2: positive=LINKS (camera.move_manual 'left' = pan+)."""
     try:
-        ok = _atomic_ipc_cmd("ptz_pan", {"angle": float(angle)})
-        return {"ok": ok, "angle": float(angle)}
+        return _relative_move("left", "right", angle, 180.0)
     except Exception as e:
         return {"error": str(e)[:200]}
 
@@ -48,7 +63,10 @@ def ptz_pan(angle: float) -> Dict[str, Any]:
 def led_set(color: str = "blue") -> Dict[str, Any]:
     """LED-Farbe (red/green/blue/yellow/magenta/cyan/white/off)."""
     try:
-        ok = _atomic_ipc_cmd("led_set_color", {"color": str(color)})
+        farbe = _LED_COLORS.get(str(color).lower())
+        if farbe is None:
+            return {"error": f"unbekannte Farbe {color!r}", "allowed": sorted(_LED_COLORS)}
+        ok = _atomic_ipc_cmd("led_set", {"farbe": farbe, "modus": "statisch"})
         return {"ok": ok, "color": str(color)}
     except Exception as e:
         return {"error": str(e)[:200]}
@@ -69,10 +87,9 @@ def camera_snapshot() -> Dict[str, Any]:
 
 
 def ptz_tilt(angle: float) -> Dict[str, Any]:
-    """Tilt-Bewegung (-90..+90 Grad)."""
+    """Relative Tilt-Bewegung (-90..+90 Grad), positive=hoch."""
     try:
-        ok = _atomic_ipc_cmd("ptz_tilt", {"angle": float(angle)})
-        return {"ok": ok, "angle": float(angle)}
+        return _relative_move("up", "down", angle, 90.0)
     except Exception as e:
         return {"error": str(e)[:200]}
 
