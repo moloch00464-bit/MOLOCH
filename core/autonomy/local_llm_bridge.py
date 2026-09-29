@@ -992,6 +992,27 @@ class LocalLLMBridge:
             if resp is not None:
                 resp.close()
 
+    def is_ollama_running_cached(self, max_age: float = 10.0) -> bool:
+        """Nicht-blockierend fuer Status-Pfade: letzter Messwert, Refresh im Hintergrund.
+
+        _is_ollama_running() blockiert bis zu 2s, wenn hailo-ollama generiert;
+        der Status wird aber ~4x/s aus dem Perception-Loop geschrieben.
+        """
+        now = time.monotonic()
+        if (now - getattr(self, "_ollama_probe_ts", -1e9) > max_age
+                and not getattr(self, "_ollama_probe_busy", False)):
+            self._ollama_probe_busy = True
+
+            def _probe():
+                try:
+                    self._ollama_probe_val = self._is_ollama_running()
+                finally:
+                    self._ollama_probe_ts = time.monotonic()
+                    self._ollama_probe_busy = False
+
+            threading.Thread(target=_probe, daemon=True, name="OllamaProbe").start()
+        return getattr(self, "_ollama_probe_val", False)
+
     def set_vision_callbacks(self, pause_fn: Callable, resume_fn: Callable):
         """Callbacks fuer Vision-Pipeline Pause/Resume registrieren."""
         self._vision_pause_callback = pause_fn
@@ -1970,7 +1991,7 @@ class LocalLLMBridge:
         return {
             "llm_mode": self._llm_mode,
             "ollama_installed": self._ollama_available,
-            "ollama_running": self._is_ollama_running() if self._ollama_available else False,
+            "ollama_running": self.is_ollama_running_cached() if self._ollama_available else False,
             "ollama_fail_count": self._ollama_fail_count,
             "ollama_backoff_sec": round(backoff_remaining),
             "last_provider": self._last_provider,
