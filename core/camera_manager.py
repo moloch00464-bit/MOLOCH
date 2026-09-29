@@ -976,11 +976,11 @@ class CameraManager:
         self._cloud_state["led_level"] = int(level)
         logger.info(f"[CLOUD] Night mode: {mode} (level={level})")
 
-    def cloud_toggle_alarm(self):
-        """Alarm ein/ausschalten."""
+    def cloud_toggle_alarm(self, on=None):
+        """Alarm setzen (on=True/False) oder umschalten (on=None)."""
         if not self._cloud or not self._cloud.connected:
             return
-        self._alarm_on = not self._alarm_on
+        self._alarm_on = (not self._alarm_on) if on is None else bool(on)
         self._cloud.run(self._cloud.bridge.set_alarm(self._alarm_on))
         self._cloud_state["alarm_active"] = self._alarm_on
         logger.info(f"[CLOUD] Alarm: {'AN' if self._alarm_on else 'AUS'}")
