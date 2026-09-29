@@ -2953,7 +2953,8 @@ class MolochService:
         elif action == 'cloud_led':
             self._cam.cloud_set_night_mode(cmd.get('level', 0))
         elif action == 'cloud_alarm':
-            self._cam.cloud_toggle_alarm()
+            # keyword_handler und panel_ewelink senden on=True/False
+            self._cam.cloud_toggle_alarm(cmd.get('on'))
         elif action == 'snapshot':
             self._cam.take_snapshot()
         elif action == 'teach_mode_toggle':
