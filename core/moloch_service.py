@@ -2829,6 +2829,11 @@ class MolochService:
                 if tracker and hasattr(tracker, 'config'):
                     cfg = tracker.config
                     if hasattr(cfg, param):
+                        # Slider liefern float; int-Felder (z.B. Ringbuffer-Groesse
+                        # als Slice-Index) muessen int bleiben
+                        cur = getattr(cfg, param)
+                        if isinstance(cur, int) and not isinstance(cur, bool):
+                            value = int(round(value))
                         setattr(cfg, param, value)
                         # Basis-Werte aktualisieren (fuer dynamische Anpassung)
                         if param == 'pan_gain':
