@@ -10,6 +10,7 @@ Config: settings.stt_bridge (host/port/language/beam_size/vad_filter/timeout_sec
 import json
 import logging
 import os
+import time
 from typing import Optional
 
 import requests
@@ -20,6 +21,27 @@ _SETTINGS_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     "config", "settings.json",
 )
+
+
+# Circuit-Breaker: nach einem Fehler die Bridge kurz ueberspringen, damit
+# PTT sofort lokal transkribiert statt bei jedem Versuch zu warten.
+_BREAKER_SEC = 60.0
+_down_until = 0.0
+
+
+def _bridge_down() -> bool:
+    return time.monotonic() < _down_until
+
+
+def _mark_down(reason: str) -> None:
+    global _down_until
+    _down_until = time.monotonic() + _BREAKER_SEC
+    logger.warning(f"STT-Bridge Fehler: {reason} - {int(_BREAKER_SEC)}s lokal")
+
+
+def _timeout(cfg: dict):
+    """(connect, read): ein toter PC faellt nach Sekunden durch, nicht nach 60s."""
+    return (float(cfg.get("connect_timeout_sec", 3)), float(cfg.get("timeout_sec", 60)))
 
 
 def _load_cfg() -> dict:
@@ -61,7 +83,7 @@ def health_check(timeout_sec: int = 3) -> Optional[dict]:
 def transcribe_audio(audio_path: str, language: Optional[str] = None) -> Optional[dict]:
     """Schickt Audio-File zur PC-Bridge, returns {text, language, duration, segments} oder None."""
     cfg = _load_cfg()
-    if not cfg.get("enabled"):
+    if not cfg.get("enabled") or _bridge_down():
         return None
     if not os.path.exists(audio_path):
         logger.warning(f"Audio-File fehlt: {audio_path}")
@@ -75,9 +97,9 @@ def transcribe_audio(audio_path: str, language: Optional[str] = None) -> Optiona
                 "beam_size": str(cfg.get("beam_size", 5)),
                 "vad_filter": str(cfg.get("vad_filter", True)).lower(),
             }
-            r = requests.post(url, files=files, data=data, timeout=cfg.get("timeout_sec", 60))
+            r = requests.post(url, files=files, data=data, timeout=_timeout(cfg))
         if r.status_code != 200:
-            logger.warning(f"STT-Bridge HTTP {r.status_code}: {r.text[:200]}")
+            _mark_down(f"HTTP {r.status_code}: {r.text[:200]}")
             return None
         result = r.json()
         logger.info(
@@ -86,7 +108,7 @@ def transcribe_audio(audio_path: str, language: Optional[str] = None) -> Optiona
         )
         return result
     except (requests.RequestException, ValueError) as e:
-        logger.warning(f"STT-Bridge Fehler: {e}")
+        _mark_down(str(e))
         return None
 
 
@@ -94,7 +116,7 @@ def transcribe_bytes(audio_bytes: bytes, suffix: str = ".wav",
                      language: Optional[str] = None) -> Optional[dict]:
     """Wie transcribe_audio, aber direkt aus Bytes statt File-Pfad."""
     cfg = _load_cfg()
-    if not cfg.get("enabled"):
+    if not cfg.get("enabled") or _bridge_down():
         return None
     url = f"http://{cfg['host']}:{cfg['port']}/transcribe"
     try:
@@ -104,13 +126,13 @@ def transcribe_bytes(audio_bytes: bytes, suffix: str = ".wav",
             "beam_size": str(cfg.get("beam_size", 5)),
             "vad_filter": str(cfg.get("vad_filter", True)).lower(),
         }
-        r = requests.post(url, files=files, data=data, timeout=cfg.get("timeout_sec", 60))
+        r = requests.post(url, files=files, data=data, timeout=_timeout(cfg))
         if r.status_code != 200:
-            logger.warning(f"STT-Bridge HTTP {r.status_code}: {r.text[:200]}")
+            _mark_down(f"HTTP {r.status_code}: {r.text[:200]}")
             return None
         return r.json()
     except (requests.RequestException, ValueError) as e:
-        logger.warning(f"STT-Bridge Fehler: {e}")
+        _mark_down(str(e))
         return None
 
 
