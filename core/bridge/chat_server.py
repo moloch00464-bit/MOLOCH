@@ -4538,6 +4538,7 @@ def audit_verify_status():
 
 import uuid as _uuid
 
+_PERF_TEST_SPAWN_LOCK = threading.Lock()
 _PERF_TEST_RUNS: Dict[str, Dict[str, Any]] = {}  # run_id -> {proc, started_at, log_path, state_path}
 _PERF_TEST_LOCK = threading.Lock()
 _PERF_TEST_LOG_DIR = Path(os.path.expanduser("~/moloch/logs/performance_test"))
@@ -4688,38 +4689,41 @@ def api_test_run(req: Optional[Dict[str, Any]] = Body(default=None)):
             "Browser-Cache reset (Strg+F5) oder Skip-Checkboxen leeren."
         )
 
-    # 409 wenn schon ein Run laeuft
-    active = _perf_test_active_run_id()
-    if active:
-        raise HTTPException(409, f"Test laeuft bereits: run_id={active}")
+    # Pruefen + Starten + Registrieren atomar: sonst starten zwei parallele
+    # Requests beide einen Run (Check lag ausserhalb des Locks)
+    with _PERF_TEST_SPAWN_LOCK:
+        # 409 wenn schon ein Run laeuft
+        active = _perf_test_active_run_id()
+        if active:
+            raise HTTPException(409, f"Test laeuft bereits: run_id={active}")
 
-    run_id = str(_uuid.uuid4())
-    log_path = Path(f"/dev/shm/perf_test_{run_id}.log")
-    state_path = Path(f"/dev/shm/perf_test_{run_id}.state")
+        run_id = str(_uuid.uuid4())
+        log_path = Path(f"/dev/shm/perf_test_{run_id}.log")
+        state_path = Path(f"/dev/shm/perf_test_{run_id}.state")
 
-    cmd = ["python3", "-u", "-m", "scripts.performance_test.runner"]
-    if judge == "cloud":
-        cmd += ["--judge=cloud"]
-    if skip_acts:
-        cmd += ["--skip-act=" + ",".join(str(int(n)) for n in skip_acts)]
+        cmd = ["python3", "-u", "-m", "scripts.performance_test.runner"]
+        if judge == "cloud":
+            cmd += ["--judge=cloud"]
+        if skip_acts:
+            cmd += ["--skip-act=" + ",".join(str(int(n)) for n in skip_acts)]
 
-    started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    try:
-        proc = subprocess.Popen(
-            cmd, cwd=str(_PERF_TEST_MOLOCH_DIR),
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            bufsize=1, text=True,
-        )
-    except Exception as e:
-        raise HTTPException(500, f"Subprocess-Spawn-Fehler: {e}")
+        started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        try:
+            proc = subprocess.Popen(
+                cmd, cwd=str(_PERF_TEST_MOLOCH_DIR),
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                bufsize=1, text=True,
+            )
+        except Exception as e:
+            raise HTTPException(500, f"Subprocess-Spawn-Fehler: {e}")
 
-    info = {
-        "proc": proc, "run_id": run_id, "started_at": started_at,
-        "log_path": log_path, "state_path": state_path, "cmd": cmd,
-        "judge": judge, "skip_acts": skip_acts,
-    }
-    with _PERF_TEST_LOCK:
-        _PERF_TEST_RUNS[run_id] = info
+        info = {
+            "proc": proc, "run_id": run_id, "started_at": started_at,
+            "log_path": log_path, "state_path": state_path, "cmd": cmd,
+            "judge": judge, "skip_acts": skip_acts,
+        }
+        with _PERF_TEST_LOCK:
+            _PERF_TEST_RUNS[run_id] = info
 
     # Initial-State + Pointer
     try:
