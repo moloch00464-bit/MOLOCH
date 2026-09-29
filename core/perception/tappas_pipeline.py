@@ -800,6 +800,9 @@ class TappasPipeline:
             name: Personenname (z.B. "Markus")
             n: Maximale Anzahl Kandidaten zum Sammeln (beste 20 werden gespeichert)
         """
+        if not name or name.strip().lower() in ("unbekannt", "unknown"):
+            logger.warning(f"[ENROLLMENT] Abgelehnt: kein gueltiger Name ({name!r})")
+            return
         with self._enroll_lock:
             if self._enroll_active:
                 logger.warning("[ENROLLMENT] Laeuft bereits!")
@@ -2064,7 +2067,9 @@ class TappasPipeline:
 
         # Face Recognition
         if face_id:
-            pf.face_id = face_id.lower()
+            fid = face_id.lower()
+            # match_face liefert "Unbekannt"; alle Verbraucher pruefen auf "unknown"
+            pf.face_id = "unknown" if fid in ("unbekannt", "unknown") else fid
             pf.face_similarity = face_similarity
 
         # Face Attributes (bestes Face mit Attributen)
