@@ -151,8 +151,11 @@ class ServiceProxy:
             payload.update(params)
 
         try:
-            with open(cmd_file, "w") as f:
+            # Atomar (NEVER #6): .tmp passt nicht auf das Poll-Glob moloch_cmd_*.json
+            tmp_file = cmd_file + ".tmp"
+            with open(tmp_file, "w") as f:
                 json.dump(payload, f)
+            os.replace(tmp_file, cmd_file)
             self.logger.info(f"CMD #{self._cmd_counter:04d}: {action}")
             self._cmd_counter += 1
             return True
@@ -657,6 +660,11 @@ class MolochPanel:
                     # after-Chain neu starten
                     if self._preview._running:
                         try:
+                            # Laufende Kette erst abbrechen: stale heisst meist nur
+                            # "keine neuen Frames", sonst entsteht pro Tick eine
+                            # weitere 30Hz-Kette und der Tk-Loop saettigt.
+                            if self._preview._after_id is not None:
+                                self._preview._parent.after_cancel(self._preview._after_id)
                             self._preview._after_id = self._preview._parent.after(
                                 100, self._preview._update
                             )
@@ -675,6 +683,8 @@ class MolochPanel:
                     # after-Chain neu starten
                     if self._avatar._running:
                         try:
+                            if self._avatar._after_id is not None:
+                                self._avatar._parent.after_cancel(self._avatar._after_id)
                             self._avatar._after_id = self._avatar._parent.after(
                                 100, self._avatar._update_animation
                             )
