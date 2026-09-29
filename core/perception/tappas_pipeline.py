@@ -171,6 +171,8 @@ class TappasPipeline:
         self._loop = None
         self._loop_thread = None
         self._running = False
+        # start()/stop() werden von mehreren Watchdogs aufgerufen -> serialisieren
+        self._lifecycle_lock = threading.RLock()
 
         # Detections (thread-safe, letzter Frame)
         self._lock = threading.Lock()
@@ -310,9 +312,16 @@ class TappasPipeline:
 
     def start(self):
         """Pipeline starten. Blockiert NICHT — laeuft in eigenem Thread."""
+        with self._lifecycle_lock:
+            self._start_locked()
+
+    def _start_locked(self):
         if self._running:
             logger.warning("Pipeline laeuft bereits")
             return
+        if self._pipeline is not None:
+            # Tote Pipeline (Bus-Error/EOS) erst aufraeumen, sonst Leak + 2. RTSP-Slot
+            self._stop_locked()
 
         # vision_enabled=false → Pipeline komplett ueberspringen (RAM sparen)
         try:
@@ -464,6 +473,10 @@ class TappasPipeline:
 
     def stop(self):
         """Pipeline sauber beenden. Funktioniert auch wenn _running schon False (z.B. nach Bus-Error)."""
+        with self._lifecycle_lock:
+            self._stop_locked()
+
+    def _stop_locked(self):
         was_running = self._running
         self._running = False
 
