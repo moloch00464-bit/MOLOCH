@@ -54,6 +54,8 @@ class WiFiMic:
     # Erhoet von 100ms/10 Paketen wegen WiFi-Bursts (Buffer war oft fast voll)
     JITTER_BUF_SIZE = 15  # Max Pakete im Jitter-Buffer
     JITTER_TIMEOUT_MS = 150  # Max Wartezeit bevor Ausspielen
+    JITTER_MAX_GAP = 50      # Max Stille-Pakete pro Luecke (0,5 s), sonst Resync
+    JITTER_RESYNC_BACK = 100 # Seq-Ruecksprung ab dem neu synchronisiert wird (1 s)
 
     # UDP Socket Empfangspuffer: 1MB (default 208KB reicht nicht bei CPU-Last)
     UDP_RECV_BUF = 1048576
@@ -280,6 +282,10 @@ class WiFiMic:
         if n == 0:
             return
         size = self.RING_16K_SIZE
+        if n > size:
+            # Mehr als der Ring fasst: nur die neuesten Bytes behalten
+            data = data[-size:]
+            n = size
 
         with self._lock_16k:
             wr = self._ring_16k_wr
@@ -293,7 +299,12 @@ class WiFiMic:
                 self._ring_16k[wr:size] = data[:first]
                 self._ring_16k[0:n - first] = data[first:]
             self._ring_16k_wr = end % size
-            self._ring_16k_avail = min(self._ring_16k_avail + n, size)
+            new_avail = self._ring_16k_avail + n
+            if new_avail > size:
+                # Ueberlauf: aelteste Daten sind ueberschrieben -> Lesezeiger nachziehen
+                self._ring_16k_rd = (self._ring_16k_rd + new_avail - size) % size
+                new_avail = size
+            self._ring_16k_avail = new_avail
 
     def _ring_read_16k(self, num_bytes: int) -> bytes:
         """Liest Audio-Daten aus dem 16kHz Ringpuffer."""
@@ -530,18 +541,40 @@ class WiFiMic:
         next_seq = self._jitter_next_seq_16k
         if next_seq < 0:
             next_seq = oldest_seq
+        elif oldest_seq < next_seq:
+            if next_seq - oldest_seq > self.JITTER_RESYNC_BACK:
+                # Zaehler zurueckgesprungen (ESP32-Reboot): neu synchronisieren
+                next_seq = oldest_seq
+            else:
+                # Verspaetete Pakete: verwerfen statt Buffer endlos wachsen lassen
+                for s in [s for s in self._jitter_buf_16k if s < next_seq]:
+                    del self._jitter_buf_16k[s]
+                if not self._jitter_buf_16k:
+                    return
+                oldest_seq = min(self._jitter_buf_16k.keys())
+        if oldest_seq - next_seq > self.JITTER_MAX_GAP:
+            # Grosser Sprung (gemeinsamer Zaehler mit 48k-Stream): nicht mit Stille fuellen
+            next_seq = oldest_seq
 
         max_seq = max(self._jitter_buf_16k.keys())
         silence = bytes(self.CHUNK_16K)  # 320 Bytes Stille
 
         # Batch: alle Chunks sammeln, dann EIN write
         chunks = []
+        silence_run = 0
         while next_seq <= max_seq:
             if next_seq in self._jitter_buf_16k:
                 audio, _ = self._jitter_buf_16k.pop(next_seq)
                 chunks.append(audio)
+                silence_run = 0
+            elif silence_run >= self.JITTER_MAX_GAP:
+                # Luecke innerhalb des Buffers zu gross: zum naechsten Paket springen
+                next_seq = min(self._jitter_buf_16k.keys())
+                silence_run = 0
+                continue
             else:
                 chunks.append(silence)
+                silence_run += 1
             next_seq = (next_seq + 1) & 0xFFFFFFFF
             if not self._jitter_buf_16k:
                 break
