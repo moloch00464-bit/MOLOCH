@@ -315,6 +315,34 @@ def _kill_process_tree(pid: int) -> None:
         pass
 
 
+
+def _run_tree(cmd: List[str], timeout: float, **kwargs) -> subprocess.CompletedProcess:
+    """Wie subprocess.run, killt bei Timeout aber den ganzen Prozessbaum.
+
+    subprocess.run killt nur das direkte Kind und wartet dann auf die Pipes;
+    unter Windows halten Enkel (z.B. node.exe hinter claude.cmd) sie offen.
+    Zudem hat TimeoutExpired kein .pid-Attribut. Wirft TimeoutExpired weiter.
+    """
+    kwargs.setdefault("stdout", subprocess.PIPE)
+    kwargs.setdefault("stderr", subprocess.PIPE)
+    if kwargs.pop("capture_output", False):
+        kwargs["stdout"] = kwargs["stderr"] = subprocess.PIPE
+    proc = subprocess.Popen(cmd, **kwargs)
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_process_tree(proc.pid)
+        try:
+            proc.kill()  # Fallback, falls taskkill fehlt (nicht-Windows)
+        except OSError:
+            pass
+        try:
+            proc.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+        raise
+    return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
+
 def _git_run_safe(args: List[str], env: Dict[str, str], timeout: int = 30) -> bool:
     """Run a git command. On failure, log + try `rebase --abort` cleanup if relevant."""
     res = subprocess.run(args, cwd=REPO, env=env, timeout=timeout,
@@ -349,14 +377,12 @@ def _trigger_v_next_train(triggering_topic: str, triggering_ts: str) -> Optional
         logger.info(f"AUTO-TRIGGER: {triggering_topic} at {triggering_ts} -> sync + train + reload")
 
         try:
-            sync_result = subprocess.run(
+            sync_result = _run_tree(
                 ["cmd.exe", "/c", str(REPO / "pc" / "sync_samples.bat")],
                 timeout=60, capture_output=True, text=True, stdin=subprocess.DEVNULL,
             )
-        except subprocess.TimeoutExpired as e:
-            if e.pid:
-                _kill_process_tree(e.pid)
-            logger.error("sync_samples timeout")
+        except subprocess.TimeoutExpired:
+            logger.error("sync_samples timeout - process tree killed")
             return None
         if sync_result.returncode != 0:
             logger.error(f"sync_samples failed (rc={sync_result.returncode}): {sync_result.stderr[:200]}")
@@ -366,14 +392,12 @@ def _trigger_v_next_train(triggering_topic: str, triggering_ts: str) -> Optional
         samples = Path.home() / "moloch_samples" / "samples.jsonl"
         adapters_out = Path.home() / "moloch_adapters"
         try:
-            train_result = subprocess.run(
+            train_result = _run_tree(
                 [str(venv_python), str(REPO / "pc" / "lora_trainer.py"),
                  "--samples", str(samples), "--out", str(adapters_out)],
                 timeout=1800, capture_output=True, text=True, stdin=subprocess.DEVNULL,
             )
-        except subprocess.TimeoutExpired as e:
-            if e.pid:
-                _kill_process_tree(e.pid)
+        except subprocess.TimeoutExpired:
             logger.error("lora_trainer timeout - process tree killed")
             return None
         if train_result.returncode != 0:
@@ -607,7 +631,7 @@ def _trigger_claude_autoreply(topic_id: str, topic_ts: str,
         logger.info(f"[fed] TRIGGER claude -p for {topic_id} (turns<={FED_MAX_TURNS})")
         t0 = time.monotonic()
         try:
-            proc = subprocess.run(
+            proc = _run_tree(
                 [claude_path, "-p", prompt,
                  "--dangerously-skip-permissions",
                  "--output-format", "json",
@@ -615,10 +639,8 @@ def _trigger_claude_autoreply(topic_id: str, topic_ts: str,
                 cwd=str(REPO), env=env, timeout=FED_TIMEOUT_SECS,
                 capture_output=True, text=True, stdin=subprocess.DEVNULL,
             )
-        except subprocess.TimeoutExpired as e:
-            if e.pid:
-                _kill_process_tree(e.pid)
-            logger.error(f"[fed] claude timeout for {topic_id}")
+        except subprocess.TimeoutExpired:
+            logger.error(f"[fed] claude timeout for {topic_id} - process tree killed")
             _fed_log_human(f"TIMEOUT {topic_id}")
             return {"ok": False, "error": "timeout"}
 
@@ -771,7 +793,11 @@ def main() -> int:
             new_v = _trigger_v_next_train(topic, ts)
             if new_v:
                 handled[key] = now
-                _save_handled(handled)
+            else:
+                # Fehlschlag (z.B. git push) zaehlt fuer den Topic-Cooldown
+                # (startswith(topic + ":")), sonst Retrain alle 30s. Retry nach Cooldown.
+                handled[f"{key}:failed"] = now
+            _save_handled(handled)
 
         # Federation-Schicht: bei whitelisteten Pi-Topics autonom claude -p triggern.
         # Nach v_next_train (das hat Vorrang) - sequenziell, lock-protected.
