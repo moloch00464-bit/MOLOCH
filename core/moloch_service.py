@@ -2476,7 +2476,7 @@ class MolochService:
                 _llm = get_llm_bridge()
                 status["llm_provider"] = _llm._last_provider
                 status["llm_ollama_running"] = (
-                    _llm._is_ollama_running() if _llm._ollama_available else False
+                    _llm.is_ollama_running_cached() if _llm._ollama_available else False
                 )
             except Exception:
                 status["llm_provider"] = "none"
