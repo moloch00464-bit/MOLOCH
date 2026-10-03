@@ -3079,7 +3079,6 @@ class MolochService:
                         logger.info(f"[IPC] Reflect gesprochen: {comment[:60]}")
                     logger.info(f"[IPC] Reflect fertig: {result}")
 
-                import threading
                 threading.Thread(target=_do_reflect_ipc, daemon=True,
                                  name="IPC-Reflect").start()
                 logger.info("[IPC] Reflect gestartet")
@@ -3272,57 +3271,30 @@ class MolochService:
 
         # ---- NPU-Extras: CLIP, OCR, VLM ----
 
-        elif action == 'npu_clip':
-            # CLIP-Embedding erzeugen (640d, aus aktuellem Frame)
-            def _do_clip():
-                try:
-                    from core.perception.npu_extras import get_npu_extras
-                    emb = get_npu_extras().clip_embed()
-                    if emb is not None:
-                        logger.info(f"[NPU-EXTRAS] CLIP: {emb.shape} OK")
-                    else:
-                        logger.warning("[NPU-EXTRAS] CLIP: kein Frame oder Fehler")
-                except Exception as e:
-                    logger.error(f"[NPU-EXTRAS] CLIP Fehler: {e}")
-            threading.Thread(target=_do_clip, daemon=True, name="NpuClip").start()
+        elif action in ('npu_clip', 'npu_ocr', 'npu_vlm_describe'):
+            # Auf Abruf im Thread; Ergebnis landet in
+            # /dev/shm/moloch_npu_result_<request_id>.json (npu_extras.run_request)
+            kind = {'npu_clip': 'clip', 'npu_ocr': 'ocr', 'npu_vlm_describe': 'vlm'}[action]
+            rid = cmd.get('request_id', '')
+            prompt = cmd.get('prompt')
 
-        elif action == 'npu_ocr':
-            # OCR: Text im aktuellen Kamerabild erkennen
-            def _do_ocr():
+            def _do_npu():
                 try:
                     from core.perception.npu_extras import get_npu_extras
-                    texte = get_npu_extras().ocr_read()
-                    if texte:
-                        for t in texte:
-                            logger.info(f"[NPU-EXTRAS] OCR: '{t['text']}' conf={t['confidence']:.2f}")
-                    else:
-                        logger.info("[NPU-EXTRAS] OCR: kein Text erkannt")
-                except Exception as e:
-                    logger.error(f"[NPU-EXTRAS] OCR Fehler: {e}")
-            threading.Thread(target=_do_ocr, daemon=True, name="NpuOcr").start()
-
-        elif action == 'npu_vlm_describe':
-            # VLM: Szene beschreiben (Qwen2-VL-2B)
-            prompt = cmd.get('prompt', 'Beschreibe was du siehst. Kurz und praezise, auf Deutsch.')
-            def _do_vlm():
-                try:
-                    from core.perception.npu_extras import get_npu_extras
-                    text = get_npu_extras().vlm_describe(prompt=prompt)
-                    if text:
-                        logger.info(f"[NPU-EXTRAS] VLM: {text[:120]}")
-                        # Ergebnis als Event publizieren
+                    res = get_npu_extras().run_request(kind, rid, prompt)
+                    logger.info(f"[NPU-EXTRAS] {kind}: ok={res.get('ok')} "
+                                f"{res.get('duration_ms')}ms err={res.get('error')}")
+                    if kind == 'vlm' and res.get('text'):
                         try:
                             from core.moloch_event_bus import get_event_bus
                             get_event_bus().publish("vlm_description", {
-                                "text": text, "prompt": prompt
+                                "text": res['text'], "prompt": prompt
                             })
                         except Exception:
                             pass
-                    else:
-                        logger.warning("[NPU-EXTRAS] VLM: keine Beschreibung")
                 except Exception as e:
-                    logger.error(f"[NPU-EXTRAS] VLM Fehler: {e}")
-            threading.Thread(target=_do_vlm, daemon=True, name="NpuVlm").start()
+                    logger.error(f"[NPU-EXTRAS] {kind} Fehler: {e}")
+            threading.Thread(target=_do_npu, daemon=True, name="NpuExtras").start()
 
         elif action == 'npu_extras_status':
             # Status aller Extra-Modelle abfragen
