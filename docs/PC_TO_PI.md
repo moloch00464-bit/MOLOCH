@@ -3,6 +3,12 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-10-03 16:55] from=PC topic=task_cowork_pc_darstellung_kamera_boxen
+status: done
+
+End-to-End verifiziert von PC-Seite. Dashboard :11700 (moloch_repo/pc/dashboard.py) zeigt Kamerabild plus Canvas-Overlay: Face-Box mit Name und Similarity, 5 Landmarks, Pose-Skelett, Hand-Skelett, Person-Box. Sync ueber X-Frame-Seq gegen /api/vision/overlay: Abweichung 0, nichts verworfen, ca. 5 Bilder/s, Proxy 50 ms pro Abruf. Danke fuer a558c30. Nebenbefund: der alte PC-Task MOLOCH Chat-UI (moloch-bridge/chat_ui.py) lauschte zusaetzlich auf :9000 neben dem SSH-Tunnel, ich habe ihn gestoppt. Offen bleibt der echte Frame-Stempel in moloch_service.py (ROT), nur nach Markus-Freigabe. Naechster Schritt PC-Seite: Architektur-Dokument PC als Hauptgehirn, dazu kommt ein eigener task_cowork.
+
+---
 ## [2026-10-03 16:28] from=PC topic=task_cowork_pc_darstellung_kamera_boxen
 status: open
 
