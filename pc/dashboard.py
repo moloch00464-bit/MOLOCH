@@ -20,11 +20,13 @@ from typing import Optional
 import httpx
 import uvicorn
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 
 PORT = int(os.environ.get("MOLOCH_DASHBOARD_PORT", "11700"))
 PROXY_URL = os.environ.get("MOLOCH_PROXY_URL", "http://localhost:11600")
 PI_TUNNEL_URL = os.environ.get("MOLOCH_PI_TUNNEL_URL", "http://localhost:9000")
+STT_URL = os.environ.get("MOLOCH_STT_URL", "http://127.0.0.1:9001")
+TTS_URL = os.environ.get("MOLOCH_TTS_URL", "http://127.0.0.1:9002")
 ADAPTERS_DIR = Path(
     os.environ.get("MOLOCH_ADAPTERS", str(Path.home() / "moloch_adapters"))
 )
@@ -34,9 +36,20 @@ TRAINING_STATUS_FILE = ADAPTERS_DIR / "training_status.json"
 POOL_HISTORY: deque = deque(maxlen=720)
 
 
+# Gemeinsamer Client fuer die Kamera-Routen (Keep-Alive). Ein neuer Client pro Abruf
+# kostet auf Windows >1 s (Verbindungsaufbau) — zu langsam fuer das Live-Bild.
+_cam_client: Optional[httpx.AsyncClient] = None
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    yield
+    global _cam_client
+    _cam_client = httpx.AsyncClient(timeout=5.0)
+    try:
+        yield
+    finally:
+        await _cam_client.aclose()
+        _cam_client = None
 
 
 app = FastAPI(title="MOLOCH Dashboard", lifespan=lifespan)
@@ -156,6 +169,79 @@ async def api_chat(request: Request):
             return {"error": str(e)[:120]}
 
 
+@app.get("/api/history")
+async def api_history(n: int = 40):
+    """Spiegelt die ECHTE Pi-Konversation (gemeinsames Memory) — eine Wahrheit fuer alle Fenster."""
+    async with httpx.AsyncClient() as client:
+        data, _ = await _safe_get(client, f"{PI_TUNNEL_URL}/history?n={n}", timeout=8.0)
+    return data or {"messages": []}
+
+
+@app.post("/api/transcribe")
+async def api_transcribe(request: Request):
+    """Audio -> lokale STT-Bridge :9001 (faster-whisper). Nur Transkript zurueck, KEIN Auto-Submit."""
+    body = await request.body()
+    ctype = request.headers.get("content-type", "audio/webm")
+    files = {"audio": ("rec.webm", body, ctype)}
+    async with httpx.AsyncClient() as client:
+        try:
+            r = await client.post(
+                f"{STT_URL}/transcribe", files=files,
+                data={"language": "de"}, timeout=120.0,
+            )
+            if r.status_code == 200:
+                return r.json()
+            return {"error": f"STT {r.status_code}", "text": ""}
+        except Exception as e:
+            return {"error": str(e)[:120], "text": ""}
+
+
+@app.get("/snapshot.jpg")
+async def api_snapshot():
+    """Live-Kamerabild vom Pi durchreichen (zeigt was Moloch gerade sieht)."""
+    try:
+        r = await _cam_client.get(f"{PI_TUNNEL_URL}/snapshot.jpg", timeout=5.0)
+        headers = {"Cache-Control": "no-store"}
+        # Frame-Stempel vom Pi durchreichen — der Browser gleicht damit das Overlay ab
+        for h in ("x-frame-seq", "x-frame-ts"):
+            if h in r.headers:
+                headers[h] = r.headers[h]
+        return Response(
+            content=r.content,
+            media_type=r.headers.get("content-type", "image/jpeg"),
+            headers=headers,
+        )
+    except Exception:
+        return Response(status_code=503)
+
+
+@app.get("/api/vision/overlay")
+async def api_vision_overlay():
+    """NPU-Erkennungen vom Pi durchreichen (BBoxen normiert 0..1) — fuer das Canvas-Overlay."""
+    data, _ = await _safe_get(_cam_client, f"{PI_TUNNEL_URL}/api/vision/overlay", timeout=3.0)
+    return data or {"error": "overlay offline", "panel_detections": []}
+
+
+@app.get("/api/tracker/status")
+async def api_tracker_status():
+    async with httpx.AsyncClient() as client:
+        data, _ = await _safe_get(client, f"{PI_TUNNEL_URL}/api/tracker/status", timeout=5.0)
+    return data or {"error": "tracker offline"}
+
+
+@app.post("/api/tracker/st_override")
+async def api_tracker_override(request: Request):
+    body = await request.json()
+    async with httpx.AsyncClient() as client:
+        try:
+            r = await client.post(
+                f"{PI_TUNNEL_URL}/api/tracker/st_override", json=body, timeout=5.0,
+            )
+            return r.json() if r.status_code == 200 else {"error": f"Pi {r.status_code}"}
+        except Exception as e:
+            return {"error": str(e)[:120]}
+
+
 HTML_PAGE = """<!doctype html>
 <html lang="de"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -221,9 +307,34 @@ footer{margin-top:10px;color:var(--mute);font-size:11px;text-align:center}
 .zone-pill.guardian{background:#1a2a4a;color:#6699ee}
 .zone-pill.shadow{background:#2a1a4a;color:#aa88ee}
 .zone-pill.berserker{background:#4a1a1a;color:#ff8888}
+.cam-wrap{position:relative;width:640px;max-width:100%;line-height:0}
+.cam-wrap img{width:100%;height:auto;border:1px solid var(--border);border-radius:6px;background:#08080c}
+.cam-wrap canvas{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}
 </style></head><body>
 <h1>🎛 MOLOCH COWORK DASHBOARD</h1>
 <div class="grid">
+  <div class="card pi full"><h2><span class="pulse" id="cam-pulse"></span>KAMERA — was Moloch sieht (live)</h2>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start">
+      <div class="cam-wrap">
+        <img id="cam" alt="Kamera laedt...">
+        <canvas id="cam-ovl"></canvas>
+      </div>
+      <div style="min-width:200px">
+        <div class="kv" id="track-kv">…</div>
+        <div style="margin-top:10px">
+          <button class="tts-toggle on" id="ovl-btn" onclick="toggleOverlay()">NPU-BOXEN AN</button>
+        </div>
+        <div class="legend" style="flex-direction:column;gap:3px;margin-top:8px">
+          <span><i style="background:#00dcff"></i>Gesicht (erkannt)</span>
+          <span><i style="background:#ffdc00"></i>Gesicht (ohne ID)</span>
+          <span><i style="background:#00dc50"></i>Person</span>
+          <span><i style="background:#ffa500"></i>Pose</span>
+          <span><i style="background:#ff00c8"></i>Hand</span>
+        </div>
+        <div id="cam-info" style="font:11px monospace;color:var(--mute);margin-top:8px;min-height:30px;white-space:pre"></div>
+      </div>
+    </div>
+  </div>
   <div class="card pc"><h2><span class="pulse" id="pc-pulse"></span>PC ADAPTER (Qwen 1.5B + LoRA, :11600)</h2>
     <div class="kv" id="pc-kv">…</div>
   </div>
@@ -399,6 +510,14 @@ async function tick(){
       ['Tunnel-Latency', s.pi.latency_ms+' ms'],
     ]);
 
+    $('cam-pulse').className = 'pulse ' + (s.pi.online?'ok':'err');
+    setKv('track-kv',[
+      ['Person', pl.person_detected?'ja':'nein', pl.person_detected?'ok':''],
+      ['Gesicht', pl.face_id || (pl.face_detected?'(unbekannt)':'—')],
+      ['Face-Conf', fix(pl.face_confidence,2)],
+      ['FPS', fix(pl.fps_total,1)],
+    ]);
+
     const log=s.adapters.latest_log||{};
     const tr=s.training;
     const trKv=[
@@ -510,46 +629,128 @@ async function tick(){
 }
 tick(); setInterval(tick, 5000);
 
-// === MIKROFON (STT) ===
-const _SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-let _recognition = null, _micActive = false;
+// === KAMERABILD + NPU-OVERLAY (Bild und Erkennungen vom Pi, per Frame-Seq abgeglichen) ===
+// Zeichenlogik entspricht core/gui/panel_preview.py: BBoxen normiert 0..1 -> Canvas-Pixel.
+const CAM_INTERVAL_MS = 200;      // ~5 Bilder/s, Pi liefert 20 FPS
+const OVL_MAX_SEQ_DIFF = 2;       // Boxen verwerfen, wenn sie zu einem anderen Frame gehoeren
+const OVL_MAX_AGE_S = 0.3;        // ... oder das Status-JSON zu alt ist
+const COCO_PAIRS = [[0,1],[0,2],[1,3],[2,4],[5,6],[5,7],[7,9],[6,8],[8,10],[5,11],[6,12],
+                    [11,12],[11,13],[13,15],[12,14],[14,16]];
+const HAND_PAIRS = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[0,9],[9,10],[10,11],[11,12],
+                    [0,13],[13,14],[14,15],[15,16],[0,17],[17,18],[18,19],[19,20],[5,9],[9,13],[13,17]];
+let _ovlOn = true, _camBusy = false, _camUrl = null, _camTimes = [], _ovlDropped = 0;
 
-if (_SR) {
-  _recognition = new _SR();
-  _recognition.lang = 'de-DE';
-  _recognition.continuous = false;
-  _recognition.interimResults = true;
-
-  _recognition.onstart = () => {
-    $('mic-status').textContent = '🔴 Höre zu...';
-  };
-  _recognition.onresult = (e) => {
-    const r = e.results[e.results.length - 1];
-    const txt = r[0].transcript;
-    $('chat-input').value = txt;
-    $('mic-status').textContent = (r.isFinal ? '✓ ' : '…') + txt;
-    if (r.isFinal) {
-      _micActive = false;
-      _updateMicBtn();
-      sendChat();
-    }
-  };
-  _recognition.onerror = (e) => {
-    $('mic-status').textContent = 'Mikrofon-Fehler: ' + e.error;
-    _micActive = false; _updateMicBtn();
-  };
-  _recognition.onend = () => {
-    if (_micActive) { _micActive = false; _updateMicBtn(); }
-    if (!$('chat-input').value) $('mic-status').textContent = '';
-  };
-} else {
-  setTimeout(() => {
-    if ($('mic-btn')) {
-      $('mic-btn').title = 'SpeechRecognition nicht verfügbar — Chrome verwenden';
-      $('mic-btn').style.opacity = '0.4';
-    }
-  }, 500);
+function toggleOverlay() {
+  _ovlOn = !_ovlOn;
+  const btn = $('ovl-btn');
+  btn.textContent = _ovlOn ? 'NPU-BOXEN AN' : 'NPU-BOXEN AUS';
+  btn.className = 'tts-toggle ' + (_ovlOn ? 'on' : 'off');
+  if (!_ovlOn) drawOverlay(null);
 }
+
+function drawOverlay(dets) {
+  const img = $('cam'), cv = $('cam-ovl');
+  const cw = img.clientWidth, ch = img.clientHeight;
+  if (!cw || !ch) return;
+  if (cv.width !== cw || cv.height !== ch) { cv.width = cw; cv.height = ch; }
+  const g = cv.getContext('2d');
+  g.clearRect(0, 0, cw, ch);
+  if (!_ovlOn || !dets) return;
+  g.font = '11px monospace';
+  g.textBaseline = 'top';
+  const rect = (b, color, w) => {
+    g.strokeStyle = color; g.lineWidth = w;
+    g.strokeRect(b[0]*cw, b[1]*ch, (b[2]-b[0])*cw, (b[3]-b[1])*ch);
+  };
+  const label = (b, text, color) => {
+    const x = b[0]*cw + 2, y = Math.max(0, b[1]*ch - 13);
+    g.fillStyle = 'rgba(0,0,0,.55)';
+    g.fillRect(x - 2, y, g.measureText(text).width + 4, 13);
+    g.fillStyle = color; g.fillText(text, x, y + 1);
+  };
+  const dot = (x, y, r, color) => {
+    g.fillStyle = color; g.beginPath(); g.arc(x*cw, y*ch, r, 0, 6.2832); g.fill();
+  };
+  const line = (a, b, color) => {
+    g.strokeStyle = color; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(a[0]*cw, a[1]*ch); g.lineTo(b[0]*cw, b[1]*ch); g.stroke();
+  };
+  for (const d of dets) {
+    const b = d.bbox || [];
+    if (b.length !== 4) continue;
+    const cls = d['class'] || '?';
+    if (cls === 'face') {
+      const color = d.face_id ? '#00dcff' : '#ffdc00';
+      const sim = d.face_similarity || 0;
+      const text = sim > 0 ? ((d.face_id || '?') + ' ' + sim.toFixed(2))
+                           : ('face ' + (d.confidence || 0).toFixed(2));
+      rect(b, color, 1); label(b, text, color);
+      const lms = d.landmarks || [];
+      for (let i = 0; i < lms.length - 1; i += 2) dot(lms[i], lms[i+1], 1.5, '#00ff64');
+    } else if (cls === 'person') {
+      const color = d.reid_name ? '#00c8ff' : '#00dc50';
+      const text = d.reid_name ? (d.reid_name + ' ' + (d.reid_score || 0).toFixed(2))
+                               : ('person ' + (d.confidence || 0).toFixed(2));
+      rect(b, color, 2); label(b, text, color);
+    } else if (cls === 'pose') {
+      rect(b, '#ffa500', 2);
+      const k = d.keypoints || [];
+      for (const [i, j] of COCO_PAIRS) {
+        if (k[i] && k[j] && k[i][2] > 0.1 && k[j][2] > 0.1) line(k[i], k[j], '#ffa500');
+      }
+      for (const p of k) if (p.length > 2 && p[2] > 0.1) dot(p[0], p[1], 2, '#ffa500');
+    } else if (cls === 'hand') {
+      rect(b, '#ff00c8', 2);
+      const k = d.keypoints || [];
+      for (const [i, j] of HAND_PAIRS) if (k[i] && k[j]) line(k[i], k[j], '#ff00c8');
+      for (const p of k) dot(p[0], p[1], 1.5, '#ff00c8');
+    }
+  }
+}
+
+async function refreshCam() {
+  if (_camBusy) return;           // kein Stau, wenn der Pi mal langsam antwortet
+  _camBusy = true;
+  try {
+    const [fr, ov] = await Promise.all([
+      fetch('/snapshot.jpg?t=' + Date.now()),
+      fetch('/api/vision/overlay').then(r => r.ok ? r.json() : null).catch(() => null),
+    ]);
+    if (!fr.ok) throw new Error('kein Bild (' + fr.status + ')');
+    const seq = parseInt(fr.headers.get('X-Frame-Seq') || '-1', 10);
+    const url = URL.createObjectURL(await fr.blob());
+    const img = $('cam');
+    await new Promise(res => { img.onload = res; img.onerror = res; img.src = url; });
+    if (_camUrl) URL.revokeObjectURL(_camUrl);
+    _camUrl = url;
+
+    let dets = null, dseq = 0, age = 0, n = 0;
+    if (ov && Array.isArray(ov.panel_detections)) {
+      n = ov.panel_detections.length;
+      dseq = (seq >= 0 && typeof ov.seq === 'number') ? Math.abs(ov.seq - seq) : 0;
+      age = typeof ov.status_age_s === 'number' ? ov.status_age_s : 0;
+      if (dseq <= OVL_MAX_SEQ_DIFF && age <= OVL_MAX_AGE_S) dets = ov.panel_detections;
+      else _ovlDropped++;
+    }
+    drawOverlay(dets);
+
+    const now = performance.now();
+    _camTimes.push(now);
+    _camTimes = _camTimes.filter(t => t > now - 2000);
+    const fps = (_camTimes.length / 2).toFixed(1);
+    $('cam-info').textContent = 'seq ' + (seq >= 0 ? seq : '?') + '  d' + dseq + '  alter '
+      + Math.round(age * 1000) + ' ms\\n' + fps + ' Bilder/s  ' + n + ' Obj  verworfen ' + _ovlDropped;
+  } catch (e) {
+    drawOverlay(null);
+    $('cam-info').textContent = 'Kamera: ' + e.message;
+  } finally {
+    _camBusy = false;
+  }
+}
+refreshCam(); setInterval(refreshCam, CAM_INTERVAL_MS);
+
+// === MIKROFON (STT ueber lokale Bridge :9001, manueller Start/Stop, KEIN Auto-Submit bei Pause) ===
+let _mediaRecorder = null, _recChunks = [], _micActive = false;
 
 function _updateMicBtn() {
   const btn = $('mic-btn');
@@ -563,25 +764,45 @@ function _updateMicBtn() {
   }
 }
 
-function toggleMic() {
-  if (!_recognition) {
-    $('mic-status').textContent = 'Kein SpeechRecognition — Chrome verwenden';
-    return;
-  }
-  if (_micActive) {
-    _recognition.stop();
-    _micActive = false;
-  } else {
-    // TTS stoppen wenn Mikro startet — nicht sprechen waehrend zuhoeren
+async function toggleMic() {
+  // Laeuft Aufnahme? -> stoppen, dann wird transkribiert (onstop).
+  if (_micActive && _mediaRecorder) { _mediaRecorder.stop(); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({audio: true});
+    _mediaRecorder = new MediaRecorder(stream);
+    _recChunks = [];
+    _mediaRecorder.ondataavailable = e => { if (e.data.size > 0) _recChunks.push(e.data); };
+    _mediaRecorder.onstop = async () => {
+      _micActive = false; _updateMicBtn();
+      stream.getTracks().forEach(t => t.stop());
+      $('mic-status').textContent = 'transkribiere...';
+      const blob = new Blob(_recChunks, {type: 'audio/webm'});
+      try {
+        const r = await fetch('/api/transcribe', {
+          method: 'POST', headers: {'Content-Type': 'audio/webm'}, body: blob,
+        });
+        const d = await r.json();
+        if (d.text && d.text.trim()) {
+          // Transkript ins Feld — NICHT automatisch senden. Markus prueft und drueckt Senden.
+          $('chat-input').value = d.text.trim();
+          $('mic-status').textContent = '✓ erkannt — pruefen und Senden druecken';
+          $('chat-input').focus();
+        } else {
+          $('mic-status').textContent = d.error ? ('STT: ' + d.error) : 'nichts erkannt';
+        }
+      } catch (e) {
+        $('mic-status').textContent = 'STT-Fehler: ' + e.message;
+      }
+    };
+    // TTS stoppen waehrend Aufnahme
     if (window.speechSynthesis) speechSynthesis.cancel();
-    $('tts-speaking').style.display = 'none';
-    _ttsActive = false;
-    $('chat-input').value = '';
-    $('mic-status').textContent = '';
-    _recognition.start();
-    _micActive = true;
+    $('tts-speaking').style.display = 'none'; _ttsActive = false;
+    _mediaRecorder.start();
+    _micActive = true; _updateMicBtn();
+    $('mic-status').textContent = '🔴 Aufnahme laeuft — nochmal klicken zum Stoppen';
+  } catch (e) {
+    $('mic-status').textContent = 'Mikrofon-Zugriff verweigert: ' + e.message;
   }
-  _updateMicBtn();
 }
 
 // === TTS + CHAT ===
@@ -636,11 +857,11 @@ function speakMoloch(text) {
   speechSynthesis.speak(utt);
 }
 
-function appendChat(who, text, cls) {
+function appendChat(who, text, cls, tsStr) {
   const log = $('chat-log');
   const msg = document.createElement('div');
   msg.className = 'chat-msg ' + (cls || who.toLowerCase());
-  const ts = new Date().toLocaleTimeString('de-DE', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  const ts = tsStr || new Date().toLocaleTimeString('de-DE', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
   msg.innerHTML = `<span class="who">[${ts}] ${who}:</span> <span class="body">${text.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</span>`;
   log.appendChild(msg);
   log.scrollTop = log.scrollHeight;
@@ -654,7 +875,6 @@ async function sendChat() {
   const btn = $('chat-send');
   btn.disabled = true;
   btn.textContent = '...';
-  appendChat('Markus', msg, 'markus');
   try {
     const r = await fetch('/api/chat', {
       method: 'POST',
@@ -663,16 +883,43 @@ async function sendChat() {
     });
     const data = await r.json();
     const reply = data.response || data.text || data.reply || data.message
-               || (data.error ? '[Fehler: ' + data.error + ']' : JSON.stringify(data));
-    appendChat('MOLOCH', reply, 'moloch');
-    speakMoloch(reply);
+               || (data.error ? '[Fehler: ' + data.error + ']' : '');
+    if (reply) speakMoloch(reply);
+    loadHistory();  // echten Verlauf (Markus + Moloch) sofort nachziehen
   } catch(e) {
-    appendChat('SYS', 'Verbindungsfehler: ' + e.message, 'system');
+    $('mic-status').textContent = 'Verbindungsfehler: ' + e.message;
   } finally {
     btn.disabled = false;
     btn.textContent = 'Senden';
   }
 }
+
+// === CHAT-VERLAUF aus der ECHTEN Pi-Konversation (/history) — eine Wahrheit fuer ALLE Fenster ===
+let _lastHistTs = '';
+let _histInit = false;
+async function loadHistory() {
+  try {
+    const r = await fetch('/api/history?n=40');
+    if (!r.ok) return;
+    const d = await r.json();
+    const msgs = d.messages || [];
+    const log = $('chat-log');
+    if (!_histInit) { log.innerHTML = ''; _histInit = true; }
+    for (const m of msgs) {
+      const ts = m.ts || '';
+      if (ts && _lastHistTs && ts <= _lastHistTs) continue;
+      const who = (m.sender === 'user') ? 'Markus'
+                : (m.sender === 'moloch') ? 'MOLOCH' : (m.sender || 'SYS');
+      const cls = (m.sender === 'user') ? 'markus'
+                : (m.sender === 'moloch') ? 'moloch' : 'system';
+      const tsStr = (m.ts || '').replace('T', ' ').slice(11, 19);
+      appendChat(who, m.text || '', cls, tsStr);
+      if (ts) _lastHistTs = ts;
+    }
+  } catch (e) {}
+}
+loadHistory();
+setInterval(loadHistory, 4000);
 </script></body></html>
 """
 
