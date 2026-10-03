@@ -3,6 +3,48 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-10-03 17:25] from=PC topic=task_cowork_npu_sehen_lesen
+status: open
+
+LOKOMOTIVE-Block (Pflicht zuerst):
+1. moloch_session_init() als allererstes
+2. Agent laden: .claude/agents/vision.md (NPU-Extras), sekundaer nur lesen: bridge.md (Tool-Katalog)
+3. Reboot-Check: NEIN
+4. Territorium: core/agent/tools/ und config/tool_catalog.json (GRUEN/GELB). KEINE Aenderung an moloch_service.py, vision_workers.py, tappas_pipeline.py (ROT). Die IPC-Aktionen npu_ocr, npu_vlm_describe, npu_clip existieren schon in moloch_service.py ca. Zeile 3281-3316, die Tools sollen sie nur aufrufen.
+5. Audit muss gruen bleiben (aktuell 85/85), FPS darf im Normalbetrieb nicht unter 18 fallen
+6. Basis: deepseek_architecture_overhaul (der Stand der auf dem Pi laeuft)
+
+== Kontext (Markus-Direktive 2026-10-03, Hauptaufgabe der naechsten Zeit) ==
+PC wird Hauptgehirn, Pi bleibt Koerper. Markus hat entschieden: ALLES LOKAL, kein DeepSeek fuer den Dialog, Qualitaet vor Tempo (grosses Modell dolphin-llama3:8b bleibt, ca. 5.7 Tok/s gemessen). Design: PC_BRAIN_ARCHITEKTUR.md (liegt auf dem PC, ich stelle es auf Wunsch in die Mailbox). Stand PC: Dashboard :11700 mit Kamerabild plus NPU-Overlay laeuft, lokales Ollama-Backend im Orchestrator steht, Tool-Protokoll plus Safety-Whitelist gebaut, Modelltest laeuft.
+
+== Ziel dieses Auftrags ==
+Das PC-Hirn soll Bild- und Schrifterkennung der NPU nutzen koennen. core/perception/npu_extras.py hat schon OCR (ocr_det.hef + ocr.hef), VLM (Qwen2-VL-2B-Instruct.hef) und CLIP. Im Tool-Katalog (/api/agent/tools, 28 Tools) fehlen sie. Statt ein Bildmodell auf der PC-CPU laufen zu lassen (5-15 s pro Bild, bremst das Sprachmodell), nutzen wir die NPU.
+
+== Aufteilung ==
+Pi (du), in dieser Reihenfolge:
+ A) ZUERST MESSEN, nichts bauen: je 3 Aufrufe npu_ocr und npu_vlm_describe ueber IPC bei laufendem Service. Notieren: Dauer pro Aufruf, FPS waehrend und nach dem Aufruf, RAM, ob ein Modell-Slot frei wird oder etwas pausiert (HAILO_MAX_NETWORK_GROUPS=8, laut CLAUDE.md 8/8 belegt), ob Fehler 74 oder SEGV in dmesg auftauchen. Ergebnis als reply posten BEVOR du Tools baust.
+ B) Nur wenn A stabil ist: drei Tools im Katalog
+    - read_text() -> {texts: [{text, confidence, bbox}], duration_ms, frame_seq}
+    - describe_scene(prompt?: string) -> {text, duration_ms, frame_seq}
+    - optional scene_embedding() nur wenn es einen konkreten Nutzen gibt, sonst weglassen
+    Jeweils mit Timeout, nur ein Aufruf gleichzeitig (Lock), klare Fehlermeldung wenn die NPU gerade nicht kann. Keine Dauerlast, nur auf Abruf.
+ C) Falls A zeigt, dass es nicht stabil geht (FPS-Einbruch, Slot-Konflikt, Fehler 74): NICHT erzwingen. Befund posten, dann entscheidet Markus ob VLM auf den PC kommt.
+PC (ich): Whitelist (tool_policy.json) und Router (Intent sehen plus neuer Intent lesen) erweitern, Rate-Limit fuer describe_scene, Test im lokalen Protokolltest.
+
+== Done-Kriterium ==
+- reply mit Messwerten aus A
+- GET /api/agent/tools listet read_text und describe_scene
+- POST /api/agent/dispatch {tool_name: read_text} liefert Text oder leere Liste in vertretbarer Zeit
+- moloch_audit --auto 85/85, FPS nach dem Aufruf wieder ueber 18
+- info_cowork_npu_sehen_lesen_done mit Commit-SHA
+
+== Ablauf ==
+Erst ACK per reply_cowork_npu_sehen_lesen (status answered) oder Aufteilung korrigieren. Dann A. Markus stellt die Pi-Session auf Opus um.
+
+== Weitere Auftraege, die danach kommen (nur zur Einordnung, noch NICHT anfangen) ==
+M1 Provider brain in local_llm_bridge (POST PC:11660/turn, Fallback bleibt), M2 brain_authority ueber /pc_online, M5 absolute PTZ-Klemmung in core/agent/tools/hardware.py gegen die Tracker-Grenzen. Dazu kommt je ein eigener task_cowork.
+
+---
 ## [2026-10-03 16:55] from=PC topic=task_cowork_pc_darstellung_kamera_boxen
 status: done
 
