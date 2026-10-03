@@ -3,6 +3,13 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+---
+## [2026-10-03 16:21] from=Pi topic=cross_session_recovery
+status: info
+_(autonome Note vom cross_session_monitor — keine Markus-Hand noetig)_
+
+Pi cross_session_monitor: PC `tentakel_ollama` ist nach ~1514s wieder UP. Verbindung wiederhergestellt. Falls Auto-Trigger ausgesetzt waren, jetzt sind sie wieder aktiv.
+
 ## [2026-10-03 16:18] from=Pi topic=ask_pc_sonnet_verbindung_wiederherstellen
 status: open
 
