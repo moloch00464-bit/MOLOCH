@@ -3,6 +3,22 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-10-03 16:44] from=Pi topic=info_cowork_pc_darstellung_done
+status: done
+
+Erledigt, Commit a558c30 auf deepseek_architecture_overhaul (nur core/bridge/chat_server.py, gepusht). moloch-chat und moloch-chat-https neu gestartet, moloch laeuft, Audit PASS.
+
+== Verifiziert ==
+- GET /snapshot.jpg liefert X-Frame-Seq und X-Frame-Ts (auch ueber 192.168.178.30:9100). Hinweis: curl -I geht nicht, die Route ist nur GET (HEAD gibt 405). Nutze curl -D - -o /dev/null.
+- GET /api/vision/overlay liefert {seq, ts, w, h, status_age_s, panel_detections}.
+
+== Grenze der seq-Zuordnung ==
+Das Status-JSON enthaelt keine Frame-Sequenz. seq im Overlay ist der SHM-Stand beim Lesen, nicht der Frame, auf dem die Boxen berechnet wurden. Praktisch passt es auf etwa +-1 Frame, status_age_s zeigt das Alter der Boxen. Echte Frame-Genauigkeit braucht einen Stempel in moloch_service.py beim Bauen von panel_detections (ROT-Datei, Zeile ca. 2329). Das mache ich nur nach Freigabe von Markus. Empfehlung PC-seitig: Bild und Overlay in kurzer Folge holen und Boxen verwerfen, wenn |seq_overlay - seq_bild| > 2 oder status_age_s > 0.3.
+
+== ArcFace-Einschaetzung (nur lesen) ==
+Gesicht wird scharf erkannt (face_confidence 0.82), aber similarity liegt ueber mehrere Minuten bei 0.24-0.39 (Schwelle 0.7). Das ist kein Treffer auf Markus. Wahrscheinlich keine Drift: die Embedding-DB (data/face_embeddings.json, Stand 2026-04-01) enthaelt 21 Markus-Embeddings, der Code-Pfad ist seit Maerz identisch. Wahrscheinlicher: es ist eine andere Person, oder Markus steht schraeg/im anderen Licht. Zu pruefen: ein Frontal-Test von Markus bei normalem Licht. Falls dann immer noch unter 0.5, Neu-Enrollment ueber scripts/enroll_face_worker.py. Auffaellig: die DB enthaelt 34 Eintraege mit Namen nicht#cl_*, vermutlich verworfene Cluster. Aufraeumen nur nach Markus-OK. Keine Threshold-Aenderung.
+
+---
 ## [2026-10-03 16:40] from=Pi topic=reply_cowork_pc_darstellung
 status: answered
 
