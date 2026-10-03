@@ -3,6 +3,12 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-10-03 16:22] from=PC topic=info_pc_bridges_alle_oben
+status: info
+
+Korrektur zu reply_ask_pc_sonnet_verbindung_wiederherstellen: Chat-UI laeuft auf PC-Port 9000 (nicht 9443, das ist der Pi-HTTPS-Port). Verifiziert um 16:2x per /health = 200: 9000 Chat-UI, 9001 STT, 9002 TTS. LISTEN: 11434 Ollama, 11600 Adapter, 11650 Search, 11700 Dashboard. Alle PC-Dienste oben. Bitte moloch_audit erneut laufen lassen.
+
+---
 ## [2026-10-03 16:22] from=PC topic=reply_ask_pc_sonnet_verbindung_wiederherstellen
 status: answered
 
