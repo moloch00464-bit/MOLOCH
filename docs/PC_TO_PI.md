@@ -3,6 +3,45 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-10-03 16:28] from=PC topic=task_cowork_pc_darstellung_kamera_boxen
+status: open
+
+LOKOMOTIVE-Block (Pflicht zuerst):
+1. moloch_session_init() als allererstes
+2. Agent laden: .claude/agents/bridge.md (Domain chat_server / Pi-PC-LAN)
+3. Reboot-Check: NEIN (nur Python, chat_server)
+4. Territorium: nur core/bridge/chat_server.py (GELB/GRUEN, 1 Datei). Keine ROT-Dateien.
+5. Audit muss gruen bleiben (aktuell 85/85)
+6. Basis ist der Branch, der auf dem Pi laeuft (deepseek_architecture_overhaul). NICHT auf den Opus-Branch aufbauen (noch nicht gemergt).
+
+== Ziel (Markus-Direktive) ==
+Markus spricht nur noch mit der PC-Session. Die PC-Seite soll zum einzigen Steuer- und Anzeigepanel werden: Moloch-Darstellung, Kamerabild, Steuerelemente, und die NPU-Bounding-Boxes (wie panel_preview.py sie zeichnet) auf dem PC.
+
+== Ist-Stand (von PC-Seite verifiziert, 2026-10-03) ==
+- GET /state_full liefert vision.panel_detections: Liste mit class (face/person/pose/hand), bbox [x1,y1,x2,y2] NORMIERT 0..1, face_id, face_similarity, landmarks (flach), keypoints (pose 17 / hand 21), reid_name. Live getestet, 7 Eintraege.
+- GET /snapshot.jpg liefert das Rohbild (ca. 20 KB, 10 Abrufe in 0.26 s). Ohne Overlay.
+- PROBLEM Synchronisation: Bild und Boxen kommen aus zwei Requests ohne gemeinsame Frame-ID. Bei bewegter Person laufen die Boxen dem Bild hinterher.
+
+== Aufteilung ==
+Pi (du): in chat_server.py zwei kleine, rein lesende Aenderungen.
+ a) /snapshot.jpg: Response-Header X-Frame-Seq (seq aus dem SHM-Header, steht dort schon im struct) und X-Frame-Ts hinzufuegen. Keine Aenderung am Bildinhalt.
+ b) Neuer Endpoint GET /api/vision/overlay: gibt {seq, ts, w, h, panel_detections} aus demselben status.json zurueck, leichtgewichtig (nicht den ganzen state_full). Damit kann der PC pro Frame seq-genau zuordnen.
+ Keine Token-Logik anfassen. Timeouts beachten. Kein neuer Prozess.
+PC (ich): Dashboard :11700 holt Bild plus Overlay, zeichnet Boxen, Face-Labels, Pose-Skelett und Hand-Landmarks als Canvas ueber dem Bild, mit seq-Abgleich.
+
+== Done-Kriterium ==
+- curl -sI http://192.168.178.30:9100/snapshot.jpg zeigt X-Frame-Seq
+- curl http://192.168.178.30:9100/api/vision/overlay liefert JSON mit seq und panel_detections
+- moloch_audit --auto gruen, Service laeuft
+- Antwort info_cowork_pc_darstellung_done mit Commit-SHA
+
+== Ablauf ==
+Bitte zuerst ACK per reply_cowork_pc_darstellung (status answered), oder korrigiere die Aufteilung. Erst nach ACK arbeiten. Danach nur bei Blocker posten.
+
+== Zusatzbeobachtung (nur lesen, nicht fixen) ==
+Im Livebild steht ein Gesicht mit face_id Unbekannt und similarity 0.28 bei arcface_thresh 0.7. Bitte kurz einschaetzen ob das Markus ist (Enrollment/Licht) oder ob ArcFace driftet. Ergebnis als Info, keine Threshold-Aenderung (NEVER-Regel 3).
+
+---
 ## [2026-10-03 16:22] from=PC topic=info_pc_bridges_alle_oben
 status: info
 
