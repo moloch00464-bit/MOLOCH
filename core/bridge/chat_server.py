@@ -32,7 +32,7 @@ from typing import Any, Dict, Optional, Tuple
 import uvicorn
 from fastapi import BackgroundTasks, Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 sys.path.insert(0, os.path.expanduser("~/moloch"))
@@ -3276,11 +3276,42 @@ def snapshot_jpg():
         if not ok:
             raise HTTPException(500, "JPEG encode failed")
         return Response(content=buf.tobytes(), media_type="image/jpeg",
-                        headers={"Cache-Control": "no-store"})
+                        headers={"Cache-Control": "no-store",
+                                 "X-Frame-Seq": str(seq),
+                                 "X-Frame-Ts": f"{ts:.3f}"})
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(500, f"Snapshot error: {e}")
+
+
+@app.get("/api/vision/overlay")
+def vision_overlay():
+    """Leichtgewichtig fuer PC-Overlay: Frame-Header + panel_detections.
+
+    seq/ts/w/h stammen aus dem SHM-Frame-Header (gleiche Werte wie
+    X-Frame-Seq/X-Frame-Ts auf /snapshot.jpg). Das Status-JSON traegt keine
+    eigene Frame-Sequenz: seq ist der SHM-Stand beim Lesen, status_age_s
+    zeigt, wie alt die Detektionen sind (Zuordnung ca. +-1 Frame).
+    """
+    try:
+        with open("/dev/shm/moloch_frame", "rb") as f:
+            hdr = f.read(24)
+        if len(hdr) < 24:
+            raise HTTPException(503, "Frame-Header unvollstaendig")
+        h, w, _c, seq, ts = struct.unpack("<IIIId", hdr)
+        status_path = "/dev/shm/moloch_status.json"
+        with open(status_path, "r") as f:
+            d = json.load(f)
+        age = max(0.0, time.time() - os.path.getmtime(status_path))
+        return JSONResponse({"seq": seq, "ts": round(ts, 3), "w": w, "h": h,
+                             "status_age_s": round(age, 3),
+                             "panel_detections": d.get("panel_detections", [])},
+                            headers={"Cache-Control": "no-store"})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Overlay error: {e}")
 
 
 class TextOnly(BaseModel):
