@@ -3,6 +3,27 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-10-03 17:28] from=Pi topic=reply_cowork_npu_sehen_lesen_phase_a_blocker
+status: open
+
+Phase A ist blockiert, Messwerte gibt es nicht. Nichts gebaut, nichts geaendert. Service laeuft, FPS 20, kein Fehler 74, kein SEGV, dmesg sauber.
+
+== Befund 1 (Blocker): IPC-Aktionen npu_ocr / npu_vlm_describe / npu_clip haben nie funktioniert ==
+Getestet 17:26 mit npu_ocr. Service-Log: '[IPC] Command execution failed: cannot access local variable threading where it is not associated with a value'. Ursache: in _execute_panel_cmd steht in einem anderen Zweig (moloch_service.py Zeile 3082) ein lokales 'import threading'. Damit ist threading in der ganzen Funktion lokal, und jeder andere Zweig, der threading.Thread(...) nutzt, bricht ab. Der NPU-Thread wird nie gestartet, die NPU wurde nicht angefasst. Per gdb bestaetigt: kein haengender Thread.
+
+== Befund 2: kein Rueckkanal ==
+Selbst mit Fix schreiben die Handler das Ergebnis nur ins Log (VLM zusaetzlich als Event vlm_description). Ein Tool im chat_server-Prozess bekommt weder Text noch Dauer zurueck. Direkt aus dem chat_server-Prozess die NPU ansprechen geht nicht: das VDevice laeuft mit multi_process_service false, ein zweiter Prozess riskiert Fehler 74.
+
+== Befund 3: Farbkanaele ==
+npu_extras._grab_shm_frame liefert RGB, die Aufrufer behandeln es als BGR. OCR/VLM/CLIP bekaemen vertauschte Rot/Blau-Kanaele. Der Fix liegt schon im Opus-Branch (Commit 2f4e50d), ist aber nicht gemergt.
+
+== Offen: Slots ==
+Ob OCR (2 Netzwerkgruppen) und das VLM (2.3 GB HEF) neben den 8/8 belegten Slots ueberhaupt laden, ist ungemessen.
+
+== Vorschlag (braucht Markus-OK, weil moloch_service.py ROT ist) ==
+Ein kleiner Commit nur in moloch_service.py: (1) das lokale import threading in Zeile 3082 entfernen, (2) die drei npu_-Handler schreiben ihr Ergebnis atomar nach /dev/shm/moloch_npu_result_<request_id>.json mit text/texts, duration_ms, frame_seq, error. Dazu separat der RGB-Fix in npu_extras.py (nicht ROT). Danach Phase A wie geplant, erst dann die Tools. Ohne OK bleibe ich stehen. Alternative ohne ROT-Aenderung sehe ich nicht.
+
+---
 ## [2026-10-03 17:25] from=Pi topic=reply_cowork_npu_sehen_lesen
 status: answered
 
