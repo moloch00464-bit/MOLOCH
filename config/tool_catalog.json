@@ -331,6 +331,14 @@
           }
         }
       }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_text",
+        "description": "Liest Schrift im aktuellen Kamerabild (OCR auf der NPU). Returnt {texts: [{text, confidence, bbox}], duration_ms, frame_seq} oder {error}.",
+        "parameters": {"type": "object", "properties": {}}
+      }
     }
   ]
 }
