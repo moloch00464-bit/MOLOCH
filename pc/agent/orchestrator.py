@@ -19,13 +19,17 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
+import time
 from typing import Any, Dict, List, Optional
 
 from pc.agent import deepseek_client
 from pc.agent import local_llm_client
 from pc.agent import token_budget
+from pc.agent import tool_protocol
 from pc.agent.pi_tool_bridge import MockBridge, ToolBridge, get_bridge
+from pc.agent.safety import Context, Safety
 
 logger = logging.getLogger("orchestrator")
 
@@ -39,6 +43,11 @@ SYSTEM_PROMPT = (
 )
 # LLM-Backends mit gleicher Schnittstelle (complete / extract_message / extract_usage)
 BACKENDS = {"deepseek": deepseek_client, "local": local_llm_client}
+# Lokale Grenzen: wenige Iterationen, Wanduhr-Limit, Tool-Ergebnis gekuerzt
+# (Prompt-Verarbeitung ~37 Tok/s auf dieser CPU — 1500 Zeichen kosten schon ~10 s)
+LOCAL_MAX_ITER = 4
+LOCAL_WALL_S = float(os.environ.get("MOLOCH_LOCAL_WALL_S", "120"))
+LOCAL_TOOL_RESULT_CHARS = 1500
 
 
 class Orchestrator:
@@ -49,6 +58,7 @@ class Orchestrator:
         system_prompt: str = SYSTEM_PROMPT,
         verbose: bool = False,
         backend: str = "deepseek",
+        safety: Optional[Safety] = None,
     ) -> None:
         if backend not in BACKENDS:
             raise ValueError(f"backend muss eines von {sorted(BACKENDS)} sein")
@@ -65,9 +75,116 @@ class Orchestrator:
         # der CPU) und 7B-Modelle rufen Tools unzuverlaessig. Kommt mit dem Tool-Protokoll
         # (Regel-Router + Schema + Validator), siehe PC_BRAIN_ARCHITEKTUR.md Etappe 2.
         self.llm_tools = self.tools if backend == "deepseek" else None
+        self.index = tool_protocol.catalog_index(self.tools)
+        self.safety = safety or (Safety() if backend == "local" else None)
 
-    def run(self, user_query: str) -> Dict[str, Any]:
+    def _run_local(self, user_query: str, ctx: Optional[Context] = None) -> Dict[str, Any]:
+        """Lokaler Pfad: Regel-Router -> JSON-Protokoll -> Validator -> Safety -> Dispatch."""
+        t0 = time.time()
+        intent, names = tool_protocol.route(user_query, list(self.index))
+        messages: List[Dict[str, Any]] = [{"role": "system", "content": self.system_prompt}]
+        tool_calls_log: List[Dict[str, Any]] = []
+        total_tokens = 0
+
+        def result(answer: str, iterations: int) -> Dict[str, Any]:
+            return {"answer": answer, "iterations": iterations, "tool_calls": tool_calls_log,
+                    "total_tokens": total_tokens, "intent": intent,
+                    "duration_s": round(time.time() - t0, 1)}
+
+        if not names:
+            # Smalltalk: frei antworten, ohne JSON-Zwang (bessere Sprache, kein Tool-Fehlgriff)
+            messages.append({"role": "user", "content": user_query})
+            response = self.llm.complete(messages)
+            total_tokens += self.llm.extract_usage(response).get("total_tokens", 0)
+            return result((self.llm.extract_message(response).get("content") or "").strip(), 1)
+
+        # Regel-Aufloesung: der Code holt/tut es, das Modell formuliert nur (kein Raten,
+        # keine vertauschte Richtung, ein Modelldurchlauf statt zwei)
+        resolved = tool_protocol.resolve(user_query, intent, names)
+        if resolved:
+            tool, args = resolved
+            decision = self.safety.check(tool, args, ctx)
+            if decision.ok:
+                bridge_result = self.bridge.dispatch(tool, decision.args)
+            else:
+                bridge_result = {"result": None,
+                                 "error": f"nicht ausgefuehrt ({decision.action}): {decision.reason}"}
+            used = decision.args or args
+            if self.verbose:
+                logger.info(f"[orch] regel intent={intent} {tool}({used}) -> {decision.action} {decision.reason}")
+            tool_calls_log.append({"name": tool, "params": used, "safety": decision.action,
+                                   "reason": decision.reason, "result": bridge_result, "by": "regel"})
+            hinweis = ""
+            if decision.action == "clamp":
+                hinweis = (f" Der Wunsch wurde begrenzt: verlangt {json.dumps(args, ensure_ascii=False)}, "
+                           f"ausgefuehrt {json.dumps(used, ensure_ascii=False)}. Sag das.")
+            messages.append({"role": "user", "content": user_query})
+            # Daten als eigene System-Nachricht NACH der Frage: der Persona-Praefix bleibt im
+            # Cache, und das Modell wiederholt die Rohdaten seltener (zusaetzlich: stop).
+            messages.append({"role": "system", "content": (
+                f"Bereits erledigt: {tool} {json.dumps(used, ensure_ascii=False)}\n"
+                f"Ergebnis: {json.dumps(bridge_result, ensure_ascii=False)[:LOCAL_TOOL_RESULT_CHARS]}\n"
+                "Antworte Markus jetzt in ein bis zwei Saetzen in deinem Ton, in der Ich-Form. "
+                "Nutze nur dieses Ergebnis, erfinde nichts dazu. Uebersetze keine Eigennamen und "
+                "keine Zonen (guardian, shadow, berserker). Gib keine Rohdaten und keine Klammern wieder. "
+                "Wurde etwas nicht ausgefuehrt, sag das ehrlich." + hinweis
+            )})
+            response = self.llm.complete(messages, stop=["\n[", "[Ergebnis", "[Ausgef", "Ergebnis:"])
+            total_tokens += self.llm.extract_usage(response).get("total_tokens", 0)
+            return result((self.llm.extract_message(response).get("content") or "").strip(), 1)
+
+        # Keine Regel greift: Modell waehlt per JSON-Protokoll.
+        # Werkzeug-Block als zweite System-Nachricht: der Persona-Praefix bleibt im Cache
+        messages.append({"role": "system", "content": tool_protocol.prompt_block(names, self.index)})
+        messages.append({"role": "user", "content": user_query})
+        fmt = tool_protocol.schema(names)
+        repaired = False
+        max_iter = min(self.max_iter, LOCAL_MAX_ITER)
+
+        for iteration in range(1, max_iter + 1):
+            if time.time() - t0 > LOCAL_WALL_S:
+                return result("[lokales Zeitlimit erreicht]", iteration - 1)
+            response = self.llm.complete(messages, response_format=fmt, max_tokens=140)
+            total_tokens += self.llm.extract_usage(response).get("total_tokens", 0)
+            raw = self.llm.extract_message(response).get("content") or ""
+            parsed = tool_protocol.parse(raw, names, self.index)
+            if self.verbose:
+                logger.info(f"[orch] iter {iteration} intent={intent} roh={raw[:160]!r}")
+
+            if parsed.error:
+                if repaired:
+                    return result("[lokales Modell lieferte kein gueltiges Format]", iteration)
+                repaired = True
+                messages.append({"role": "assistant", "content": raw})
+                messages.append({"role": "user", "content": f"FEHLER: {parsed.error} Antworte erneut."})
+                continue
+            if parsed.tool is None:
+                return result(parsed.say, iteration)
+
+            decision = self.safety.check(parsed.tool, parsed.args, ctx)
+            if decision.ok:
+                bridge_result = self.bridge.dispatch(parsed.tool, decision.args)
+            else:
+                bridge_result = {"result": None,
+                                 "error": f"nicht ausgefuehrt ({decision.action}): {decision.reason}"}
+            if self.verbose:
+                logger.info(f"[orch]   tool_call: {parsed.tool}({decision.args or parsed.args}) "
+                            f"-> {decision.action} {decision.reason}")
+            tool_calls_log.append({"name": parsed.tool, "params": decision.args or parsed.args,
+                                   "safety": decision.action, "reason": decision.reason,
+                                   "result": bridge_result})
+            messages.append({"role": "assistant", "content": raw})
+            messages.append({"role": "user", "content": (
+                f"TOOL-ERGEBNIS {parsed.tool}: "
+                f"{json.dumps(bridge_result, ensure_ascii=False)[:LOCAL_TOOL_RESULT_CHARS]}\n"
+                "Antworte jetzt Markus (tool = null, done = true)."
+            )})
+        return result("[max iterations reached without final answer]", max_iter)
+
+    def run(self, user_query: str, ctx: Optional[Context] = None) -> Dict[str, Any]:
         """Loop bis finale Antwort. Returns {answer, iterations, tool_calls, total_tokens}."""
+        if self.backend == "local":
+            return self._run_local(user_query, ctx)
         messages: List[Dict[str, Any]] = [
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": user_query},

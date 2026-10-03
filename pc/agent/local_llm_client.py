@@ -42,6 +42,7 @@ def complete(
     timeout: int = HTTP_TIMEOUT,
     response_format: Optional[Any] = None,
     keep_alive: str = DEFAULT_KEEP_ALIVE,
+    stop: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Sendet messages an Ollama, returnt Response im OpenAI-Format.
 
@@ -60,6 +61,8 @@ def complete(
             "num_ctx": DEFAULT_NUM_CTX,
         },
     }
+    if stop:
+        payload["options"]["stop"] = stop
     if tools:
         payload["tools"] = tools
     if response_format is not None:

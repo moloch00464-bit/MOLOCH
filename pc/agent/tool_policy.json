@@ -1,0 +1,53 @@
+{
+  "_doc": "Whitelist + Grenzen fuer das lokale PC-Hirn. Unabhaengig vom Pi-Katalog: was hier nicht steht, ist gesperrt. Siehe PC_BRAIN_ARCHITEKTUR.md Abschnitt 6.",
+  "version": 1,
+  "kill_file": "%LOCALAPPDATA%/moloch_pc_state/brain_kill",
+  "read_rate_per_min": 30,
+  "quiet_hours": {"from": 23, "to": 7},
+  "ptz": {
+    "pan_min": -100.0, "pan_max": 88.0,
+    "tilt_min": -15.0, "tilt_max": 30.0,
+    "max_step_pan": 30.0, "max_step_tilt": 15.0,
+    "unknown_pos_step": 10.0,
+    "blocked_tracker_states": ["tracking", "follow"]
+  },
+  "tools": {
+    "get_mood":              {"tier": "frei"},
+    "get_face_id":           {"tier": "frei"},
+    "get_npu_status":        {"tier": "frei"},
+    "get_audit_state":       {"tier": "frei"},
+    "moloch_status_summary": {"tier": "frei"},
+    "read_memory":           {"tier": "frei", "clamp": {"limit": [1, 5]}},
+    "camera_snapshot":       {"tier": "frei"},
+    "spotify_now_playing":   {"tier": "frei"},
+    "spotify_top_artists":   {"tier": "frei", "clamp": {"n": [1, 10]}},
+    "spotify_top_tracks":    {"tier": "frei", "clamp": {"n": [1, 10]}},
+    "spotify_search":        {"tier": "frei"},
+
+    "ptz_pan":  {"tier": "begrenzt", "rate_per_min": 6},
+    "ptz_tilt": {"tier": "begrenzt", "rate_per_min": 6},
+    "led_set":  {"tier": "begrenzt", "rate_per_min": 10},
+    "tts_say":  {"tier": "begrenzt", "max_chars": {"text": 300},
+                 "proactive_per_10min": 4, "quiet_hours_proactive": true},
+
+    "spotify_play":       {"tier": "begrenzt", "user_turn_only": true, "rate_per_min": 10},
+    "spotify_pause":      {"tier": "begrenzt", "user_turn_only": true, "rate_per_min": 10},
+    "spotify_next":       {"tier": "begrenzt", "user_turn_only": true, "rate_per_min": 10},
+    "spotify_prev":       {"tier": "begrenzt", "user_turn_only": true, "rate_per_min": 10},
+    "spotify_play_genre": {"tier": "begrenzt", "user_turn_only": true, "rate_per_min": 10},
+    "spotify_recommend":  {"tier": "begrenzt", "user_turn_only": true, "rate_per_min": 10},
+    "spotify_volume":     {"tier": "begrenzt", "user_turn_only": true, "rate_per_min": 10,
+                           "clamp": {"percent": [10, 70]}},
+    "thermal_set_tension_pwm": {"tier": "begrenzt", "rate_per_min": 6,
+                                "clamp": {"percent": [30, 100]}},
+
+    "web_search": {"tier": "begrenzt", "user_turn_only": true, "rate_per_min": 4,
+                   "clamp": {"max_results": [1, 3]}},
+    "web_fetch":  {"tier": "begrenzt", "user_turn_only": true, "rate_per_min": 4,
+                   "clamp": {"max_chars": [200, 1500]}},
+
+    "browser_open":       {"tier": "bestaetigung"},
+    "browser_click":      {"tier": "gesperrt"},
+    "browser_screenshot": {"tier": "gesperrt"}
+  }
+}
