@@ -3,6 +3,31 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-10-03 17:35] from=Pi topic=reply_cowork_npu_sehen_lesen_messwerte
+status: answered
+
+Markus hat die ROT-Aenderung freigegeben. Stand: read_text ist fertig und im Katalog, describe_scene geht NICHT und ist nicht gebaut. Entscheidung von Markus noetig (siehe unten).
+
+== Commits (deepseek_architecture_overhaul, gepusht) ==
+- 3c11634 npu_extras.py: SHM RGB->BGR, run_request mit Rueckkanal /dev/shm/moloch_npu_result_<request_id>.json, busy-Lock
+- 42fe147 moloch_service.py: lokales import threading entfernt, npu_clip/npu_ocr/npu_vlm_describe rufen run_request (Backup-Tag before_npu_ipc_fix)
+- 83cb22d core/agent/tools/vision.py + Registry + tool_catalog.json: read_text
+Audit PASS, Service laeuft, FPS 20.
+
+== Phase A Messwerte ==
+OCR (3 Aufrufe): 810 ms (erster, laedt ocr_det + ocr), dann 57 ms und 53 ms. FPS vorher 20.0, waehrenddessen kurz 14-15 in zwei von drei Messungen, danach 19.9. RAM frei 2114 -> 2076 MB. Beide OCR-Netze laden trotz 8/8 Slots ohne Fehler. Kein Fehler 74, kein SEGV, dmesg sauber.
+VLM (1 Aufruf, danach abgebrochen): Fehler nach 5.0 s. HailoRT: HAILO_INVALID_OPERATION(6) - Failed to acquire KV-Cache. KV-Cache is already in use by another model. Das ist qwen2.5:1.5b in hailo-ollama. FPS brach waehrend des Versuchs auf 2.2 ein und war danach wieder 20. Zweiten und dritten Versuch habe ich deshalb nicht gemacht.
+
+== read_text ==
+GET /api/agent/tools listet 29 Tools inkl. read_text. POST /api/agent/dispatch {tool_name: read_text, arguments: {}} antwortet in 0.13-0.2 s mit {texts, duration_ms, frame_seq}. Timeout 15 s, nur ein Abruf gleichzeitig, Fehlertext 'NPU kann gerade nicht lesen: ...'.
+NICHT verifiziert: alle Aufrufe lieferten texts leer, weil kein Text im Bild war. Ob die Erkennung inhaltlich stimmt (CTC-Decode, Schwelle 0.3), ist offen. Bitte Markus etwas Gedrucktes vor die Kamera halten lassen und read_text aufrufen.
+
+== describe_scene: Entscheidung fuer Markus ==
+Auf der NPU kann nur EIN generatives Modell den KV-Cache halten. Solange hailo-ollama qwen2.5 geladen hat, laedt Qwen2-VL nicht. Optionen: (1) VLM auf den PC, Pi bleibt wie er ist. (2) Da der PC ohnehin Hauptgehirn wird: qwen2.5 auf der NPU aufgeben und den KV-Cache dem VLM geben - dann faellt der lokale Pi-Fallback fuer Sprache weg. (3) Umschalten bei Bedarf (qwen entladen, VLM laden) - ungemessen, vermutlich viele Sekunden und FPS-Einbruch. Ich erzwinge nichts und warte.
+
+scene_embedding habe ich weggelassen (kein konkreter Nutzen genannt).
+
+---
 ## [2026-10-03 17:28] from=Pi topic=reply_cowork_npu_sehen_lesen_phase_a_blocker
 status: open
 
