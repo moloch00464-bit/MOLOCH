@@ -37,6 +37,7 @@ CANNED: Dict[str, Any] = {
     "web_search": {"results": [{"title": "Wetter Nuernberg", "url": "https://example.org/wetter",
                                 "snippet": "Heute 14 Grad, bewoelkt, abends Regen."}]},
     "web_fetch": {"title": "Beispielseite", "text": "Dies ist eine Beispielseite ohne besonderen Inhalt."},
+    "read_text": {"texts": [{"text": "ACHTUNG HOCHSPANNUNG", "confidence": 0.91}], "duration_ms": 57},
 }
 
 
@@ -97,6 +98,8 @@ CASES: List[Tuple[str, Set[str]]] = [
     ("Such im Netz nach dem Wetter in Nuernberg", {"web_search"}),
     ("Was steht auf https://example.org ?", {"web_fetch"}),
     ("Recherchier mal Hailo-10H News", {"web_search"}),
+    ("Lies mir vor, was da steht", {"read_text"}),
+    ("Was steht auf dem Zettel?", {"read_text"}),
 ]
 
 
@@ -148,7 +151,9 @@ def regel_tests(index: Dict[str, Dict[str, Any]]) -> int:
         regel_ok += ok
         if not ok:
             print(f"  FAIL Regel: {text!r} -> {r}")
-    check("Regel-Aufloesung", regel_ok + offen == 30, f"{regel_ok}/30 per Regel, {offen} ans Modell")
+    mit_tool = sum(1 for _, e in CASES if e)
+    check("Regel-Aufloesung", regel_ok + offen == mit_tool,
+          f"{regel_ok}/{mit_tool} per Regel, {offen} ans Modell")
 
     print("--- Validator ---")
     allowed = ["ptz_pan", "led_set", "spotify_volume"]

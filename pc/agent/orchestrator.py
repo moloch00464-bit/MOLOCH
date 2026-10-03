@@ -20,6 +20,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 import time
 from typing import Any, Dict, List, Optional
@@ -48,6 +49,8 @@ BACKENDS = {"deepseek": deepseek_client, "local": local_llm_client}
 LOCAL_MAX_ITER = 4
 LOCAL_WALL_S = float(os.environ.get("MOLOCH_LOCAL_WALL_S", "120"))
 LOCAL_TOOL_RESULT_CHARS = 1500
+# Das Modell schreibt sonst Dialoge weiter oder zitiert seinen Prompt
+LOCAL_STOP = ["\nMarkus:", "\nStil:", "\nMoloch:", "\nUser:"]
 
 
 class Orchestrator:
@@ -87,6 +90,8 @@ class Orchestrator:
         total_tokens = 0
 
         def result(answer: str, iterations: int) -> Dict[str, Any]:
+            # Rollen-Praefix ("Moloch:") entfernen, den das Modell gern mitschreibt
+            answer = re.sub(r"^\s*(moloch|antwort)\s*:\s*", "", answer or "", flags=re.IGNORECASE).strip()
             return {"answer": answer, "iterations": iterations, "tool_calls": tool_calls_log,
                     "total_tokens": total_tokens, "intent": intent,
                     "duration_s": round(time.time() - t0, 1)}
@@ -94,7 +99,7 @@ class Orchestrator:
         if not names:
             # Smalltalk: frei antworten, ohne JSON-Zwang (bessere Sprache, kein Tool-Fehlgriff)
             messages.append({"role": "user", "content": user_query})
-            response = self.llm.complete(messages)
+            response = self.llm.complete(messages, stop=LOCAL_STOP)
             total_tokens += self.llm.extract_usage(response).get("total_tokens", 0)
             return result((self.llm.extract_message(response).get("content") or "").strip(), 1)
 
@@ -129,7 +134,9 @@ class Orchestrator:
                 "keine Zonen (guardian, shadow, berserker). Gib keine Rohdaten und keine Klammern wieder. "
                 "Wurde etwas nicht ausgefuehrt, sag das ehrlich." + hinweis
             )})
-            response = self.llm.complete(messages, stop=["\n[", "[Ergebnis", "[Ausgef", "Ergebnis:"])
+            response = self.llm.complete(
+                messages, temperature=0.3,
+                stop=LOCAL_STOP + ["\n[", "[Ergebnis", "[Ausgef", "Ergebnis:", "=>"])
             total_tokens += self.llm.extract_usage(response).get("total_tokens", 0)
             return result((self.llm.extract_message(response).get("content") or "").strip(), 1)
 

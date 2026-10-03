@@ -24,6 +24,8 @@
     "spotify_top_tracks":    {"tier": "frei", "clamp": {"n": [1, 10]}},
     "spotify_search":        {"tier": "frei"},
 
+    "read_text": {"tier": "begrenzt", "rate_per_min": 6},
+
     "ptz_pan":  {"tier": "begrenzt", "rate_per_min": 6},
     "ptz_tilt": {"tier": "begrenzt", "rate_per_min": 6},
     "led_set":  {"tier": "begrenzt", "rate_per_min": 10},

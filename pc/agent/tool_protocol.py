@@ -37,6 +37,10 @@ INTENTS: List[Tuple[str, str, List[str]]] = [
      r"\b(dreh\w*|schwenk\w*|schau\w* (nach|hoch|runter|rauf|links|rechts)|guck\w* (nach|hoch|runter|links|rechts)|"
      r"kamera|nach (links|rechts|oben|unten)|led|licht|leuchte\w*|farbe)\b",
      ["ptz_pan", "ptz_tilt", "led_set"]),
+    ("lesen",
+     r"\b(lies\w*|lese\w*|vorlesen|was steht (da|hier|drauf|auf de[mr]|auf diesem|auf dieser)|"
+     r"schrift|beschriftung|etikett|zettel)\b",
+     ["read_text"]),
     ("sehen",
      r"\b(siehst du|wen siehst|wer ist (da|das)|erkennst du|wer steht|ist jemand|was siehst|im bild|vor dir)\b",
      ["get_face_id", "moloch_status_summary", "camera_snapshot"]),
@@ -129,6 +133,9 @@ def resolve(text: str, intent: str, available: List[str]) -> Optional[Tuple[str,
         if re.search(r"l(ue|ü)fter", t) and n is not None:
             return pick("thermal_set_tension_pwm", {"percent": n})
         return pick("moloch_status_summary")
+
+    if intent == "lesen":
+        return pick("read_text")       # OCR auf der Pi-NPU, liest den aktuellen Frame
 
     if intent == "sehen":
         return pick("get_face_id")
