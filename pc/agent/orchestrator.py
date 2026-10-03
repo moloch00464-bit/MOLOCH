@@ -23,6 +23,7 @@ import sys
 from typing import Any, Dict, List, Optional
 
 from pc.agent import deepseek_client
+from pc.agent import local_llm_client
 from pc.agent import token_budget
 from pc.agent.pi_tool_bridge import MockBridge, ToolBridge, get_bridge
 
@@ -36,6 +37,8 @@ SYSTEM_PROMPT = (
     "selbst statt zu raten. Antworte deutsch, knapp, direkt. Kein 'natuerlich gerne'. "
     "Wenn ein Tool fehlt, sag das klar."
 )
+# LLM-Backends mit gleicher Schnittstelle (complete / extract_message / extract_usage)
+BACKENDS = {"deepseek": deepseek_client, "local": local_llm_client}
 
 
 class Orchestrator:
@@ -45,14 +48,23 @@ class Orchestrator:
         max_iter: int = DEFAULT_MAX_ITER,
         system_prompt: str = SYSTEM_PROMPT,
         verbose: bool = False,
+        backend: str = "deepseek",
     ) -> None:
+        if backend not in BACKENDS:
+            raise ValueError(f"backend muss eines von {sorted(BACKENDS)} sein")
         self.bridge = bridge or get_bridge()
         self.max_iter = max_iter
         self.system_prompt = system_prompt
         self.verbose = verbose
+        self.backend = backend
+        self.llm = BACKENDS[backend]
         self.tools = self.bridge.get_catalog()
         if not self.tools:
-            logger.warning("[orch] Tool-Catalog leer — DeepSeek antwortet ohne Tools")
+            logger.warning("[orch] Tool-Catalog leer — LLM antwortet ohne Tools")
+        # Lokal noch OHNE Tools: der ganze Katalog kostet ~2000 Prompt-Token (~50 s auf
+        # der CPU) und 7B-Modelle rufen Tools unzuverlaessig. Kommt mit dem Tool-Protokoll
+        # (Regel-Router + Schema + Validator), siehe PC_BRAIN_ARCHITEKTUR.md Etappe 2.
+        self.llm_tools = self.tools if backend == "deepseek" else None
 
     def run(self, user_query: str) -> Dict[str, Any]:
         """Loop bis finale Antwort. Returns {answer, iterations, tool_calls, total_tokens}."""
@@ -63,9 +75,10 @@ class Orchestrator:
         tool_calls_log: List[Dict[str, Any]] = []
         total_tokens = 0
 
+        cloud = self.backend == "deepseek"
         for iteration in range(1, self.max_iter + 1):
-            # Welle 21 Phase 5: Per-Loop-Budget-Check
-            if total_tokens >= token_budget.PER_LOOP_DEFAULT:
+            # Welle 21 Phase 5: Per-Loop-Budget-Check (nur Cloud — lokal kostet nichts)
+            if cloud and total_tokens >= token_budget.PER_LOOP_DEFAULT:
                 logger.warning(
                     f"[orch] Per-Loop-Budget exhausted ({total_tokens} >= "
                     f"{token_budget.PER_LOOP_DEFAULT}) — abort"
@@ -76,7 +89,7 @@ class Orchestrator:
                     "tool_calls": tool_calls_log,
                     "total_tokens": total_tokens,
                 }
-            if token_budget.is_over_daily_cap():
+            if cloud and token_budget.is_over_daily_cap():
                 logger.warning("[orch] Daily-Cap exceeded — Cloud-Calls blocked")
                 return {
                     "answer": "[daily token-cap erreicht — bitte morgen weiter oder MOLOCH_DAILY_TOKEN_HARD_CAP env hochsetzen]",
@@ -86,10 +99,16 @@ class Orchestrator:
                 }
             if self.verbose:
                 logger.info(f"[orch] iter {iteration}/{self.max_iter}")
-            response = deepseek_client.complete(messages, tools=self.tools)
-            usage = deepseek_client.extract_usage(response)
+            response = self.llm.complete(messages, tools=self.llm_tools)
+            usage = self.llm.extract_usage(response)
             total_tokens += usage.get("total_tokens", 0)
-            assistant_msg = deepseek_client.extract_message(response)
+            assistant_msg = self.llm.extract_message(response)
+            if self.verbose and response.get("timing"):
+                t = response["timing"]
+                logger.info(
+                    f"[orch]   lokal: {t['total_s']:.1f}s gesamt, Prompt {t['prompt_s']:.1f}s, "
+                    f"{t['tok_per_s']:.1f} Tok/s"
+                )
             messages.append(assistant_msg)
             tool_calls = assistant_msg.get("tool_calls") or []
             if not tool_calls:
@@ -144,6 +163,8 @@ def main(argv: List[str]) -> int:
                         help="Erzwingt MockBridge (kein Pi-Bezug)")
     parser.add_argument("--max-iter", type=int, default=DEFAULT_MAX_ITER)
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--backend", choices=sorted(BACKENDS), default="local",
+                        help="local = Ollama auf diesem PC (Default), deepseek = Cloud")
     args = parser.parse_args(argv[1:])
 
     logging.basicConfig(
@@ -153,7 +174,8 @@ def main(argv: List[str]) -> int:
 
     user_query = " ".join(args.query)
     bridge = MockBridge() if args.mock else get_bridge()
-    orch = Orchestrator(bridge=bridge, max_iter=args.max_iter, verbose=args.verbose)
+    orch = Orchestrator(bridge=bridge, max_iter=args.max_iter, verbose=args.verbose,
+                        backend=args.backend)
     result = orch.run(user_query)
     print("=" * 60)
     print(f"ANTWORT (nach {result['iterations']} iter, {result['total_tokens']} tokens):")
