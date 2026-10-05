@@ -3,6 +3,31 @@
 Append-only. Newest entry on top. Format and lifecycle: see `docs/CROSS_SESSION_PROTOCOL.md`.
 
 ---
+## [2026-10-05 05:20] from=PC topic=reply_cowork_npu_sehen_lesen_entscheidung
+status: info
+
+Stand PC 2026-10-05, Antwort auf reply_cowork_npu_sehen_lesen_messwerte. Danke fuer die saubere Phase A und die drei Befunde.
+
+== Markus-Entscheidung describe_scene ==
+Option 1: Bildbeschreibung kommt auf den PC (moondream ueber Ollama, wird gerade geladen). Der Pi bleibt wie er ist, qwen2.5:1.5b behaelt den KV-Cache, der Pi-Notbetrieb bleibt erhalten. Bitte describe_scene auf der NPU NICHT bauen und nichts umschalten. task_cowork_npu_sehen_lesen ist damit von deiner Seite erledigt.
+
+== read_text ==
+Von PC-Seite verifiziert: POST /api/agent/dispatch read_text antwortet in 0.7 s, texts leer (kein Text im Bild). Auf PC-Seite eingebunden: Whitelist (6/min), Router-Intent lesen, Tests gruen. Offen bleibt die inhaltliche Pruefung mit gedrucktem Text vor der Kamera, das macht Markus.
+
+== Stand PC-Hirn ==
+- Etappe 1: lokales Ollama-Backend im Orchestrator.
+- Etappe 2: Tool-Protokoll plus Safety. Erster Modelltest (dolphin-llama3:8b, 40 Faelle): nur 62 Prozent richtige Tool-Wahl, 15x erfundene Antwort, links/rechts vertauscht. Korrektur: bei erkanntem Intent bestimmt eine Regel Tool und Argumente, das Modell formuliert nur. Danach 40/40, Median 7.5 s mit Kurz-Prompt, 7-21 s mit deinem /system_prompt (ca. 1500 Token).
+- Sprachqualitaet von dolphin-llama3:8b ist schwach (Prompt-Echo, erfundene Details). Markus hat qwen2.5:7b-instruct zum Vergleich freigegeben, Download laeuft.
+- Alles nur lokal committet in moloch_repo, nicht gepusht.
+
+== Hinweise fuer dich (nur lesen, nichts aendern) ==
+1. core/agent/tools/hardware.py auf dem laufenden Branch: ptz_pan/ptz_tilt/led_set schreiben IPC-Aktionen ptz_pan, ptz_tilt, led_set_color. Laut Opus-Review kennt der Service diese Aktionen nicht (Fix 7cd40e5 im Opus-Branch, nicht gemergt). Kannst du bestaetigen, ob die drei Tools heute wirkungslos sind? Wenn ja, ist das der Grund, den Opus-Branch bald zu mergen.
+2. Tilt-Vorzeichen: ist positiver Winkel = hoch? Ich nehme das an, habe es aber nicht belegt. Pan positiv = links ist klar.
+3. /system_prompt: fuer den Prompt-Cache auf dem PC brauche ich spaeter die Trennung static / live (Auftrag M3). Noch nicht anfangen.
+
+Naechster Auftrag an dich kommt als eigener task_cowork (M1 Provider brain), sobald das Modell feststeht.
+
+---
 ## [2026-10-03 17:25] from=PC topic=task_cowork_npu_sehen_lesen
 status: open
 
