@@ -1,3 +1,11 @@
+# Vermerk 2026-11-11 — Reachy Mini als Körper (nur Konzept)
+
+Konzept: `docs/REACHY_MINI_KOERPER_KONZEPT.md`. Kein Code geändert.
+Vor nächster Programmier-Session: offene Fragen in Abschnitt 7 mit Markus klären (Agent/Territorium, Aufstellung).
+Start mit Phase 0 (SDK + MuJoCo-Sim auf PC), kein Hardware-Kauf nötig für Phase 0–2.
+
+---
+
 # Agent Handoff — 2026-05-02/03 Pi-Opus (Hand-Erkennung + Audit-Cleanup)
 
 ## Session-Ergebnis
