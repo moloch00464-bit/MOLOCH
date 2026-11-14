@@ -55,6 +55,26 @@ aber nur mechanisch (-168.4..170 / -78..78.8).
   Tilt positiv = physisch hoch?
 - Position ist bis 5s alt: bei laufendem Tracking kann das Ziel um einige Grad abweichen.
 
+## Vektor-Recall im LLM-Kontext (4657404, 09a0b04) - STANDARD AUS
+MolochMemory.recall(query) in core/longterm_memory.py; get_memory_context_minimal(query=...)
+haengt bis zu 3 passende Fakten an. Aufrufer: nur _generate_tentacle in local_llm_bridge.py
+(lokaler PC-Pfad; bewusst NICHT DeepSeek/Cloud, NICHT voice_pipeline).
+- Einschalten: zusaetzlich zu embedding_bridge.enabled auch `"recall_enabled": true`
+  (oder ENV MOLOCH_MEMORY_RECALL=1). Erster Recall spiegelt alle Fakten im Hintergrund nach Qdrant.
+- UNGEPRUEFT und wichtig: all-MiniLM-L6-v2 ist ein englisch trainiertes Modell. Ob deutsche
+  Fragen damit die richtigen Fakten treffen, muss am echten System gemessen werden
+  (recall_min_score 0.45 ist ein Startwert). Wenn nicht: mehrsprachiges 384-dim-Modell in
+  embedding_bridge.model eintragen, Collection neu befuellen.
+
+## Koerper / Reachy Mini (core/body/) - ENTWURF, nirgends angeschlossen
+Konzept jetzt im Branch: docs/REACHY_MINI_KOERPER_KONZEPT.md. Gebaut: Phase 1 (Ausdruck)
++ Controller mit Not-Aus/Prioritaeten + Mock-Backend, 44 Tests (tests/test_body.py).
+- Kein echtes Backend, kein SDK. Alle Grenzen/Geschwindigkeiten in config/body_mappings.json
+  sind ANNAHMEN - vor Hardware am SDK/Simulator pruefen (Konzept Phase 0).
+- Offen fuer Markus (Konzept Abschnitt 7): eigener Agent `body` mit Territorium core/body/?
+  Hook kennt die Domain noch nicht. Aufstellung relativ zur Sonoff (gaze.yaw_sign/offset).
+- Naechster Schritt waere Phase 2: Backend gegen den MuJoCo-Simulator auf dem PC.
+
 ## Repo-Zustand
 - `main` steht seit 2026-05-11 (a5bf8cb), 34 Commits hinter dem Pi-Branch.
 - `ccr-2f46f2da-zkd6is`: 1 Doku-Commit (Reachy-Mini-Koerperkonzept, 2026-11-11), nicht gemergt.
