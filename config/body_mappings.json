@@ -1,0 +1,58 @@
+{
+  "_hinweis": "ENTWURF. Alle Grenzen und Geschwindigkeiten sind vorsichtige Annahmen, NICHT aus dem Reachy-Mini-SDK belegt. Vor echter Hardware in Phase 0 am SDK/Simulator pruefen und anpassen.",
+  "version": 1,
+  "limits": {
+    "head_pitch": [-25.0, 25.0],
+    "head_yaw": [-60.0, 60.0],
+    "head_roll": [-20.0, 20.0],
+    "head_z": [-10.0, 10.0],
+    "body_yaw": [-90.0, 90.0],
+    "antenna_l": [-90.0, 90.0],
+    "antenna_r": [-90.0, 90.0]
+  },
+  "motion": {
+    "max_speed_deg_s": 60.0,
+    "min_duration_s": 0.2,
+    "max_duration_s": 5.0,
+    "min_interval_s": 0.1,
+    "deadband": 0.5,
+    "idle_timeout_s": 3.0,
+    "reconnect_backoff_s": 10.0
+  },
+  "states": {
+    "idle":           {"head_pitch": -8.0,  "head_z": -2.0, "antenna": 10.0},
+    "observing":      {"head_pitch": 0.0,   "head_z": 0.0,  "antenna": 40.0},
+    "engaged":        {"head_pitch": 5.0,   "head_z": 2.0,  "antenna": 55.0},
+    "overloaded":     {"head_pitch": -3.0,  "head_z": 0.0,  "antenna": 30.0, "antenna_asym": 25.0},
+    "withdrawing":    {"head_pitch": -15.0, "head_z": -5.0, "antenna": -20.0, "gaze_scale": 0.0, "body_yaw": 25.0},
+    "offline_anchor": {"head_pitch": -10.0, "head_z": -4.0, "antenna": 0.0,  "gaze_scale": 0.0}
+  },
+  "moods": {
+    "calm":     {"antenna_offset": 0.0,   "wiggle_deg": 4.0,  "wiggle_hz": 0.3},
+    "focused":  {"antenna_offset": 10.0,  "wiggle_deg": 0.0,  "wiggle_hz": 0.0},
+    "alert":    {"antenna_offset": 35.0,  "wiggle_deg": 0.0,  "wiggle_hz": 0.0},
+    "agitated": {"antenna_offset": 15.0,  "wiggle_deg": 12.0, "wiggle_hz": 2.5},
+    "euphoric": {"antenna_offset": 20.0,  "wiggle_deg": 15.0, "wiggle_hz": 1.5},
+    "dark":     {"antenna_offset": -45.0, "wiggle_deg": 2.0,  "wiggle_hz": 0.1}
+  },
+  "zones": {
+    "guardian":  {"amplitude": 1.0, "speed": 1.0},
+    "shadow":    {"amplitude": 0.6, "speed": 0.5, "head_pitch": -6.0},
+    "berserker": {"amplitude": 1.4, "speed": 1.0}
+  },
+  "modulation": {
+    "dominance_pitch_deg": 10.0,
+    "breath_mm": 2.0,
+    "breath_hz_base": 0.2,
+    "breath_hz_per_tension": 0.4,
+    "noise_deg_max": 3.0
+  },
+  "gaze": {
+    "yaw_scale": 1.0,
+    "yaw_offset": 0.0,
+    "yaw_sign": 1.0,
+    "pitch_scale": 1.0,
+    "pitch_offset": 0.0,
+    "body_yaw_share": 0.4
+  }
+}
