@@ -23,6 +23,7 @@ Umgebungsvariablen (haben Vorrang):
     MOLOCH_EMBED_URL=http://rechner:11434     (Basis-URL ohne Pfad)
     MOLOCH_EMBED_MODEL=all-minilm
     MOLOCH_EMBED_TOKEN=...                    (optional, Authorization: Bearer)
+    MOLOCH_MEMORY_RECALL=1|0                  (Fakten-Recall im LLM-Kontext)
 """
 
 import json
@@ -49,6 +50,11 @@ _DEFAULTS = {
     "timeout_sec": 8,
     "backoff_sec": 60,
     "max_chars": 2000,
+    # Recall: passende Fakten in den LLM-Kontext (core/longterm_memory.py recall()).
+    # Eigener Schalter, damit Speichern und Abrufen getrennt aktivierbar sind.
+    "recall_enabled": False,
+    "recall_limit": 3,
+    "recall_min_score": 0.45,
 }
 
 
@@ -87,6 +93,9 @@ def load_config() -> Dict:
     env_enabled = os.environ.get("MOLOCH_EMBED_ENABLED")
     if env_enabled is not None:
         cfg["enabled"] = env_enabled.strip().lower() in ("1", "true", "yes", "on")
+    env_recall = os.environ.get("MOLOCH_MEMORY_RECALL")
+    if env_recall is not None:
+        cfg["recall_enabled"] = env_recall.strip().lower() in ("1", "true", "yes", "on")
     if os.environ.get("MOLOCH_EMBED_MODEL"):
         cfg["model"] = os.environ["MOLOCH_EMBED_MODEL"]
     base = os.environ.get("MOLOCH_EMBED_URL", "").rstrip("/")
