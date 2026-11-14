@@ -212,31 +212,26 @@ class KeywordHandler:
         """Name aus Enrollment-Befehl extrahieren."""
         lower = text.lower().strip()
 
-        # Pattern: "merk dir das ist <NAME>"
-        m = re.search(r"merk dir das ist\s+(\w+)", lower)
-        if m:
-            return m.group(1)
-
-        # Pattern: "das ist <NAME>" — deutsche Partikeln und Fuellwoerter ausschliessen
+        # Deutsche Partikeln und Fuellwoerter sind keine Namen. Gilt fuer ALLE
+        # Muster: "merk dir das ist nicht ..." hat sonst eine Person "nicht"
+        # angelegt (34 Eintraege nicht#cl_* in der Face-DB).
         _no_enroll = {
             "gut", "ok", "okay", "toll", "super", "richtig", "falsch", "egal",
-            # Haeufige deutsche Partikeln die als Namen erkannt wurden (false positives):
             "wohl", "auch", "nicht", "ja", "nein", "doch", "schon", "mal", "halt",
             "eben", "nun", "so", "nur", "noch", "sehr", "klar", "leider", "eigentlich",
+            "kein", "keiner", "mein", "meine", "dein", "deine", "der", "die", "das",
+            "ein", "eine", "jetzt", "bitte", "starten", "start", "unbekannt",
         }
-        m = re.search(r"das ist\s+(\w+)", lower)
-        if m and m.group(1) not in _no_enroll:
-            return m.group(1)
-
-        # Pattern: "enrollment <NAME>" / "enroll <NAME>"
-        m = re.search(r"enroll(?:ment)?\s+(\w+)", lower)
-        if m:
-            return m.group(1)
-
-        # Pattern: "einpraegen <NAME>"
-        m = re.search(r"einpr[aä]gen\s+(\w+)", lower)
-        if m:
-            return m.group(1)
+        patterns = (
+            r"merk dir das ist\s+(\w+)",    # "merk dir das ist <NAME>"
+            r"das ist\s+(\w+)",             # "das ist <NAME>"
+            r"enroll(?:ment)?\s+(\w+)",     # "enrollment <NAME>" / "enroll <NAME>"
+            r"einpr[aä]gen\s+(\w+)",        # "einpraegen <NAME>"
+        )
+        for pattern in patterns:
+            m = re.search(pattern, lower)
+            if m and m.group(1) not in _no_enroll and not m.group(1).isdigit():
+                return m.group(1)
 
         return "unbekannt"
 
