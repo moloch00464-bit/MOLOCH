@@ -75,6 +75,35 @@ Konzept jetzt im Branch: docs/REACHY_MINI_KOERPER_KONZEPT.md. Gebaut: Phase 1 (A
   Hook kennt die Domain noch nicht. Aufstellung relativ zur Sonoff (gaze.yaw_sign/offset).
 - Naechster Schritt waere Phase 2: Backend gegen den MuJoCo-Simulator auf dem PC.
 
+## ArcFace erkennt Markus nicht - Befund aus der Face-DB (Stand Repo 2026-05-09)
+`python3 scripts/face_db_doctor.py` (nur lesend) zeigt an data/face_embeddings.json:
+- 34 Eintraege `nicht#cl_*` (29./30.03.): Person namens "nicht", Fehl-Enrollment per Sprache
+  ("merk dir das ist nicht ..."). Ursache behoben in ac961d4 (keyword_handler).
+- `markus` (1 Basis + 15 snap + 2 cl) und `Markus` (5 teach vom 01.04.) sind getrennte Namen
+  UND passen nicht zusammen: Aehnlichkeit 0.19-0.25 (gleiche Person braucht > 0.4).
+- Die teach-Eintraege kommen aus dem Live-FaceWorker, die snap-Eintraege aus einem
+  Enrollment-Skript. scripts/tappas_enroll.py richtet OHNE --align nicht aus (Crop+Resize),
+  der Live-Pfad richtet immer per 5-Punkt-Affine aus -> wahrscheinlichste Ursache.
+- Folge: Der Live-Pfad hat nur 5 fast gleiche Referenzen aus einer 2-Minuten-Sitzung.
+  Continuous Learning braucht sim >= 0.55 zum Dazulernen und kommt so nie in Gang.
+  Das erklaert die beobachteten 0.24-0.39. NICHT bewiesen - am Pi pruefen.
+Vorschlag am Pi (Service gestoppt, Tool legt Backup an):
+  1. `python3 scripts/face_db_doctor.py --remove nicht --apply`
+  2. Neu enrollen ueber den Live-Pfad (Teach-Modus oder scripts/enroll_face_worker.py),
+     verschiedene Winkel/Licht/Abstaende.
+  3. Wenn die neuen Eintraege live > 0.5 treffen: `--remove-kind markus:snap` usw.
+  Threshold NICHT anfassen (NEVER 3).
+Nebenbefunde in ROT-Dateien, NICHT geaendert:
+- tappas_pipeline._continuous_learn: `k.split('#')[0].lower() == matched_name` - bei Namen mit
+  Grossbuchstaben greift die Obergrenze von 50 Eintraegen nie.
+- moloch_service Teach-Modus (~Z. 512) schreibt face_embeddings.json nicht atomar (NEVER 6)
+  und fest unter dem Namen "Markus".
+
+## Werkzeuge fuer den Pi
+- scripts/check_after_merge.py: prueft nach dem Merge alles, was offline nicht ging
+  (Importe, Status, Qdrant, echtes Ollama-Embedding, Deutsch-Treffer). Nur lesend.
+- .github/workflows/tests.yml: pytest bei jedem Push (279 passed, 18 skipped, Python 3.13).
+
 ## Repo-Zustand
 - `main` steht seit 2026-05-11 (a5bf8cb), 34 Commits hinter dem Pi-Branch.
 - `ccr-2f46f2da-zkd6is`: 1 Doku-Commit (Reachy-Mini-Koerperkonzept, 2026-11-11), nicht gemergt.
