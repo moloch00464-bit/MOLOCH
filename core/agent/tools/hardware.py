@@ -42,20 +42,98 @@ _LED_COLORS = {
 }
 
 
-def _relative_move(pos_dir: str, neg_dir: str, angle: float, limit: float) -> Dict[str, Any]:
-    """Relative PTZ-Bewegung ueber die Service-Aktion ptz_move."""
-    angle = max(-limit, min(limit, float(angle)))
-    if angle == 0:
+STATUS_PATH = "/dev/shm/moloch_status.json"
+SETTINGS_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
+    "config", "settings.json",
+)
+STATUS_MAX_AGE_S = 5.0   # aeltere Positionsangabe gilt als unbekannt
+MIN_MOVE_DEG = 0.5       # kleinere Reste werden nicht gefahren
+
+# Mechanische Grenzen der Sonoff CAM-PT2 (core/hardware/camera.py PAN_MIN/...).
+# camera.move_absolute klemmt darauf ohnehin; hier geht es um die engeren
+# Tracker-Grenzen aus settings.json["ptz"] (Popup "Tracker").
+_MECH_LIMITS = {"pan": (-168.4, 170.0), "tilt": (-78.0, 78.8)}
+
+
+def _axis_limits(axis: str) -> tuple:
+    """Konfigurierte Grenzen einer Achse, nie weiter als die mechanischen."""
+    lo, hi = _MECH_LIMITS[axis]
+    try:
+        with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
+            ptz = json.load(f).get("ptz", {}) or {}
+        cfg_lo = float(ptz.get(f"{axis}_limit_min", lo))
+        cfg_hi = float(ptz.get(f"{axis}_limit_max", hi))
+        if cfg_lo < cfg_hi:
+            lo, hi = max(lo, cfg_lo), min(hi, cfg_hi)
+    except Exception as e:
+        logger.debug(f"PTZ-Grenzen nicht lesbar, nutze mechanische: {e}")
+    return lo, hi
+
+
+def _current_position(axis: str) -> Optional[float]:
+    """Aktuelle Achsposition in Grad aus dem Service-Status (None = unbekannt)."""
+    try:
+        if time.time() - os.stat(STATUS_PATH).st_mtime > STATUS_MAX_AGE_S:
+            return None
+        with open(STATUS_PATH, "r", encoding="utf-8") as f:
+            val = (json.load(f).get("ptz", {}) or {}).get(f"current_{axis}")
+        return float(val) if val is not None else None
+    except Exception:
+        return None
+
+
+def _clamp_delta(axis: str, angle: float) -> Dict[str, Any]:
+    """Relativen Winkel so kuerzen, dass das Ziel innerhalb der Grenzen bleibt.
+
+    Positiver Winkel erhoeht den Achswert (Pan: links, Tilt: hoch) - genau wie
+    camera.move_manual. Steht die Kamera schon ausserhalb, wird nur noch die
+    Bewegung nach innen zugelassen.
+    """
+    lo, hi = _axis_limits(axis)
+    cur = _current_position(axis)
+    if cur is None:
+        if (lo, hi) == _MECH_LIMITS[axis]:
+            # Keine engeren Grenzen konfiguriert: die Kamera klemmt selbst.
+            return {"angle": angle, "clamped": False, "position_known": False}
+        return {"angle": 0.0, "clamped": True, "position_known": False,
+                "note": "Position unbekannt - keine Bewegung, weil engere Grenzen gelten"}
+    target = max(lo, min(hi, cur + angle))
+    eff = target - cur
+    if eff * angle <= 0:
+        eff = 0.0    # Grenze erreicht oder Kamera steht ausserhalb und soll weiter raus
+    elif abs(eff) > abs(angle):
+        eff = angle  # von ausserhalb nach innen: nie weiter als verlangt
+    elif abs(eff - angle) > 0.05 and abs(eff) < MIN_MOVE_DEG:
+        eff = 0.0    # gekuerzter Rest zu klein zum Fahren
+    out: Dict[str, Any] = {"angle": round(eff, 1), "clamped": abs(eff - angle) > 0.05,
+                           "position_known": True, "target": round(cur + eff, 1),
+                           "limits": [lo, hi]}
+    if eff == 0.0:
+        out["note"] = "Grenze erreicht"
+    return out
+
+
+def _relative_move(axis: str, pos_dir: str, neg_dir: str, angle: float, limit: float) -> Dict[str, Any]:
+    """Relative PTZ-Bewegung ueber die Service-Aktion ptz_move, absolut geklemmt."""
+    requested = max(-limit, min(limit, float(angle)))
+    if requested == 0:
         return {"ok": True, "angle": 0.0, "note": "keine Bewegung"}
-    direction = pos_dir if angle > 0 else neg_dir
-    ok = _atomic_ipc_cmd("ptz_move", {"direction": direction, "step": abs(angle)})
-    return {"ok": ok, "angle": angle, "direction": direction}
+    res = _clamp_delta(axis, requested)
+    res["requested"] = requested
+    eff = res["angle"]
+    if eff == 0:
+        res["ok"] = False
+        return res
+    res["direction"] = pos_dir if eff > 0 else neg_dir
+    res["ok"] = _atomic_ipc_cmd("ptz_move", {"direction": res["direction"], "step": abs(eff)})
+    return res
 
 
 def ptz_pan(angle: float) -> Dict[str, Any]:
     """Relative Pan-Bewegung in Grad. NEVER 2: positive=LINKS (camera.move_manual 'left' = pan+)."""
     try:
-        return _relative_move("left", "right", angle, 180.0)
+        return _relative_move("pan", "left", "right", angle, 180.0)
     except Exception as e:
         return {"error": str(e)[:200]}
 
@@ -89,7 +167,7 @@ def camera_snapshot() -> Dict[str, Any]:
 def ptz_tilt(angle: float) -> Dict[str, Any]:
     """Relative Tilt-Bewegung (-90..+90 Grad), positive=hoch."""
     try:
-        return _relative_move("up", "down", angle, 90.0)
+        return _relative_move("tilt", "up", "down", angle, 90.0)
     except Exception as e:
         return {"error": str(e)[:200]}
 
