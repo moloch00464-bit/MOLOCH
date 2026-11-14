@@ -20,6 +20,7 @@ import os
 import re
 import json
 import time
+import uuid
 import logging
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple
@@ -196,9 +197,12 @@ class KeywordHandler:
           "merk dir das ist Peter" → name=peter
           "das ist Hans" → name=hans
           "enrollment markus" → name=markus
-          "gesicht merken" → name=unbekannt (Fallback)
+          "gesicht merken" → kein Name → nachfragen, kein Enrollment
         """
         name = self._extract_enrollment_name(text)
+        if name == "unbekannt":
+            logger.info("[KEYWORD] Enrollment ohne Namen abgelehnt")
+            return "Wessen Gesicht? Sag zum Beispiel: 'Merk dir, das ist Markus.'"
         self._send_ipc_command("enrollment_start", name=name, n=20)
         response = response_template.replace("{name}", name.capitalize())
         logger.info(f"[KEYWORD] Enrollment gestartet fuer '{name}'")
@@ -451,10 +455,13 @@ class KeywordHandler:
         """
         cmd = {"action": action}
         cmd.update(kwargs)
-        path = f"/tmp/moloch_cmd_{int(time.time() * 1000)}.json"
+        path = f"/tmp/moloch_cmd_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}.json"
         try:
-            with open(path, "w") as f:
+            # Atomar: .tmp passt nicht auf das Poll-Glob moloch_cmd_*.json
+            tmp = path + ".tmp"
+            with open(tmp, "w") as f:
                 json.dump(cmd, f)
+            os.replace(tmp, path)
             logger.info(f"[KEYWORD] IPC Command: {action} -> {path}")
         except Exception as e:
             logger.error(f"[KEYWORD] IPC Command fehlgeschlagen: {e}")

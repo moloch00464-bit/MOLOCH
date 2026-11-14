@@ -252,15 +252,19 @@ def _collect_drift_events(prev: Optional[Dict[str, Any]],
     return combined
 
 
-def _safe_collect(module_name: str, fallback_status: str = "PENDING") -> Dict[str, Any]:
-    """Best-effort Sub-Auditor-Aufruf. Bei Fehler: PENDING-Layer mit error-detail."""
+def _safe_collect(module_name: str, fallback_status: str = "WARN") -> Dict[str, Any]:
+    """Best-effort Sub-Auditor-Aufruf. Bei Fehler: WARN-Layer mit error-detail.
+
+    Frueher PENDING - das rollte in _compute_overall als gruen durch, ein
+    abgestuerzter Auditor sah also aus wie ein gesunder Layer.
+    """
     try:
         mod = __import__(f"core.audit.{module_name}", fromlist=["collect"])
         return mod.collect()
     except Exception as e:
         logger.warning("[audit] %s collect-Fehler: %s", module_name, e)
         return {"score": 0, "max": 0, "status": fallback_status,
-                "detail": {"error": str(e)[:200]}}
+                "detail": {"error": str(e)[:200], "collector_crashed": True}}
 
 
 def _safe_collect_self_diagnosis() -> Dict[str, Any]:

@@ -2476,7 +2476,7 @@ class MolochService:
                 _llm = get_llm_bridge()
                 status["llm_provider"] = _llm._last_provider
                 status["llm_ollama_running"] = (
-                    _llm._is_ollama_running() if _llm._ollama_available else False
+                    _llm.is_ollama_running_cached() if _llm._ollama_available else False
                 )
             except Exception:
                 status["llm_provider"] = "none"
@@ -2829,6 +2829,11 @@ class MolochService:
                 if tracker and hasattr(tracker, 'config'):
                     cfg = tracker.config
                     if hasattr(cfg, param):
+                        # Slider liefern float; int-Felder (z.B. Ringbuffer-Groesse
+                        # als Slice-Index) muessen int bleiben
+                        cur = getattr(cfg, param)
+                        if isinstance(cur, int) and not isinstance(cur, bool):
+                            value = int(round(value))
                         setattr(cfg, param, value)
                         # Basis-Werte aktualisieren (fuer dynamische Anpassung)
                         if param == 'pan_gain':
@@ -2948,7 +2953,8 @@ class MolochService:
         elif action == 'cloud_led':
             self._cam.cloud_set_night_mode(cmd.get('level', 0))
         elif action == 'cloud_alarm':
-            self._cam.cloud_toggle_alarm()
+            # keyword_handler und panel_ewelink senden on=True/False
+            self._cam.cloud_toggle_alarm(cmd.get('on'))
         elif action == 'snapshot':
             self._cam.take_snapshot()
         elif action == 'teach_mode_toggle':

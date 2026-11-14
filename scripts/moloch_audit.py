@@ -170,31 +170,33 @@ def wait_with_countdown(seconds, message="Warte"):
 # AUTO-TESTS: SYSTEM BASICS (Claude)
 # ============================================================
 
+def _find_pid(pattern):
+    """Erste PID zu pattern oder None. Ohne Shell: pgrep|head via shell=True
+    fand die eigene Shell-Kommandozeile und meldete immer einen Treffer."""
+    try:
+        res = subprocess.run(["pgrep", "-f", pattern],
+                             capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    own = {os.getpid(), os.getppid()}
+    for line in res.stdout.split():
+        if line.isdigit() and int(line) not in own:
+            return int(line)
+    return None
+
 @auto_test("Service läuft", "system")
 def test_service_running():
-    try:
-        out = subprocess.check_output(
-            "pgrep -f 'moloch_service' | head -1",
-            shell=True, timeout=5
-        ).decode().strip()
-        if out:
-            return True, f"PID {out}"
-        return False, "Kein Prozess"
-    except:
-        return False, "pgrep fehlgeschlagen"
+    pid = _find_pid("moloch_service")
+    if pid:
+        return True, f"PID {pid}"
+    return False, "Kein Prozess"
 
 @auto_test("Panel läuft", "system")
 def test_panel_running():
-    try:
-        out = subprocess.check_output(
-            "pgrep -f 'panel_main' | head -1",
-            shell=True, timeout=5
-        ).decode().strip()
-        if out:
-            return True, f"PID {out}"
-        return False, "Kein Prozess"
-    except:
-        return False, "pgrep fehlgeschlagen"
+    pid = _find_pid("panel_main")
+    if pid:
+        return True, f"PID {pid}"
+    return False, "Kein Prozess"
 
 @auto_test("Status-JSON aktuell", "system")
 def test_status_json():
@@ -1126,13 +1128,9 @@ def test_onvif_no_error_loop():
 @auto_test("Kein Thread-Leak", "system")
 def test_thread_leak():
     try:
-        out = subprocess.check_output(
-            "pgrep -f 'moloch_service' | head -1",
-            shell=True, timeout=5
-        ).decode().strip()
-        if not out:
+        pid = _find_pid("moloch_service")
+        if not pid:
             return True, "Service nicht aktiv (uebersprungen)"
-        pid = int(out)
         t1 = None
         with open(f"/proc/{pid}/status") as f:
             for line in f:

@@ -26,6 +26,7 @@ import asyncio
 import logging
 import os
 import time
+import urllib.parse
 import uuid
 from contextlib import asynccontextmanager
 from typing import Dict, Optional
@@ -35,6 +36,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
 from playwright.async_api import Browser, Page, Playwright, async_playwright
 from pydantic import BaseModel, Field
+from url_guard import check_public_url, is_public_host
 
 logging.basicConfig(
     level=logging.INFO,
@@ -172,13 +174,32 @@ async def stats():
     }
 
 
+
+async def _guard_route(route):
+    url = route.request.url
+    if url.startswith(("data:", "blob:", "about:")):
+        await route.continue_()
+        return
+    host = urllib.parse.urlparse(url).hostname or ""
+    if not await asyncio.to_thread(is_public_host, host):
+        logger.warning(f"[open] internes Ziel blockiert: {host}")
+        await route.abort("blockedbyclient")
+        return
+    await route.continue_()
+
 @app.post("/open")
 async def open_url(req: OpenRequest):
     if _browser is None:
         raise HTTPException(503, "browser not initialized")
     if not (req.url.startswith("http://") or req.url.startswith("https://")):
         raise HTTPException(400, "url must start with http:// or https://")
+    try:
+        await asyncio.to_thread(check_public_url, req.url)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     page = await _browser.new_page()
+    # SSRF: auch Redirects und Subressourcen duerfen keine internen Ziele laden
+    await page.route("**/*", _guard_route)
     tab_id = uuid.uuid4().hex[:12]
     try:
         await page.goto(req.url, wait_until=req.wait_until, timeout=DEFAULT_TIMEOUT_MS)

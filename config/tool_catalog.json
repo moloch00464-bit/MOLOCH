@@ -171,7 +171,7 @@
       "type": "function",
       "function": {
         "name": "ptz_pan",
-        "description": "Pan-Bewegung der Kamera in Grad (-180..+180). NEVER 2: positive=LINKS bei Sonoff.",
+        "description": "Relative Pan-Bewegung der Kamera in Grad (-180..+180), ausgehend von der aktuellen Position. positive=LINKS.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -206,7 +206,7 @@
       "type": "function",
       "function": {
         "name": "ptz_tilt",
-        "description": "Tilt-Bewegung der Kamera in Grad (-90..+90).",
+        "description": "Relative Tilt-Bewegung der Kamera in Grad (-90..+90), ausgehend von der aktuellen Position. positive=hoch.",
         "parameters": {
           "type": "object",
           "properties": {

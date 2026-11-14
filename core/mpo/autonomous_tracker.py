@@ -827,7 +827,7 @@ class AutonomousTracker:
                 center_y = (ty1 + ty2) / 2 / frame_height
 
             # === STAGE 4: Ring-Buffer Smoothing (letzte N Frames mitteln) ===
-            buf_size = self.config.center_ring_buffer_size
+            buf_size = max(1, int(self.config.center_ring_buffer_size))
             self._center_ring.append((center_x, center_y))
             if len(self._center_ring) > buf_size:
                 self._center_ring = self._center_ring[-buf_size:]
@@ -1031,7 +1031,7 @@ class AutonomousTracker:
             self.current_target_confidence = selected_pose.get("face_confidence", 0) if selected_type == TargetType.FACE else selected_pose.get("confidence", 0)
 
             # Ring-Buffer Smoothing (gleiche Logik wie update_detection Stage 4)
-            buf_size = self.config.center_ring_buffer_size
+            buf_size = max(1, int(self.config.center_ring_buffer_size))
             self._center_ring.append((track_x, track_y))
             if len(self._center_ring) > buf_size:
                 self._center_ring = self._center_ring[-buf_size:]

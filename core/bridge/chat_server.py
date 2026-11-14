@@ -10,6 +10,7 @@ Endpoints:
   POST /chat       -> {text, force_local?, use_reason?} -> {text, provider, duration_ms}
 """
 import asyncio
+import hmac
 import logging
 import os
 import re
@@ -53,6 +54,33 @@ app = FastAPI(title="MOLOCH Chat-Server", version="1.0")
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
 )
+
+# Opt-in API-Token: gesetzt via MOLOCH_API_TOKEN -> alle schreibenden Routen und
+# sensible GETs verlangen Header "X-Moloch-Token". Ohne Token: Verhalten wie bisher.
+# Loopback bleibt frei (lokale Prozesse, PC ueber SSH-Tunnel localhost:9000).
+_API_TOKEN = os.environ.get("MOLOCH_API_TOKEN", "").strip()
+_PROTECTED_GET = ("/snapshot.jpg", "/feedback_export", "/history")
+_LOOPBACK = ("127.0.0.1", "::1", "localhost")
+
+
+def _needs_token(method: str, path: str) -> bool:
+    if method in ("POST", "PUT", "PATCH", "DELETE"):
+        return True
+    return method == "GET" and path in _PROTECTED_GET
+
+
+@app.middleware("http")
+async def _api_token_guard(request, call_next):
+    if (_API_TOKEN and _needs_token(request.method, request.url.path)
+            and (request.client is None or request.client.host not in _LOOPBACK)):
+        supplied = request.headers.get("x-moloch-token", "")
+        if not hmac.compare_digest(supplied.encode(), _API_TOKEN.encode()):
+            return JSONResponse({"detail": "X-Moloch-Token fehlt oder falsch"}, status_code=401)
+    return await call_next(request)
+
+
+if not _API_TOKEN:
+    logger.warning("MOLOCH_API_TOKEN nicht gesetzt - alle Routen ohne Auth erreichbar (LAN)")
 
 # PC-Heartbeat-Tracking (Task 5d): letzter empfangener PC-Online-Timestamp
 _pc_online_ts: float = 0.0
@@ -4458,25 +4486,34 @@ _VERIFY_VALID_TYPES = {
 }
 
 
+_verify_lock = threading.Lock()
+_verify_proc: Optional[subprocess.Popen] = None
+
+
 def _spawn_closed_loop_run(verify_type: str = "all") -> Dict:
     """Fire-and-forget Spawn des Closed-Loop-Orchestrators.
 
     Verify dauert bis zu 3 Min — kein Warten, kein capture. Ergebnis landet
     in /dev/shm/closed_loop_state.json (vom Orchestrator selbst geschrieben).
     """
+    global _verify_proc
     rid = str(uuid.uuid4())[:8]
     vt = verify_type if verify_type in _VERIFY_VALID_TYPES else "all"
     args = ["python3", "-m", "core.audit.closed_loop.closed_loop_orchestrator",
             f"--{vt}"]
-    try:
-        subprocess.Popen(
-            args,
-            cwd="/home/molochzuhause/moloch",
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except Exception as e:
-        raise HTTPException(500, f"Verify-Spawn fehlgeschlagen: {e}")
+    with _verify_lock:
+        # Nur ein Lauf gleichzeitig: jeder Lauf faehrt PTZ/LED/Fan/TTS physisch
+        if _verify_proc is not None and _verify_proc.poll() is None:
+            raise HTTPException(409, "Closed-Loop-Verify laeuft bereits")
+        try:
+            _verify_proc = subprocess.Popen(
+                args,
+                cwd="/home/molochzuhause/moloch",
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception as e:
+            raise HTTPException(500, f"Verify-Spawn fehlgeschlagen: {e}")
     return {
         "run_id": rid,
         "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -4532,6 +4569,7 @@ def audit_verify_status():
 
 import uuid as _uuid
 
+_PERF_TEST_SPAWN_LOCK = threading.Lock()
 _PERF_TEST_RUNS: Dict[str, Dict[str, Any]] = {}  # run_id -> {proc, started_at, log_path, state_path}
 _PERF_TEST_LOCK = threading.Lock()
 _PERF_TEST_LOG_DIR = Path(os.path.expanduser("~/moloch/logs/performance_test"))
@@ -4682,38 +4720,41 @@ def api_test_run(req: Optional[Dict[str, Any]] = Body(default=None)):
             "Browser-Cache reset (Strg+F5) oder Skip-Checkboxen leeren."
         )
 
-    # 409 wenn schon ein Run laeuft
-    active = _perf_test_active_run_id()
-    if active:
-        raise HTTPException(409, f"Test laeuft bereits: run_id={active}")
+    # Pruefen + Starten + Registrieren atomar: sonst starten zwei parallele
+    # Requests beide einen Run (Check lag ausserhalb des Locks)
+    with _PERF_TEST_SPAWN_LOCK:
+        # 409 wenn schon ein Run laeuft
+        active = _perf_test_active_run_id()
+        if active:
+            raise HTTPException(409, f"Test laeuft bereits: run_id={active}")
 
-    run_id = str(_uuid.uuid4())
-    log_path = Path(f"/dev/shm/perf_test_{run_id}.log")
-    state_path = Path(f"/dev/shm/perf_test_{run_id}.state")
+        run_id = str(_uuid.uuid4())
+        log_path = Path(f"/dev/shm/perf_test_{run_id}.log")
+        state_path = Path(f"/dev/shm/perf_test_{run_id}.state")
 
-    cmd = ["python3", "-u", "-m", "scripts.performance_test.runner"]
-    if judge == "cloud":
-        cmd += ["--judge=cloud"]
-    if skip_acts:
-        cmd += ["--skip-act=" + ",".join(str(int(n)) for n in skip_acts)]
+        cmd = ["python3", "-u", "-m", "scripts.performance_test.runner"]
+        if judge == "cloud":
+            cmd += ["--judge=cloud"]
+        if skip_acts:
+            cmd += ["--skip-act=" + ",".join(str(int(n)) for n in skip_acts)]
 
-    started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    try:
-        proc = subprocess.Popen(
-            cmd, cwd=str(_PERF_TEST_MOLOCH_DIR),
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            bufsize=1, text=True,
-        )
-    except Exception as e:
-        raise HTTPException(500, f"Subprocess-Spawn-Fehler: {e}")
+        started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        try:
+            proc = subprocess.Popen(
+                cmd, cwd=str(_PERF_TEST_MOLOCH_DIR),
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                bufsize=1, text=True,
+            )
+        except Exception as e:
+            raise HTTPException(500, f"Subprocess-Spawn-Fehler: {e}")
 
-    info = {
-        "proc": proc, "run_id": run_id, "started_at": started_at,
-        "log_path": log_path, "state_path": state_path, "cmd": cmd,
-        "judge": judge, "skip_acts": skip_acts,
-    }
-    with _PERF_TEST_LOCK:
-        _PERF_TEST_RUNS[run_id] = info
+        info = {
+            "proc": proc, "run_id": run_id, "started_at": started_at,
+            "log_path": log_path, "state_path": state_path, "cmd": cmd,
+            "judge": judge, "skip_acts": skip_acts,
+        }
+        with _PERF_TEST_LOCK:
+            _PERF_TEST_RUNS[run_id] = info
 
     # Initial-State + Pointer
     try:

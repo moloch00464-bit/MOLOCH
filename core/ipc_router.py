@@ -149,7 +149,14 @@ class IPCRouter:
                     os.unlink(cf)
                     commands.append(cmd)
                 except Exception as e:
-                    logger.debug(f"Panel cmd poll ({cf}): {e}")
+                    # Erzeuger schreiben teils nicht atomar: junge Datei = evtl.
+                    # noch im Schreiben -> naechster Poll statt loeschen
+                    try:
+                        if time.time() - os.path.getmtime(cf) < 2.0:
+                            continue
+                    except OSError:
+                        continue
+                    logger.warning(f"Panel cmd verworfen ({cf}): {e}")
                     try:
                         os.unlink(cf)
                     except FileNotFoundError:

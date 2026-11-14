@@ -26,7 +26,27 @@ import time
 import logging
 import threading
 from datetime import datetime, timedelta
+from contextlib import contextmanager
 from typing import Optional, Dict, List, Any
+
+try:
+    import fcntl
+except ImportError:  # Windows: kein Cross-Prozess-Lock noetig (nur Pi schreibt)
+    fcntl = None
+
+
+@contextmanager
+def _file_lock(lock_path: str):
+    """Exklusiver Cross-Prozess-Lock (Service und chat_server schreiben dieselbe Datei)."""
+    if fcntl is None:
+        yield
+        return
+    with open(lock_path, "a") as lf:
+        fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
 
 logger = logging.getLogger("MolochMemory")
 
@@ -292,15 +312,20 @@ class MolochMemory:
                 "text": text,
                 "source": source,
             }
-            self._today_messages.append(msg)
-
-            # RAM-Schutz: Max 500 Messages pro Tag im RAM (Disk hat alles)
-            if len(self._today_messages) > 500:
-                self._today_messages = self._today_messages[-500:]
-
-            # SOFORT auf Disk — kein Buffering
+            # SOFORT auf Disk — unter Datei-Lock neu lesen + anhaengen.
+            # Vorher schrieb jeder Prozess (Service, chat_server) seine eigene
+            # RAM-Kopie und loeschte dabei die Nachrichten des anderen; ab 500
+            # Nachrichten gingen zudem die aeltesten auch auf Disk verloren.
             path = self._conv_path(self._today_date)
-            _safe_write_json(path, self._today_messages)
+            with _file_lock(path + ".lock"):
+                on_disk = _safe_read_json(path, [])
+                if not isinstance(on_disk, list):
+                    on_disk = []
+                on_disk.append(msg)
+                _safe_write_json(path, on_disk)
+
+            # RAM-Schutz: Max 500 Messages pro Tag im RAM (Disk hat jetzt wirklich alles)
+            self._today_messages = on_disk[-500:]
 
     def get_recent_messages(self, n: int = 50) -> List[Dict]:
         """
