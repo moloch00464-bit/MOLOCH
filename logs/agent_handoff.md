@@ -39,6 +39,22 @@ tests/test_vector_memory_unit.py (39 Tests, simuliertes Qdrant + HTTP). pytest g
   Kontext von longterm_memory/local_llm_bridge - eigener Schritt, eigene Entscheidung.
 - Rollback: git revert des Commits "feat(memory): Vektorgedaechtnis mit Remote-Embedding".
 
+## core.vision-Import repariert (940f894)
+core/vision/__init__.py importierte unified_pipeline + hybrid_vision, die seit 2026-03-30
+(642f454) geloescht sind. Jeder Import aus core.vision scheiterte: inference_engine
+(Nicht-TAPPAS-Fallback), scripts/enroll_arcface.py, scripts/calibrate_tracking.py,
+calibration_engine. Tote Importe entfernt. pytest jetzt 191 passed, 18 skipped, 0 failed.
+Auf dem Pi pruefen: `python3 -c "import core.inference_engine"`.
+
+## M5 PTZ-Klemmung (Agent-Tools ptz_pan/ptz_tilt)
+core/agent/tools/hardware.py klemmt gegen settings.json ptz.*_limit_*, Position aus
+/dev/shm/moloch_status.json (ptz.current_pan/current_tilt, max 5s alt). 22 Tests in
+tests/test_agent_ptz_clamp.py. Antwort auf PC-Frage: camera.move_absolute klemmt selbst,
+aber nur mechanisch (-168.4..170 / -78..78.8).
+- Am Geraet UNGEPRUEFT: stimmt ptz.current_pan im Status waehrend der Tracker faehrt?
+  Tilt positiv = physisch hoch?
+- Position ist bis 5s alt: bei laufendem Tracking kann das Ziel um einige Grad abweichen.
+
 ## Repo-Zustand
 - `main` steht seit 2026-05-11 (a5bf8cb), 34 Commits hinter dem Pi-Branch.
 - `ccr-2f46f2da-zkd6is`: 1 Doku-Commit (Reachy-Mini-Koerperkonzept, 2026-11-11), nicht gemergt.
