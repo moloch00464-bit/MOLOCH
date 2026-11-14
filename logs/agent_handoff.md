@@ -1,3 +1,34 @@
+# Agent Handoff — 2026-11-14 Cloud-Session (Merge-Vorbereitung, KEIN Pi-Zugriff)
+
+Branch `ccr-5df7b577-w92x94` = `deepseek_architecture_overhaul` (e13f39a) + Merge von
+`claude/github-fable-push-check-2wgb10` (31 Review-Fixes vom 2026-09-29). Merge-Commit cfe3031.
+
+## Geprueft (offline, im Cloud-Container)
+- Einziger Konflikt: core/perception/npu_extras.py (RGB/BGR doppelt gefixt) -> Pi-Variante behalten.
+- py_compile aller 26 geaenderten .py ok, pyflakes ohne neue undefinierte Namen.
+- pytest: 113 passed, 33 skipped, 2 failed (core.vision.unified_pipeline fehlt, schon vorher).
+
+## NICHT geprueft - muss auf dem Pi passieren
+- Service-Start, moloch_audit --auto, FPS, NPU-Worker. Der Merge fasst 6 ROT-Dateien an
+  (moloch_service, tappas_pipeline, face_pipeline, autonomous_tracker, ipc_router, voice-nahe tts.py).
+- Uebernahme auf dem Pi: Tag setzen, `git merge origin/ccr-5df7b577-w92x94` (fast-forward),
+  __pycache__ loeschen, Restart, Audit. Bei FAIL: zurueck auf den Tag.
+
+## Antwort auf PC-Frage (PC_TO_PI 2026-10-05, Hinweis 1)
+Bestaetigt per Code: auf deepseek_architecture_overhaul senden ptz_pan/ptz_tilt/led_set die
+IPC-Aktionen `ptz_pan`, `ptz_tilt`, `led_set_color`. Weder moloch_service.py noch ipc_router.py
+kennen sie -> die drei Agent-Tools sind dort wirkungslos. Nach dem Merge: `ptz_move`
+(direction/step) und `led_set` (farbe/modus), beide im Service vorhanden.
+Tilt im Tool: positiv = "up". Ob "up" physisch hoch ist, ist am Geraet nicht belegt.
+
+## Repo-Zustand
+- `main` steht seit 2026-05-11 (a5bf8cb), 34 Commits hinter dem Pi-Branch.
+- `ccr-2f46f2da-zkd6is`: 1 Doku-Commit (Reachy-Mini-Koerperkonzept, 2026-11-11), nicht gemergt.
+- Keine ChatGPT-Vorarbeit im Repo: keine Branches, PRs oder Issues, nur alte Notizen
+  in context/origin_fragments/chatgpt_insights.md.
+
+---
+
 # Agent Handoff — 2026-10-03 Pi-Session (Cowork mit PC-Session, NPU-Lesen)
 
 ## Arbeitsweise seit heute
