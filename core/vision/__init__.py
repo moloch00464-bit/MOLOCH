@@ -1,43 +1,21 @@
 # M.O.L.O.C.H. Vision Module
 """
-Vision Pipeline
-===============
+Vision-Hilfsmodule (Legacy-Paket)
+=================================
 
-Components:
-- UnifiedVisionPipeline: Single source of truth
-- GstHailoDetector: GStreamer + Hailo-10H pose detection
-- GstHailoPoseDetector: Pose detection with keypoint validation
-- HailoAnalyzer: On-demand Hailo face recognition
-- HybridVision: Orchestrator
-- FaceDatabase: LanceDB face embedding storage
+Die Live-Pipeline liegt in core/perception/ (TAPPAS + Stage-2-Worker).
+Hier bleiben nur noch:
+- HailoAnalyzer: On-demand Hailo-Gesichtserkennung
+- FaceDatabase: Face-Embedding-Speicher
+- Detektor-Module (gesture_detector, hand_gesture_detector, face_attr_npu, ...)
 
-RECOMMENDED Usage:
-    from core.vision import get_unified_pipeline
-
-    pipeline = get_unified_pipeline()
-    pipeline.start()
-
-    # Get frame with overlay
-    frame = pipeline.get_frame_with_overlay()
-
-Legacy Usage:
-    from core.vision import get_hybrid_vision
-    hv = get_hybrid_vision()
+unified_pipeline und hybrid_vision wurden am 2026-03-30 geloescht (Commit
+642f454). Ihre Importe standen hier noch und liessen JEDEN Import aus
+core.vision scheitern - deshalb entfernt.
 """
-
-# Unified Pipeline (RECOMMENDED)
-from .unified_pipeline import (
-    UnifiedVisionPipeline,
-    PipelineConfig,
-    PipelineState,
-    Detection,
-    FrameResult,
-    get_unified_pipeline
-)
 
 # Hailo Analyzers
 from .hailo_analyzer import HailoAnalyzer, HailoState, get_hailo_analyzer, RecognitionResult
-from .hybrid_vision import HybridVision, HybridVisionState, PersonEvent, get_hybrid_vision
 from .face_database import FaceDatabase, KnownPerson, SearchResult, get_face_database
 
 # Legacy compatibility stubs
@@ -61,13 +39,6 @@ class XiaoTrigger:
     pass
 
 __all__ = [
-    # Unified Pipeline (RECOMMENDED)
-    "UnifiedVisionPipeline",
-    "PipelineConfig",
-    "PipelineState",
-    "Detection",
-    "FrameResult",
-    "get_unified_pipeline",
     # Legacy stubs
     "XiaoVision",
     "get_vision",
@@ -78,11 +49,6 @@ __all__ = [
     "HailoState",
     "get_hailo_analyzer",
     "RecognitionResult",
-    # Orchestrator
-    "HybridVision",
-    "HybridVisionState",
-    "PersonEvent",
-    "get_hybrid_vision",
     # Database
     "FaceDatabase",
     "KnownPerson",
