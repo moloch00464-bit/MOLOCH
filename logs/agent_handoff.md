@@ -21,6 +21,24 @@ kennen sie -> die drei Agent-Tools sind dort wirkungslos. Nach dem Merge: `ptz_m
 (direction/step) und `led_set` (farbe/modus), beide im Service vorhanden.
 Tilt im Tool: positiv = "up". Ob "up" physisch hoch ist, ist am Geraet nicht belegt.
 
+## Paket A Gedaechtnis (ChatGPT-Handoff 2026-11-13) - gebaut, STANDARD AUS
+Dateien: core/memory/embedding_provider.py (neu), core/memory/vector_memory.py,
+tests/test_vector_memory_unit.py (39 Tests, simuliertes Qdrant + HTTP). pytest gesamt:
+152 passed, 33 skipped, 2 failed (unified_pipeline, Altlast).
+- Embeddings kommen vom PC-Ollama (/api/embed, Modell all-minilm, 384-dim), kein neuer Dienst.
+- Einschalten: PC `ollama pull all-minilm`, dann settings.json
+  `"embedding_bridge": {"enabled": true}` (Host/Port fallen auf tentacle_llm zurueck)
+  oder ENV MOLOCH_EMBED_ENABLED=1. settings.json ist ROT und wurde NICHT angefasst.
+- UNGETESTET: echtes Ollama (Antwortformat /api/embed), echtes Qdrant, Latenz auf dem Pi.
+- Nebenwirkung beim Einschalten: core/moloch_sprache.py holt sich denselben Embedder
+  und wird damit ebenfalls aktiv (3 weitere Collections). Beobachten.
+- Alte Vektoren in moloch_memory stammen von sentence-transformers; nach dem Einschalten
+  einmal PersistentMemory.sync_to_vector() laufen lassen (deterministische IDs, ueberschreibt).
+- Noch NICHT verdrahtet: sync_to_vector() ruft niemand auf, build_context() nutzt nur das
+  alte GUI-Panel. Damit Moloch die Suche beim Antworten nutzt, muss sie in den
+  Kontext von longterm_memory/local_llm_bridge - eigener Schritt, eigene Entscheidung.
+- Rollback: git revert des Commits "feat(memory): Vektorgedaechtnis mit Remote-Embedding".
+
 ## Repo-Zustand
 - `main` steht seit 2026-05-11 (a5bf8cb), 34 Commits hinter dem Pi-Branch.
 - `ccr-2f46f2da-zkd6is`: 1 Doku-Commit (Reachy-Mini-Koerperkonzept, 2026-11-11), nicht gemergt.
