@@ -1653,7 +1653,9 @@ class LocalLLMBridge:
         # (z.B. Markus' Profil, Crew-Namen, Rebecca-Klingonisch, Genesis-Datum).
         try:
             from core.longterm_memory import get_memory
-            memory_ctx = get_memory().get_memory_context_minimal()
+            # query: passende Fakten per Vektor-Recall (nur wenn eingeschaltet, sonst
+            # unveraendert). Nur hier im lokalen Tentakel-Pfad, nicht bei Cloud-LLMs.
+            memory_ctx = get_memory().get_memory_context_minimal(query=prompt)
             if memory_ctx:
                 system = (system or "") + "\n\n--- MEMORY ---\n" + memory_ctx
         except Exception:
