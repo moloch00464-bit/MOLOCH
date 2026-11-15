@@ -173,6 +173,10 @@ main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 400px;
           <button data-src="test">Ausprobieren</button>
         </div>
         <div class="kv" id="body-now"></div>
+        <div id="body-gaze" style="margin-top:8px">
+          <button class="toggle" id="body-center" title="Setzt die aktuelle Kamerastellung als Geradeaus-Blick des Roboters">Kamera schaut auf mich</button>
+          <div class="brow"><label>Mitdrehen <b id="bg-faktor-v">1.0</b>×</label><input type="range" id="bg-faktor" min="0.5" max="3" step="0.1" value="1"></div>
+        </div>
         <div id="body-test" style="display:none;margin-top:8px">
           <div class="brow"><label>Zone</label><select id="bt-zone"></select></div>
           <div class="brow"><label>Stimmung</label><select id="bt-mood"></select></div>
@@ -487,6 +491,10 @@ for (const id of ['zone', 'mood', 'being_state']) $('bt-' + id).addEventListener
 for (const id of ['tension', 'dominance']) $('bt-' + id).addEventListener('input', () => {
   $('bt-' + id + '-v').textContent = (+$('bt-' + id).value).toFixed(2); sendBodyTest(); });
 
+$('body-center').onclick = () => bodyPost({action: 'center'});
+$('bg-faktor').addEventListener('change', () => bodyPost({action: 'faktor', wert: +$('bg-faktor').value}));
+$('bg-faktor').addEventListener('input', () => { $('bg-faktor-v').textContent = (+$('bg-faktor').value).toFixed(1); });
+
 async function refreshBody() {
   let s;
   try { s = await (await fetch('/api/ki/body')).json(); } catch (e) { return; }
@@ -518,6 +526,7 @@ async function refreshBody() {
     const z = b.zustand, p = b.last_pose || {};
     const rows = [['Quelle', b.quelle === 'live' ? 'Molochs Live-Zustand' : b.quelle === 'test' ? 'Test-Vorgabe' : 'Pi offline'],
       ['Zone / Stimmung', z.zone + ' / ' + z.mood], ['Zustand', z.being_state],
+      ['Blick', z.gaze_yaw == null ? '—' : 'Drehung ' + z.gaze_yaw.toFixed(0) + '°, Neigung ' + (z.gaze_pitch ?? 0).toFixed(0) + '°'],
       ['Kopf', 'Neigung ' + (p.head_pitch ?? '—') + '°, Höhe ' + (p.head_z ?? '—') + ' mm'],
       ['Antennen', (p.antenna_l ?? '—') + '° / ' + (p.antenna_r ?? '—') + '°']];
     const box = $('body-now'); box.innerHTML = '';

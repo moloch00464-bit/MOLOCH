@@ -37,6 +37,7 @@ PI_URL = os.environ.get("MOLOCH_PI_TUNNEL_URL", "http://localhost:9000").rstrip(
 DIR = Path(os.environ.get("MOLOCH_ZENTRALE_DIR", str(Path.home() / "moloch_zentrale")))
 OVERRIDE_FILE = DIR / "body_override.json"
 STATUS_FILE = DIR / "body_status.json"
+CALIB_FILE = DIR / "body_calib.json"
 
 LOOP_HZ = 20.0          # Ziel-Stream an den Simulator
 LIVE_EVERY_S = 0.5      # Pi-Abfrage
@@ -113,7 +114,9 @@ class ReachyHttpBackend:
                 "x": 0.0, "y": 0.0, "z": cur["head_z"] / 1000.0,
                 "roll": math.radians(cur["head_roll"]),
                 "pitch": math.radians(cur["head_pitch"]) * PITCH_SIGN,
-                "yaw": math.radians(cur["head_yaw"]),
+                # BodyPose.head_yaw ist relativ zum Koerper gedacht (compute_pose teilt den
+                # Blick auf); der Reachy nimmt die Kopfdrehung absolut -> Koerperanteil addieren.
+                "yaw": math.radians(cur["head_yaw"] + cur["body_yaw"]),
             },
             "target_antennas": [_antenna_rad(cur["antenna_r"]) * ANTENNA_SIGN[0],
                                 _antenna_rad(cur["antenna_l"]) * ANTENNA_SIGN[1]],
@@ -135,10 +138,26 @@ def _clamp(v, lo, hi, default=0.0) -> float:
     return max(lo, min(hi, v)) if math.isfinite(v) else default
 
 
-def derive_state(live: Optional[dict]) -> Optional[dict]:
+def read_calib() -> dict:
+    """Blick-Kalibrierung aus der KI-Zentrale ("Kamera schaut auf mich").
+
+    mitte_pan/mitte_tilt: Kamerastellung, bei der der Roboter geradeaus schaut.
+    faktor: Verstaerkung der Kamerabewegung (1.0 = Grad fuer Grad).
+    """
+    try:
+        c = json.loads(CALIB_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        c = {}
+    return {"mitte_pan": _clamp(c.get("mitte_pan"), -180.0, 180.0),
+            "mitte_tilt": _clamp(c.get("mitte_tilt"), -90.0, 90.0),
+            "faktor": _clamp(c.get("faktor"), 0.1, 3.0, default=1.0)}
+
+
+def derive_state(live: Optional[dict], calib: Optional[dict] = None) -> Optional[dict]:
     """Pi /live -> Felder fuer BodyState. Mood und Seins-Zustand sind abgeleitet (Naeherung)."""
     if not live:
         return None
+    calib = calib or {"mitte_pan": 0.0, "mitte_tilt": 0.0, "faktor": 1.0}
     core = live.get("core") or {}
     zone = core.get("zone") if core.get("zone") in ZONES else "guardian"
     tension = _clamp(core.get("tension"), 0.0, 1.0)   # Pi liefert -1..+1, der Koerper nutzt 0..1
@@ -164,8 +183,10 @@ def derive_state(live: Optional[dict]) -> Optional[dict]:
     pan, tilt = ptz.get("pan"), ptz.get("tilt")
     return {"zone": zone, "mood": mood, "being_state": being, "tension": tension,
             "dominance": _clamp(core.get("dominance"), -1.0, 1.0),
-            "gaze_yaw": _clamp(pan, -180.0, 180.0) if isinstance(pan, (int, float)) else None,
-            "gaze_pitch": _clamp(tilt, -90.0, 90.0) if isinstance(tilt, (int, float)) else None}
+            "gaze_yaw": _clamp((pan - calib["mitte_pan"]) * calib["faktor"], -180.0, 180.0)
+            if isinstance(pan, (int, float)) else None,
+            "gaze_pitch": _clamp((tilt - calib["mitte_tilt"]) * calib["faktor"], -90.0, 90.0)
+            if isinstance(tilt, (int, float)) else None}
 
 
 def read_override() -> Optional[dict]:
@@ -212,7 +233,7 @@ def main() -> None:
             last_live = loop_t
             try:
                 r = pi.get(f"{PI_URL}/live")
-                live_state = derive_state(r.json()) if r.status_code == 200 else None
+                live_state = derive_state(r.json(), read_calib()) if r.status_code == 200 else None
             except (httpx.HTTPError, ValueError):
                 live_state = None
 

@@ -503,6 +503,29 @@ async def ki_body_action(request: Request):
     if action == "live":
         _write_override(None)
         return {"ok": True}
+    if action in ("center", "faktor"):
+        calib_file = LOG_DIR / "body_calib.json"
+        try:
+            calib = json.loads(calib_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            calib = {}
+        if action == "center":
+            # aktuelle Kamerastellung = "Roboter schaut geradeaus"
+            async with httpx.AsyncClient() as client:
+                live = await _get_json(client, f"{PI_URL}/live", timeout=3.0)
+            ptz = (live or {}).get("ptz") or {}
+            if not isinstance(ptz.get("pan"), (int, float)):
+                return JSONResponse({"error": "Pi liefert keine Kamerastellung"}, status_code=502)
+            calib["mitte_pan"] = ptz["pan"]
+            calib["mitte_tilt"] = ptz.get("tilt") or 0.0
+        else:
+            calib["faktor"] = max(0.1, min(3.0, _num(body.get("wert"), 0.1, 3.0)))
+        calib.setdefault("faktor", 1.0)
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        calib_file.write_text(json.dumps(calib), encoding="utf-8")
+        return {"ok": True, "info": f"Mitte: Schwenk {calib.get('mitte_pan', 0):.0f} Grad, "
+                                    f"Neigung {calib.get('mitte_tilt', 0):.0f} Grad, "
+                                    f"Faktor {calib['faktor']:.1f}", "kalibrierung": calib}
     if action == "estop":
         _write_override({"estop": bool(body.get("on")), "until": 0})
         return {"ok": True}
