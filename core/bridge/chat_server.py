@@ -2858,6 +2858,30 @@ def memory_turn(req: MemoryTurnRequest):
     return {"ok": True, "sender": sender, "source": req.source, "chars": len(text)}
 
 
+@app.get("/memory/recall")
+def memory_recall(q: str = "", limit: int = 3):
+    """Zur Frage passende Erinnerungen - die Gedaechtnis-Schnittstelle fuer den PC.
+
+    Der PC spiegelt das Gedaechtnis nicht, er fragt pro Turn hier nach. Antwort:
+      hits:  [{text, source: "fakt"|"selbstwissen", score, mode: "lexical"|"vector"}]
+      block: fertig formatierter Textblock fuer den Prompt ("" wenn nichts passt)
+    Nur lesend. Leere hits heissen: nichts Passendes gespeichert - nichts erfinden.
+    """
+    q = (q or "").strip()[:600]
+    limit = max(1, min(int(limit), 5))
+    if not q:
+        raise HTTPException(422, "q fehlt")
+    try:
+        mem = get_memory()
+        hits = mem.recall_hits(q, limit=limit)
+        block = mem.recall(q, limit=limit)
+    except Exception as e:
+        raise HTTPException(500, f"Memory-Lesefehler: {e}")
+    logger.info(f"[MEMORY-RECALL] q='{q[:60]}' treffer={len(hits)} "
+                f"quellen={sorted({h['source'] for h in hits})}")
+    return {"query": q, "count": len(hits), "hits": hits, "block": block}
+
+
 @app.get("/history")
 def history(n: int = 20):
     """Letzte N Konversations-Turns aus persistentem Memory (Cross-Channel:
