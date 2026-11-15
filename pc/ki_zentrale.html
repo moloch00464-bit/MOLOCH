@@ -89,6 +89,10 @@ main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 400px;
 .model button:hover{border-color:var(--mute)}
 .model button:disabled{opacity:.45;cursor:default}
 .envwarn{font-size:11.5px;color:var(--warn);margin-top:8px}
+.brow{display:grid;grid-template-columns:130px 1fr;gap:8px;align-items:center;margin:5px 0;font-size:12.5px}
+.brow label{color:var(--mute)}.brow label b{color:var(--fg);font-weight:500}
+.brow select{background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:6px;padding:4px 6px;font:inherit}
+.brow input[type=range]{width:100%;accent-color:var(--pc)}
 .ramline{font-size:12px;color:var(--mute);margin-top:4px}
 
 @media (max-width:900px){
@@ -154,6 +158,29 @@ main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 400px;
       <div id="models"></div>
       <div class="ramline" id="ramline"></div>
       <div class="envwarn" id="envwarn"></div>
+    </section>
+
+    <section class="card">
+      <h2>Körper (Reachy-Mini-Simulator) <span class="dot" id="p-body"></span></h2>
+      <div class="motorhead">
+        <button class="btn" id="body-btn">…</button>
+        <button class="toggle" id="body-estop" style="display:none">Not-Aus</button>
+        <span class="hint" id="body-info"></span>
+      </div>
+      <div id="body-panel" style="display:none">
+        <div class="seg" id="body-src" style="margin-bottom:8px">
+          <button data-src="live" class="on">Live von Moloch</button>
+          <button data-src="test">Ausprobieren</button>
+        </div>
+        <div class="kv" id="body-now"></div>
+        <div id="body-test" style="display:none;margin-top:8px">
+          <div class="brow"><label>Zone</label><select id="bt-zone"></select></div>
+          <div class="brow"><label>Stimmung</label><select id="bt-mood"></select></div>
+          <div class="brow"><label>Zustand</label><select id="bt-being_state"></select></div>
+          <div class="brow"><label>Anspannung <b id="bt-tension-v">0.0</b></label><input type="range" id="bt-tension" min="0" max="1" step="0.05" value="0"></div>
+          <div class="brow"><label>Dominanz <b id="bt-dominance-v">0.0</b></label><input type="range" id="bt-dominance" min="-1" max="1" step="0.05" value="0"></div>
+        </div>
+      </div>
     </section>
   </aside>
 </main>
@@ -435,6 +462,73 @@ async function refresh() {
   try { render(await (await fetch('/api/ki/status')).json()); }
   catch (e) { dot('p-ollama', 'err'); $('t-ollama').textContent = 'Zentrale nicht erreichbar'; }
 }
+
+// Koerper (Reachy-Simulator)
+let bodySrc = 'live', bodyListsDone = false, bodyBusy = false;
+async function bodyPost(payload) {
+  const d = await (await fetch('/api/ki/body', {method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload)})).json();
+  if (d.error || d.info) $('body-info').textContent = d.error || d.info;
+  return d;
+}
+function sendBodyTest() {
+  if (bodySrc !== 'test') return;
+  bodyPost({action: 'test', zone: $('bt-zone').value, mood: $('bt-mood').value,
+    being_state: $('bt-being_state').value, tension: +$('bt-tension').value, dominance: +$('bt-dominance').value});
+}
+function setBodySrc(src) {
+  bodySrc = src;
+  for (const b of $('body-src').querySelectorAll('button')) b.classList.toggle('on', b.dataset.src === src);
+  $('body-test').style.display = src === 'test' ? '' : 'none';
+  if (src === 'test') sendBodyTest(); else bodyPost({action: 'live'});
+}
+$('body-src').addEventListener('click', e => { if (e.target.dataset.src) setBodySrc(e.target.dataset.src); });
+for (const id of ['zone', 'mood', 'being_state']) $('bt-' + id).addEventListener('change', sendBodyTest);
+for (const id of ['tension', 'dominance']) $('bt-' + id).addEventListener('input', () => {
+  $('bt-' + id + '-v').textContent = (+$('bt-' + id).value).toFixed(2); sendBodyTest(); });
+
+async function refreshBody() {
+  let s;
+  try { s = await (await fetch('/api/ki/body')).json(); } catch (e) { return; }
+  if (!bodyListsDone) {
+    for (const k of ['zone', 'mood', 'being_state'])
+      for (const v of s.listen[k]) { const o = document.createElement('option'); o.textContent = v; $('bt-' + k).append(o); }
+    bodyListsDone = true;
+  }
+  const b = s.bruecke, on = s.simulator && !!b;
+  dot('p-body', on ? (b.estop ? 'err' : 'ok') : s.simulator ? 'warn' : '');
+  const btn = $('body-btn');
+  if (!bodyBusy) {
+    btn.textContent = !s.installiert ? 'nicht installiert' : s.simulator ? 'Simulator stoppen' : 'Simulator starten';
+    btn.disabled = !s.installiert;
+    btn.className = 'btn' + (s.simulator ? ' stop' : '');
+    btn.onclick = async () => {
+      bodyBusy = true; btn.disabled = true; btn.textContent = s.simulator ? 'stoppt …' : 'startet …';
+      try { await bodyPost({action: s.simulator ? 'stop' : 'start'}); } catch (e) { $('body-info').textContent = e.message; }
+      bodyBusy = false; refreshBody();
+    };
+  }
+  $('body-panel').style.display = on ? '' : 'none';
+  const es = $('body-estop');
+  es.style.display = on ? '' : 'none';
+  if (on) {
+    es.textContent = b.estop ? 'Not-Aus lösen' : 'Not-Aus';
+    es.classList.toggle('on', !b.estop);
+    es.onclick = () => bodyPost({action: 'estop', on: !b.estop}).then(refreshBody);
+    const z = b.zustand, p = b.last_pose || {};
+    const rows = [['Quelle', b.quelle === 'live' ? 'Molochs Live-Zustand' : b.quelle === 'test' ? 'Test-Vorgabe' : 'Pi offline'],
+      ['Zone / Stimmung', z.zone + ' / ' + z.mood], ['Zustand', z.being_state],
+      ['Kopf', 'Neigung ' + (p.head_pitch ?? '—') + '°, Höhe ' + (p.head_z ?? '—') + ' mm'],
+      ['Antennen', (p.antenna_l ?? '—') + '° / ' + (p.antenna_r ?? '—') + '°']];
+    const box = $('body-now'); box.innerHTML = '';
+    for (const [k, v] of rows) {
+      const a = document.createElement('span'); a.className = 'k'; a.textContent = k;
+      const c = document.createElement('span'); c.className = 'v'; c.textContent = v;
+      box.append(a, c);
+    }
+  }
+}
+refreshBody(); setInterval(refreshBody, 2000);
 
 setMode(mode); setTts(ttsOn);
 loadVerlauf(); refresh(); setInterval(refresh, 4000);

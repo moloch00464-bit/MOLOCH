@@ -385,6 +385,130 @@ async def ki_ollama(request: Request):
     return JSONResponse({"error": "action muss start oder stop sein"}, status_code=400)
 
 
+# ---------------------------------------------------------------- Koerper (Reachy-Simulator)
+
+REACHY_URL = os.environ.get("MOLOCH_REACHY_URL", "http://127.0.0.1:8000").rstrip("/")
+REACHY_DAEMON = Path(os.environ.get(
+    "MOLOCH_REACHY_DAEMON", str(Path.home() / "reachy_env" / "Scripts" / "reachy-mini-daemon.exe")))
+PC_PYTHON = Path.home() / "moloch_pc_env" / "Scripts" / "python.exe"
+BODY_BRIDGE = HERE / "body_bridge.py"
+BODY_OVERRIDE = LOG_DIR / "body_override.json"
+BODY_STATUS = LOG_DIR / "body_status.json"
+BODY_ZONES = ("guardian", "shadow", "berserker")
+BODY_MOODS = ("calm", "focused", "alert", "agitated", "euphoric", "dark")
+BODY_STATES = ("idle", "observing", "engaged", "overloaded", "withdrawing", "offline_anchor")
+
+
+def _body_procs() -> list:
+    """Simulator- und Bruecken-Prozesse (samt Kindern)."""
+    found = []
+    for p in psutil.process_iter(["pid", "name", "cmdline"]):
+        cmd = " ".join(p.info.get("cmdline") or []).lower()
+        name = (p.info.get("name") or "").lower()
+        if "reachy-mini-daemon" in name or "reachy-mini-daemon" in cmd or "body_bridge.py" in cmd:
+            found.append(p)
+    return found
+
+
+def _body_status_file() -> Optional[dict]:
+    try:
+        d = json.loads(BODY_STATUS.read_text(encoding="utf-8"))
+        return d if time.time() - float(d.get("ts", 0)) < 4 else None
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def _write_override(data: Optional[dict]) -> None:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    if data is None:
+        BODY_OVERRIDE.unlink(missing_ok=True)
+        return
+    tmp = BODY_OVERRIDE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data), encoding="utf-8")
+    os.replace(tmp, BODY_OVERRIDE)
+
+
+def _spawn(args: list) -> None:
+    subprocess.Popen(args, cwd=str(LOG_DIR), creationflags=_NO_WINDOW,
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, close_fds=True)
+
+
+def _num(v, lo: float, hi: float) -> float:
+    try:
+        return max(lo, min(hi, float(v)))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+@router.get("/api/ki/body")
+async def ki_body():
+    async with httpx.AsyncClient() as client:
+        sim = await _get_json(client, f"{REACHY_URL}/api/daemon/status", timeout=1.5)
+    return {
+        "installiert": REACHY_DAEMON.exists(),
+        "simulator": sim is not None,
+        "bruecke": await asyncio.to_thread(_body_status_file),
+        "listen": {"zone": BODY_ZONES, "mood": BODY_MOODS, "being_state": BODY_STATES},
+    }
+
+
+@router.post("/api/ki/body")
+async def ki_body_action(request: Request):
+    deny = _require_local(request)
+    if deny:
+        return deny
+    body = await request.json()
+    action = body.get("action")
+    if action == "start":
+        if not REACHY_DAEMON.exists():
+            return JSONResponse({"error": "Reachy-Simulator ist nicht installiert"}, status_code=404)
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        async with httpx.AsyncClient() as client:
+            if not await _get_json(client, f"{REACHY_URL}/api/daemon/status", timeout=1.5):
+                _spawn([str(REACHY_DAEMON), "--sim", "--no-media", "--fastapi-host", "127.0.0.1",
+                        "--log-file", str(LOG_DIR / "reachy_sim.log")])
+                for _ in range(40):
+                    await asyncio.sleep(1)
+                    if await _get_json(client, f"{REACHY_URL}/api/daemon/status", timeout=1.0):
+                        break
+                else:
+                    return JSONResponse({"error": "Simulator antwortet nach 40 s nicht"}, status_code=504)
+        if not await asyncio.to_thread(_body_status_file):
+            _spawn([str(PC_PYTHON), str(BODY_BRIDGE)])
+        return {"ok": True, "info": "Koerper-Simulator laeuft"}
+    if action == "stop":
+        n = 0
+        for p in await asyncio.to_thread(_body_procs):
+            try:
+                for c in p.children(recursive=True):
+                    c.kill()
+                p.kill()
+                n += 1
+            except psutil.Error:
+                pass
+        _write_override(None)
+        return {"ok": True, "info": f"{n} Prozess(e) beendet"}
+    if action == "test":
+        if body.get("zone") not in BODY_ZONES or body.get("mood") not in BODY_MOODS \
+                or body.get("being_state") not in BODY_STATES:
+            return JSONResponse({"error": "unbekannte Zone, Mood oder Zustand"}, status_code=400)
+        _write_override({
+            "zone": body["zone"], "mood": body["mood"], "being_state": body["being_state"],
+            "tension": _num(body.get("tension"), 0.0, 1.0),
+            "dominance": _num(body.get("dominance"), -1.0, 1.0),
+            "until": time.time() + 600,   # Test-Vorgabe faellt nach 10 min von selbst auf Live zurueck
+        })
+        return {"ok": True}
+    if action == "live":
+        _write_override(None)
+        return {"ok": True}
+    if action == "estop":
+        _write_override({"estop": bool(body.get("on")), "until": 0})
+        return {"ok": True}
+    return JSONResponse({"error": "unbekannte action"}, status_code=400)
+
+
 @router.get("/api/ki/verlauf")
 def ki_verlauf(n: int = 60):
     return {"messages": _read_log(max(0, min(n, 500)))}
