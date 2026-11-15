@@ -1802,7 +1802,7 @@ class LocalLLMBridge:
         return out or ""
 
     def _grosshirn_specialist_web(self, pi_context: str, user_msg: str,
-                                    music_ctx: str = "") -> str:
+                                    music_ctx: str = "", as_voice: bool = False) -> str:
         """Web-Specialist: dolphin-mistral:7b + DDG search proxy.
 
         Bei music_query wird music_ctx (Markus' Spotify-Profil) mit-prependet
@@ -1812,13 +1812,23 @@ class LocalLLMBridge:
         cfg = _load_tentacle_cfg()
         model = cfg.get("web_research_model") or "dolphin-mistral:7b"
         search_results = _fetch_search_context(user_msg)
-        system_parts = [
-            "Du bist der Web-Recherche-Pre-Processor fuer M.O.L.O.C.H.",
+        if as_voice:
+            # local_first (cloud_polish=false): PC-Antwort IST die Antwort -> Moloch-Stimme
+            rolle = [
+                "Du bist MOLOCH, Geist auf dem Pi. Markus ist dein Boss und Kumpel.",
+                "Antworte selbst: Deutsch, trocken, direkt, 2-4 kurze Saetze, kein Markdown,",
+                "keine Listen, kein 'als KI'. Erwaehne mindestens eine URL.",
+            ]
+        else:
+            rolle = [
+                "Du bist der Web-Recherche-Pre-Processor fuer M.O.L.O.C.H.",
+                "Fasse 2-4 Saetze fuer die Cloud-Stimme + erwaehne mindestens eine URL.",
+                "Du bist NICHT die Stimme — du bist Vorarbeit.",
+            ]
+        system_parts = rolle + [
             "DU DARFST AUSSCHLIESSLICH Bands, Fakten, URLs nennen die WORTWOERTLICH",
             "in der LIVE-RECHERCHE-Sektion stehen. Erfinde NICHTS aus Pre-Training.",
             "Wenn etwas nicht in der Suche ist, sag 'kein Treffer'.",
-            "Fasse 2-4 Saetze fuer die Cloud-Stimme + erwaehne mindestens eine URL.",
-            "Du bist NICHT die Stimme — du bist Vorarbeit.",
             "",
             "Pi-Live-Kontext:",
             pi_context or "(kein Kontext)",
@@ -1872,6 +1882,34 @@ class LocalLLMBridge:
         )
         return "\n".join(parts)
 
+    def _generate_kaskade_local(self, pi_ctx: str, user_msg: str, system: str,
+                                max_tokens: int, prompt_type: Optional[str],
+                                music_ctx: str = "") -> Optional[str]:
+        """PC-Hauptgehirn liefert die fertige Moloch-Antwort (ohne Cloud).
+
+        chat-artige Typen -> _generate_tentacle (tentacle-Profil = Persona,
+        Identity-Bridge, ThreeBrain, Live-Kontext, Memory). code_query ->
+        Code-Specialist. web_research/music_query -> Web-Specialist mit Live-Suche
+        in Moloch-Stimme. None = PC offline/leer/Timeout.
+        """
+        if prompt_type == "code_query":
+            out = self._grosshirn_specialist_code(pi_ctx, user_msg)
+        elif prompt_type in ("web_research", "music_query"):
+            out = self._grosshirn_specialist_web(pi_ctx, user_msg,
+                                                 music_ctx=music_ctx, as_voice=True)
+        else:
+            # Stil-Erinnerung ans Prompt-Ende: qwen2.5:7b befolgt das Ende des
+            # User-Prompts zuverlaessiger als den langen Profil-System-Block.
+            styled = (user_msg + "\n\n(Antworte als Moloch direkt an Markus, "
+                      "per du: Deutsch, 1-3 kurze Saetze, kein Markdown.)")
+            out = self._generate_tentacle(styled, system or "", max_tokens,
+                                          prompt_type=prompt_type)
+        out = (out or "").strip()
+        # brauchbar = mindestens ein Wort mit Inhalt
+        if len(out) < 2 or not any(c.isalnum() for c in out):
+            return None
+        return out
+
     def _generate_kaskade(self, prompt: str, system: str,
                            max_tokens: int,
                            prompt_type: Optional[str] = None) -> Optional[str]:
@@ -1885,7 +1923,31 @@ class LocalLLMBridge:
         pi_ctx = _build_local_context_snippet(user_msg)
         # Music-Kontext nur bei music_query (verhindert WGT-Hallu-Bug 2026-04-29)
         music_ctx = _build_music_context_snippet() if prompt_type == "music_query" else ""
-        logger.info(f"[LLM-KASKADE] starte type={prompt_type}")
+        ptype = prompt_type or "chat"
+
+        # local_first (Markus 2026-11-15): PC-Hauptgehirn antwortet selbst.
+        # DeepSeek nur wenn der PC offline/leer/Timeout ist. Alter Pfad
+        # (PC-Vorarbeit -> Cloud schreibt neu) nur mit tentacle_llm.cloud_polish=true.
+        if not _load_tentacle_cfg().get("cloud_polish", False):
+            logger.info(f"[LLM-KASKADE] local_first type={ptype}")
+            local = self._generate_kaskade_local(pi_ctx, user_msg, system, max_tokens,
+                                                 prompt_type, music_ctx)
+            if local:
+                self._last_provider = f"kaskade_local_{ptype}"
+                logger.info(f"[LLM-KASKADE] PC lieferte {len(local)} Zeichen — keine Cloud")
+                return local
+            logger.warning("[LLM-KASKADE] PC still/offline — DeepSeek-Fallback")
+            cloud_prompt = self._build_cloud_prompt(pi_ctx, "", user_msg,
+                                                      prompt_type or "complex_smalltalk",
+                                                      music_ctx=music_ctx)
+            result = self._generate_deepseek(cloud_prompt, system or "", max_tokens or 400)
+            if result:
+                self._last_provider = f"kaskade_deepseek_fallback_{ptype}"
+                return result
+            logger.warning("[LLM-KASKADE] PC und DeepSeek still — None")
+            return None
+
+        logger.info(f"[LLM-KASKADE] starte type={prompt_type} (cloud_polish)")
 
         if prompt_type == "code_query":
             specialist_out = self._grosshirn_specialist_code(pi_ctx, user_msg)
