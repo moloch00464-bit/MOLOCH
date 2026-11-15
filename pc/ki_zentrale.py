@@ -334,6 +334,27 @@ async def ki_status():
     }
 
 
+@router.post("/api/ki/speaking")
+async def ki_speaking(request: Request):
+    """Sprachausgabe des Browsers an den Pi melden (POST /speech/state).
+
+    Damit nickt der Koerper auch bei Chat-Antworten, nicht nur bei proaktiven
+    Saetzen. Best effort: ist der Pi weg, passiert einfach nichts.
+    """
+    deny = _require_local(request)
+    if deny:
+        return deny
+    body = await request.json()
+    payload = {"speaking": bool(body.get("speaking")), "source": "pc_zentrale",
+               "text": str(body.get("text") or "")[:200]}
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.post(f"{PI_URL}/speech/state", json=payload, timeout=3.0)
+        return {"ok": r.status_code == 200}
+    except Exception:
+        return {"ok": False}
+
+
 @router.post("/api/ki/model")
 async def ki_model(request: Request):
     deny = _require_local(request)

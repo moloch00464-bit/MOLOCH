@@ -269,7 +269,23 @@ function speak(text) {
   u.rate = Math.max(0.6, Math.min(1.6, ({guardian: .95, shadow: .88, berserker: 1.2}[zone] || .95) + ten * 0.15));
   const v = speechSynthesis.getVoices().find(v => v.lang.startsWith('de'));
   if (v) u.voice = v;
+  // Sprechstatus an den Pi: der Koerper nickt, solange wirklich Ton laeuft.
+  // Alle 10 s auffrischen (die Body-Bridge laesst den Status nach 30 s verfallen).
+  let beat = null;
+  const done = () => { if (beat) { clearInterval(beat); beat = null; reportSpeaking(false, ''); } };
+  u.onstart = () => {
+    reportSpeaking(true, text);
+    beat = setInterval(() => reportSpeaking(true, text), 10000);
+  };
+  u.onend = done;
+  u.onerror = done;   // auch bei Abbruch durch speechSynthesis.cancel()
   speechSynthesis.speak(u);
+}
+
+function reportSpeaking(on, text) {
+  fetch('/api/ki/speaking', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                             body: JSON.stringify({speaking: on, text: (text || '').slice(0, 200)})})
+    .catch(() => {});
 }
 
 function setBusy(b) {
