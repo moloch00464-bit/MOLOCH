@@ -230,13 +230,12 @@ async def _recall(client: httpx.AsyncClient, question: str) -> Optional[dict]:
 
 
 def _recall_snippet(recall: Optional[dict]) -> str:
-    """Erinnerungen als Prompt-Zeilen. Drei Faelle, die das Modell unterscheiden koennen soll."""
+    """Erinnerungen als Prompt-Zeilen: Treffer, nichts Passendes (leer) oder Pi nicht erreichbar."""
     if recall is None:
         return "[GEDAECHTNIS] nicht erreichbar - sag ehrlich, wenn du etwas nicht weisst."
     block = (recall.get("block") or "").strip()
     if not block:
-        return ("[GEDAECHTNIS] kein passender Eintrag - erfinde keine Erinnerungen, "
-                "sag es, wenn du etwas nicht weisst.")
+        return ""  # Smalltalk ohne Bezug: nichts anhaengen, sonst redet das Modell darueber
     return "[GEDAECHTNIS] " + block
 
 
