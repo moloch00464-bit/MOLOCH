@@ -1,0 +1,19 @@
+{
+  "_info": "Rollen der lokalen Ollama-Modelle fuer die KI-Zentrale (:11700/zentrale). keep_alive: wie lange ein Modell nach Benutzung im RAM bleibt (-1 = dauerhaft).",
+  "haupthirn": "qwen2.5:7b-instruct",
+  "chat_optionen": {
+    "num_ctx": 4096,
+    "num_predict": 160,
+    "temperature": 0.7,
+    "verlauf_turns": 6
+  },
+  "modelle": {
+    "qwen2.5:7b-instruct": {"rolle": "Haupthirn", "aufgabe": "Dialog und Werkzeug-Entscheidungen", "keep_alive": "-1"},
+    "moondream:latest": {"rolle": "Augen", "aufgabe": "Bild beschreiben, nur auf Abruf", "keep_alive": "60s"},
+    "moloch-coder:latest": {"rolle": "Coder", "aufgabe": "Code-Fragen vom Pi (code_query)", "keep_alive": "5m"},
+    "deepseek-coder:6.7b": {"rolle": "Coder-Basis", "aufgabe": "Grundmodell von moloch-coder", "keep_alive": "5m"},
+    "dolphin-llama3:8b": {"rolle": "Reserve", "aufgabe": "frueheres Tentakel-Modell, Rueckfall falls qwen nicht passt", "keep_alive": "5m"},
+    "dolphin-mistral:7b": {"rolle": "Kritiker", "aufgabe": "Pi-Critic (critic_client), bewusst ungefiltert", "keep_alive": "5m"},
+    "all-minilm:latest": {"rolle": "Gedaechtnis", "aufgabe": "Embeddings fuer Vektor-Recall", "keep_alive": "10m", "typ": "embedding"}
+  }
+}

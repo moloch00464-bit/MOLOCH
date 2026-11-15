@@ -25,7 +25,7 @@ import requests
 logger = logging.getLogger("local-llm-client")
 
 API_URL = os.environ.get("MOLOCH_LOCAL_LLM_URL", "http://127.0.0.1:11434").rstrip("/")
-DEFAULT_MODEL = os.environ.get("MOLOCH_LOCAL_MODEL", "dolphin-llama3:8b")
+DEFAULT_MODEL = os.environ.get("MOLOCH_LOCAL_MODEL", "qwen2.5:7b-instruct")  # Haupthirn seit 2026-11-15
 DEFAULT_KEEP_ALIVE = os.environ.get("MOLOCH_LOCAL_KEEP_ALIVE", "30m")
 DEFAULT_MAX_TOKENS = 80
 DEFAULT_TEMP = 0.6

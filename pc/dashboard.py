@@ -54,6 +54,10 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="MOLOCH Dashboard", lifespan=lifespan)
 
+# KI-Zentrale (/zentrale, /api/ki/*): lokale KI steuern und direkt mit Moloch reden
+from ki_zentrale import router as _ki_router  # noqa: E402
+app.include_router(_ki_router)
+
 
 async def _safe_get(client: httpx.AsyncClient, url: str, timeout: float = 2.0):
     t0 = time.time()
@@ -311,7 +315,7 @@ footer{margin-top:10px;color:var(--mute);font-size:11px;text-align:center}
 .cam-wrap img{width:100%;height:auto;border:1px solid var(--border);border-radius:6px;background:#08080c}
 .cam-wrap canvas{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}
 </style></head><body>
-<h1>🎛 MOLOCH COWORK DASHBOARD</h1>
+<h1>🎛 MOLOCH COWORK DASHBOARD <a href="/zentrale" style="float:right;font:600 12px system-ui;color:#7e3bce;text-decoration:none;border:1px solid #7e3bce;padding:3px 10px;border-radius:12px">→ KI-ZENTRALE</a></h1>
 <div class="grid">
   <div class="card pi full"><h2><span class="pulse" id="cam-pulse"></span>KAMERA — was Moloch sieht (live)</h2>
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start">
