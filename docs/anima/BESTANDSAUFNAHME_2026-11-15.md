@@ -1,7 +1,7 @@
 # ANIMA – Bestandsaufnahme und Arbeitsplan
 
 **Stand:** 2026-11-15 · **Basis:** `deepseek_architecture_overhaul` @ `d39e03a` + Branch `ccr-5df7b577-w92x94`
-**Auftrag:** `docs/anima/MASTER_BRIEFING_2026-11-15.md`
+**Auftrag:** `docs/anima/MASTER_BRIEFING_2026-11-15.md` · **Nächste Schritte:** `AUFTRAG_PI.md`, `AUFTRAG_PC.md` · **Hardware:** Raspberry Pi 5, 4 GB RAM (von Markus bestätigt)
 
 ## Wie dieser Bericht zu lesen ist
 
@@ -11,7 +11,7 @@ Deshalb gibt es drei Stufen, die nicht vermischt werden:
 | Stufe | Bedeutung |
 |---|---|
 | **Code** | Im Repository vorhanden und gelesen. Sagt nichts darüber, ob es läuft. |
-| **Test** | Durch automatische Tests ohne Hardware belegt (`python3 -m pytest tests pc`: 352 bestanden, 19 übersprungen). |
+| **Test** | Durch automatische Tests ohne Hardware belegt (`python3 -m pytest tests pc`: 361 bestanden, 19 übersprungen). |
 | **Gerät** | Am laufenden System nachgewiesen. **In dieser Sitzung für keinen Punkt möglich.** Wo ein Handoff einen Nachweis nennt, steht die Quelle dabei. |
 
 Phase B des Briefings (Laufzeit prüfen) ist damit **offen** und steht als Prüfliste in Abschnitt 4.
@@ -155,7 +155,8 @@ Fragenkatalog für den Abnahmetest: `docs/anima/FRAGENKATALOG.md`.
 
 ### 11 · Hardware-Selbstwissen
 
-- **Widersprüche in der Doku:** Pi-RAM: README 8 GB, CLAUDE.md und Systemübersicht 4 GB. SSD 2: README NTFS, CLAUDE.md ext4. TOPS: README 26 (korrigiert auf 40).
+- **Pi-RAM: 4 GB** (von Markus am 15.11.2026 bestätigt; README nannte fälschlich 8 GB, korrigiert).
+- **Widersprüche in der Doku:** SSD 2: README NTFS, CLAUDE.md ext4. TOPS: README 26 (korrigiert auf 40).
 - **Code:** `core/system_watchdog.py` prüft Frame-Stillstand, Pipeline, ONVIF, RAM/CPU, Platte, Mikrofon, Netz, Ollama. Tools `get_npu_status`, `moloch_status_summary`, `thermal_set_tension_pwm`. `hailo_manager._force_release_device()` beendet fremde Prozesse am NPU-Gerät – schont eigene Prozesse, bleibt aber ein Eingriff; nicht aus Diagnosen heraus aufrufen.
 - **Umgesetzt:** `scripts/self_diagnosis.py::test_hailo_npu` weist jetzt echte Inferenz nach (Zähler der Worker laufen weiter) und öffnet bei laufendem Service kein VDevice mehr.
 - **Offen:** Inventar am Gerät; Unterspannung/Throttling (`vcgencmd get_throttled`); Lüfter-Tacho; Power-Platine („Pico Power 5" laut Gedächtnis-Fakt, Auslesbarkeit unbekannt); Chat-Fragen wie „Wie warm ist dein Raspberry?" mit echten Messwerten beantworten.
@@ -176,7 +177,7 @@ Jedes Paket ist für sich mergebar, hat einen Abnahmetest und nennt, was am Ger�
 |---|---|---|---|---|---|
 | **P1** | Gedächtnisabruf: Wort-Recall, Selbstwissen, `/memory/recall`, Zentrale | 1, 2 | mittel | Abnahme | **gebaut, ungeprüft am Gerät** |
 | **P2** | NPU-Selbsttest ehrlich, README | 11 | klein | Abnahme | **gebaut, ungeprüft am Gerät** |
-| **P3** | Laufzeit-Inventar: Skript, das Phase B abarbeitet und einen Bericht schreibt | 1, 2, 11 | klein | ja | offen |
+| **P3** | Laufzeit-Inventar: Skript, das Phase B abarbeitet und einen Bericht schreibt | 1, 2, 11 | klein | ja | **gebaut** (`scripts/anima_inventory.py`), am Gerät laufen lassen |
 | **P4** | Ein Sprechstatus für alle TTS-Wege → Reachy nickt bei jeder Antwort | 9 | klein–mittel | Simulator | **Zentrale gebaut, ungeprüft am Simulator**; Pi-`/tts`/Cockpit offen |
 | **P5** | Lokaler Chat der Zentrale erkennt Befehle (Kamera, Musik) über den Pi | 3 | klein | ja | **gebaut, ungeprüft am Gerät** |
 | **P6** | Hardware-Fragen im Chat mit Messwerten (Temperatur, Speicher, NPU) | 11 | mittel | ja | offen |
