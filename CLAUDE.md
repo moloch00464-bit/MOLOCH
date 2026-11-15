@@ -668,10 +668,6 @@ def get_thing() -> "Thing":
    der Desktop laeuft. Das Tkinter-Panel hat aber keinen Autostart, nur das Desktop-Symbol
    `MOLOCH_Panel.desktop`. Audit-Punkt `Panel laeuft` ist deshalb FAIL, solange es niemand
    startet. Anzeige ist seit 2026-10-03 der PC (:11700). Entscheidung Markus: Autostart oder Test streichen.
-7. **Dominance klebt bei +1.0** (gemessen 2026-11-15): Impulse (`dominance_impulse * 0.05` pro
-   Tick) schlagen den Drift (0.05/min) um Groessenordnungen, sobald Markus im Bild ist.
-   Folge am Koerper: Kopf dauerhaft 10 Grad hoch. Diagnose klar, Fix ist eine
-   Persoenlichkeits-Entscheidung (core_integrator.py ist ROT).
 6. **Tension klebt bei 1.0** (beobachtet 2026-06-11): Anti-Stuck-Drift wirkte am
    11.05. (-0.69), nach Reboot heute Maximum-Pin. Diagnose offen (personality/unconscious).
 
