@@ -63,16 +63,60 @@ def run_test(name, func):
 # TEST 1: Hailo NPU - Echtes Model laden + Inference
 # ============================================================
 
-def test_hailo_npu():
-    """Lade ein HEF-Model auf die NPU und fuehre Dummy-Inference aus."""
-    from hailo_platform import VDevice, HEF, FormatType
+STATUS_JSON = "/dev/shm/moloch_status.json"
+
+
+def _npu_inference_counts():
+    """Summe der NPU-Inferenzen aller Worker aus dem Service-Status.
+
+    Returns (summe, worker_anzahl, fps) oder None, wenn kein frischer Status da ist
+    (Service laeuft nicht oder schreibt nicht mehr).
+    """
+    try:
+        if time.time() - os.stat(STATUS_JSON).st_mtime > 5.0:
+            return None
+        with open(STATUS_JSON) as f:
+            st = json.load(f)
+    except Exception:
+        return None
+    workers = st.get("worker_health") or {}
+    total = sum(int(w.get("total_inferences") or 0) for w in workers.values() if isinstance(w, dict))
+    fps = st.get("fps") or {}
+    best_fps = max([v for v in fps.values() if isinstance(v, (int, float))] or [0.0])
+    return total, len(workers), best_fps
+
+
+def test_hailo_npu(wait_s: float = 2.0):
+    """NPU pruefen, ohne dem laufenden Service in die Quere zu kommen.
+
+    Service laeuft: KEIN eigenes VDevice oeffnen (zweite Gruppe neben SHARED
+    riskiert HAILO Error 74). Stattdessen der echte Nachweis: die
+    Inferenz-Zaehler der Worker muessen innerhalb von wait_s weiterlaufen.
+    Service laeuft nicht: Modell ueber die SHARED-Gruppe laden. Das belegt
+    Treiber, Firmware und HEF - aber es wird dabei keine Inferenz gerechnet.
+    """
+    before = _npu_inference_counts()
+    if before is not None:
+        time.sleep(wait_s)
+        after = _npu_inference_counts()
+        if after is None:
+            return False, "Service-Status waehrend der Messung verschwunden"
+        delta = after[0] - before[0]
+        detail = f"{after[1]} Worker, {delta} Inferenzen in {wait_s:.0f}s, {after[2]:.1f} FPS"
+        if delta > 0:
+            return True, "NPU rechnet (Service): " + detail
+        if after[2] > 0:
+            return True, "Pipeline laeuft, Worker gerade ohne Arbeit (niemand im Bild?): " + detail
+        return False, "NPU rechnet nicht: " + detail
+
+    from hailo_platform import VDevice, HEF
 
     hef_path = "/mnt/moloch-data/hailo/models/scrfd_10g.hef"
     if not os.path.exists(hef_path):
         return False, f"HEF nicht gefunden: {hef_path}"
 
     params = VDevice.create_params()
-    params.group_id = "MOLOCH_DIAG"
+    params.group_id = "SHARED"
     vd = VDevice(params)
 
     hef = HEF(hef_path)
@@ -90,7 +134,8 @@ def test_hailo_npu():
     import gc
     gc.collect()
 
-    return True, f"SCRFD geladen, Input: {in_name} {in_shape}, Outputs: {len(out_names)}"
+    return True, (f"Service aus: SCRFD geladen (Input {in_name} {in_shape}, "
+                  f"{len(out_names)} Outputs) - NUR geladen, keine Inferenz gerechnet")
 
 
 # ============================================================
