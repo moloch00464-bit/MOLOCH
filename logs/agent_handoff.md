@@ -2,7 +2,9 @@
 
 Branch `ccr-5df7b577-w92x94`, aufgesetzt auf deepseek_architecture_overhaul @ d39e03a.
 Auftrag, Stand und Plan: docs/anima/ (MASTER_BRIEFING, BESTANDSAUFNAHME, FRAGENKATALOG).
-pytest tests pc: 352 passed, 19 skipped. Am Geraet ist NICHTS davon geprueft.
+**Naechste Schritte Schritt fuer Schritt: docs/anima/AUFTRAG_PI.md und docs/anima/AUFTRAG_PC.md.**
+Uebersicht mit Checkliste: GitHub Issue #3. Hardware: Raspberry Pi 5 mit 4 GB RAM (Markus, 15.11.).
+pytest tests pc: 361 passed, 19 skipped. Am Geraet ist NICHTS davon geprueft.
 
 ## Gebaut (Standard AN, weil rein lokal und ohne neue Abhaengigkeit)
 - Wort-Recall + Selbstwissen: core/memory/lexical_recall.py, config/self_knowledge.json,
@@ -14,6 +16,7 @@ pytest tests pc: 352 passed, 19 skipped. Am Geraet ist NICHTS davon geprueft.
 - pc/ki_zentrale: lokaler Chat holt Erinnerungen, fuehrt Befehle ueber den Pi aus,
   Browser-Sprachausgabe meldet Sprechstatus (Koerper nickt bei Chat-Antworten).
 - keyword_handler: Fuellwoerter ("schau MAL zur Tuer") brechen die Erkennung nicht mehr.
+- scripts/anima_inventory.py (P3): Laufzeit-Inventar, rein lesend, schreibt logs/anima_inventar_<datum>.md.
 - scripts/self_diagnosis.py: NPU-Test zaehlt echte Inferenzen, oeffnet bei laufendem
   Service kein VDevice mehr (vorher eigene Gruppe MOLOCH_DIAG = Error-74-Risiko).
 
@@ -32,7 +35,7 @@ pytest tests pc: 352 passed, 19 skipped. Am Geraet ist NICHTS davon geprueft.
   bei Zugriff von ausserhalb des LAN absichern.
 
 ## Offen laut Plan (docs/anima/BESTANDSAUFNAHME, Abschnitt 3)
-P3 Laufzeit-Inventar, P6 Hardware-Fragen mit Messwerten, P7 Recherche, P8 Situationszustand,
+P6 Hardware-Fragen mit Messwerten, P7 Recherche, P8 Situationszustand,
 P9 Audio-Ereignisse, P10 Spotify-DJ (erst Token pruefen), P11 Raumkalibrierung,
 P12 Geraeuschbibliothek, P13 Reachy-Selbstbeobachtung.
 
