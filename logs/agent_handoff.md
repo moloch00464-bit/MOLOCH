@@ -1,3 +1,28 @@
+# Agent Handoff — 2026-11-15 Pi-Session (Kaskade local_first + /memory/turn)
+
+Commits auf deepseek_architecture_overhaul: efa302a (local_llm_bridge), b02f0f2 (chat_server).
+Rollback-Tag: before_kaskade_local_first. Audit 84/85 (nur Panel, lightdm maskiert).
+
+## Kaskade local_first
+- Neuer Schalter tentacle_llm.cloud_polish (Default false, NICHT in settings.json eingetragen).
+  false: PC-qwen antwortet selbst -> provider kaskade_local_<type>.
+  PC offline/leer/Timeout -> DeepSeek ohne Vorarbeit -> kaskade_deepseek_fallback_<type>.
+  true: alter Pfad (PC-Vorarbeit, DeepSeek schreibt neu) -> kaskade_deepseek_<type>.
+- simple_smalltalk lief nie ueber _route_by_type: im llm_mode=kaskade fragt ask_external nur
+  force_local/hardware_status auf NPU ab, alles andere geht absichtlich in die Kaskade
+  (Entscheidung 2026-05-09, Qwen-1.5B-Deutsch zu schlecht). _route_by_type gilt nur fuer local_first-Mode.
+  Bleibt so: simple_smalltalk landet jetzt lokal auf PC-qwen statt in der Cloud.
+- Getestet: complex 39 s, simple 16 s, beide kaskade_local_*, 1-3 Saetze Moloch-Ton.
+  PC per iptables-REJECT :11434 gesperrt -> kaskade_deepseek_fallback_complex_smalltalk in 3.6 s.
+- Offen: Latenz 15-57 s (qwen 7B CPU + langer System-Prompt, timeout_sec=90).
+  web_model=api_deepseek schickt /chat-Web-Recherche weiter direkt in die Cloud (nicht Teil der Kaskade).
+
+## POST /memory/turn
+Body {"sender":"markus"|"moloch", "text": 1-4000 Zeichen, "source": "pc_zentrale" (Default, [A-Za-z0-9_.-]{1,32})}.
+200 {"ok":true,"sender":"user"|"moloch","source":...,"chars":n}; 422 bei falschem sender/leerem/zu langem text/ungueltiger source;
+401 wenn MOLOCH_API_TOKEN gesetzt und X-Moloch-Token fehlt/falsch (Loopback frei); 500 Memory-Schreibfehler.
+Getestet: Turns erscheinen in GET /history mit source=pc_zentrale.
+
 # Agent Handoff — 2026-11-14 Cloud-Session (Merge-Vorbereitung, KEIN Pi-Zugriff)
 
 Branch `ccr-5df7b577-w92x94` = `deepseek_architecture_overhaul` (e13f39a) + Merge von
