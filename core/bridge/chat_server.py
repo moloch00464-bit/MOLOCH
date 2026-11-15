@@ -2909,6 +2909,15 @@ def live_status():
                 "tracker_state": (d.get("ptz") or {}).get("tracker_state"),
             },
         }
+        # Letzter proaktiver Satz (Anlass, spricht gerade) fuer den Koerper
+        try:
+            with open("/dev/shm/moloch_speech.json", "r") as f:
+                sp = json.load(f)
+            sp["age_s"] = round(time.time() - float(sp.get("ts", 0)), 1)
+            if sp["age_s"] < 120:
+                out["speech"] = sp
+        except (OSError, ValueError, TypeError):
+            pass
         return out
     except Exception as e:
         raise HTTPException(500, f"Status read error: {e}")
