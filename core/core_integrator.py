@@ -273,9 +273,7 @@ class CoreIntegrator:
             self._owner_confirmed_until = time.monotonic() + self.OWNER_OVERRIDE_DURATION
             # Sofortiger Effekt auf State
             self._tension = _clamp(self._tension - self.OWNER_OVERRIDE_TENSION_DROP, lo=-1.0, hi=1.0)
-            self._dominance = _clamp(
-                self._dominance + self.OWNER_OVERRIDE_DOMINANCE_BOOST, -1.0, 1.0
-            )
+            self._push_dominance(self.OWNER_OVERRIDE_DOMINANCE_BOOST)
             _logger.info(
                 f"[CORE] Owner-Override AKTIV: T={self._tension:.3f} "
                 f"D={self._dominance:+.3f} (gilt {self.OWNER_OVERRIDE_DURATION:.0f}s)"
@@ -369,6 +367,21 @@ class CoreIntegrator:
         """Direkt-Zugriff auf Tension (0.0-1.0)."""
         with self._lock:
             return self._tension
+
+    def _push_dominance(self, delta: float) -> None:
+        """Dominance-Schub mit weicher Saettigung (Aufrufer haelt den Lock).
+
+        Je naeher am Rand, desto schwaecher wirkt ein Schub in dieselbe Richtung
+        (quadratischer Restweg); Schuebe zur Mitte hin wirken voll. Ohne das schlugen
+        Impuls, Owner-Override und Vision-Patterns zusammen (~+2/min bei ruhigem Owner)
+        den Drift (0.05/min) und der Wert klebte bei +1.0 (gemessen 2026-11-15).
+        """
+        if delta > 0:
+            headroom = min(1.0, 1.0 - self._dominance)
+        else:
+            headroom = min(1.0, 1.0 + self._dominance)
+        self._dominance = _clamp(
+            self._dominance + delta * max(0.0, headroom) ** 2, -1.0, 1.0)
 
     def get_dominance(self) -> float:
         """Direkt-Zugriff auf Dominance (-1.0 bis +1.0)."""
@@ -602,9 +615,8 @@ class CoreIntegrator:
             elif self._dominance > self.DOMINANCE_DRIFT_TARGET:
                 self._dominance -= drift
 
-            # Impuls addieren (gedaempft — langsame Persoenlichkeits-Shifts)
-            self._dominance += dominance_impulse * 0.05
-            self._dominance = _clamp(self._dominance, -1.0, 1.0)
+            # Impuls addieren (gedaempft — langsame Persoenlichkeits-Shifts), weich gesaettigt
+            self._push_dominance(dominance_impulse * 0.05)
 
             # Nacht: leichter Shadow-Drift
             if period == "nachts":
@@ -658,7 +670,7 @@ class CoreIntegrator:
                     _logger.info("[CORE] Owner-Override abgelaufen (Timer)")
                 else:
                     # Waehrend Override: leichter Guardian-Drift (wie Markus erkannt)
-                    self._dominance = _clamp(self._dominance + 0.005, -1.0, 1.0)
+                    self._push_dominance(0.005)
 
             # =============================================================
             # 5. Zone mit Hysterese bestimmen (Gate0 Phase 5)
@@ -826,21 +838,21 @@ class CoreIntegrator:
         # === Pattern 1: Unbekannter nah -> Tension + Shadow ===
         if person and unknown and proximity > 0.1:
             self._tension = _clamp(self._tension + 0.05, lo=-1.0, hi=1.0)
-            self._dominance = _clamp(self._dominance - 0.02, -1.0, 1.0)
+            self._push_dominance(-0.02)
 
         # === Pattern 2: Unbekannter + hohe Bewegung -> Tension stark + Shadow ===
         if unknown and pose_energy > 0.5:
             self._tension = _clamp(self._tension + 0.08, lo=-1.0, hi=1.0)
-            self._dominance = _clamp(self._dominance - 0.03, -1.0, 1.0)
+            self._push_dominance(-0.03)
 
         # === Pattern 3: Markus + ruhig + neutral/happy -> Tension sinkt, Guardian ===
         if markus and pose_energy < 0.2 and smoothed_emotion in (None, "neutral", "happy"):
             self._tension = _clamp(self._tension - 0.02, lo=-1.0, hi=1.0)
-            self._dominance = _clamp(self._dominance + 0.01, -1.0, 1.0)
+            self._push_dominance(0.01)
 
         # === Pattern 4: Markus + happy -> Guardian Boost ===
         if markus and smoothed_emotion == "happy":
-            self._dominance = _clamp(self._dominance + 0.02, -1.0, 1.0)
+            self._push_dominance(0.02)
 
         # === Pattern 5: Niemand + lange Absence -> Tension sinkt ===
         if not person and not face and absence > 10:
@@ -856,7 +868,7 @@ class CoreIntegrator:
 
         # === Pattern 8: Voice + Face -> Guardian Interaktion ===
         if voice and face:
-            self._dominance = _clamp(self._dominance + 0.02, -1.0, 1.0)
+            self._push_dominance(0.02)
             self._tension = _clamp(self._tension + 0.01)
 
     # =========================================================================
