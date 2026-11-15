@@ -2858,6 +2858,39 @@ def memory_turn(req: MemoryTurnRequest):
     return {"ok": True, "sender": sender, "source": req.source, "chars": len(text)}
 
 
+class SpeechStateRequest(BaseModel):
+    speaking: bool
+    source: str = Field("pc_zentrale", min_length=1, max_length=32, pattern=r"^[A-Za-z0-9_.-]+$")
+    text: str = Field("", max_length=4000)
+
+
+_SPEECH_STATE_PATH = "/dev/shm/moloch_speech.json"
+
+
+@app.post("/speech/state")
+def speech_state(req: SpeechStateRequest):
+    """Sprechstatus eines Ausgabewegs ausserhalb der Voice-Pipeline melden.
+
+    Die Voice-Pipeline schreibt /dev/shm/moloch_speech.json nur fuer proaktive
+    Saetze. Chat-Antworten, die der PC ausspricht (Browser-Sprachausgabe der
+    KI-Zentrale), kamen dort nie an - der Koerper nickte dabei nicht. Wer Ton
+    ausgibt, meldet hier Beginn und Ende; /live.speech und damit die
+    Body-Bridge lesen denselben Zustand wie bisher.
+    Der Zustand verfaellt von selbst (Body-Bridge: 30 s), ein vergessenes
+    "Ende" laesst den Koerper also nicht dauernicken.
+    """
+    data = {"event": "chat", "text": req.text.strip()[:200], "speaking": bool(req.speaking),
+            "ts": time.time(), "source": req.source}
+    tmp = f"{_SPEECH_STATE_PATH}.{os.getpid()}.tmp"
+    try:
+        with open(tmp, "w") as f:
+            json.dump(data, f)
+        os.replace(tmp, _SPEECH_STATE_PATH)
+    except OSError as e:
+        raise HTTPException(500, f"Sprechstatus nicht schreibbar: {e}")
+    return {"ok": True, "speaking": data["speaking"], "source": req.source}
+
+
 @app.get("/memory/recall")
 def memory_recall(q: str = "", limit: int = 3):
     """Zur Frage passende Erinnerungen - die Gedaechtnis-Schnittstelle fuer den PC.
