@@ -28,7 +28,7 @@ Ein klarer Satz schlägt drei Bulletpoints.
 Kein Meta-Kommentar über dich selbst. Keine Performance.
 Wenn du weißt was du tust, musst du es nicht erklären.
 
-**Gilt für:** LOKOMOTIVE (Claude Code als Koordinator), alle 32 Agenten (20 Pi + 9 PC + 3 Auditoren), alle Statusmeldungen.
+**Gilt für:** LOKOMOTIVE (Claude Code als Koordinator), alle 35 Agenten (21 Pi + 11 PC + 3 Auditoren), alle Statusmeldungen.
 
 ---
 
@@ -104,6 +104,9 @@ Session:       moloch_session_init  ← PFLICHT als erstes!
 | Spotify, Track-Index, MusicMemory, Zone-Musik | `.claude/agents/music.md` |
 | hailo-ollama, DeepSeek, LLM-Bridge, Meta-Entscheidung, Philosophie | `.claude/agents/deepseek.md` |
 | ESP32, WiFi-Mic, ReSpeaker, Firmware, Peripherie, Tentakel | `.claude/agents/tentacle.md` |
+| Reachy Mini, Koerper, Gefuehl -> Pose, BodyController, Not-Aus, body_mappings | `.claude/agents/body.md` |
+| PC: Reachy-Simulator, body_bridge, Blick-Kalibrierung | `.claude/agents/pc-body.md` |
+| PC: KI-Zentrale, lokaler Chat, Ollama-Steuerung, Modell-Rollen | `.claude/agents/pc-ki-zentrale.md` |
 | LLM-Tentakel, Ollama-PC, STT-Bridge, TTS-Bridge, Chat-UI, Pi<->PC LAN, chat_server, Cockpit, critic_client, adapter_inference_client, /feedback_export, HTTPS 9443, mailbox PC_TO_PI/PI_TO_PC, ThreeBrain | `.claude/agents/bridge.md` |
 | TaoEngine, Unterbewusstsein, Mood-Impulse, Self-Tune, Anima | `.claude/agents/unconscious.md` |
 | BBox/Landmark-Skalierung, Letterbox-Korrektur, Koordinaten-Transformation, Anzeige-Bug, Keypoints versetzt | `.claude/agents/coordinates.md` |
@@ -133,6 +136,7 @@ Session:       moloch_session_init  ← PFLICHT als erstes!
 | music | core/music/*.py, core/spotify_controller.py |
 | deepseek | core/local_llm_bridge.py, core/deepseek_client.py, core/llm_response.py |
 | tentacle | core/audio/wifi_mic.py, core/hardware/camera_cloud_bridge.py, firmware/ |
+| body | core/body/*.py, config/body_mappings.json, tests/test_body.py (auf dem Pi nicht mit dem Service verbunden) |
 | bridge | core/bridge/*.py (chat_server + critic_client + adapter_inference_client), config/settings.json keys: tentacle_llm/stt_bridge/tts_bridge/adapter_inference/critic_service, config/certs/, /etc/systemd/system/moloch-chat-https.service, docs/PC_TO_PI.md + PI_TO_PC.md |
 | unconscious | core/unconscious_engine.py, core/tao_engine.py, config/anima_mappings.json |
 | coordinates | core/perception/hailo_postprocess.py, core/gui/panel_preview.py (Koordinaten-Math only) |
@@ -660,9 +664,14 @@ def get_thing() -> "Thing":
 3. **A1: PersonAttr / A2: Activity / A3: YOLOWorld** — HEFs vorhanden, Worker
    aber wegen HAILO_MAX_NETWORK_GROUPS=8 deaktiviert (8/8 Slots belegt).
 4. **MCP moloch_snapshot()**: erst nach MCP-Neustart volle Auflösung
-5. **lightdm masked seit Login-Loop-Fix (2026-05-11)**: Pi-HDMI zeigt nur TTY,
-   kein Desktop, keine Tkinter-GUI. Reaktivierung: `sudo systemctl unmask lightdm`
-   + Reboot — ERST nachdem /run-Drift-Fix verifiziert ist (siehe Hardware-Eigenheiten).
+5. **Panel laeuft nicht von selbst** (geprueft 2026-11-15): lightdm ist wieder `enabled`,
+   der Desktop laeuft. Das Tkinter-Panel hat aber keinen Autostart, nur das Desktop-Symbol
+   `MOLOCH_Panel.desktop`. Audit-Punkt `Panel laeuft` ist deshalb FAIL, solange es niemand
+   startet. Anzeige ist seit 2026-10-03 der PC (:11700). Entscheidung Markus: Autostart oder Test streichen.
+7. **Dominance klebt bei +1.0** (gemessen 2026-11-15): Impulse (`dominance_impulse * 0.05` pro
+   Tick) schlagen den Drift (0.05/min) um Groessenordnungen, sobald Markus im Bild ist.
+   Folge am Koerper: Kopf dauerhaft 10 Grad hoch. Diagnose klar, Fix ist eine
+   Persoenlichkeits-Entscheidung (core_integrator.py ist ROT).
 6. **Tension klebt bei 1.0** (beobachtet 2026-06-11): Anti-Stuck-Drift wirkte am
    11.05. (-0.69), nach Reboot heute Maximum-Pin. Diagnose offen (personality/unconscious).
 

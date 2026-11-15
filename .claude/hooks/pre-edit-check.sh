@@ -86,6 +86,7 @@ get_file_domain() {
         */awareness*)             echo "awareness";   return ;;
         */memory*)                echo "memory";      return ;;
         */music*)                 echo "music";       return ;;
+        */core/body*)             echo "body";        return ;;
         */speech*|*/tts*)         echo "voice";       return ;;
         */hardware*)
             case "$BASENAME" in
@@ -180,6 +181,7 @@ if ! is_exempt; then
         echo "  deepseek    -> hailo-ollama, LLM-Bridge, DeepSeek API" >&2
         echo "  tentacle    -> ESP32 WiFi-Mic, wifi_mic.py, camera_cloud_bridge" >&2
         echo "  unconscious -> TaoEngine, Unterbewusstsein, anima_mappings" >&2
+        echo "  body        -> Reachy Mini: core/body, Gefuehl -> Pose, Not-Aus" >&2
         echo "  stresstest  -> Scripts, Tests, Chaos Engineering" >&2
         echo "" >&2
         echo "Agent setzt Lock: touch /tmp/moloch_agent_[name]" >&2

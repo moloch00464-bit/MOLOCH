@@ -5,7 +5,7 @@ tools: Read, Grep, Glob, Edit, Write, Bash, PowerShell
 model: opus
 maxTurns: 30
 skills: pc-cowork-startup, pc-mailbox-http, pc-cowork-orchestrator, pc-bridge, pc-mic-fix, finetune-loop
-sub-agents: pc-mailbox-cowork, pc-coder-tentakel, pc-agent-orchestrator, pc-web-pipeline, pc-chrome, pc-services, pc-windows-quirks
+sub-agents: pc-mailbox-cowork, pc-coder-tentakel, pc-agent-orchestrator, pc-web-pipeline, pc-chrome, pc-services, pc-windows-quirks, pc-ki-zentrale, pc-body
 memory: project
 ---
 
