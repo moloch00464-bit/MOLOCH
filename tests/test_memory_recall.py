@@ -64,6 +64,7 @@ def mem():
     }
     m._personal_context = {"markus": {"age": 40, "location": "Zuhause"}}
     m._self_knowledge = []      # echtes config/self_knowledge.json aus dem Spiel lassen
+    m._facts_checked_at = float("inf")   # echte facts.json auf dem Pi ebenso
     return m
 
 

@@ -604,9 +604,40 @@ Regeln:
         self._self_knowledge = entries
         return entries
 
+    FACTS_REFRESH_S = 10.0
+
+    def _refresh_facts_from_disk(self):
+        """Fakten uebernehmen, die ein ANDERER Prozess gespeichert hat.
+
+        Hauptservice (Voice) und Chat-Server halten die Fakten je im RAM. Ohne
+        diesen Abgleich faende der Chat einen per Sprache gelernten Fakt erst
+        nach einem Neustart. Nur hinzufuegen/aktualisieren, nie loeschen.
+        Hoechstens alle FACTS_REFRESH_S und nur, wenn sich die Datei geaendert hat.
+        """
+        now = time.monotonic()
+        if now - getattr(self, "_facts_checked_at", float("-inf")) < self.FACTS_REFRESH_S:
+            return
+        self._facts_checked_at = now
+        try:
+            mtime = os.stat(FACTS_PATH).st_mtime
+        except OSError:
+            return
+        if mtime == getattr(self, "_facts_mtime", None):
+            return
+        self._facts_mtime = mtime
+        disk = _safe_read_json(FACTS_PATH, None)
+        if not isinstance(disk, dict):
+            return
+        with self._facts_lock:
+            new = {k: v for k, v in disk.items() if self._facts.get(k) != v}
+            self._facts.update(new)
+        if new:
+            logger.info(f"[MEMORY] {len(new)} Fakt(en) von anderem Prozess uebernommen")
+
     def _lexical_index(self):
         """Wort-Index ueber Fakten + Selbstwissen. Neu gebaut, wenn sich die Fakten aendern."""
         from core.memory.lexical_recall import LexicalIndex
+        self._refresh_facts_from_disk()
         with self._facts_lock:
             facts = [
                 f"{k}: {v.get('value', '') if isinstance(v, dict) else v}"

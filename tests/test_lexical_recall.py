@@ -139,6 +139,7 @@ def mem(monkeypatch):
     m._facts_lock = threading.Lock()
     m._facts = {k: {"value": v, "source": "test"} for k, v in FACTS.items()}
     m._personal_context = {}
+    m._facts_checked_at = float("inf")   # echte facts.json auf dem Pi aus dem Spiel lassen
     return m
 
 
@@ -185,6 +186,39 @@ class TestRecallHits:
         mem._facts["Test_Codewort"] = {"value": "Zitronenfalter 4711"}
         hits = mem.recall_hits("Was ist das Codewort Zitronenfalter?")
         assert _texts(hits) == ["Test_Codewort: Zitronenfalter 4711"]
+
+    def test_fact_saved_by_other_process_is_picked_up(self, mem, monkeypatch, tmp_path):
+        """Voice-Pipeline (anderer Prozess) lernt einen Fakt - der Chat findet ihn ohne Neustart."""
+        facts_file = tmp_path / "facts.json"
+        monkeypatch.setattr(lm, "FACTS_PATH", str(facts_file))
+        monkeypatch.setattr(mem, "FACTS_REFRESH_S", 0.0)
+        mem._facts_checked_at = float("-inf")
+        facts_file.write_text(json.dumps(mem._facts))
+        assert mem.recall_hits("Was ist das Codewort Zitronenfalter?") == []
+
+        on_disk = dict(mem._facts, Test_Codewort={"value": "Zitronenfalter 4711"})
+        facts_file.write_text(json.dumps(on_disk))
+        import os
+        os.utime(facts_file, (1e9, 1e9))        # sicher andere mtime
+        hits = mem.recall_hits("Was ist das Codewort Zitronenfalter?")
+        assert _texts(hits) == ["Test_Codewort: Zitronenfalter 4711"]
+
+    def test_disk_refresh_never_drops_own_facts(self, mem, monkeypatch, tmp_path):
+        facts_file = tmp_path / "facts.json"
+        monkeypatch.setattr(lm, "FACTS_PATH", str(facts_file))
+        monkeypatch.setattr(mem, "FACTS_REFRESH_S", 0.0)
+        mem._facts_checked_at = float("-inf")
+        facts_file.write_text(json.dumps({"Nur_auf_Platte": {"value": "x"}}))
+        mem.recall_hits("irgendeine laengere Frage hier")
+        assert "Markus_Kaffee" in mem._facts and "Nur_auf_Platte" in mem._facts
+
+    def test_broken_facts_file_is_ignored(self, mem, monkeypatch, tmp_path):
+        facts_file = tmp_path / "facts.json"
+        facts_file.write_text("[1, 2")
+        monkeypatch.setattr(lm, "FACTS_PATH", str(facts_file))
+        monkeypatch.setattr(mem, "FACTS_REFRESH_S", 0.0)
+        mem._facts_checked_at = float("-inf")
+        assert mem.recall_hits("Wie trinke ich meinen Kaffee?")
 
     def test_lexical_can_be_switched_off(self, mem, monkeypatch):
         monkeypatch.setattr(ep, "load_config", lambda: dict(ep._DEFAULTS, recall_lexical=False))
