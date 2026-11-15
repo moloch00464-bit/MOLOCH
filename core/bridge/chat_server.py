@@ -2821,6 +2821,43 @@ def chat(req: ChatRequest):
 
 
 
+class MemoryTurnRequest(BaseModel):
+    sender: str = Field(..., min_length=1, max_length=16)
+    text: str = Field(..., min_length=1, max_length=4000)
+    source: str = Field("pc_zentrale", min_length=1, max_length=32,
+                        pattern=r"^[A-Za-z0-9_.-]+$")
+
+
+# Externe Sender -> Memory-Sender (wie /chat: "user" = Markus, "moloch" = Moloch)
+_MEMORY_TURN_SENDERS = {"markus": "user", "moloch": "moloch"}
+
+
+@app.post("/memory/turn")
+def memory_turn(req: MemoryTurnRequest):
+    """Turn aus einem anderen Kanal (z.B. PC-KI-Zentrale) ins gemeinsame Memory.
+
+    Gleicher Schreibweg wie /chat (save_message + EventBus), erscheint in /history.
+    Token-Pruefung (X-Moloch-Token) uebernimmt die Middleware fuer alle POSTs.
+    """
+    sender = _MEMORY_TURN_SENDERS.get(req.sender.strip().lower())
+    if sender is None:
+        raise HTTPException(422, "sender muss 'markus' oder 'moloch' sein")
+    text = req.text.strip()
+    if not text:
+        raise HTTPException(422, "text ist leer")
+    try:
+        get_memory().save_message(sender, text, source=req.source)
+    except Exception as e:
+        raise HTTPException(500, f"Memory-Schreibfehler: {e}")
+    try:
+        topic = "conversation.user_said" if sender == "user" else "conversation.moloch_said"
+        get_event_bus().publish(topic, {"text": text, "source": req.source},
+                                source="chat_server", priority=5)
+    except Exception as e:
+        logger.debug(f"memory_turn EventBus Fehler: {e}")
+    return {"ok": True, "sender": sender, "source": req.source, "chars": len(text)}
+
+
 @app.get("/history")
 def history(n: int = 20):
     """Letzte N Konversations-Turns aus persistentem Memory (Cross-Channel:
