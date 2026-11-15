@@ -6,6 +6,12 @@ Auftrag, Stand und Plan: docs/anima/ (MASTER_BRIEFING, BESTANDSAUFNAHME, FRAGENK
 Uebersicht mit Checkliste: GitHub Issue #3. Hardware: Raspberry Pi 5 mit 4 GB RAM (Markus, 15.11.).
 pytest tests pc: 361 passed, 19 skipped. Am Geraet ist NICHTS davon geprueft.
 
+## Naechster grosser Auftrag: Nervensystem (nur Plan, KEIN Code)
+docs/anima/NERVENSYSTEM_BRIEFING_2026-11-15.md (Wortlaut) und docs/anima/NERVENSYSTEM_PLAN.md
+(Abgleich mit dem Code, Grundsaetze, erste Schleife Temperatur -> Koerper -> Rueckmeldung,
+Abnahme in drei Stufen, offene Entscheidungen E1-E8). GitHub-Issue dazu ist mit #3 verknuepft.
+Erst PR #4 mergen und Inventar ziehen, dann nach Cowork-Protokoll starten.
+
 ## Gebaut (Standard AN, weil rein lokal und ohne neue Abhaengigkeit)
 - Wort-Recall + Selbstwissen: core/memory/lexical_recall.py, config/self_knowledge.json,
   MolochMemory.recall_hits()/recall(). Abschalten: embedding_bridge.recall_lexical=false
