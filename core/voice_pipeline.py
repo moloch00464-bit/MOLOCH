@@ -2615,10 +2615,62 @@ class VoicePipeline:
         )
         self._spontaneous_thread.start()
         logger.info("[VOICE] Spontane-Kommentare-Monitor gestartet")
+        threading.Thread(target=self._presence_loop, daemon=True,
+                         name="PresenceTriggers").start()
 
     def stop_spontaneous_monitor(self):
         """Monitor stoppen."""
         self._spontaneous_running = False
+
+    def _presence_loop(self):
+        """Anwesenheits-Ausloeser: Markus kommt / geht, Unbekannter (alle 2 s).
+
+        Liest nur /dev/shm/moloch_status.json. Regeln und Schalter: config/proactive.json.
+        """
+        try:
+            from core.autonomy.presence_triggers import PresenceTriggers
+            triggers = PresenceTriggers()
+        except Exception as e:
+            logger.error(f"[PROAKTIV] Ausloeser nicht ladbar: {e}")
+            return
+        logger.info("[PROAKTIV] Anwesenheits-Ausloeser gestartet")
+        while self._spontaneous_running:
+            time.sleep(2.0)
+            try:
+                with open("/dev/shm/moloch_status.json", "r") as f:
+                    st = json.load(f)
+                ev = triggers.update(st.get("face_id"), bool(st.get("face_detected")),
+                                     bool(st.get("person_detected")))
+                if not ev:
+                    continue
+                with self._lock:
+                    busy = self._recording or self._speaking or self._processing
+                if busy:
+                    logger.info(f"[PROAKTIV] {ev['event']} uebersprungen (Gespraech laeuft)")
+                    continue
+                logger.info(f"[PROAKTIV] Ausloeser: {ev['event']}")
+                state = {"reason": ev["reason"], "event": ev["event"],
+                         "situation": ev["situation"]}
+                try:
+                    from core.core_integrator import get_core_integrator
+                    state.update(get_core_integrator().get_state())
+                except Exception:
+                    pass
+                self._generate_spontaneous_comment(state)
+            except Exception as e:
+                logger.debug(f"[PROAKTIV] Schleife: {e}")
+
+    @staticmethod
+    def _publish_speech(event: str, text: str, speaking: bool) -> None:
+        """Sprech-Status fuer den Koerper (PC body_bridge liest ihn ueber /live.speech)."""
+        try:
+            tmp = "/dev/shm/moloch_speech.json.tmp"
+            with open(tmp, "w") as f:
+                json.dump({"event": event, "text": text[:200], "speaking": bool(speaking),
+                           "ts": time.time()}, f)
+            os.replace(tmp, "/dev/shm/moloch_speech.json")
+        except OSError:
+            pass
 
     def _spontaneous_loop(self):
         """Prueft alle 30s ob Moloch spontan kommentieren soll."""
@@ -2759,6 +2811,11 @@ Antworte immer auf Deutsch. Niemals Englisch oder andere Sprachen.
 Wenn dir nichts Situationsrelevantes einfaellt: Antworte exakt mit dem Wort SCHWEIG"""
 
         # Memory-Kontext fuer Relevanz
+        # Ausloeser (Markus kommt/geht, Unbekannter): Situation im Prompt richtigstellen
+        _situation = integrator_state.get("situation")
+        if _situation:
+            system = system.replace("Du siehst Markus gerade ueber deine Kamera.", _situation)
+
         # Nur der kompakte Kontext: der volle Memory-Kontext (~14.000 Zeichen) sprengt
         # das 4096-Token-Fenster des lokalen Modells. Abgeschnitten wurde der ANFANG,
         # also genau die Regeln oben (1 Satz, Deutsch, SCHWEIG) -> Wortsalat.
@@ -2839,9 +2896,14 @@ Wenn dir nichts Situationsrelevantes einfaellt: Antworte exakt mit dem Wort SCHW
                 get_memory().save_message("moloch", text, source="spontaneous")
             except Exception:
                 pass
-            # Sprechen
-            if self._voice_enabled:
-                self._speak(text)
+            # Sprechen (Status fuer den Koerper: Anlass + spricht gerade)
+            _event = integrator_state.get("event") or "spontan"
+            self._publish_speech(_event, text, self._voice_enabled)
+            try:
+                if self._voice_enabled:
+                    self._speak(text)
+            finally:
+                self._publish_speech(_event, text, False)
         except Exception as e:
             logger.error(f"[SPONTAN] LLM Fehler: {e}")
 
