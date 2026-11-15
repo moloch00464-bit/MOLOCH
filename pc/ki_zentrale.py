@@ -13,8 +13,8 @@ Laeuft im Dashboard-Prozess (:11700), eingehaengt per app.include_router().
     GET  /api/ki/verlauf    letzte Eintraege aus dem PC-Chatlog
 
 Rollen und Haupthirn stehen in ki_rollen.json. Der Chatlog liegt in
-~/moloch_zentrale/chat_log.jsonl, weil der Pi noch keinen Endpunkt hat,
-ueber den der PC Gespraeche ins gemeinsame Gedaechtnis schreibt.
+~/moloch_zentrale/chat_log.jsonl (Verlauf fuer den Prompt); lokale Turns werden
+zusaetzlich per POST /memory/turn ins gemeinsame Pi-Gedaechtnis gespiegelt.
 """
 import asyncio
 import json
@@ -217,6 +217,23 @@ async def _persona_text(client: httpx.AsyncClient) -> str:
     if data and data.get("system"):
         _persona.update(text=data["system"], ts=time.time())
     return _persona["text"] or FALLBACK_PERSONA
+
+
+async def _mirror_to_pi(client: httpx.AsyncClient, user_text: str, reply: str) -> bool:
+    """Lokalen Turn ins gemeinsame Pi-Gedaechtnis schreiben (POST /memory/turn, Pi b02f0f2).
+
+    Best effort: ist der Pi weg, bleibt der Turn nur im PC-Log.
+    """
+    try:
+        for sender, text in (("markus", user_text), ("moloch", reply)):
+            r = await client.post(f"{PI_URL}/memory/turn", timeout=5.0,
+                                  json={"sender": sender, "text": text[:4000],
+                                        "source": "pc_zentrale"})
+            if r.status_code != 200:
+                return False
+        return True
+    except Exception:
+        return False
 
 
 def _line(obj: dict) -> bytes:
@@ -470,12 +487,15 @@ async def ki_chat(request: Request):
 
                 text = text.strip()
                 secs = round(time.time() - t0, 1)
+                mirrored = False
                 if text:
                     _log({"who": "moloch", "text": text, "mode": "local",
                           "model": model, "secs": secs})
+                    mirrored = await _mirror_to_pi(client, msg, text)
                 ev_n, ev_d = stats.get("eval_count"), stats.get("eval_duration")
                 yield _line({
                     "done": True,
+                    "gedaechtnis": mirrored,
                     "model": model,
                     "secs": secs,
                     "erstes_wort_s": round(first, 1) if first is not None else None,

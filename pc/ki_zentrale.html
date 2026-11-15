@@ -287,6 +287,7 @@ async function send() {
             if (d.erstes_wort_s != null) parts.push('erstes Wort ' + d.erstes_wort_s + ' s');
             if (d.tok_s) parts.push(d.tok_s + ' Tok/s');
             if (d.laden_s > 1) parts.push('Modell geladen in ' + d.laden_s + ' s');
+            parts.push(d.gedaechtnis ? 'im Gedächtnis' : 'nicht im Pi-Gedächtnis');
             addTail(el, parts.join(' · '));
           }
         }
