@@ -70,18 +70,16 @@ Phase B des Briefings (Laufzeit prüfen) ist damit **offen** und steht als Prüf
 - `pc/ki_zentrale.py`: lokaler Chat holt pro Frage die Treffer und hängt sie als `[GEDAECHTNIS]`-Block an.
 - Wissensarten laut Briefing: persönliche Fakten ✔, Selbstwissen ✔, Projektchronik ✔ (als Selbstwissen), Gesprächsverlauf ✔ (vorhanden), Sensorik ✔ (`/live`). **Fehlt:** episodische Erinnerungen (EpisodicMemory ist aus RAM-Gründen deaktiviert), Rechercheergebnisse als eigene Art.
 
-**Bekannte Lücke:** Ein Fakt, den ein *anderer* Prozess speichert (z. B. die Voice-Pipeline im Hauptservice), wird vom Chat-Server erst nach dessen Neustart gefunden – beide halten die Fakten im RAM. Fakten, die im Chat selbst per `[REMEMBER: …]` gelernt werden, sind sofort da.
+**Prozessgrenze:** Hauptservice (Voice) und Chat-Server halten die Fakten je im RAM. Vor jedem Abruf wird `facts.json` übernommen, wenn sie sich geändert hat (höchstens alle 10 s). Ein per Sprache gelernter Fakt ist damit im Chat ohne Neustart abrufbar.
 
 **Grenzen des Wort-Recalls:** findet nur, was ein Wort mit der Frage teilt. „Was trinke ich morgens?" findet den Kaffee-Fakt nicht, wenn darin „Kaffee" steht und in der Frage nicht. Dafür ist die Vektorsuche da – erst einschalten, wenn der Deutsch-Test (`scripts/check_after_merge.py`) besteht.
 
 **Abnahmetest am Gerät:**
 
 ```bash
-# 1. Fakt nur auf dem Pi speichern. Der Chat-Server (eigener Prozess, moloch-chat.service)
-#    laedt Fakten beim Start - deshalb danach neu starten.
-cd ~/moloch && python3 -c "from core.longterm_memory import get_memory; \
+# 1. Fakt nur auf dem Pi speichern (eigener Prozess - der Chat-Server uebernimmt ihn binnen 10 s)
+cd ~/moloch && python3 -c "from core.longterm_memory import get_memory; \\
   get_memory().add_fact('Test_Codewort', 'Zitronenfalter 4711', source='abnahmetest')"
-sudo systemctl restart moloch-chat
 # 2. Abruf direkt
 curl -s 'localhost:9100/memory/recall?q=Was%20ist%20das%20Codewort%20Zitronenfalter'
 # 3. In der KI-Zentrale (lokal) fragen: "Was ist das Codewort Zitronenfalter?"
