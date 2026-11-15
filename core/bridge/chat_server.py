@@ -2902,6 +2902,12 @@ def live_status():
             },
             "worker_health": d.get("worker_health", {}),
             "core": d.get("core", {}),
+            # Kamerastellung fuer den Koerper (PC body_bridge): Grad, wie der Tracker sie fuehrt
+            "ptz": {
+                "pan": (d.get("ptz") or {}).get("current_pan"),
+                "tilt": (d.get("ptz") or {}).get("current_tilt"),
+                "tracker_state": (d.get("ptz") or {}).get("tracker_state"),
+            },
         }
         return out
     except Exception as e:
