@@ -29,6 +29,12 @@ logger = logging.getLogger("KeywordHandler")
 
 _CONFIG_PATH = Path.home() / "moloch" / "config" / "keywords.json"
 
+# Woerter, die einen Befehl nicht veraendern ("schau MAL BITTE zur Tuer")
+_FILLER_WORDS = frozenset({
+    "mal", "bitte", "doch", "kurz", "eben", "einmal", "jetzt", "gleich", "schnell",
+    "moloch", "hey", "ey", "ok", "okay", "also", "dann", "nochmal",
+})
+
 
 class KeywordHandler:
     """Lokale Keyword-Erkennung fuer M.O.L.O.C.H."""
@@ -72,10 +78,17 @@ class KeywordHandler:
         if len(lower) < 3:
             return None
 
+        # Zweite Fassung ohne Hoeflichkeits- und Fuellwoerter: "schau mal bitte
+        # zur Tuer" soll "schau zur tuer" treffen. Die Wendung selbst bleibt
+        # Pflicht - "die Tuer klemmt" loest weiterhin nichts aus.
+        stripped = " ".join(
+            w for w in re.sub(r"[^\w\s]", " ", lower).split() if w not in _FILLER_WORDS
+        )
+
         for cat in self._categories:
             keywords = cat.get("keywords", [])
             for kw in keywords:
-                if kw in lower:
+                if kw in lower or kw in stripped:
                     action = cat.get("action", "")
                     response = cat.get("response", "OK.")
                     logger.info(
