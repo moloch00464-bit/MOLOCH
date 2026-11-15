@@ -44,6 +44,15 @@ LIVE_EVERY_S = 0.5      # Pi-Abfrage
 PITCH_SIGN = -1.0       # BodyPose: + = Kopf hoch; Reachy (y nach links): + = Nase runter
 ANTENNA_SIGN = (-1.0, 1.0)  # (rechts, links); Ruhewerte im Sim sind (-0.18, +0.18) rad
 
+EVENT_HOLD_S = 8.0      # so lange praegt ein Ausloeser die Haltung nach dem Satz
+# Anlass -> (Zone, Mood, Seins-Zustand) fuer die Dauer der Reaktion
+EVENT_LOOK = {
+    "markus_arrived": ("guardian", "alert", "engaged"),      # aufrichten, Antennen senkrecht
+    "markus_left": ("guardian", "dark", "idle"),             # Kopf sinkt, Antennen haengen
+    "unknown_person": ("shadow", "alert", "observing"),      # Kopf tief, Antennen steil, lauernd
+    "spontan": ("guardian", "calm", "engaged"),              # normaler Kommentar: zuwenden
+}
+
 ZONES = ("guardian", "shadow", "berserker")
 MOODS = ("calm", "focused", "alert", "agitated", "euphoric", "dark")
 STATES = ("idle", "observing", "engaged", "overloaded", "withdrawing", "offline_anchor")
@@ -177,12 +186,23 @@ def derive_state(live: Optional[dict], calib: Optional[dict] = None) -> Optional
         mood = "focused"
     else:
         mood = "calm"
+    # Proaktiver Satz vom Pi (/live.speech): waehrend er spricht nickt der Kopf leicht,
+    # und der Anlass faerbt die Haltung fuer EVENT_HOLD_S Sekunden (Priority.DIALOGUE).
+    dialog = None
+    sp = live.get("speech") or {}
+    age = sp.get("age_s")
+    speaking = bool(sp.get("speaking")) and isinstance(age, (int, float)) and age < 30
+    if isinstance(age, (int, float)) and (speaking or age < EVENT_HOLD_S):
+        dialog = sp.get("event") or "spontan"
+        zone, mood, being = EVENT_LOOK.get(dialog, (zone, mood, "engaged"))
+
     # Blick folgt der Sonoff: Pan/Tilt des Trackers in Grad. Vorzeichen und Skalierung
     # stehen in config/body_mappings.json (gaze.*), nicht hier - die Sonoff bleibt unangetastet.
     ptz = live.get("ptz") or {}
     pan, tilt = ptz.get("pan"), ptz.get("tilt")
     return {"zone": zone, "mood": mood, "being_state": being, "tension": tension,
             "dominance": _clamp(core.get("dominance"), -1.0, 1.0),
+            "speaking": speaking, "_dialog": dialog,
             "gaze_yaw": _clamp((pan - calib["mitte_pan"]) * calib["faktor"], -180.0, 180.0)
             if isinstance(pan, (int, float)) else None,
             "gaze_pitch": _clamp((tilt - calib["mitte_tilt"]) * calib["faktor"], -90.0, 90.0)
@@ -252,8 +272,13 @@ def main() -> None:
                                            "being_state": "offline_anchor",
                                            "tension": 0.0, "dominance": 0.0}
 
+        state = dict(state)
+        dialog = state.pop("_dialog", None)
         pose = compute_pose(BodyState(**state), mappings, loop_t - t_start)
-        ctrl.submit(Priority.MANUAL if source == "test" else Priority.IDLE, pose, ttl_s=1.0)
+        prio = (Priority.MANUAL if source == "test"
+                else Priority.DIALOGUE if dialog else Priority.IDLE)
+        ctrl.submit(prio, pose, ttl_s=1.0)
+        state["ereignis"] = dialog
         result = ctrl.tick()
         try:
             backend.step()

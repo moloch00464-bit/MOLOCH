@@ -41,6 +41,14 @@ Pi /live (core.zone/tension/dominance, person, face_id, ptz.pan/tilt)   oder Tes
 - Not-Aus: `{"action":"estop","on":true|false}` -> Motoren entlasten.
 - Kein Autostart. Nach PC-Neustart laeuft der Simulator erst nach Klick.
 
+## Reaktion auf proaktive Saetze (seit 2026-11-15)
+
+Der Pi meldet ueber `/live.speech` den letzten proaktiven Satz: `event` (markus_arrived, markus_left,
+unknown_person, spontan), `speaking`, `age_s`. Solange er spricht und noch EVENT_HOLD_S (8 s) danach
+faerbt `EVENT_LOOK` in body_bridge.py Zone/Mood/Zustand und die Pose laeuft mit Priority.DIALOGUE.
+Ausloeser-Logik und Regeln liegen auf dem Pi: `core/autonomy/presence_triggers.py`, `config/proactive.json`.
+Trockentest ohne Kamera: `/dev/shm/moloch_speech.json` auf dem Pi von Hand schreiben.
+
 ## Diagnose
 
 | Symptom | Pruefen |

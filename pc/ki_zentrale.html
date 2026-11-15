@@ -525,6 +525,7 @@ async function refreshBody() {
     es.onclick = () => bodyPost({action: 'estop', on: !b.estop}).then(refreshBody);
     const z = b.zustand, p = b.last_pose || {};
     const rows = [['Quelle', b.quelle === 'live' ? 'Molochs Live-Zustand' : b.quelle === 'test' ? 'Test-Vorgabe' : 'Pi offline'],
+      ['Reaktion', z.ereignis ? ({markus_arrived: 'Markus kommt', markus_left: 'Markus geht', unknown_person: 'Unbekannter', spontan: 'spontaner Satz'}[z.ereignis] || z.ereignis) + (z.speaking ? ' · spricht' : '') : '—'],
       ['Zone / Stimmung', z.zone + ' / ' + z.mood], ['Zustand', z.being_state],
       ['Blick', z.gaze_yaw == null ? '—' : 'Drehung ' + z.gaze_yaw.toFixed(0) + '°, Neigung ' + (z.gaze_pitch ?? 0).toFixed(0) + '°'],
       ['Kopf', 'Neigung ' + (p.head_pitch ?? '—') + '°, Höhe ' + (p.head_z ?? '—') + ' mm'],
