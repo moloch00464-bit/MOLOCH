@@ -23,7 +23,8 @@ Umgebungsvariablen (haben Vorrang):
     MOLOCH_EMBED_URL=http://rechner:11434     (Basis-URL ohne Pfad)
     MOLOCH_EMBED_MODEL=all-minilm
     MOLOCH_EMBED_TOKEN=...                    (optional, Authorization: Bearer)
-    MOLOCH_MEMORY_RECALL=1|0                  (Fakten-Recall im LLM-Kontext)
+    MOLOCH_MEMORY_RECALL=1|0                  (Vektor-Recall im LLM-Kontext)
+    MOLOCH_MEMORY_RECALL_LEXICAL=1|0          (Wort-Recall lokal, Standard 1)
 """
 
 import json
@@ -55,6 +56,8 @@ _DEFAULTS = {
     "recall_enabled": False,
     "recall_limit": 3,
     "recall_min_score": 0.45,
+    # Wortvergleich lokal auf dem Pi (ohne PC, ohne Qdrant) - Grundversorgung, Standard an.
+    "recall_lexical": True,
 }
 
 
@@ -96,6 +99,9 @@ def load_config() -> Dict:
     env_recall = os.environ.get("MOLOCH_MEMORY_RECALL")
     if env_recall is not None:
         cfg["recall_enabled"] = env_recall.strip().lower() in ("1", "true", "yes", "on")
+    env_lex = os.environ.get("MOLOCH_MEMORY_RECALL_LEXICAL")
+    if env_lex is not None:
+        cfg["recall_lexical"] = env_lex.strip().lower() in ("1", "true", "yes", "on")
     if os.environ.get("MOLOCH_EMBED_MODEL"):
         cfg["model"] = os.environ["MOLOCH_EMBED_MODEL"]
     base = os.environ.get("MOLOCH_EMBED_URL", "").rstrip("/")
