@@ -1,3 +1,41 @@
+# Agent Handoff — 2026-11-15 Cloud-Session (ANIMA Master-Briefing, KEIN Geraetezugriff)
+
+Branch `ccr-5df7b577-w92x94`, aufgesetzt auf deepseek_architecture_overhaul @ d39e03a.
+Auftrag, Stand und Plan: docs/anima/ (MASTER_BRIEFING, BESTANDSAUFNAHME, FRAGENKATALOG).
+pytest tests pc: 352 passed, 19 skipped. Am Geraet ist NICHTS davon geprueft.
+
+## Gebaut (Standard AN, weil rein lokal und ohne neue Abhaengigkeit)
+- Wort-Recall + Selbstwissen: core/memory/lexical_recall.py, config/self_knowledge.json,
+  MolochMemory.recall_hits()/recall(). Abschalten: embedding_bridge.recall_lexical=false
+  oder MOLOCH_MEMORY_RECALL_LEXICAL=0. Wirkt im Tentakel-Pfad (local_llm_bridge) und
+  im Agent-Tool read_memory.
+- Fakten eines anderen Prozesses (Voice -> Chat-Server) werden binnen 10 s uebernommen.
+- chat_server: GET /memory/recall, POST /speech/state, POST /command.
+- pc/ki_zentrale: lokaler Chat holt Erinnerungen, fuehrt Befehle ueber den Pi aus,
+  Browser-Sprachausgabe meldet Sprechstatus (Koerper nickt bei Chat-Antworten).
+- keyword_handler: Fuellwoerter ("schau MAL zur Tuer") brechen die Erkennung nicht mehr.
+- scripts/self_diagnosis.py: NPU-Test zaehlt echte Inferenzen, oeffnet bei laufendem
+  Service kein VDevice mehr (vorher eigene Gruppe MOLOCH_DIAG = Error-74-Risiko).
+
+## Nach dem Merge am Geraet (Reihenfolge)
+1. Pi: pull, __pycache__ loeschen, `sudo systemctl restart moloch moloch-chat`, Audit.
+2. PC: KI-Zentrale neu starten (pc/ki_zentrale.py + .html geaendert).
+3. Abnahmetests: BESTANDSAUFNAHME Abschnitt "Abnahmetest am Geraet" (Bereich 1),
+   Bereich 3 und 9, dann docs/anima/FRAGENKATALOG.md.
+4. Phase-B-Pruefliste (BESTANDSAUFNAHME Abschnitt 4) abarbeiten, Ergebnisse hier eintragen.
+
+## Beobachten
+- Wort-Recall haengt bis zu 3 Zeilen an den Prompt des Tentakel-Pfads. Wenn das 7B-Modell
+  dadurch schlechter antwortet: abschalten (siehe oben) und melden.
+- Nick-Bewegung beim Sprechen (2 Grad, 2 Hz) ist ungetunt.
+- /memory/recall und /history sind per GET ohne Token lesbar (wie bisher /history) -
+  bei Zugriff von ausserhalb des LAN absichern.
+
+## Offen laut Plan (docs/anima/BESTANDSAUFNAHME, Abschnitt 3)
+P3 Laufzeit-Inventar, P6 Hardware-Fragen mit Messwerten, P7 Recherche, P8 Situationszustand,
+P9 Audio-Ereignisse, P10 Spotify-DJ (erst Token pruefen), P11 Raumkalibrierung,
+P12 Geraeuschbibliothek, P13 Reachy-Selbstbeobachtung.
+
 # Agent Handoff — 2026-11-15 Pi-Session (Kaskade local_first + /memory/turn)
 
 Commits auf deepseek_architecture_overhaul: efa302a (local_llm_bridge), b02f0f2 (chat_server).
