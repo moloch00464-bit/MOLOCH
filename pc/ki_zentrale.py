@@ -219,6 +219,17 @@ async def _persona_text(client: httpx.AsyncClient) -> str:
     return _persona["text"] or FALLBACK_PERSONA
 
 
+async def _pi_command(text: str) -> Optional[dict]:
+    """Pi fragen, ob die Eingabe ein Befehl ist (POST /command). None = Pi nicht erreichbar."""
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.post(f"{PI_URL}/command", timeout=2.5,
+                                  json={"text": text[:2000], "source": "pc_zentrale"})
+        return r.json() if r.status_code == 200 else None
+    except Exception:
+        return None
+
+
 async def _recall(client: httpx.AsyncClient, question: str) -> Optional[dict]:
     """Passende Erinnerungen vom Pi holen (GET /memory/recall). None = Pi nicht erreichbar.
 
@@ -602,6 +613,23 @@ async def ki_chat(request: Request):
                   "model": data.get("provider"), "secs": secs})
         return {"text": text, "provider": data.get("provider"),
                 "secs": secs, "error": data.get("error")}
+
+    # Befehl? Der Pi fuehrt ihn ueber seinen Keyword-Handler aus (Kamera, Licht, Musik),
+    # ohne dass ein Sprachmodell dazwischen raet. Kein Befehl oder Pi weg -> normal weiter.
+    t0 = time.time()
+    cmd = await _pi_command(msg)
+    if cmd and cmd.get("handled") and cmd.get("text"):
+        text = str(cmd["text"]).strip()
+        secs = round(time.time() - t0, 1)
+        _log({"who": "markus", "text": msg, "mode": "local"})
+        _log({"who": "moloch", "text": text, "mode": "local", "model": "keyword_handler", "secs": secs})
+
+        async def befehl():
+            yield _line({"t": text})
+            yield _line({"done": True, "gedaechtnis": True, "befehl": True,
+                         "model": "Befehl (Pi)", "secs": secs})
+
+        return StreamingResponse(befehl(), media_type="application/x-ndjson")
 
     if _chat_lock.locked():
         return JSONResponse({"error": "Moloch denkt noch an der letzten Antwort"}, status_code=409)

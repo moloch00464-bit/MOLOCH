@@ -335,7 +335,8 @@ async function send() {
             if (d.tok_s) parts.push(d.tok_s + ' Tok/s');
             if (d.laden_s > 1) parts.push('Modell geladen in ' + d.laden_s + ' s');
             parts.push(d.gedaechtnis ? 'im Gedächtnis' : 'nicht im Pi-Gedächtnis');
-            if (d.erinnerungen == null) parts.push('Erinnerungen: Pi nicht erreichbar');
+            if (d.befehl) { /* Befehl vom Pi ausgefuehrt: keine Gedaechtnis-Angaben */ }
+            else if (d.erinnerungen == null) parts.push('Erinnerungen: Pi nicht erreichbar');
             else if (d.erinnerungen > 0) parts.push(d.erinnerungen + ' Erinnerung' + (d.erinnerungen > 1 ? 'en' : '') +
                                                    ' genutzt (' + (d.erinnerung_quellen || []).join(', ') + ')');
             else parts.push('keine passende Erinnerung');
