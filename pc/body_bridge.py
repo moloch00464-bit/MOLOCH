@@ -158,8 +158,14 @@ def derive_state(live: Optional[dict]) -> Optional[dict]:
         mood = "focused"
     else:
         mood = "calm"
+    # Blick folgt der Sonoff: Pan/Tilt des Trackers in Grad. Vorzeichen und Skalierung
+    # stehen in config/body_mappings.json (gaze.*), nicht hier - die Sonoff bleibt unangetastet.
+    ptz = live.get("ptz") or {}
+    pan, tilt = ptz.get("pan"), ptz.get("tilt")
     return {"zone": zone, "mood": mood, "being_state": being, "tension": tension,
-            "dominance": _clamp(core.get("dominance"), -1.0, 1.0)}
+            "dominance": _clamp(core.get("dominance"), -1.0, 1.0),
+            "gaze_yaw": _clamp(pan, -180.0, 180.0) if isinstance(pan, (int, float)) else None,
+            "gaze_pitch": _clamp(tilt, -90.0, 90.0) if isinstance(tilt, (int, float)) else None}
 
 
 def read_override() -> Optional[dict]:
