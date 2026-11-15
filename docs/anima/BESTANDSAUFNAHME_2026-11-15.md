@@ -11,7 +11,7 @@ Deshalb gibt es drei Stufen, die nicht vermischt werden:
 | Stufe | Bedeutung |
 |---|---|
 | **Code** | Im Repository vorhanden und gelesen. Sagt nichts darüber, ob es läuft. |
-| **Test** | Durch automatische Tests ohne Hardware belegt (`python3 -m pytest tests pc`: 339 bestanden, 19 übersprungen). |
+| **Test** | Durch automatische Tests ohne Hardware belegt (`python3 -m pytest tests pc`: 352 bestanden, 19 übersprungen). |
 | **Gerät** | Am laufenden System nachgewiesen. **In dieser Sitzung für keinen Punkt möglich.** Wo ein Handoff einen Nachweis nennt, steht die Quelle dabei. |
 
 Phase B des Briefings (Laufzeit prüfen) ist damit **offen** und steht als Prüfliste in Abschnitt 4.
@@ -24,7 +24,7 @@ Phase B des Briefings (Laufzeit prüfen) ist damit **offen** und steht als Prüf
 |---|---|---|---|---|---|---|
 | 1 | Gedächtnis ↔ Ollama | ja | Speichern ja (Handoff 15.11.: `/memory/turn`, `/history`); Abruf nein | **Lücke bestätigt:** lokale Modelle bekamen nur 3 Zeilen Crew, keine Fakten (Cloud-Pfad bekam alle) | Wort-Recall, Selbstwissen, `GET /memory/recall`, Anbindung KI-Zentrale | Abnahmetest am Gerät |
 | 2 | Sprachmodelle, Antwortqualität | ja | Kaskade `local_first` getestet (Handoff 15.11.) | Modellname in Konfiguration widersprüchlich; Selbstwissen fehlte | Selbstwissen (22 Einträge) | Vergleichstests, Identitätsdateien zusammenführen |
-| 3 | Chat ↔ Kamera | teilweise | unbekannt | Pi-`/chat` kann „schau zur Tür"; **lokaler PC-Chat nicht** | – | Intent-Weg für den lokalen Chat |
+| 3 | Chat ↔ Kamera | teilweise | unbekannt | **Zwei Lücken bestätigt:** lokaler PC-Chat führte keine Befehle aus; „schau **mal** zur Tür" wurde nirgends erkannt | `POST /command`, Vorabfrage in der Zentrale, Füllwörter in der Erkennung | Abnahme am Gerät; Bildbeschreibung |
 | 4 | BBox, Raumkalibrierung | minimal | nein | Entfernung = 3 Stufen aus BBox-Fläche, kein Kalibrierprofil | – | Konzept + Messreihe |
 | 5 | ReSpeaker, Dauer-Audio | Sprache ja, Geräusche nein | Sprache teilweise | Keine Geräuschereignisse im EventBus | – | VAD/Ereignis-Pipeline |
 | 6 | Spotify-DJ | ja | unbekannt (03.10.: Refresh-Token widerrufen) | Auto-DJ und Zonen-Empfehlung vorhanden, kein Lernen aus Ablehnung | – | Token prüfen, dann DJ-Logik |
@@ -105,7 +105,10 @@ Fragenkatalog für den Abnahmetest: `docs/anima/FRAGENKATALOG.md`.
 - **Chat → Kamera (Code):** Pi-`/chat` ruft den Keyword-Handler vor dem LLM auf. „schau zur Tür" → `ptz_goto` mit benannter Position, Arbiter auf MANUELL. Läuft über die vorhandene Prioritätssteuerung, kein zweiter Controller.
 - **Kamera → Chat (Code):** `_build_local_context_snippet` gibt erkanntes Gesicht, Person, Zone in den Prompt; KI-Zentrale hängt `[LIVE]` an.
 - **Lücke:** Der **lokale** Modus der KI-Zentrale spricht direkt mit Ollama. Dort greift kein Keyword-Handler – „schau zur Tür" bewegt nichts. Der Modus „pi" der Zentrale geht über `/chat` und kann es.
-- **Offen:** Im lokalen Modus zuerst den Pi fragen, ob die Eingabe ein Befehl ist (z. B. `POST /chat` mit einem Nur-Keyword-Schalter), sonst lokal antworten. „Was siehst du?" liefert derzeit nur Klassen und Gesichts-ID; eine Bildbeschreibung läuft laut Entscheidung vom 05.10. über den PC (moondream), Stand unbekannt.
+- **Zweite Lücke (per Test belegt):** Die Erkennung verlangte die Wendung wörtlich. „Moloch, schau mal zur Tür" – der Beispielsatz des Briefings – traf nicht, weil „mal" dazwischen steht. Das galt auch für den Pi-Chat und die Sprache.
+- **Umgesetzt (Stufe Test):** Füllwörter werden vor dem Abgleich entfernt, die Wendung bleibt Pflicht („die Tür klemmt" bewegt nichts). `POST /command` fragt nur den Keyword-Handler; die Zentrale ruft das im lokalen Modus vor Ollama auf.
+- **Abnahme am Gerät:** In der Zentrale (lokal) „Moloch, schau mal zur Tür" → Kamera fährt, Antwort „Blick zur Tuer.", Abschlusszeile „Befehl (Pi)". Danach „Die Tür klemmt" → keine Bewegung.
+- **Offen:** „Was siehst du?" liefert derzeit nur Klassen und Gesichts-ID; eine Bildbeschreibung läuft laut Entscheidung vom 05.10. über den PC (moondream), Stand unbekannt.
 
 ### 4 · Bounding-Boxen und Raumkalibrierung
 
@@ -175,7 +178,7 @@ Jedes Paket ist für sich mergebar, hat einen Abnahmetest und nennt, was am Ger�
 | **P2** | NPU-Selbsttest ehrlich, README | 11 | klein | Abnahme | **gebaut, ungeprüft am Gerät** |
 | **P3** | Laufzeit-Inventar: Skript, das Phase B abarbeitet und einen Bericht schreibt | 1, 2, 11 | klein | ja | offen |
 | **P4** | Ein Sprechstatus für alle TTS-Wege → Reachy nickt bei jeder Antwort | 9 | klein–mittel | Simulator | **Zentrale gebaut, ungeprüft am Simulator**; Pi-`/tts`/Cockpit offen |
-| **P5** | Lokaler Chat der Zentrale erkennt Befehle (Kamera, Musik) über den Pi | 3 | klein | ja | offen |
+| **P5** | Lokaler Chat der Zentrale erkennt Befehle (Kamera, Musik) über den Pi | 3 | klein | ja | **gebaut, ungeprüft am Gerät** |
 | **P6** | Hardware-Fragen im Chat mit Messwerten (Temperatur, Speicher, NPU) | 11 | mittel | ja | offen |
 | **P7** | Recherche mehrstufig mit Volltext und Quellen | 7 | mittel | PC | offen |
 | **P8** | `/live` als Situationszustand, Ereignisschema | 10 | mittel | ja | offen |
