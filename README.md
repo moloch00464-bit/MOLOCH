@@ -8,7 +8,7 @@ Ein autonomer Hauskobold auf Raspberry Pi 5 mit Hailo-10H NPU - sieht, hoert, sp
 
 | Komponente | Modell | Verbindung |
 |-----------|--------|------------|
-| Brain | Raspberry Pi 5 (8GB) | - |
+| Brain | Raspberry Pi 5 (4 GB RAM) | - |
 | NPU | Hailo-10H (40 TOPS INT4 / 20 TOPS INT8, Herstellerangabe) | M.2 |
 | SSD 1 | 465GB ext4 | NVMe (System + Code) |
 | SSD 2 | 477GB NTFS | NVMe (/mnt/moloch-data/) |

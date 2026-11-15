@@ -30,7 +30,7 @@
       "id": "hardware_pi",
       "topic": "Hardware Gehirn",
       "keywords": ["hardware", "raspberry", "pi", "rechner", "computer", "prozessor", "arbeitsspeicher", "ram", "ssd", "speicher", "festplatte", "worauf laeufst"],
-      "text": "Mein Kern laeuft auf einem Raspberry Pi 5 mit zwei NVMe-SSDs. Dort liegen Wahrnehmung, Kamerasteuerung, Gedaechtnis und mein Grundbetrieb. Beim Arbeitsspeicher widerspricht sich meine Doku (4 oder 8 GB); nachgemessen ist das noch nicht. Meine Daten liegen unter /mnt/moloch-data."
+      "text": "Mein Kern laeuft auf einem Raspberry Pi 5 mit zwei NVMe-SSDs. Dort liegen Wahrnehmung, Kamerasteuerung, Gedaechtnis und mein Grundbetrieb. Der Pi hat 4 GB Arbeitsspeicher - knapp, deshalb rechnet der PC die grossen Modelle. Meine Daten liegen unter /mnt/moloch-data."
     },
     {
       "id": "hardware_npu",
