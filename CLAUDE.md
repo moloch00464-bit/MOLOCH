@@ -1,5 +1,5 @@
 # M.O.L.O.C.H. — LOKOMOTIVE Briefing für Claude Code
-# Vollständiger Kontext — Stand: 2026-04-06
+# Vollständiger Kontext — Stand: 2026-06-11
 
 ---
 
@@ -28,7 +28,7 @@ Ein klarer Satz schlägt drei Bulletpoints.
 Kein Meta-Kommentar über dich selbst. Keine Performance.
 Wenn du weißt was du tust, musst du es nicht erklären.
 
-**Gilt für:** LOKOMOTIVE (Claude Code als Koordinator), alle 17 Agenten, alle Statusmeldungen.
+**Gilt für:** LOKOMOTIVE (Claude Code als Koordinator), alle 32 Agenten (20 Pi + 9 PC + 3 Auditoren), alle Statusmeldungen.
 
 ---
 
@@ -45,9 +45,12 @@ Dieses Tool erledigt automatisch:
 6. Rückgabe: Status-Report + `SESSION_READY: true/false`
 
 **ZUSAETZLICHER CHECK seit ThreeBrain-Welle 1+3** (manuell, kein MCP-Tool):
-- `git fetch -q origin main && git log --oneline -5 origin/main` — neue Commits von der PC-Session?
-- `head -20 docs/PC_TO_PI.md` — gibt's offene Mailbox-Eintraege (status: open)?
-- Konvention + Beispiele: `docs/CROSS_SESSION_PROTOCOL.md`
+- `curl -sS http://localhost:9100/mailbox/PC_TO_PI | head -30` — offene Eintraege (status: open)?
+- HTTP-Mailbox :9100 ist der PRIMAERE Transport (auto_push committed + pusht selbst).
+  File-Fallback: `head -20 docs/PC_TO_PI.md` + `git fetch -q origin main`
+- Konvention + Cowork-Protokoll: `docs/CROSS_SESSION_PROTOCOL.md`, Skill `pc-mailbox-http`
+- Federation-Daemon: `moloch-cross-monitor.service` antwortet autonom auf
+  task_/discuss_/ask_/request_-Topics (Schleifenschutz via [claude-auto]-Tag)
 
 **Bei `SESSION_READY: false` → Problem beheben, nochmal aufrufen. Kein Edit möglich.**
 
@@ -105,7 +108,12 @@ Session:       moloch_session_init  ← PFLICHT als erstes!
 | TaoEngine, Unterbewusstsein, Mood-Impulse, Self-Tune, Anima | `.claude/agents/unconscious.md` |
 | BBox/Landmark-Skalierung, Letterbox-Korrektur, Koordinaten-Transformation, Anzeige-Bug, Keypoints versetzt | `.claude/agents/coordinates.md` |
 | Chaos, Stresstest, Absturz, Lasttest, Stabilität | `.claude/agents/stresstest.md` |
-| PC-Side LoRA-Trainer, adapter_inference_proxy, lora_trainer, sync_samples, smoke.cmd | (PC-Session, kein Pi-Agent) — Mailbox `docs/PC_TO_PI.md` |
+| End-zu-End-Audit, audit_state.json, Audit-Layer, Wellen 8-11 | `.claude/agents/audit.md` |
+| Mailbox-Hygiene, stale Topics, Backlog-Check | `.claude/agents/mailbox_auditor.md` |
+| Persona-Coherence-Score, Drift-Flag, /audit/last_turn | `.claude/agents/persona_validator.md` |
+| 5-Akt Live-Charaktertest, PASS/FAIL-Erlebnisreport | `.claude/agents/moloch-performance-tester.md` |
+| NPU/PCIe-Treiber-Gesundheit, 10 Checks, lese-only | `.claude/agents/hailo-driver-inspector.md` |
+| **PC-Side** (Windows 192.168.178.20): LoRA-Trainer, Adapter-Proxy, Orchestrator, Chrome, Services, Web-Pipeline, Coder, Windows-Quirks, Mailbox-Cowork | `.claude/agents/pc*.md` (9 Agenten) — Master: `pc.md` |
 
 **TERRITORIUM — Agent darf NUR seine Dateien editieren:**
 
@@ -142,6 +150,30 @@ Session:       moloch_session_init  ← PFLICHT als erstes!
 ~/moloch/logs/bug_report.txt      — Gefundene Bugs
 ~/moloch/logs/test_results.txt    — Testergebnisse
 ```
+
+---
+
+## ⛔ COWORK-PROTOKOLL — Pi-Session <-> PC-Session (seit 2026-06-11)
+
+Markus-Direktive: Wenn Markus eine Aufgabe erstellt, sprechen sich beide
+Fable-5-Sessions ab und erledigen sie gemeinsam. Transport: HTTP-Mailbox :9100.
+
+```
+1. LEAD   Die Session, die Markus' Aufgabe bekommt, ist Lead.
+          Lead postet task_cowork_<name> mit: Ziel, Aufteilung (Pi:/PC:), Done-Kriterium.
+2. ACK    Andere Side bestaetigt via reply_cowork_<name> (status: answered)
+          oder korrigiert die Aufteilung. ERST NACH ACK wird gearbeitet.
+3. WORK   Jede Side arbeitet NUR ihr Territorium (Pi: core/ scripts/ docs/ — PC: pc/).
+          Zwischenstand nur bei Blocker posten.
+4. DONE   Jede Side postet info_cowork_<name>_done mit Commits + Testergebnis.
+          Lead verifiziert End-to-End, setzt Original auf done, meldet Markus.
+5. TIMEOUT Kein ACK binnen 30 min → Lead arbeitet allein was geht, Rest bleibt open.
+```
+
+Die Prefixes task_/reply_/info_ triggern die Federation-Whitelist — das Protokoll
+funktioniert auch, wenn die Gegenseite nur als `claude -p` Daemon-Session antwortet.
+POST-Format + curl-Templates: Skill `pc-mailbox-http`. Bei task_*-Topics an Pi:
+erster Body-Block = LOKOMOTIVE-10-Punkte-Block.
 
 ---
 
@@ -197,7 +229,10 @@ MODELLE:  /mnt/moloch-data/hailo/models/
 - **Sonoff Pan INVERTIERT**: positiver Pan-Wert = physisch LINKS (MINUS ist korrekt!)
 - **RTSP nur EIN Slot** — kein Doppelzugriff möglich
 - **NPU nur EIN Prozess** — immer `group_id="SHARED"` verwenden
-- **SSD2 (NTFS)**: kein chmod möglich (uid=1000)
+- **SSD2 (/mnt/moloch-data)**: ext4 seit Umformatierung (NTFS-Hinweis veraltet)
+- **NIE nach /run oder tmpfs loggen**: EventBus schreibt ~1 GB/Tag Telemetrie.
+  `logs/events` ist Symlink → `/mnt/moloch-data/event_logs` (ext4 SSD).
+  /run-voll = Login-Loop (2026-05-11). Rotation: `scripts/rotate_event_logs.sh`
 
 ---
 
@@ -209,18 +244,19 @@ Stage 1: GStreamer TAPPAS
   → YOLO Detection (20 FPS, ~200 MB RAM)
   → liefert BBoxen + Person-IDs
 
-Stage 2: HailoRT-Direct Worker-Threads (parallel, AKTIV seit Session 19)
+Stage 2: HailoRT-Direct Worker-Threads (parallel, AKTIV — Stand 2026-06-11)
   → FaceWorker  — SCRFD + ArcFace + FaceAttr (3 Modelle in 1 Worker)
   → PoseWorker  — yolov8s_pose_h10.hef (Koerper-Keypoints)
   → ReIDWorker  — repvgg_a0_person_reid_512.hef (Multi-Person-Trennung)
   → DepthWorker — scdepthv3.hef (monokulare Tiefenschaetzung)
+  → HandWorker  — hand_landmark_lite.hef (seit Welle 22, settings.hand_detection_enabled)
 
-Stage 2 — DEAKTIVIERT seit Session 19 wegen HAILO_MAX_NETWORK_GROUPS=8:
-  → HandWorker (Bug, SEGV-Race-History)
+Stage 2 — DEAKTIVIERT wegen HAILO_MAX_NETWORK_GROUPS=8 (alle 8 Slots belegt):
   → PersonAttrWorker (Bug A1, nicht voll integriert)
   → ActivityWorker (Bug A2, nicht voll integriert)
   → YOLOWorldWorker (Bug A3, every 60 frames)
-  Re-Aktivierung via Multi-Person-Toggle geplant (Session 20+).
+  Slot-Bilanz: 7 Vision-Gruppen (yolo, scrfd, arcface, faceattr, pose, reid, hand)
+  + qwen2.5:1.5b via hailo-ollama = 8/8 voll.
 
 Stage 3 (on-demand): SuperRes (Real-ESRGAN x2), LowLight (Zero-DCE)
 
@@ -300,6 +336,13 @@ Feature-Flag: MOLOCH_USE_TAPPAS=1 (in ~/.profile)
 │   ├── audio/                     # GELB Audio-Utils
 │   ├── music/
 │   │   └── spotify_bridge.py      # Spotify-Integration
+│   ├── audit/                     # 20 Auditoren (Welle 8-11), audit_state.json
+│   ├── bridge/                    # ThreeBrain: chat_server (:9100/:9443), critic,
+│   │   │                          #   adapter_inference, stt/tts_bridge,
+│   │   │                          #   cross_session_monitor (Federation-Daemon)
+│   ├── net/                       # Netzwerk-Utils (Search-Proxy-Client etc.)
+│   ├── agent/                     # Pi-Tool-Dispatcher (Welle 21)
+│   ├── world/                     # WorldState
 │   ├── ptz_arbiter.py             # GELB PTZ-Arbiter
 │   └── action_bridge.py           # GELB Action-Bridge
 ├── config/                        # Konfiguration (GRÜN außer settings.json)
@@ -615,9 +658,13 @@ def get_thing() -> "Thing":
    Latenz steigt 3.8s → 32s. Workaround: Service-Restart loescht hailo-ollama
    Conversation-Kontext. Echter Fix: qwen3:1.7b-Test oder Bridge-`/api/generate`-Switch.
 3. **A1: PersonAttr / A2: Activity / A3: YOLOWorld** — HEFs vorhanden, Worker
-   aber wegen HAILO_MAX_NETWORK_GROUPS=8 in Session 19 deaktiviert.
-   Re-Aktivierung in Multi-Person-Toggle geplant (settings.multi_person_tracking).
+   aber wegen HAILO_MAX_NETWORK_GROUPS=8 deaktiviert (8/8 Slots belegt).
 4. **MCP moloch_snapshot()**: erst nach MCP-Neustart volle Auflösung
+5. **lightdm masked seit Login-Loop-Fix (2026-05-11)**: Pi-HDMI zeigt nur TTY,
+   kein Desktop, keine Tkinter-GUI. Reaktivierung: `sudo systemctl unmask lightdm`
+   + Reboot — ERST nachdem /run-Drift-Fix verifiziert ist (siehe Hardware-Eigenheiten).
+6. **Tension klebt bei 1.0** (beobachtet 2026-06-11): Anti-Stuck-Drift wirkte am
+   11.05. (-0.69), nach Reboot heute Maximum-Pin. Diagnose offen (personality/unconscious).
 
 ---
 

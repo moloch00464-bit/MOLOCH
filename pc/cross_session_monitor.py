@@ -24,6 +24,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -38,6 +39,8 @@ LOCK_FILE = LOG_DIR / "v_next_train.lock"
 HANDLED_FILE = LOG_DIR / "handled_topics.json"
 
 PI_TUNNEL = os.environ.get("MOLOCH_PI_TUNNEL_URL", "http://localhost:9000")
+# Muss zum Pi passen (chat_server MAILBOX_BRANCH, gleiche ENV-Variable)
+MAILBOX_BRANCH = os.environ.get("MOLOCH_MAILBOX_BRANCH", "deepseek_architecture_overhaul")
 PC_HOST = "localhost"
 PC_ENDPOINTS = {
     "ollama":    f"http://{PC_HOST}:11434/api/tags",
@@ -135,11 +138,11 @@ def _git_env() -> Dict[str, str]:
 def _git_fetch_and_diff(last_sha: Optional[str]) -> Dict:
     try:
         subprocess.run(
-            ["git", "fetch", "-q", "origin", "main"],
+            ["git", "fetch", "-q", "origin", MAILBOX_BRANCH],
             cwd=REPO, timeout=15, check=True, env=_git_env(),
         )
         cur_sha = subprocess.run(
-            ["git", "rev-parse", "origin/main"],
+            ["git", "rev-parse", f"origin/{MAILBOX_BRANCH}"],
             cwd=REPO, capture_output=True, text=True, timeout=5, check=True,
         ).stdout.strip()
         new_commits: List[str] = []
@@ -205,12 +208,30 @@ def _append_log(entry: Dict) -> None:
         logger.warning(f"log write fail: {e}")
 
 
+def _read_mailbox_text(file: str) -> Optional[str]:
+    """Mailbox aus dem gefetchten Remote-Stand lesen, Fallback Arbeitsbaum.
+
+    Der Loop fetcht nur (kein Merge); der Arbeitsbaum war deshalb veraltet,
+    bis jemand manuell pullte.
+    """
+    try:
+        res = subprocess.run(
+            ["git", "show", f"origin/{MAILBOX_BRANCH}:docs/{file}"],
+            cwd=REPO, capture_output=True, timeout=10,
+        )
+        if res.returncode == 0:
+            return res.stdout.decode("utf-8", errors="replace")
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+    path = REPO / "docs" / file
+    return path.read_text(encoding="utf-8") if path.exists() else None
+
+
 def _parse_mailbox(file: str, n: int = 4) -> List[Dict]:
     try:
-        path = REPO / "docs" / file
-        if not path.exists():
+        text = _read_mailbox_text(file)
+        if text is None:
             return []
-        text = path.read_text(encoding="utf-8")
         entries: List[Dict] = []
         cur: Optional[Dict] = None
         in_code_fence = False  # ignore "## [" headers innerhalb ```...``` Bloecken
@@ -315,6 +336,34 @@ def _kill_process_tree(pid: int) -> None:
         pass
 
 
+
+def _run_tree(cmd: List[str], timeout: float, **kwargs) -> subprocess.CompletedProcess:
+    """Wie subprocess.run, killt bei Timeout aber den ganzen Prozessbaum.
+
+    subprocess.run killt nur das direkte Kind und wartet dann auf die Pipes;
+    unter Windows halten Enkel (z.B. node.exe hinter claude.cmd) sie offen.
+    Zudem hat TimeoutExpired kein .pid-Attribut. Wirft TimeoutExpired weiter.
+    """
+    kwargs.setdefault("stdout", subprocess.PIPE)
+    kwargs.setdefault("stderr", subprocess.PIPE)
+    if kwargs.pop("capture_output", False):
+        kwargs["stdout"] = kwargs["stderr"] = subprocess.PIPE
+    proc = subprocess.Popen(cmd, **kwargs)
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_process_tree(proc.pid)
+        try:
+            proc.kill()  # Fallback, falls taskkill fehlt (nicht-Windows)
+        except OSError:
+            pass
+        try:
+            proc.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+        raise
+    return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
+
 def _git_run_safe(args: List[str], env: Dict[str, str], timeout: int = 30) -> bool:
     """Run a git command. On failure, log + try `rebase --abort` cleanup if relevant."""
     res = subprocess.run(args, cwd=REPO, env=env, timeout=timeout,
@@ -349,14 +398,12 @@ def _trigger_v_next_train(triggering_topic: str, triggering_ts: str) -> Optional
         logger.info(f"AUTO-TRIGGER: {triggering_topic} at {triggering_ts} -> sync + train + reload")
 
         try:
-            sync_result = subprocess.run(
+            sync_result = _run_tree(
                 ["cmd.exe", "/c", str(REPO / "pc" / "sync_samples.bat")],
                 timeout=60, capture_output=True, text=True, stdin=subprocess.DEVNULL,
             )
-        except subprocess.TimeoutExpired as e:
-            if e.pid:
-                _kill_process_tree(e.pid)
-            logger.error("sync_samples timeout")
+        except subprocess.TimeoutExpired:
+            logger.error("sync_samples timeout - process tree killed")
             return None
         if sync_result.returncode != 0:
             logger.error(f"sync_samples failed (rc={sync_result.returncode}): {sync_result.stderr[:200]}")
@@ -366,14 +413,12 @@ def _trigger_v_next_train(triggering_topic: str, triggering_ts: str) -> Optional
         samples = Path.home() / "moloch_samples" / "samples.jsonl"
         adapters_out = Path.home() / "moloch_adapters"
         try:
-            train_result = subprocess.run(
+            train_result = _run_tree(
                 [str(venv_python), str(REPO / "pc" / "lora_trainer.py"),
                  "--samples", str(samples), "--out", str(adapters_out)],
                 timeout=1800, capture_output=True, text=True, stdin=subprocess.DEVNULL,
             )
-        except subprocess.TimeoutExpired as e:
-            if e.pid:
-                _kill_process_tree(e.pid)
+        except subprocess.TimeoutExpired:
             logger.error("lora_trainer timeout - process tree killed")
             return None
         if train_result.returncode != 0:
@@ -607,7 +652,7 @@ def _trigger_claude_autoreply(topic_id: str, topic_ts: str,
         logger.info(f"[fed] TRIGGER claude -p for {topic_id} (turns<={FED_MAX_TURNS})")
         t0 = time.monotonic()
         try:
-            proc = subprocess.run(
+            proc = _run_tree(
                 [claude_path, "-p", prompt,
                  "--dangerously-skip-permissions",
                  "--output-format", "json",
@@ -615,10 +660,8 @@ def _trigger_claude_autoreply(topic_id: str, topic_ts: str,
                 cwd=str(REPO), env=env, timeout=FED_TIMEOUT_SECS,
                 capture_output=True, text=True, stdin=subprocess.DEVNULL,
             )
-        except subprocess.TimeoutExpired as e:
-            if e.pid:
-                _kill_process_tree(e.pid)
-            logger.error(f"[fed] claude timeout for {topic_id}")
+        except subprocess.TimeoutExpired:
+            logger.error(f"[fed] claude timeout for {topic_id} - process tree killed")
             _fed_log_human(f"TIMEOUT {topic_id}")
             return {"ok": False, "error": "timeout"}
 
@@ -700,6 +743,29 @@ def _maybe_trigger_claude_autoreply(pi_topics: List[Dict],
 # Main loop
 # =============================================================================
 
+HEARTBEAT_INTERVAL_S = 30
+
+
+def _heartbeat_loop() -> None:
+    """POST /pc_online alle 30s an den Pi (Pi-Timeout 90s), unabhaengig vom Loop."""
+    while _running:
+        try:
+            req = urllib.request.Request(
+                f"{PI_TUNNEL}/pc_online",
+                data=b"{}",
+                headers={"Content-Type": "application/json",
+                         "User-Agent": "moloch-cross-monitor"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_S):
+                pass
+        except Exception as e:
+            logger.debug(f"pc_online POST failed: {e}")
+        for _ in range(HEARTBEAT_INTERVAL_S):
+            if not _running:
+                return
+            time.sleep(1)
+
 def main() -> int:
     logger.info(f"PC cross-session monitor starting (loop {LOOP_INTERVAL_S}s)")
     logger.info(f"  REPO     = {REPO}")
@@ -711,6 +777,12 @@ def main() -> int:
     state: Dict[str, str] = {}        # endpoint -> "up"/"down"
     first_down: Dict[str, float] = {} # endpoint -> ts when went down
     handled = _load_handled()
+
+    # Heartbeat im eigenen Thread: Training (bis 1800s) und claude -p (300s)
+    # blockieren den Haupt-Loop; der Pi setzt den PC nach 90s ohne
+    # /pc_online auf offline.
+    threading.Thread(target=_heartbeat_loop, name="pc-online-heartbeat",
+                     daemon=True).start()
 
     while _running:
         loop_start = time.monotonic()
@@ -771,26 +843,15 @@ def main() -> int:
             new_v = _trigger_v_next_train(topic, ts)
             if new_v:
                 handled[key] = now
-                _save_handled(handled)
+            else:
+                # Fehlschlag (z.B. git push) zaehlt fuer den Topic-Cooldown
+                # (startswith(topic + ":")), sonst Retrain alle 30s. Retry nach Cooldown.
+                handled[f"{key}:failed"] = now
+            _save_handled(handled)
 
         # Federation-Schicht: bei whitelisteten Pi-Topics autonom claude -p triggern.
         # Nach v_next_train (das hat Vorrang) - sequenziell, lock-protected.
         _maybe_trigger_claude_autoreply(pi_to_pc, handled)
-
-        # POST /pc_online heartbeat to Pi (90s timeout on Pi side, so every 30s loop is fine)
-        if state.get("pi_chat") == "up":
-            try:
-                req = urllib.request.Request(
-                    f"{PI_TUNNEL}/pc_online",
-                    data=b"{}",
-                    headers={"Content-Type": "application/json",
-                             "User-Agent": "moloch-cross-monitor"},
-                    method="POST",
-                )
-                with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_S):
-                    pass
-            except Exception as e:
-                logger.debug(f"pc_online POST failed: {e}")
 
         _append_log({
             "kind": "heartbeat",

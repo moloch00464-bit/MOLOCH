@@ -345,21 +345,13 @@ class FaceWorker(BaseWorker):
 
         self._faceattr_configured.run([bindings], INFERENCE_TIMEOUT_MS)
 
-        # Decode (haengt vom konkreten Modell ab — minimal-Version)
-        # Output ist typisch: [age, gender_logit, smile_logit] oder aehnlich
-        # Hier: robustes Parsing, Detailformat spaeter anpassen
-        out_data = bufs[self._faceattr_out_names[0]].flatten()
-
-        gender = "M" if (len(out_data) > 1 and out_data[1] > 0) else "F"
-        emotion = "neutral"
-        if len(out_data) > 2:
-            emotion = "happy" if out_data[2] > 0 else "neutral"
+        # face_attr_resnet_v1_18: 80 Logits = CelebA 40 Attribute (neg/pos).
+        # Enthaelt kein Alter -> age_range bleibt None.
+        from core.perception.face_attributes import parse_face_attributes
+        attrs = parse_face_attributes(bufs[self._faceattr_out_names[0]])
+        gender = attrs["gender"] or "F"
+        emotion = "happy" if attrs["smiling"] else "neutral"
         age_range = None
-        if len(out_data) > 0:
-            age_val = float(out_data[0])
-            if 0 < age_val < 100:
-                age_low = int(age_val / 5) * 5
-                age_range = f"{age_low}-{age_low + 5}"
 
         return gender, age_range, emotion
 

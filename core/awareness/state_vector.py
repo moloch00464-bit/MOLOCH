@@ -46,6 +46,9 @@ RAM_OVERLOAD = 85.0
 TEMP_OVERLOAD = 75.0
 TENSION_HIGH_OVERLOAD = 0.70
 TENSION_HIGH_DURATION_SEC = 60.0
+# PC pusht ~1x/s. Bleibt der Push laenger aus (PC tot/haengt), uebernimmt
+# wieder die Pi-Heuristik - sonst bliebe der State fuer immer eingefroren.
+PC_AUTHORITY_TTL_SEC = 15.0
 
 
 class StateVector:
@@ -61,6 +64,7 @@ class StateVector:
         self._tension_high_since: float = 0.0
         self._authority: str = "pi_heuristic"
         self._last_update: float = 0.0
+        self._pc_authority_ts: float = 0.0
 
     def mark_engaged(self) -> None:
         """Externer Trigger - chat_server / voice_pipeline meldet Interaktion."""
@@ -83,6 +87,7 @@ class StateVector:
             self._vector = {s: v / total for s, v in clean.items()}
             self._authority = "pc_remote"
             self._last_update = time.time()
+            self._pc_authority_ts = self._last_update
 
     def tick(self) -> None:
         """Heuristische Neuberechnung aus moloch_status.json.
@@ -115,9 +120,11 @@ class StateVector:
             self._tension_meta = tension
 
             if self._authority == "pc_remote":
-                # PC haelt den State autoritativ - nicht ueberschreiben
-                self._last_update = now
-                return
+                if now - self._pc_authority_ts <= PC_AUTHORITY_TTL_SEC:
+                    # PC haelt den State autoritativ - nicht ueberschreiben
+                    self._last_update = now
+                    return
+                self._authority = "pi_heuristic"
 
             target = self._heuristic_vector(
                 person_count=person_count,

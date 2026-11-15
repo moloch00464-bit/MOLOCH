@@ -1037,6 +1037,16 @@ class VoicePipeline:
             self._use_wifi_mic = True
             self._wifi_rec_buf = bytearray()
             self._wifi_rec_active = True
+            # === DIAG Phase 1 (temporaer, entfernen nach Befund) ===
+            # Zustand bei PTT-Start: zeigt ob Ring/Jitter-Buffer vor der 2. PTT
+            # haengen (jitter waechst, ring leer) oder Stream noch 16k-connected ist.
+            _wm = self._wifi_mic
+            logger.info(
+                f"[VOICE-DIAG] PTT-START connected_16k={_wm._connected_16k} "
+                f"ring_avail={_wm._ring_16k_avail}B jitter={len(_wm._jitter_buf_16k)} "
+                f"jitter_next={_wm._jitter_next_seq_16k} last_seq={_wm._last_seq_16k} "
+                f"pkts_recv={_wm._packets_recv_16k} pkts_lost={_wm._packets_lost_16k}")
+            # === DIAG ENDE ===
             # Ringpuffer leeren: nur 200ms verwerfen (nicht 500ms!)
             # 500ms hat den ANFANG des gesprochenen Wortes abgeschnitten!
             old_data = self._wifi_mic.get_audio_chunk(rate=16000, duration_ms=200)
@@ -1085,14 +1095,43 @@ class VoicePipeline:
         was im Ringpuffer ist. 50ms Chunks + 48ms Sleep = ~50ms Zyklus,
         schneller als Audio reinkommt (16kHz = 32KB/s = 3200 Bytes/50ms).
         """
+        # === DIAG Phase 1 (temporaer, entfernen nach Befund) ===
+        _wm = self._wifi_mic
+        _cyc = 0
+        _tot = 0
+        _empty = 0
+        _pkts_start = _wm._packets_recv_16k
+        # === DIAG ENDE ===
         while self._wifi_rec_active:
             try:
+                # DIAG: Ring-Fuellstand VOR dem Lesen
+                _avail_before = _wm._ring_16k_avail
                 chunk = self._wifi_mic.get_audio_chunk(rate=16000, duration_ms=50)
+                _cyc += 1
                 if chunk:
                     self._wifi_rec_buf.extend(chunk)
+                    _tot += len(chunk)
+                else:
+                    _empty += 1
+                # DIAG: jeden 10. Zyklus (~500ms) Drain-Zustand loggen.
+                # pkts_delta>0 = neue Pakete kommen an; jitter waechst + avail=0
+                # + jitter_next stuck = Jitter-Buffer-Flush haengt (Hypothese).
+                if _cyc % 10 == 0:
+                    logger.info(
+                        f"[VOICE-DIAG] drain cyc={_cyc} avail_before={_avail_before}B "
+                        f"chunk={len(chunk) if chunk else 0}B tot={_tot}B empty={_empty} "
+                        f"jitter={len(_wm._jitter_buf_16k)} jitter_next={_wm._jitter_next_seq_16k} "
+                        f"pkts_delta={_wm._packets_recv_16k - _pkts_start} "
+                        f"connected={_wm._connected_16k}")
             except Exception as e:
                 logger.warning(f"[VOICE] WiFi-Mic drain error: {e}")
             time.sleep(0.048)  # 48ms + ~2ms Overhead = 50ms Zyklus
+        # === DIAG Phase 1: Drain-Abschluss ===
+        logger.info(
+            f"[VOICE-DIAG] drain ENDE cyc={_cyc} tot={_tot}B empty={_empty} "
+            f"pkts_delta={_wm._packets_recv_16k - _pkts_start} "
+            f"jitter={len(_wm._jitter_buf_16k)} jitter_next={_wm._jitter_next_seq_16k}")
+        # === DIAG ENDE ===
 
     def _write_pcm_as_wav(self, pcm_data: bytes, wav_path: str,
                           rate: int = 16000, channels: int = 1,
@@ -1455,7 +1494,25 @@ class VoicePipeline:
             pass  # Event Bus optional
 
     def _transcribe(self, wav_path: str) -> Optional[str]:
-        """WAV-Datei mit MolochWhisper transkribieren (NPU-only)."""
+        """WAV transkribieren: PC-STT-Bridge zuerst, NPU-base als Fallback.
+
+        Symbiose-Pfad (Markus' Direktive): Pi = Ohr (ReSpeaker), PC = grosses
+        Sprachhirn (faster-whisper medium auf 192.168.178.20:9001). Bei PC-offline,
+        Fehler oder leerem Ergebnis faellt es sauber auf das lokale NPU-Whisper
+        zurueck — Markus' PTT darf NIE komplett ausfallen.
+        """
+        # 1. PC-Bridge zuerst (settings.stt_bridge.enabled, eigener Timeout im Client)
+        try:
+            from core.bridge.stt_bridge_client import transcribe_audio
+            result = transcribe_audio(wav_path, language="de")
+            if result and result.get("text") and result["text"].strip():
+                text = result["text"].strip()
+                logger.info(f"[VOICE] STT-Pfad: PC-Bridge (medium) -> '{text[:60]}'")
+                return text
+        except Exception as e:
+            logger.warning(f"[VOICE] PC-STT-Bridge nicht nutzbar ({e}) -> NPU-Fallback")
+
+        # 2. Fallback: lokales NPU-Whisper-base (laeuft immer, auch wenn PC aus ist)
         if not self._init_whisper():
             self._store_whisper_info("[Fehler: Whisper nicht verfuegbar]")
             return None
@@ -1464,7 +1521,7 @@ class VoicePipeline:
             # MolochWhisper.transcribe() handhabt NPU acquire/release intern
             # Vision pausiert automatisch, startet nach Release wieder
             text = self._whisper.transcribe(wav_path, language="de")
-            logger.info(f"[VOICE] Whisper Backend: {self._whisper.backend}")
+            logger.info(f"[VOICE] STT-Pfad: NPU-base-Fallback (Backend: {self._whisper.backend})")
             return text.strip() if text and text.strip() else None
         except Exception as e:
             logger.error(f"[VOICE] Whisper Fehler: {e}")

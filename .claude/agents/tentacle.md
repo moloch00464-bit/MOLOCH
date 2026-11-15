@@ -24,7 +24,9 @@ Lies IMMER zuerst: `CLAUDE.md`, `agents/AGENT_TENTACLE.md` und `docs/DANGER_MAP.
 - WiFi: Direkt-AP `MOLOCH_DIRECT`, statisch 10.42.0.2, Ping ~2ms
 - UDP Audio: Port 12345 (16kHz Mono, 320B/Paket), Port 12346 (48kHz Stereo)
 - UDP LED: Port 8888, Format: `LED:farbe [modus] [geschwindigkeit]`
-- HTTP Port 80: /audio/status, /audio/mode, /audio/start, /audio/stop
+- HTTP Port 80: /audio/status (GET), /audio/start, /audio/stop
+- `/audio/mode?rate=16000|48000` braucht **POST** — GET liefert 404!
+  Schaltet live, kein Stop/Start noetig: `curl -X POST "http://10.42.0.2/audio/mode?rate=16000"`
 - OTA: ArduinoOTA, Hostname "moloch-mic"
 - RGB-LED: WS2812 auf GPIO1 via neopixelWrite()
 - Flash: `arduino-cli upload --fqbn esp32:esp32:XIAO_ESP32S3 -p /dev/ttyACM0`

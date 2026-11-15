@@ -23,6 +23,7 @@ Nutzung:
 """
 
 import os
+import json
 import time
 import struct
 import logging
@@ -44,6 +45,8 @@ INFERENCE_TIMEOUT_MS = 10000
 # SHM Frame-Buffer (gleich wie tappas_pipeline.py)
 SHM_FRAME_PATH = "/dev/shm/moloch_frame"
 SHM_HEADER_SIZE = 24
+# Rueckkanal: Ergebnis pro request_id (IPC-Aufrufer liest und loescht)
+RESULT_PREFIX = "/dev/shm/moloch_npu_result_"
 
 # OCR CTC-Alphabet: PaddleOCR v5 Standard (96 druckbare + blank)
 # Index 0 = blank, 1-96 = Zeichen
@@ -54,20 +57,45 @@ OCR_CHARSET = (
 )
 
 
-def _grab_shm_frame() -> Optional[np.ndarray]:
-    """Aktuellen Frame aus SHM lesen (640x360 BGR)."""
+def _grab_shm_frame_seq():
+    """Aktuellen Frame aus SHM lesen. Returns (frame_bgr, seq) oder (None, None).
+
+    TappasPipeline schreibt RGB in den SHM; alle Aufrufer hier erwarten BGR
+    und wandeln selbst nach RGB. Deshalb hier einmal RGB -> BGR.
+    """
     try:
         with open(SHM_FRAME_PATH, "rb") as f:
             header = f.read(SHM_HEADER_SIZE)
             if len(header) < SHM_HEADER_SIZE:
-                return None
-            h, w, c = struct.unpack("<III", header[:12])
+                return None, None
+            h, w, c, seq = struct.unpack("<IIII", header[:16])
             data = f.read(h * w * c)
             if len(data) != h * w * c:
-                return None
-            return np.frombuffer(data, dtype=np.uint8).reshape((h, w, c))
+                return None, None
+            frame = np.frombuffer(data, dtype=np.uint8).reshape((h, w, c))
+            if c == 3:
+                import cv2
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            return frame, seq
     except Exception:
-        return None
+        return None, None
+
+
+def _grab_shm_frame() -> Optional[np.ndarray]:
+    """Aktuellen Frame aus SHM lesen (640x360 BGR)."""
+    return _grab_shm_frame_seq()[0]
+
+
+def _write_result(request_id: str, data: Dict) -> None:
+    """Ergebnis atomar nach /dev/shm schreiben (Rueckkanal fuer IPC-Aufrufer)."""
+    rid = "".join(ch for ch in str(request_id) if ch.isalnum() or ch in "-_")[:64]
+    if not rid:
+        return
+    path = f"{RESULT_PREFIX}{rid}.json"
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f, ensure_ascii=False)
+    os.replace(tmp, path)
 
 
 def _create_configured_model(vdevice, hef_path: str, float_output: bool = True):
@@ -92,6 +120,7 @@ class NpuExtras:
 
     def __init__(self):
         self._lock = threading.Lock()
+        self._busy = threading.Lock()  # run_request: nur ein Aufruf gleichzeitig
 
         # Lazy: werden erst beim ersten Aufruf initialisiert
         self._vdevice = None
@@ -111,6 +140,9 @@ class NpuExtras:
 
         # VLM
         self._vlm = None
+
+        # Letzter Fehler pro Aufruf (ocr_read/vlm_describe schlucken Exceptions)
+        self._last_error = None
 
         # Statistiken
         self._clip_count = 0
@@ -197,6 +229,7 @@ class NpuExtras:
 
             except Exception as e:
                 logger.error("[CLIP] Fehler: %s", e)
+                self._last_error = str(e)[:300]
                 return None
 
     # =================================================================
@@ -330,6 +363,7 @@ class NpuExtras:
 
             except Exception as e:
                 logger.error("[OCR] Fehler: %s", e)
+                self._last_error = str(e)[:300]
                 return []
 
     # =================================================================
@@ -409,7 +443,55 @@ class NpuExtras:
 
             except Exception as e:
                 logger.error("[VLM] Fehler: %s", e)
+                self._last_error = str(e)[:300]
                 return ""
+
+    # =================================================================
+    # IPC-Einstieg mit Rueckkanal
+    # =================================================================
+
+    def run_request(self, kind: str, request_id: str = "", prompt: str = None) -> Dict:
+        """OCR/VLM/CLIP auf dem aktuellen Frame, Ergebnis nach /dev/shm.
+
+        Nur ein Aufruf gleichzeitig: laeuft schon einer, kommt sofort
+        error=busy zurueck (keine Warteschlange, keine Dauerlast).
+        """
+        res = {"kind": kind, "ok": False, "frame_seq": None, "duration_ms": 0}
+        if not self._busy.acquire(blocking=False):
+            res["error"] = "busy"
+        else:
+            try:
+                t0 = time.monotonic()
+                frame, seq = _grab_shm_frame_seq()
+                res["frame_seq"] = seq
+                self._last_error = None
+                if frame is None:
+                    res["error"] = "kein Frame"
+                elif kind == "ocr":
+                    res["texts"] = self.ocr_read(frame=frame)
+                elif kind == "vlm":
+                    res["text"] = (self.vlm_describe(frame=frame, prompt=prompt)
+                                   if prompt else self.vlm_describe(frame=frame))
+                    if not res["text"] and not self._last_error:
+                        self._last_error = "keine Beschreibung"
+                elif kind == "clip":
+                    emb = self.clip_embed(frame=frame)
+                    res["dim"] = int(emb.size) if emb is not None else 0
+                else:
+                    res["error"] = f"unbekannt: {kind}"
+                if self._last_error:
+                    res["error"] = self._last_error
+                res["ok"] = "error" not in res
+                res["duration_ms"] = int((time.monotonic() - t0) * 1000)
+            except Exception as e:
+                res["error"] = str(e)[:300]
+            finally:
+                self._busy.release()
+        try:
+            _write_result(request_id, res)
+        except Exception as e:
+            logger.warning("[NPU-EXTRAS] Ergebnis nicht geschrieben: %s", e)
+        return res
 
     # =================================================================
     # Status + Cleanup

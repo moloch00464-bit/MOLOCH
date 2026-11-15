@@ -28,6 +28,7 @@ Config: .mcp.json im Moloch-Verzeichnis
 
 import json
 import os
+import re
 import subprocess
 import struct
 import mmap
@@ -46,6 +47,8 @@ CMD_DIR = "/tmp"
 CMD_PREFIX = "moloch_cmd_"
 
 # Erlaubte Pfade fuer moloch_read (Sicherheit)
+STATUS_MAX_AGE_S = 30
+
 ALLOWED_READ_PREFIXES = [
     "/home/molochzuhause/moloch/",
     "/mnt/moloch-data/memory/",
@@ -270,8 +273,11 @@ def moloch_read(path: str, lines: int = 200) -> str:
         path: Absoluter Pfad (z.B. /home/molochzuhause/moloch/config/system_capabilities.json)
         lines: Max. Zeilen (default 200)
     """
-    # Sicherheits-Check
-    allowed = any(path.startswith(p) for p in ALLOWED_READ_PREFIXES)
+    # Sicherheits-Check: normpath loest ".." auf (vorher kam z.B.
+    # /home/molochzuhause/moloch/../.ssh/id_rsa durch den startswith-Check)
+    path = os.path.normpath(path)
+    allowed = os.path.isabs(path) and any(
+        path.startswith(p) or path == p.rstrip("/") for p in ALLOWED_READ_PREFIXES)
     if not allowed:
         return f"VERWEIGERT: Pfad '{path}' nicht in erlaubten Verzeichnissen.\nErlaubt: {ALLOWED_READ_PREFIXES}"
 
@@ -661,8 +667,12 @@ def moloch_session_init() -> str:
     results = []
     ready = True
 
-    # 1. FPS und RAM aus Status-JSON
+    # 1. FPS und RAM aus Status-JSON (muss frisch sein: die Datei ueberlebt
+    #    einen Service-Crash, alte FPS>0 wuerden sonst PASS ergeben)
     try:
+        age = time.time() - os.path.getmtime(STATUS_SHM)
+        if age > STATUS_MAX_AGE_S:
+            raise RuntimeError(f"Status-JSON {age:.0f}s alt — Service haengt oder ist tot")
         with open(STATUS_SHM, "r") as f:
             data = json.load(f)
         fps = data.get("fps", {}).get("total", 0)
@@ -698,8 +708,9 @@ def moloch_session_init() -> str:
             ["journalctl", "-u", "moloch", "--no-pager", "-n", "200"],
             capture_output=True, text=True, timeout=10
         )
+        # Service-Format ist "ERROR:MolochService:..." — " ERROR " traf nie
         errors = [l for l in r.stdout.splitlines()
-                  if " ERROR " in l or " CRITICAL " in l]
+                  if re.search(r"\b(ERROR|CRITICAL)\b", l)]
         if errors:
             results.append(f"WARN  {len(errors)} ERROR/CRITICAL in letzten Logs:")
             for line in errors[-3:]:

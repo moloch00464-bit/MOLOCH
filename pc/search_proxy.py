@@ -27,6 +27,7 @@ from typing import Optional
 
 import requests
 import uvicorn
+from url_guard import check_public_url
 from bs4 import BeautifulSoup
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
@@ -198,15 +199,44 @@ def _extract_text(html: str, max_chars: int) -> tuple[str, str, bool]:
     return title, text, truncated
 
 
+MAX_FETCH_BYTES = 5 * 1024 * 1024
+MAX_REDIRECTS = 5
+
+
 def _do_fetch(url: str, max_chars: int) -> dict:
-    """Fetch URL, parse, return dict (final_url, title, text, chars, truncated)."""
+    """Fetch URL, parse, return dict (final_url, title, text, chars, truncated).
+
+    Redirects werden manuell verfolgt, damit jedes Ziel gegen interne
+    Adressen geprueft wird (SSRF); Antwortgroesse ist begrenzt.
+    """
     headers = {"User-Agent": USER_AGENT, "Accept-Language": "de-DE,de;q=0.9,en;q=0.6"}
-    r = requests.get(url, headers=headers, timeout=FETCH_TIMEOUT_SEC, allow_redirects=True)
-    r.raise_for_status()
-    ctype = r.headers.get("content-type", "").lower()
-    if "html" not in ctype and "xml" not in ctype and "text" not in ctype:
-        raise ValueError(f"unsupported content-type: {ctype}")
-    title, text, truncated = _extract_text(r.text, max_chars)
+    for _ in range(MAX_REDIRECTS + 1):
+        check_public_url(url)
+        r = requests.get(url, headers=headers, timeout=FETCH_TIMEOUT_SEC,
+                         allow_redirects=False, stream=True)
+        if not r.is_redirect:
+            break
+        location = r.headers.get("location", "")
+        r.close()
+        if not location:
+            raise ValueError("redirect ohne location")
+        url = urllib.parse.urljoin(url, location)
+    else:
+        raise ValueError(f"mehr als {MAX_REDIRECTS} redirects")
+    try:
+        r.raise_for_status()
+        ctype = r.headers.get("content-type", "").lower()
+        if "html" not in ctype and "xml" not in ctype and "text" not in ctype:
+            raise ValueError(f"unsupported content-type: {ctype}")
+        body = bytearray()
+        for chunk in r.iter_content(65536):
+            body += chunk
+            if len(body) > MAX_FETCH_BYTES:
+                raise ValueError(f"antwort groesser als {MAX_FETCH_BYTES} bytes")
+        html = bytes(body).decode(r.encoding or "utf-8", errors="replace")
+    finally:
+        r.close()
+    title, text, truncated = _extract_text(html, max_chars)
     return {
         "final_url": str(r.url),
         "title": title,

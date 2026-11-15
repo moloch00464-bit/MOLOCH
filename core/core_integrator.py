@@ -66,6 +66,15 @@ class CoreIntegrator:
     DOMINANCE_DRIFT_TARGET = 0.5    # Homoeostatisches Ziel (leicht Guardian)
     DOMINANCE_DRIFT_RATE = 0.05 / 60.0  # 0.05 pro Minute, aufgeloest in 1-Hz-Ticks
 
+    # === Input-Verfall (Fix 2026-06-11: Dominance-Pin bei +/-1.0) ===
+    # Impuls-Inputs (unconscious/event/voice/chat) wurden nie geloescht und
+    # wirkten als Dauer-Impuls: impulse*0.05/Tick uebersteigt DRIFT_RATE um
+    # Faktor 6-12 -> Dominance pinnt am Extrem, Phantom-unknown_person bleibt.
+    # Inputs ohne Refresh verfallen daher nach TTL. alarm_active haelt bewusst
+    # bis zur expliziten Aufhebung (Alarm-Edge-Logik in update_input).
+    INPUT_TTL_SECONDS = 120.0
+    INPUT_TTL_EXEMPT = {"alarm_active"}
+
     # === Hysterese ===
     ZONE_HYSTERESIS = 0.15  # Mindest-Delta fuer Zone-Wechsel (Dominance-basiert)
 
@@ -152,6 +161,7 @@ class CoreIntegrator:
 
         # === Input-Puffer: {source: {key: value}} ===
         self._inputs: Dict[str, Dict[str, float]] = {}
+        self._input_ts: Dict[str, Dict[str, float]] = {}  # (source,key) -> monotonic Setz-Zeit
         self._lock = threading.Lock()
 
         # === Effekt-Cache ===
@@ -197,6 +207,7 @@ class CoreIntegrator:
                 self._inputs[source] = {}
             prev = self._inputs[source].get(key)
             self._inputs[source][key] = _clamp(value)
+            self._input_ts.setdefault(source, {})[key] = time.monotonic()
 
         # Character Journal: Alarm-Edge ('protective'-Event)
         if key == "alarm_active":
@@ -226,8 +237,11 @@ class CoreIntegrator:
         with self._lock:
             if source not in self._inputs:
                 self._inputs[source] = {}
+            ts_map = self._input_ts.setdefault(source, {})
+            now_mono = time.monotonic()
             for key, value in data.items():
                 self._inputs[source][key] = _clamp(value)
+                ts_map[key] = now_mono
 
     def set_impulse_flag(self):
         """Externen Impulse setzen — Voraussetzung fuer Berserker-Aktivierung.
@@ -488,6 +502,19 @@ class CoreIntegrator:
                 self._inputs["time"] = {}
             if period == "nachts":
                 self._inputs["time"]["environmental_stress"] = 0.0
+
+            # Abgelaufene Impuls-Inputs verfallen lassen (siehe INPUT_TTL_SECONDS)
+            for source, data in self._inputs.items():
+                ts_map = self._input_ts.setdefault(source, {})
+                for key in list(data.keys()):
+                    if key in self.INPUT_TTL_EXEMPT:
+                        continue
+                    set_at = ts_map.setdefault(key, now)  # Alt-Eintraege altern ab jetzt
+                    if now - set_at > self.INPUT_TTL_SECONDS:
+                        del data[key]
+                        ts_map.pop(key, None)
+                        _logger.info(f"[CORE] Input verfallen: {source}.{key} "
+                                     f"(>{self.INPUT_TTL_SECONDS:.0f}s ohne Refresh)")
 
             # Alle Inputs zusammenfuehren
             all_inputs = {}

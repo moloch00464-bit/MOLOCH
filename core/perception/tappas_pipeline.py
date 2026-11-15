@@ -171,6 +171,8 @@ class TappasPipeline:
         self._loop = None
         self._loop_thread = None
         self._running = False
+        # start()/stop() werden von mehreren Watchdogs aufgerufen -> serialisieren
+        self._lifecycle_lock = threading.RLock()
 
         # Detections (thread-safe, letzter Frame)
         self._lock = threading.Lock()
@@ -310,9 +312,16 @@ class TappasPipeline:
 
     def start(self):
         """Pipeline starten. Blockiert NICHT — laeuft in eigenem Thread."""
+        with self._lifecycle_lock:
+            self._start_locked()
+
+    def _start_locked(self):
         if self._running:
             logger.warning("Pipeline laeuft bereits")
             return
+        if self._pipeline is not None:
+            # Tote Pipeline (Bus-Error/EOS) erst aufraeumen, sonst Leak + 2. RTSP-Slot
+            self._stop_locked()
 
         # vision_enabled=false → Pipeline komplett ueberspringen (RAM sparen)
         try:
@@ -464,6 +473,10 @@ class TappasPipeline:
 
     def stop(self):
         """Pipeline sauber beenden. Funktioniert auch wenn _running schon False (z.B. nach Bus-Error)."""
+        with self._lifecycle_lock:
+            self._stop_locked()
+
+    def _stop_locked(self):
         was_running = self._running
         self._running = False
 
@@ -780,6 +793,13 @@ class TappasPipeline:
         with self._face_db_lock:
             self._face_db = face_db
         logger.info(f"Face-DB aktualisiert: {len(self._face_db)} Personen")
+        # Live-face_id kommt aus dem FaceWorker, der eine eigene DB-Kopie haelt
+        fw = getattr(self, "_face_worker", None)
+        if fw is not None:
+            try:
+                fw.reload_face_db()
+            except Exception as e:
+                logger.warning(f"FaceWorker Face-DB Reload fehlgeschlagen: {e}")
 
     # =====================================================================
     # Live-Enrollment
@@ -800,6 +820,9 @@ class TappasPipeline:
             name: Personenname (z.B. "Markus")
             n: Maximale Anzahl Kandidaten zum Sammeln (beste 20 werden gespeichert)
         """
+        if not name or name.strip().lower() in ("unbekannt", "unknown"):
+            logger.warning(f"[ENROLLMENT] Abgelehnt: kein gueltiger Name ({name!r})")
+            return
         with self._enroll_lock:
             if self._enroll_active:
                 logger.warning("[ENROLLMENT] Laeuft bereits!")
@@ -2064,7 +2087,9 @@ class TappasPipeline:
 
         # Face Recognition
         if face_id:
-            pf.face_id = face_id.lower()
+            fid = face_id.lower()
+            # match_face liefert "Unbekannt"; alle Verbraucher pruefen auf "unknown"
+            pf.face_id = "unknown" if fid in ("unbekannt", "unknown") else fid
             pf.face_similarity = face_similarity
 
         # Face Attributes (bestes Face mit Attributen)

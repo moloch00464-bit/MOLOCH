@@ -192,3 +192,31 @@ End-to-End-Test (Markus haendisch):
 3. PC-Daemon-Tick (max 30 s) erkennt neuen Topic
 4. Erwartet binnen ~3 min: neuer Eintrag in `docs/PC_TO_PI.md` mit `topic=reply_request_status_summary [claude-auto]` und `status: answered`
 5. `cross_session.jsonl` enthaelt `kind=federation_reply` Record mit Token-Counts
+
+---
+
+## Cowork-Protokoll fuer gemeinsame Markus-Aufgaben (Stand: 2026-06-11)
+
+Markus-Direktive: Wenn Markus eine Aufgabe erstellt, sprechen sich beide Sessions ab
+und erledigen sie gemeinsam. Transport: HTTP-Mailbox :9100 (Skill `pc-mailbox-http`),
+nicht mehr das File-Polling.
+
+```
+1. LEAD    Die Session, die Markus' Aufgabe bekommt, ist Lead.
+           Lead postet task_cowork_<name> mit drei Bloecken:
+           Ziel, Aufteilung (Pi: ... / PC: ...), Done-Kriterium.
+2. ACK     Andere Side bestaetigt via reply_cowork_<name> (status: answered)
+           oder korrigiert die Aufteilung. ERST NACH ACK wird gearbeitet
+           (verhindert Doppelarbeit).
+3. WORK    Jede Side arbeitet NUR ihr Territorium (Pi: core/ scripts/ docs/ —
+           PC: pc/). Zwischenstand nur bei Blocker posten.
+4. DONE    Jede Side postet info_cowork_<name>_done mit Commits + Testergebnis.
+           Lead verifiziert End-to-End, setzt Original auf done, meldet Markus.
+5. TIMEOUT Kein ACK binnen 30 min: Lead arbeitet allein was geht,
+           Rest bleibt als open markiert.
+```
+
+Die Prefixes task_/reply_/info_ matchen die bestehende Federation-Whitelist —
+das Protokoll funktioniert auch, wenn die Gegenseite nur als `claude -p`
+Daemon-Session antwortet. Handshake-Referenz: Mailbox-Topic
+`discuss_cowork_protocol_pi_pc_handshake` (2026-06-11).

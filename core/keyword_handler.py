@@ -20,6 +20,7 @@ import os
 import re
 import json
 import time
+import uuid
 import logging
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple
@@ -196,9 +197,12 @@ class KeywordHandler:
           "merk dir das ist Peter" → name=peter
           "das ist Hans" → name=hans
           "enrollment markus" → name=markus
-          "gesicht merken" → name=unbekannt (Fallback)
+          "gesicht merken" → kein Name → nachfragen, kein Enrollment
         """
         name = self._extract_enrollment_name(text)
+        if name == "unbekannt":
+            logger.info("[KEYWORD] Enrollment ohne Namen abgelehnt")
+            return "Wessen Gesicht? Sag zum Beispiel: 'Merk dir, das ist Markus.'"
         self._send_ipc_command("enrollment_start", name=name, n=20)
         response = response_template.replace("{name}", name.capitalize())
         logger.info(f"[KEYWORD] Enrollment gestartet fuer '{name}'")
@@ -208,31 +212,26 @@ class KeywordHandler:
         """Name aus Enrollment-Befehl extrahieren."""
         lower = text.lower().strip()
 
-        # Pattern: "merk dir das ist <NAME>"
-        m = re.search(r"merk dir das ist\s+(\w+)", lower)
-        if m:
-            return m.group(1)
-
-        # Pattern: "das ist <NAME>" — deutsche Partikeln und Fuellwoerter ausschliessen
+        # Deutsche Partikeln und Fuellwoerter sind keine Namen. Gilt fuer ALLE
+        # Muster: "merk dir das ist nicht ..." hat sonst eine Person "nicht"
+        # angelegt (34 Eintraege nicht#cl_* in der Face-DB).
         _no_enroll = {
             "gut", "ok", "okay", "toll", "super", "richtig", "falsch", "egal",
-            # Haeufige deutsche Partikeln die als Namen erkannt wurden (false positives):
             "wohl", "auch", "nicht", "ja", "nein", "doch", "schon", "mal", "halt",
             "eben", "nun", "so", "nur", "noch", "sehr", "klar", "leider", "eigentlich",
+            "kein", "keiner", "mein", "meine", "dein", "deine", "der", "die", "das",
+            "ein", "eine", "jetzt", "bitte", "starten", "start", "unbekannt",
         }
-        m = re.search(r"das ist\s+(\w+)", lower)
-        if m and m.group(1) not in _no_enroll:
-            return m.group(1)
-
-        # Pattern: "enrollment <NAME>" / "enroll <NAME>"
-        m = re.search(r"enroll(?:ment)?\s+(\w+)", lower)
-        if m:
-            return m.group(1)
-
-        # Pattern: "einpraegen <NAME>"
-        m = re.search(r"einpr[aä]gen\s+(\w+)", lower)
-        if m:
-            return m.group(1)
+        patterns = (
+            r"merk dir das ist\s+(\w+)",    # "merk dir das ist <NAME>"
+            r"das ist\s+(\w+)",             # "das ist <NAME>"
+            r"enroll(?:ment)?\s+(\w+)",     # "enrollment <NAME>" / "enroll <NAME>"
+            r"einpr[aä]gen\s+(\w+)",        # "einpraegen <NAME>"
+        )
+        for pattern in patterns:
+            m = re.search(pattern, lower)
+            if m and m.group(1) not in _no_enroll and not m.group(1).isdigit():
+                return m.group(1)
 
         return "unbekannt"
 
@@ -451,10 +450,13 @@ class KeywordHandler:
         """
         cmd = {"action": action}
         cmd.update(kwargs)
-        path = f"/tmp/moloch_cmd_{int(time.time() * 1000)}.json"
+        path = f"/tmp/moloch_cmd_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}.json"
         try:
-            with open(path, "w") as f:
+            # Atomar: .tmp passt nicht auf das Poll-Glob moloch_cmd_*.json
+            tmp = path + ".tmp"
+            with open(tmp, "w") as f:
                 json.dump(cmd, f)
+            os.replace(tmp, path)
             logger.info(f"[KEYWORD] IPC Command: {action} -> {path}")
         except Exception as e:
             logger.error(f"[KEYWORD] IPC Command fehlgeschlagen: {e}")

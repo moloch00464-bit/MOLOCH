@@ -29,6 +29,7 @@ from .system import (
     read_memory,
     tts_say,
 )
+from .vision import read_text
 from .browser import (
     browser_open,
     browser_click,
@@ -64,4 +65,5 @@ TOOL_REGISTRY = {
     "browser_open": browser_open,
     "browser_click": browser_click,
     "browser_screenshot": browser_screenshot,
+    "read_text": read_text,
 }
