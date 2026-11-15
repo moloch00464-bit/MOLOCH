@@ -48,6 +48,17 @@ MOODS = ("calm", "focused", "alert", "agitated", "euphoric", "dark")
 STATES = ("idle", "observing", "engaged", "overloaded", "withdrawing", "offline_anchor")
 
 
+def _antenna_rad(value_deg: float) -> float:
+    """Mapping-Wert -> Kippwinkel der Antenne.
+
+    body_mappings.json meint "Aufrichtung": 90 = senkrecht hoch (alert), 0 = waagerecht,
+    negativ = haengend (dark). Beim Reachy ist 0 rad = senkrecht hoch und der Betrag
+    der Kippwinkel nach aussen. Am Simulator gesehen 2026-11-15: ohne Umrechnung
+    kippten die Antennen umso weiter weg, je aufmerksamer Moloch war.
+    """
+    return math.radians(max(0.0, min(135.0, 90.0 - value_deg)))
+
+
 class ReachyHttpBackend:
     """MotionBackend ueber die REST-Schnittstelle des reachy-mini-daemon.
 
@@ -104,8 +115,8 @@ class ReachyHttpBackend:
                 "pitch": math.radians(cur["head_pitch"]) * PITCH_SIGN,
                 "yaw": math.radians(cur["head_yaw"]),
             },
-            "target_antennas": [math.radians(cur["antenna_r"]) * ANTENNA_SIGN[0],
-                                math.radians(cur["antenna_l"]) * ANTENNA_SIGN[1]],
+            "target_antennas": [_antenna_rad(cur["antenna_r"]) * ANTENNA_SIGN[0],
+                                _antenna_rad(cur["antenna_l"]) * ANTENNA_SIGN[1]],
             "target_body_yaw": math.radians(cur["body_yaw"]),
         }
         try:
