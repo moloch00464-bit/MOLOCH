@@ -2858,6 +2858,43 @@ def memory_turn(req: MemoryTurnRequest):
     return {"ok": True, "sender": sender, "source": req.source, "chars": len(text)}
 
 
+class CommandRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=2000)
+    source: str = Field("pc_zentrale", min_length=1, max_length=32, pattern=r"^[A-Za-z0-9_.-]+$")
+
+
+@app.post("/command")
+def command(req: CommandRequest):
+    """Nur den Keyword-Handler fragen - ohne LLM.
+
+    Fuer Kanaele, die selbst antworten (KI-Zentrale lokal -> Ollama direkt): sie
+    fragen hier zuerst, ob die Eingabe ein Befehl ist ("schau zur Tuer", "licht
+    aus", "spiele ..."). Der Befehl laeuft ueber denselben Keyword-Handler wie
+    in /chat, also ueber die vorhandene Prioritaetssteuerung (PTZ-Arbiter).
+    handled=false: kein Befehl, der Aufrufer antwortet selbst; es wird nichts
+    gespeichert (der Aufrufer spiegelt seine Turns ueber /memory/turn).
+    """
+    text = req.text.strip()
+    try:
+        from core.keyword_handler import get_keyword_handler
+        response = get_keyword_handler().execute(text)
+    except Exception as e:
+        logger.warning(f"/command keyword_handler Fehler: {e}")
+        raise HTTPException(500, f"Keyword-Handler-Fehler: {e}")
+    if not response:
+        return {"handled": False}
+    try:
+        mem = get_memory()
+        mem.save_message("user", text, source=req.source)
+        mem.save_message("moloch", response, source=f"{req.source}_keyword"[:32])
+        get_event_bus().publish("conversation.user_said", {"text": text, "source": req.source},
+                                source="chat_server", priority=5)
+    except Exception as e:
+        logger.debug(f"/command Memory/Bus Fehler: {e}")
+    logger.info(f"[KEYWORD] Befehl von {req.source}: '{text[:60]}' -> '{response[:60]}'")
+    return {"handled": True, "text": response, "provider": "keyword_handler"}
+
+
 class SpeechStateRequest(BaseModel):
     speaking: bool
     source: str = Field("pc_zentrale", min_length=1, max_length=32, pattern=r"^[A-Za-z0-9_.-]+$")
