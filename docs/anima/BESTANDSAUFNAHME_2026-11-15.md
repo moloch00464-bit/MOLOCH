@@ -11,7 +11,7 @@ Deshalb gibt es drei Stufen, die nicht vermischt werden:
 | Stufe | Bedeutung |
 |---|---|
 | **Code** | Im Repository vorhanden und gelesen. Sagt nichts darüber, ob es läuft. |
-| **Test** | Durch automatische Tests ohne Hardware belegt (`python3 -m pytest tests pc`: 336 bestanden, 18 übersprungen). |
+| **Test** | Durch automatische Tests ohne Hardware belegt (`python3 -m pytest tests pc`: 339 bestanden, 19 übersprungen). |
 | **Gerät** | Am laufenden System nachgewiesen. **In dieser Sitzung für keinen Punkt möglich.** Wo ein Handoff einen Nachweis nennt, steht die Quelle dabei. |
 
 Phase B des Briefings (Laufzeit prüfen) ist damit **offen** und steht als Prüfliste in Abschnitt 4.
@@ -30,7 +30,7 @@ Phase B des Briefings (Laufzeit prüfen) ist damit **offen** und steht als Prüf
 | 6 | Spotify-DJ | ja | unbekannt (03.10.: Refresh-Token widerrufen) | Auto-DJ und Zonen-Empfehlung vorhanden, kein Lernen aus Ablehnung | – | Token prüfen, dann DJ-Logik |
 | 7 | Internetrecherche | ja | ja (PC-Tests, Handoffs) | **Bestätigt:** 3 Treffer × 120 Zeichen Ausschnitt | – | Mehrstufige Recherche |
 | 8 | Akustische Bibliothek | nein | nein | Neu zu bauen | – | Aufnahme-Werkzeug, Modellwahl |
-| 9 | Reachy Sprechbewegung | teilweise | Simulator bewegt sich (Markus, 15.11.) | **Lücke bestätigt:** `speaking` nur bei proaktiven Sätzen, nicht bei Chat-Antworten | – | Sprechstatus aller TTS-Wege |
+| 9 | Reachy Sprechbewegung | teilweise | Simulator bewegt sich (Markus, 15.11.) | **Lücke bestätigt:** `speaking` nur bei proaktiven Sätzen, nicht bei Chat-Antworten | `POST /speech/state`, Meldung aus der Sprachausgabe der Zentrale | Abnahme am Simulator; Pi-`/tts` und Cockpit melden noch nicht |
 | 10 | Gemeinsamer Core | teilweise | unbekannt | EventBus + `/live` + StateEngine existieren; kein einheitliches Ereignisformat mit TTL | – | Ereignisschema, Situationszustand |
 | 11 | Hardware-Selbstwissen | teilweise | unbekannt | NPU-Selbsttest rechnete nicht und öffnete zweites VDevice; README nannte 26 TOPS | NPU-Selbsttest, README, Selbstwissen | Inventar am Gerät, Chat-Diagnose |
 | 12 | Reachy-Selbstbeobachtung | nein | nein | Neu; alle 8 NPU-Plätze belegt | – | Trainingsablauf, Slot-Frage |
@@ -139,7 +139,9 @@ Fragenkatalog für den Abnahmetest: `docs/anima/FRAGENKATALOG.md`.
 
 - **Code:** `compute_pose()` nickt bei `speaking=True`. `pc/body_bridge.py` liest `/live.speech` und setzt `speaking`, wenn der Pi einen **proaktiven** Satz spricht.
 - **Lücke bestätigt:** Chat-Antworten (PC-TTS, Browser-Sprachausgabe der Zentrale, Pi-`/tts`) setzen `/live.speech` nicht. Die Voice-Pipeline veröffentlicht `audio.speaking_start/end`, aber nur für ihren eigenen Weg.
-- **Offen:** Ein Sprechstatus für alle Wege: jede Stelle, die Ton ausgibt, meldet Beginn und Ende an den Pi; die Body-Bridge liest nur diesen einen Zustand. Für die Browser-Sprachausgabe muss die Zentrale selbst melden (`speak()` in `ki_zentrale.html`).
+- **Umgesetzt (Stufe Test):** `POST /speech/state` auf dem Pi schreibt denselben Zustand wie die Voice-Pipeline. Die Browser-Sprachausgabe der Zentrale meldet Beginn, Ende und Abbruch; alle 10 s wird aufgefrischt, nach 30 s ohne Meldung verfällt der Zustand.
+- **Abnahme am Simulator:** In der Zentrale mit eingeschalteter Sprachausgabe eine Frage stellen → Kopf nickt, solange gesprochen wird, danach Ruhe. „Stopp" beendet beides.
+- **Offen:** Das Cockpit (`/tts` liefert Audio an den Browser) meldet noch nicht. Die Nick-Bewegung (2° bei 2 Hz) ist ungetunt – am Simulator ansehen, ob sie zu hektisch wirkt.
 
 ### 10 · Gemeinsamer Core
 
@@ -172,7 +174,7 @@ Jedes Paket ist für sich mergebar, hat einen Abnahmetest und nennt, was am Ger�
 | **P1** | Gedächtnisabruf: Wort-Recall, Selbstwissen, `/memory/recall`, Zentrale | 1, 2 | mittel | Abnahme | **gebaut, ungeprüft am Gerät** |
 | **P2** | NPU-Selbsttest ehrlich, README | 11 | klein | Abnahme | **gebaut, ungeprüft am Gerät** |
 | **P3** | Laufzeit-Inventar: Skript, das Phase B abarbeitet und einen Bericht schreibt | 1, 2, 11 | klein | ja | offen |
-| **P4** | Ein Sprechstatus für alle TTS-Wege → Reachy nickt bei jeder Antwort | 9 | klein–mittel | Simulator | offen |
+| **P4** | Ein Sprechstatus für alle TTS-Wege → Reachy nickt bei jeder Antwort | 9 | klein–mittel | Simulator | **Zentrale gebaut, ungeprüft am Simulator**; Pi-`/tts`/Cockpit offen |
 | **P5** | Lokaler Chat der Zentrale erkennt Befehle (Kamera, Musik) über den Pi | 3 | klein | ja | offen |
 | **P6** | Hardware-Fragen im Chat mit Messwerten (Temperatur, Speicher, NPU) | 11 | mittel | ja | offen |
 | **P7** | Recherche mehrstufig mit Volltext und Quellen | 7 | mittel | PC | offen |
