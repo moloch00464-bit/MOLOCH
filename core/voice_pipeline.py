@@ -400,6 +400,29 @@ def _perception_to_text() -> str:
         return ""
 
 
+def _clean_spontaneous(text):
+    """Spontanen Kommentar auf EINEN kurzen Satz kuerzen; None = lieber schweigen.
+
+    Lokale 7B-Modelle halten "MAX 1 Satz" nicht zuverlaessig ein. Gesprochen wird
+    nur der erste Satz; alles Laengere oder Kaputte wird verworfen statt vorgelesen.
+    """
+    import re
+    if not text:
+        return None
+    text = re.sub(r"\[[A-Z_]+:[^\]]*\]", "", text)             # [REMEMBER: ...] u.ae.
+    text = text.strip().strip('"\u201e\u201c\u201d').strip()
+    if text.upper().startswith("SCHWEIG"):
+        return None
+    m = re.match(r"(.+?[.!?\u2026])(\s|$)", text, re.S)
+    first = (m.group(1) if m else text).strip()
+    first = " ".join(first.split())
+    if len(first) < 4 or len(first) > 170:
+        return None
+    if first.endswith(("...", "…")):      # abgebrochener Satz
+        return None
+    return first
+
+
 def _get_hardware_status() -> str:
     """Aktuelle Hardware-Werte lesen (CPU-Temp, RAM, Luefter, NPU, Disk, Uptime)."""
     parts = []
@@ -434,7 +457,8 @@ def _get_hardware_status() -> str:
         pass
     # NPU (Hailo Device vorhanden?)
     try:
-        npu_ok = os.path.exists("/dev/hailo0")
+        # Hailo-8: /dev/hailo0, Hailo-10H: /dev/h1x-0 (ohne das hiess es immer "offline")
+        npu_ok = os.path.exists("/dev/hailo0") or os.path.exists("/dev/h1x-0")
         parts.append(f"NPU {'aktiv' if npu_ok else 'offline'}")
     except Exception:
         pass
@@ -2735,10 +2759,25 @@ Antworte immer auf Deutsch. Niemals Englisch oder andere Sprachen.
 Wenn dir nichts Situationsrelevantes einfaellt: Antworte exakt mit dem Wort SCHWEIG"""
 
         # Memory-Kontext fuer Relevanz
+        # Nur der kompakte Kontext: der volle Memory-Kontext (~14.000 Zeichen) sprengt
+        # das 4096-Token-Fenster des lokalen Modells. Abgeschnitten wurde der ANFANG,
+        # also genau die Regeln oben (1 Satz, Deutsch, SCHWEIG) -> Wortsalat.
         try:
-            memory_ctx = get_memory().get_memory_context()
+            memory_ctx = get_memory().get_memory_context_minimal()
             if memory_ctx:
-                system += "\n\n--- KONTEXT ---\n" + memory_ctx
+                system += "\n\n--- KONTEXT ---\n" + memory_ctx[:600]
+        except Exception:
+            pass
+
+        # Letzte eigene Kommentare: nicht wiederholen
+        recent = []
+        try:
+            recent = [m.get("text", "") for m in (get_memory().get_recent_messages(n=40) or [])
+                      if m.get("source") == "spontaneous" and m.get("text")][-3:]
+            if recent:
+                system += ("\n\n--- DAS HAST DU ZULETZT GESAGT (nicht wiederholen, "
+                           "anderer Satzanfang, anderes Thema) ---\n"
+                           + "\n".join("- " + t[:160] for t in recent))
         except Exception:
             pass
 
@@ -2774,6 +2813,7 @@ Wenn dir nichts Situationsrelevantes einfaellt: Antworte exakt mit dem Wort SCHW
         # Grund der Entscheidung als User-Prompt einbauen
         _reason = integrator_state.get("reason", "")
         _user_prompt = f"Spontaner Kommentar jetzt. Anlass: {_reason}" if _reason else "Spontaner Kommentar jetzt."
+        _user_prompt += " Antworte mit genau EINEM kurzen deutschen Satz, direkt an Markus."
 
         try:
             # DeepSeek R1 lokal (hailo-ollama) → DeepSeek V3 Cloud nur Fallback
@@ -2782,9 +2822,13 @@ Wenn dir nichts Situationsrelevantes einfaellt: Antworte exakt mit dem Wort SCHW
                 prompt=_user_prompt,
                 system=system,
                 max_tokens=80,
-                temperature=0.65,
+                temperature=0.5,
             )
-            text = text.strip() if text else None
+            text = _clean_spontaneous(text)
+            # Gleicher Satzanfang wie einer der letzten Kommentare -> lieber schweigen
+            if text and any(text.lower().split()[:3] == r.lower().split()[:3] for r in recent):
+                logger.info(f"[SPONTAN] Wiederholung verworfen: {text}")
+                text = None
             if not text or text.upper() == "SCHWEIG" or len(text) < 4:
                 logger.info("[SPONTAN] LLM hat SCHWEIG zurueckgegeben — kein TTS")
                 return
