@@ -224,6 +224,8 @@ class TestVectorMemory:
         self.vm = VectorMemory()
         if not self.vm._ensure_client():
             pytest.skip("Qdrant not reachable")
+        if not self.vm._ensure_embedder():
+            pytest.skip("kein Embedding-Provider aktiv (embedding_bridge aus)")
         self.test_key = f"test_{int(time.time())}"
 
     def teardown_method(self):
