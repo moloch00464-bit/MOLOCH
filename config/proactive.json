@@ -1,0 +1,13 @@
+{
+  "_info": "Proaktive Saetze durch Anwesenheits-Ausloeser (core/autonomy/presence_triggers.py). Wird bei Aenderung ohne Neustart neu gelesen. enabled=false schaltet alles ab.",
+  "enabled": true,
+  "owner": "markus",
+  "quiet_from": 23,
+  "quiet_to": 7,
+  "max_per_10min": 4,
+  "events": {
+    "markus_arrived": {"enabled": true, "cooldown_s": 300, "owner_confirm_s": 4, "min_absence_s": 120},
+    "markus_left": {"enabled": true, "cooldown_s": 300, "leave_after_s": 45, "min_presence_s": 60},
+    "unknown_person": {"enabled": true, "cooldown_s": 180, "sustain_s": 8, "owner_absent_s": 20}
+  }
+}
