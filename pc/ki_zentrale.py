@@ -219,6 +219,27 @@ async def _persona_text(client: httpx.AsyncClient) -> str:
     return _persona["text"] or FALLBACK_PERSONA
 
 
+async def _recall(client: httpx.AsyncClient, question: str) -> Optional[dict]:
+    """Passende Erinnerungen vom Pi holen (GET /memory/recall). None = Pi nicht erreichbar.
+
+    Das Gedaechtnis bleibt auf dem Pi; hier kommt pro Frage nur der passende Ausschnitt an.
+    """
+    from urllib.parse import quote
+    return await _get_json(client, f"{PI_URL}/memory/recall?q={quote(question[:600])}&limit=3",
+                           timeout=3.0)
+
+
+def _recall_snippet(recall: Optional[dict]) -> str:
+    """Erinnerungen als Prompt-Zeilen. Drei Faelle, die das Modell unterscheiden koennen soll."""
+    if recall is None:
+        return "[GEDAECHTNIS] nicht erreichbar - sag ehrlich, wenn du etwas nicht weisst."
+    block = (recall.get("block") or "").strip()
+    if not block:
+        return ("[GEDAECHTNIS] kein passender Eintrag - erfinde keine Erinnerungen, "
+                "sag es, wenn du etwas nicht weisst.")
+    return "[GEDAECHTNIS] " + block
+
+
 async def _mirror_to_pi(client: httpx.AsyncClient, user_text: str, reply: str) -> bool:
     """Lokalen Turn ins gemeinsame Pi-Gedaechtnis schreiben (POST /memory/turn, Pi b02f0f2).
 
@@ -573,9 +594,10 @@ async def ki_chat(request: Request):
     async def stream():
         async with _chat_lock:
             async with httpx.AsyncClient() as client:
-                persona, live = await asyncio.gather(
+                persona, live, recall = await asyncio.gather(
                     _persona_text(client),
                     _get_json(client, f"{PI_URL}/live", timeout=3.0),
+                    _recall(client, msg),
                 )
                 # Fester Anfang (Persona + Verlauf), wechselnder Live-Kontext ans Ende:
                 # so kann Ollama den verarbeiteten Praefix wiederverwenden.
@@ -584,8 +606,12 @@ async def ki_chat(request: Request):
                     role = "user" if e.get("who") == "markus" else "assistant"
                     if e.get("text"):
                         messages.append({"role": role, "content": e["text"]})
-                messages.append({"role": "user", "content": f"{msg}\n\n{_live_snippet(live)}"})
-                _log({"who": "markus", "text": msg, "mode": "local"})
+                # Erinnerungen vom Pi stehen als Daten hinter der Frage; ohne Treffer
+                # die ausdrueckliche Ansage, nichts dazuzuerfinden.
+                messages.append({"role": "user",
+                                 "content": f"{msg}\n\n{_live_snippet(live)}\n{_recall_snippet(recall)}"})
+                _log({"who": "markus", "text": msg, "mode": "local",
+                      "erinnerungen": (recall or {}).get("count")})
 
                 payload = {
                     "model": model,
@@ -643,6 +669,9 @@ async def ki_chat(request: Request):
                 yield _line({
                     "done": True,
                     "gedaechtnis": mirrored,
+                    "erinnerungen": (recall or {}).get("count"),
+                    "erinnerung_quellen": sorted({h.get("source", "?")
+                                                  for h in (recall or {}).get("hits", [])}),
                     "model": model,
                     "secs": secs,
                     "erstes_wort_s": round(first, 1) if first is not None else None,
