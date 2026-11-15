@@ -39,6 +39,8 @@ class TestMemoryVectorIntegration:
         vm = VectorMemory()
         if not vm._ensure_client():
             pytest.skip("Qdrant not reachable")
+        if not vm._ensure_embedder():
+            pytest.skip("kein Embedding-Provider aktiv (embedding_bridge aus)")
 
         test_key = f"integration_test_{int(time.time())}"
         try:
@@ -58,6 +60,8 @@ class TestMemoryVectorIntegration:
         vm = VectorMemory()
         if not vm._ensure_client():
             pytest.skip("Qdrant not reachable")
+        if not vm._ensure_embedder():
+            pytest.skip("kein Embedding-Provider aktiv (embedding_bridge aus)")
 
         test_key = f"forget_test_{int(time.time())}"
         self.mem.remember(test_key, "temporary_data")
@@ -75,6 +79,8 @@ class TestMemoryVectorIntegration:
         vm = VectorMemory()
         if not vm._ensure_client():
             pytest.skip("Qdrant not reachable")
+        if not vm._ensure_embedder():
+            pytest.skip("kein Embedding-Provider aktiv (embedding_bridge aus)")
 
         keys = []
         try:
