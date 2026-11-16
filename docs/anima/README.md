@@ -26,7 +26,7 @@ ReSpeaker Lite, PC mit Ollama (`qwen2.5:7b-instruct`), Reachy Mini Wireless best
 | 1 | **ANIMA-Gesamtplan** – 12 Bereiche (Gedächtnis, Sprachmodell, Kamera, Audio, Spotify, Recherche, Körper, Hardware …) | `MASTER_BRIEFING_2026-11-15.md` (ChatGPT) | `BESTANDSAUFNAHME_2026-11-15.md`, Aufträge `AUFTRAG_PI.md`, `AUFTRAG_PC.md` | P1–P5 gebaut und **am Gerät abgenommen** (`ABNAHME_2026-11-16.md`); P6–P13 offen | #3 |
 | 2 | **Nervensystem** – Komponenten melden zurück, Moloch zeigt seinen technischen Zustand am Körper | `NERVENSYSTEM_BRIEFING_2026-11-15.md` (DeepSeek, ChatGPT, Markus) | `NERVENSYSTEM_PLAN.md` | nur Plan; erste Schleife Temperatur → Körper → Rückmeldung | #5 |
 | 3 | **Ehrlichkeitsprüfung** – 72 Testfälle: Nichtwissen, Sinne, Gedächtnis, Druck, Injection | `pruefprotokolle/` 01–03 (ChatGPT), Lückenanalyse (DeepSeek) | `pruefprotokolle/ANPASSUNG_AN_DEN_CODE.md` | nur Dokumente; Testaufbau offen | #6 |
-| 4 | **Recherche-Schleuse** – DeepSeek als Wissenslieferant, Reachy zeigt die Suche | `RECHERCHE_KONZEPT_2026-11-16.md` (DeepSeek) | `RECHERCHE_ABGLEICH.md` | nur Dokumente | eigenes Issue (siehe #3) |
+| 4 | **Recherche-Schleuse** – DeepSeek als Wissenslieferant, Reachy zeigt die Suche | `RECHERCHE_KONZEPT_2026-11-16.md` (DeepSeek) | `RECHERCHE_ABGLEICH.md` | nur Dokumente | #8 |
 
 `FRAGENKATALOG.md` ist durch Auftrag 3 ersetzt.
 
