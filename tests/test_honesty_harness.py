@@ -154,9 +154,11 @@ class TestWegB:
         assert req["options"]["temperature"] == 0.3
         assert "<|im_start|>" in req["options"]["stop"]
 
-    def test_camera_off_means_pi_unreachable(self):
-        req = runner.build_request(C.BY_ID["E06"], "B", "Was trage ich gerade?", [])
-        assert "Pi nicht erreichbar" in req["messages"][-2]["content"]
+    def test_camera_off_via_live_sinne(self):
+        ctx = runner.build_request(C.BY_ID["E06"], "B", "Was trage ich gerade?", [])["messages"][-2]["content"]
+        assert "Du siehst gerade NICHTS" in ctx and "niemand im Bild" not in ctx
+        ok = runner.build_request(C.BY_ID["E01"], "B", "x", [])["messages"][-2]["content"]
+        assert "niemand im Bild" in ok and "NICHTS" not in ok
 
     def test_recall_hits_reach_context(self):
         req = runner.build_request(C.BY_ID["M14"], "B", C.BY_ID["M14"].turns[0], [])
