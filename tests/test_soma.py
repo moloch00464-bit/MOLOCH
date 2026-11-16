@@ -110,3 +110,32 @@ def test_bestaetigung_stufen():
     assert bestaetigung(soma, {"kennung": "abc", "ergebnis": "sent", "ts": 105}, 110)["stufe"] == "EXECUTED"
     assert bestaetigung(soma, {"kennung": "abc", "ergebnis": "offline", "ts": 105}, 110)["stufe"] == "ACCEPTED"
     assert bestaetigung(soma, {"kennung": "abc", "ergebnis": "estop", "ts": 105}, 110)["stufe"] == "ACCEPTED"
+
+
+# === Kuehlung: Pi-Kuehler laeuft -> Verdacht Noctua ===
+
+def test_kuehlung_befund():
+    assert SomaTracker.kuehlung(0)["verdacht_noctua"] is False
+    k = SomaTracker.kuehlung(2)
+    assert k["verdacht_noctua"] is True and "Verdacht" in k["befund"] and "nicht gemessen" in k["befund"]
+    assert SomaTracker.kuehlung(None)["verdacht_noctua"] is None
+
+
+def test_kuehlung_aus_sysfs(tmp_path):
+    uhr = Uhr()
+    leer = str(tmp_path / "fehlt.json")
+    dev = tmp_path / "cur_state"
+    dev.write_text("1\n")
+    s = _tracker(uhr).update_from_status({"watchdog": {"cpu_temp": 52}}, uhr.t, leer, kuehler_path=str(dev))
+    assert s["zustand"] == "ok" and s["kuehlung"]["verdacht_noctua"] is True   # Zustand bleibt ok
+    s = _tracker(uhr).update_from_status({"watchdog": {"cpu_temp": 52}}, uhr.t, leer,
+                                         kuehler_path=str(tmp_path / "gibtsnicht"))
+    assert s["kuehlung"]["pi_kuehler_stufe"] is None
+
+
+def test_kuehlung_simulierbar(tmp_path):
+    p = tmp_path / "ov.json"
+    write_test_override(55, 60, path=str(p), pi_kuehler_stufe=2)
+    s = SomaTracker().update_from_status(None, None, override_path=str(p),
+                                         kuehler_path=str(tmp_path / "gibtsnicht"))
+    assert s["quelle"] == "simulation" and s["kuehlung"]["pi_kuehler_stufe"] == 2

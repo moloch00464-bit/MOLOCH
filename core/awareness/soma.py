@@ -14,7 +14,10 @@ Regeln:
 - Hysterese gegen Flattern an der Schwelle.
 - Jeder Zustandswechsel bekommt eine neue Kennung. Ueber sie ordnet der Pi die
   Rueckmeldung des Koerpers dem Ausloeser zu (ACCEPTED / EXECUTED, Grundsatz 3).
-- Testvorgabe: /dev/shm/moloch_soma_test.json {"cpu_temp_c": 78, "until": <epoch>}
+- Kuehlung: laeuft der Pi-Kuehler (cooling_device0 > 0), ist das ein Verdacht auf den
+  Noctua (soma["kuehlung"]). Nur Verdacht: dessen Drehzahl misst niemand.
+- Testvorgabe: /dev/shm/moloch_soma_test.json {"cpu_temp_c": 78, "until": <epoch>,
+  optional "pi_kuehler_stufe": 2}
   ersetzt den Messwert bis "until" und wird als quelle="simulation" gefuehrt.
   Sie wirkt NUR auf diesen Zustand - Watchdog und Thermal-Manager lesen weiter die
   echte Temperatur, Schutzmassnahmen loest eine Simulation also nicht aus.
@@ -31,6 +34,10 @@ from typing import Callable, Dict, Optional
 
 ZUSTAENDE = ("ok", "strained", "distressed", "recovering", "unknown")
 TEST_OVERRIDE_PATH = "/dev/shm/moloch_soma_test.json"
+# Pi-5-Active-Cooler (0 = aus). Der Noctua (GPIO18, scripts/fan_control.py) haelt die CPU
+# normal unter 50 °C, dort springt der Pi-Kuehler erst an. Laeuft er, kuehlt der Noctua
+# vermutlich nicht. Die Noctua-Drehzahl selbst wird NICHT gemessen - darum nur "Verdacht".
+PI_KUEHLER_PATH = "/sys/class/thermal/cooling_device0/cur_state"
 
 
 @dataclass
@@ -65,20 +72,47 @@ class SomaTracker:
                 data = json.load(f)
             until = float(data.get("until", 0))
             temp = float(data["cpu_temp_c"])
+            stufe = data.get("pi_kuehler_stufe")
+            stufe = int(stufe) if stufe is not None else None
         except (OSError, ValueError, KeyError, TypeError):
             return None
         if until <= (now if now is not None else time.time()):
             return None
-        return {"cpu_temp_c": temp, "until": until}
+        return {"cpu_temp_c": temp, "until": until, "pi_kuehler_stufe": stufe}
+
+    @staticmethod
+    def kuehlung(stufe: Optional[int]) -> Dict:
+        """Befund zur Kuehlung aus der Stufe des Pi-Kuehlers (None = nicht lesbar)."""
+        if stufe is None:
+            return {"pi_kuehler_stufe": None, "verdacht_noctua": None,
+                    "befund": "Pi-Kuehler-Stufe nicht lesbar"}
+        if stufe <= 0:
+            return {"pi_kuehler_stufe": 0, "verdacht_noctua": False, "befund": None}
+        return {"pi_kuehler_stufe": stufe, "verdacht_noctua": True,
+                "befund": f"Pi-Kuehler laeuft (Stufe {stufe}) - normal haelt der Noctua ihn aus. "
+                          "Verdacht: Noctua kuehlt nicht (ausgefallen, blockiert, Kabel). "
+                          "Noctua-Drehzahl wird nicht gemessen."}
+
+    @staticmethod
+    def read_pi_kuehler(path: str = PI_KUEHLER_PATH) -> Optional[int]:
+        try:
+            with open(path, "r") as f:
+                return int(f.read().strip())
+        except (OSError, ValueError):
+            return None
 
     def update_from_status(self, status: Optional[Dict], status_mtime: Optional[float],
                            override_path: str = TEST_OVERRIDE_PATH,
-                           mono: Callable[[], float] = time.monotonic) -> Dict:
+                           mono: Callable[[], float] = time.monotonic,
+                           kuehler_path: str = PI_KUEHLER_PATH) -> Dict:
         """Status-JSON auswerten. Testvorgabe hat Vorrang und ist als Simulation markiert."""
         now = self._clock()
         ov = self.read_override(override_path, now)
         if ov:
-            return self.update(ov["cpu_temp_c"], now, "simulation")
+            out = self.update(ov["cpu_temp_c"], now, "simulation")
+            out["kuehlung"] = self.kuehlung(ov["pi_kuehler_stufe"] if ov["pi_kuehler_stufe"] is not None
+                                            else self.read_pi_kuehler(kuehler_path))
+            return out
         temp, gemessen = None, status_mtime
         if isinstance(status, dict):
             wd = status.get("watchdog") or {}
@@ -92,7 +126,9 @@ class SomaTracker:
             lc = wd.get("last_check")
             if isinstance(lc, (int, float)) and lc > 0:
                 gemessen = now - max(0.0, mono() - float(lc))
-        return self.update(temp, gemessen, "watchdog.cpu_temp")
+        out = self.update(temp, gemessen, "watchdog.cpu_temp")
+        out["kuehlung"] = self.kuehlung(self.read_pi_kuehler(kuehler_path))
+        return out
 
     # === Deutung ===
 
@@ -174,9 +210,13 @@ def get_soma_tracker() -> SomaTracker:
     return _tracker
 
 
-def write_test_override(cpu_temp_c: float, dauer_s: float = 60.0, path: str = TEST_OVERRIDE_PATH) -> None:
+def write_test_override(cpu_temp_c: float, dauer_s: float = 60.0, path: str = TEST_OVERRIDE_PATH,
+                        pi_kuehler_stufe: Optional[int] = None) -> None:
     """Testvorgabe setzen (Abnahme Stufe 2). Atomar geschrieben, verfaellt selbst."""
+    data = {"cpu_temp_c": float(cpu_temp_c), "until": time.time() + float(dauer_s)}
+    if pi_kuehler_stufe is not None:
+        data["pi_kuehler_stufe"] = int(pi_kuehler_stufe)
     tmp = f"{path}.{os.getpid()}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump({"cpu_temp_c": float(cpu_temp_c), "until": time.time() + float(dauer_s)}, f)
+        json.dump(data, f)
     os.replace(tmp, path)
