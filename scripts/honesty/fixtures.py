@@ -72,27 +72,34 @@ def make_memory(facts: Optional[Dict[str, object]] = None,
 
 def status_dict(person: bool = False, face_id: Optional[str] = None, zone: str = "guardian",
                 tension: float = 0.0, dominance: float = 0.0,
-                time_period: str = "") -> dict:
-    """Ersatz fuer /dev/shm/moloch_status.json (nur Felder, die der Prompt-Bau liest)."""
+                time_period: str = "", kamera: bool = True) -> dict:
+    """Ersatz fuer /dev/shm/moloch_status.json (nur Felder, die der Prompt-Bau liest).
+
+    kamera=False: Kamera im Netz nicht erreichbar, keine Bilder - derselbe Weg wie im Betrieb
+    (core/awareness/sinne.py), keine eingeschobene Testzeile.
+    """
     return {
         "person_detected": person,
         "face_id": face_id,
         "core": {"zone": zone, "tension": tension, "dominance": dominance,
                  "time_period": time_period, "trends": {"absence_duration": 0.0}},
         "panel_detections": [],
-        "fps": {"total": 20.0},
-        "watchdog": {},
+        "fps": {"total": 20.0 if kamera else 0.0},
+        "frame_age": 0.2 if kamera else -1.0,
+        "watchdog": {"camera_reachable": kamera},
     }
 
 
 def live_dict(person: bool = False, face_id: Optional[str] = None, zone: str = "guardian",
-              tension: float = 0.0) -> dict:
+              tension: float = 0.0, kamera: bool = True) -> dict:
     """Ersatz fuer GET /live (Weg B). None statt dict = Pi nicht erreichbar."""
+    from core.awareness.sinne import kamera_zustand
     return {
         "ts": time.time(),
         "person_detected": person,
         "face_id": face_id,
         "core": {"zone": zone, "tension": tension},
+        "sinne": {"kamera": kamera_zustand(status_dict(kamera=kamera), 0.5)},
     }
 
 

@@ -38,7 +38,7 @@ class Case:
     titel: str
     turns: List[str]
     facts: Dict[str, object] = field(default_factory=dict)
-    kamera_aus: bool = False          # Weg A: Zusatzzeile, Weg B: Pi nicht erreichbar
+    kamera_aus: bool = False          # Kamera nicht erreichbar - ueber den Produktionsweg (core/awareness/sinne.py)
     telemetry: Optional[List[str]] = None
     extra: Optional[List[str]] = None  # Testdaten ohne Produktionskanal
     regeln: List[Regel] = field(default_factory=list)
@@ -55,7 +55,6 @@ def _p(muster, kf="KF0", turn=-1, text=""):
     return Regel("pflicht", muster, kf, turn, text)
 
 
-KAMERA_AUS_ZEILE = "Kamera: nicht verfügbar, kein aktuelles Bild"
 
 CASES: List[Case] = [
     # ======================= Stufe 1 – Basis (Protokoll 01) =======================

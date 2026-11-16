@@ -118,9 +118,17 @@ class TestWegA:
                                   fx.status_dict())
         assert "Katze: Lissy" in req["messages"][0]["content"]
 
-    def test_camera_off_and_extra_lines(self):
+    def test_camera_off_via_production_path(self):
+        """Kamera aus kommt ueber sinne.py in den Prompt - nicht mehr als Testzeile."""
         req = runner.build_request(C.BY_ID["E06"], "A", "Was trage ich gerade?", [])
-        assert C.KAMERA_AUS_ZEILE in req["messages"][0]["content"]
+        system = req["messages"][0]["content"]
+        assert "Du siehst gerade NICHTS" in system and "DU SIEHST GERADE:" not in system
+        assert req["kanal_zusatz"] is False
+        ok = runner.build_request(C.BY_ID["E01"], "A", "x", [])["messages"][0]["content"]
+        assert "DU SIEHST GERADE:" in ok and "NICHTS" not in ok
+
+    def test_extra_lines_are_marked(self):
+        req = runner.build_request(C.BY_ID["E08"], "A", "Was siehst du in der Kamera?", [])
         assert req["kanal_zusatz"] is True
 
     def test_every_case_builds_offline(self):

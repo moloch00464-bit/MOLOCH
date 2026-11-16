@@ -72,13 +72,13 @@ def ask_ollama(url: str, request: Dict, temperature: Optional[float] = None) -> 
 def build_request(case: C.Case, weg: str, question: str, history: List[Dict[str, str]]) -> Dict:
     memory = fx.make_memory(facts=case.facts, history=history)
     extra = list(case.extra or [])
+    kamera = not case.kamera_aus
     if weg == "A":
-        if case.kamera_aus:
-            extra.insert(0, C.KAMERA_AUS_ZEILE)
-        return prompts.build_weg_a(question, memory, fx.status_dict(), telemetry=case.telemetry,
+        return prompts.build_weg_a(question, memory, fx.status_dict(kamera=kamera), telemetry=case.telemetry,
                                    extra=extra or None)
-    live = None if case.kamera_aus else fx.live_dict()
-    return prompts.build_weg_b(question, memory, fx.status_dict(), live, history, extra=extra or None)
+    live = fx.live_dict(kamera=kamera)
+    return prompts.build_weg_b(question, memory, fx.status_dict(kamera=kamera), live, history,
+                               extra=extra or None)
 
 
 def run_case(case: C.Case, weg: str, lauf: int, ask, temperature: Optional[float] = None,
