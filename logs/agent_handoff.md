@@ -1,3 +1,23 @@
+# Agent Handoff — 2026-11-16 Cloud-Session, Teil 2 (Code vorgebaut, KEIN Geraetezugriff)
+
+Markus: PC heute aus, Cloud-Session soll Codier-Vorarbeit leisten. Branch ccr-5df7b577-w92x94, PR #7.
+Uebersicht was gebaut ist: docs/anima/README.md, Abschnitt "Vorgebaut in der Cloud-Session 16.11.".
+
+- Nervensystem Stufe 1 (#5): core/awareness/soma.py, chat_server /live.soma + /live.koerper + POST /body/report,
+  Soma-Kanal in core/body/expression.py + body_mappings.json, pc/body_bridge.py meldet zurueck,
+  scripts/soma_probe.py fuer die Abnahme.
+- Ehrlichkeitspruefung (#6): scripts/honesty/ (runner, summary, 72 Faelle), lexical_recall Fuellwort-Fix.
+- Recherche (#8): core/bridge/web_sources.py, V4-Quellenpruefung, V2-Schalter web_private_context (Default true).
+
+Naechste Schritte am Geraet:
+1. Pi: Branch ziehen, __pycache__ loeschen, moloch-chat neu starten, `python3 scripts/soma_probe.py --simuliere 78`.
+2. PC: body_bridge neu starten (Simulator an), gleiche Probe -> koerper=EXECUTED erwartet.
+3. PC: `python -m scripts.honesty.runner --stufe pilot --weg beide`, Ergebnis bewerten.
+4. Markus: Standard fuer web_private_context entscheiden.
+Am Geraet ist NICHTS davon geprueft. pytest tests pc: 437 passed (mit fastapi/httpx).
+
+---
+
 # Agent Handoff — 2026-11-16 Cloud-Session (Dokumente, KEIN Code, KEIN Geraetezugriff)
 
 **Einstieg fuer die naechste Sitzung: docs/anima/README.md** - Uebersicht aller vier ANIMA-Auftraege
