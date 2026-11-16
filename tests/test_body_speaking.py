@@ -70,3 +70,36 @@ def test_forgotten_end_expires():
     """Kommt nie ein 'Ende', nickt der Koerper trotzdem nicht ewig."""
     state = _state(_live({"event": "chat", "speaking": True, "age_s": 45.0}))
     assert state["speaking"] is False
+
+
+# === Soma (Issue #5): /live.soma -> BodyState.soma -> Rueckmeldung ===
+
+def test_soma_aus_live():
+    live = _live()
+    live["soma"] = {"zustand": "strained", "kennung": "k1"}
+    st = bb.derive_state(live, CALIB)
+    assert st["soma"] == "strained" and st["_soma_kennung"] == "k1"
+
+
+def test_soma_fehlt_oder_kaputt_ist_unknown():
+    assert bb.derive_state(_live(), CALIB)["soma"] == "unknown"
+    live = _live()
+    live["soma"] = {"zustand": "brennt"}
+    assert bb.derive_state(live, CALIB)["soma"] == "unknown"
+
+
+def test_soma_erreicht_die_pose():
+    maps = load_mappings()
+    live = _live()
+    live["soma"] = {"zustand": "distressed", "kennung": "k2"}
+    st = bb.derive_state(live, CALIB)
+    st.pop("_dialog"); st.pop("_soma_kennung")
+    ok = dict(st, soma="ok")
+    assert compute_pose(BodyState(**st), maps, 0.0).head_pitch < compute_pose(BodyState(**ok), maps, 0.0).head_pitch
+
+
+def test_soma_report():
+    assert bb.soma_report(None, "ok", "live", "sent") is None
+    r = bb.soma_report("k3", "strained", "live", "sent")
+    assert r["kennung"] == "k3" and r["ergebnis"] == "sent"
+    assert bb.soma_report("k3", "strained", "test", "sent")["ergebnis"] == "ueberschrieben"

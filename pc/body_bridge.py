@@ -4,6 +4,7 @@
         -> core.body.compute_pose()  (Fables Mapping, config/body_mappings.json)
         -> core.body.BodyController  (Grenzen, Tempo, Not-Aus)
         -> ReachyHttpBackend         (REST des reachy-mini-daemon, :8000)
+        -> POST Pi /body/report      (was mit dem Soma-Zustand passiert ist, Issue #5)
 
 Start:  moloch_pc_env\\Scripts\\python.exe pc\\body_bridge.py
 Der Simulator laeuft getrennt:  reachy_env\\Scripts\\reachy-mini-daemon.exe --sim --no-media
@@ -56,6 +57,8 @@ EVENT_LOOK = {
 ZONES = ("guardian", "shadow", "berserker")
 MOODS = ("calm", "focused", "alert", "agitated", "euphoric", "dark")
 STATES = ("idle", "observing", "engaged", "overloaded", "withdrawing", "offline_anchor")
+SOMA = ("ok", "strained", "distressed", "recovering", "unknown")
+REPORT_EVERY_S = 5.0    # Rueckmeldung an den Pi: sofort bei neuer Kennung, sonst so oft
 
 
 def _antenna_rad(value_deg: float) -> float:
@@ -200,9 +203,13 @@ def derive_state(live: Optional[dict], calib: Optional[dict] = None) -> Optional
     # stehen in config/body_mappings.json (gaze.*), nicht hier - die Sonoff bleibt unangetastet.
     ptz = live.get("ptz") or {}
     pan, tilt = ptz.get("pan"), ptz.get("tilt")
+    # Technischer Koerperzustand (Pi core/awareness/soma.py). Fehlt er -> unknown, kein Einfluss.
+    soma = live.get("soma") or {}
+    soma_zustand = soma.get("zustand") if soma.get("zustand") in SOMA else "unknown"
     return {"zone": zone, "mood": mood, "being_state": being, "tension": tension,
             "dominance": _clamp(core.get("dominance"), -1.0, 1.0),
             "speaking": speaking, "_dialog": dialog,
+            "soma": soma_zustand, "_soma_kennung": soma.get("kennung"),
             "gaze_yaw": _clamp((pan - calib["mitte_pan"]) * calib["faktor"], -180.0, 180.0)
             if isinstance(pan, (int, float)) else None,
             "gaze_pitch": _clamp((tilt - calib["mitte_tilt"]) * calib["faktor"], -90.0, 90.0)
@@ -224,7 +231,20 @@ def override_state(o: dict) -> dict:
         "being_state": o.get("being_state") if o.get("being_state") in STATES else "idle",
         "tension": _clamp(o.get("tension"), 0.0, 1.0),
         "dominance": _clamp(o.get("dominance"), -1.0, 1.0),
+        "soma": o.get("soma") if o.get("soma") in SOMA else "ok",
     }
+
+
+def soma_report(kennung: Optional[str], zustand: str, quelle: str, ergebnis: str) -> Optional[dict]:
+    """Rueckmeldung fuer den Pi. Nur fuer einen echten Soma-Zustand vom Pi (Kennung vorhanden).
+
+    Bei Test-Vorgabe der KI-Zentrale hat der Koerper den Pi-Zustand NICHT dargestellt ->
+    ergebnis "ueberschrieben" (der Pi wertet das als ACCEPTED, nicht EXECUTED).
+    """
+    if not kennung:
+        return None
+    return {"kennung": kennung, "zustand": zustand, "ts": time.time(),
+            "ergebnis": ergebnis if quelle == "live" else "ueberschrieben"}
 
 
 def write_status(data: dict) -> None:
@@ -246,6 +266,8 @@ def main() -> None:
     last_live = last_status = 0.0
     estop_on = False
     t_start = time.monotonic()
+    soma_kennung, soma_zustand = None, "unknown"
+    last_report, reported_kennung, wirksam = 0.0, None, "offline"
 
     while True:
         loop_t = time.monotonic()
@@ -256,6 +278,8 @@ def main() -> None:
                 live_state = derive_state(r.json(), read_calib()) if r.status_code == 200 else None
             except (httpx.HTTPError, ValueError):
                 live_state = None
+            soma_kennung = (live_state or {}).get("_soma_kennung")
+            soma_zustand = (live_state or {}).get("soma", "unknown")
 
         o = read_override() or {}
         want_estop = bool(o.get("estop"))
@@ -274,6 +298,7 @@ def main() -> None:
 
         state = dict(state)
         dialog = state.pop("_dialog", None)
+        state.pop("_soma_kennung", None)
         pose = compute_pose(BodyState(**state), mappings, loop_t - t_start)
         prio = (Priority.MANUAL if source == "test"
                 else Priority.DIALOGUE if dialog else Priority.IDLE)
@@ -284,6 +309,17 @@ def main() -> None:
             backend.step()
         except httpx.HTTPError:
             pass  # der Controller verbindet beim naechsten tick() neu
+        if result != "rate_limited":
+            wirksam = result     # rate_limited sagt nichts: die letzte Pose steht weiter
+
+        if soma_kennung and (soma_kennung != reported_kennung or loop_t - last_report >= REPORT_EVERY_S):
+            rep = soma_report(soma_kennung, soma_zustand, source, wirksam)
+            last_report = loop_t
+            try:
+                if pi.post(f"{PI_URL}/body/report", json=rep).status_code == 200:
+                    reported_kennung = soma_kennung
+            except httpx.HTTPError:
+                pass     # Pi weg: dort wird der Zustand nach 20 s UNBESTAETIGT
 
         if loop_t - last_status >= 1.0:
             last_status = loop_t
