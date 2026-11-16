@@ -956,7 +956,7 @@ class CameraManager:
         if not cam.is_connected:
             cam.connect()
         pan, tilt = positions[position]
-        cam.move_absolute(pan=pan, tilt=tilt)
+        cam.move_absolute(pan_deg=pan, tilt_deg=tilt)
         logger.info(f"[PTZ] goto {position} ({pan}, {tilt})")
 
     def ptz_calibrate(self):
