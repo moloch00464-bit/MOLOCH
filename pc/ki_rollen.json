@@ -4,8 +4,9 @@
   "chat_optionen": {
     "num_ctx": 4096,
     "num_predict": 160,
-    "temperature": 0.7,
-    "verlauf_turns": 6
+    "temperature": 0.3,
+    "verlauf_turns": 6,
+    "verlauf_max_alter_min": 30
   },
   "modelle": {
     "qwen2.5:7b-instruct": {"rolle": "Haupthirn", "aufgabe": "Dialog und Werkzeug-Entscheidungen", "keep_alive": "-1"},
