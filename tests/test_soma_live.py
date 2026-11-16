@@ -79,3 +79,10 @@ def test_watchdog_aus_ist_unknown(client):
 def test_body_report_validierung(client):
     assert client.post("/body/report", json={}).status_code == 422
     assert client.post("/body/report", json={"kennung": "x" * 40}).status_code == 422
+
+
+def test_live_sinne_kamera(client, tmp_path):
+    client.setze(55.0)
+    k = client.get("/live").json()["sinne"]["kamera"]
+    assert k["ok"] is None            # Testdatei hat weder camera_reachable noch frame_age -> unbekannt
+    assert "NICHTS" in k["zeile"]

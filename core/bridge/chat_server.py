@@ -3073,6 +3073,14 @@ def live_status():
                 d, os.path.getmtime("/dev/shm/moloch_status.json"))
         except Exception as e:
             out["soma"] = {"zustand": "unknown", "ursache": f"Soma-Fehler: {e}", "kennung": None}
+        # Sinne: ist die Wahrnehmung echt? (KI-Zentrale schreibt sonst "niemand im Bild")
+        try:
+            from core.awareness.sinne import kamera_zustand
+            out["sinne"] = {"kamera": kamera_zustand(
+                d, time.time() - os.path.getmtime("/dev/shm/moloch_status.json"))}
+        except Exception as e:
+            out["sinne"] = {"kamera": {"ok": None, "grund": f"Fehler: {e}",
+                                       "zeile": "KAMERA: Zustand unbekannt. Du siehst gerade NICHTS."}}
         # Letzter proaktiver Satz (Anlass, spricht gerade) fuer den Koerper
         try:
             with open("/dev/shm/moloch_speech.json", "r") as f:
