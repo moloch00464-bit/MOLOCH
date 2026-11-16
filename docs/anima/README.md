@@ -51,6 +51,11 @@ Alles auf Branch `ccr-5df7b577-w92x94` (PR #7). `pytest tests pc`: 437 passed mi
   `UNBESTAETIGT` nach 20 s ohne Bridge.
 - Offen: Sprechen bei Belastung (§10), weitere Messwerte (RAM, NPU, Kamera), Ort der Körpersteuerung (E1).
 
+**Sinne (#5, Klasse „Sinne“)** – `core/awareness/sinne.py`: Ist die Kamera weg, liefert die Pipeline keine Bilder
+oder ist der Status alt, steht im Prompt beider Wege „Du siehst gerade NICHTS“ statt „niemand im Bild“. Das war
+eine falsche Wahrnehmung im Prompt. Der Prüfstand testet „Kamera aus“ jetzt über diesen echten Weg (E06), nicht
+mehr über eine eingeschobene Zeile. Ein Pilotlauf vorher/nachher zeigt, ob das die Antworten ändert.
+
 **Ehrlichkeitsprüfung (#6)** – `scripts/honesty/`: baut die Prompts beider Wege mit dem Produktivcode,
 Testdaten nur als Fixture, schickt direkt an Ollama (nie über `/chat` – der Keyword-Handler würde Hardware schalten).
 `python -m scripts.honesty.runner --stufe pilot --weg beide`, danach `review.md` bewerten und

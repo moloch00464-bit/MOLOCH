@@ -114,6 +114,26 @@ ein **ehrlicher Ausfallzustand samt `UNKNOWN` (D)** und die **Zuordnung von Rüc
 8. **Der Pi bleibt allein handlungsfähig.** PC-Ausfall und Reachy-Ausfall dürfen ihn nicht blockieren.
 9. **Schweigen ist ein Befund.** Bleibt eine Meldung länger als ihr Zeitlimit aus, ist das ein Zustandswechsel, kein Nichts.
 
+### Drei Klassen (Entscheidung Markus, 16.11.)
+
+Nicht jeder Messwert bekommt die ganze Kette. Erfasst wird alles an einer Stelle, eingebunden nur nach Klasse:
+
+| Klasse | Was | Kette | Code |
+|---|---|---|---|
+| **Schutz** | Was der Haupthardware schadet: Temperatur, Kühlung, Strom/USV, SSD | Soma → Körper → Rückmeldung → Gegenmaßnahme | `core/awareness/soma.py` |
+| **Sinne** | Kamera, Mikrofon, PC-Verbindung. Ihr Ausfall schadet nichts, führt aber zu erfundenen Antworten | Nur eine Zeile im Prompt beider Antwortwege, kein Körperausdruck | `core/awareness/sinne.py` |
+| **Rest** | Alles andere | Fehlermeldung in Log und Cockpit | vorhandene Wege |
+
+Prompt-Regel: nur Abweichungen melden, nie „alles ok“. Das kleine Modell verliert mit jedem zusätzlichen Wert den Faden.
+
+Stand Sinne (16.11., nur Tests): Kamera umgesetzt. Ist sie nicht erreichbar, liefert die Pipeline keine Bilder
+oder ist der Status veraltet, steht im Prompt beider Wege „Du siehst gerade NICHTS“. Vorher stand dort
+„niemand im Bild“, also eine falsche Wahrnehmung. Mikrofon und PC-Verbindung fehlen noch. Für das Mikrofon
+prüft der Watchdog schon (`_check_microphone`, setzt `active_pains.network_dead`), das wäre der nächste Sinn.
+Achtung: `watchdog.camera_reachable` ist keine laufende Messung. Der Watchdog prüft Port 554 nur, wenn die
+Pipeline schon steht (vor einem Neustartversuch), und startet mit `True`. Das eigentliche Signal ist deshalb
+`frame_age` (Bildalter, -1 = keine Bilder). `camera_reachable` ergänzt nur den Grund.
+
 ---
 
 ## 5. Die erste Schleife: Temperatur → Körper → Rückmeldung
