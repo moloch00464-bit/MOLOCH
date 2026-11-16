@@ -259,6 +259,12 @@ Erst wenn Abschnitt 5 auf Stufe 2 abgenommen ist. Jede Komponente einzeln, mit d
 2. **PC-Sprachmodell** – `llm.pc_ollama` mit `DISCONNECTED`; der Wechsel in den lokalen Betrieb wird Zustand und Ausdruck.
 3. **NPU** – `inference.hailo10h` aus Modell- und Worker-Gesundheit: Zeit seit letzter gültiger Inferenz statt Geräteknoten.
 4. **Kamera** – Stream-Alter und PTZ: gefahrene gegen gemeldete Position (`ACCEPTED` → `EXECUTED` → `VERIFIED` über die Positionsrückmeldung).
+   Stand 16.11.: Keine neue Messung bauen. Die Kamera wird schon doppelt geprüft: vom Watchdog (`camera_reachable`,
+   steht in `/live`) und vom Hardware-Auditor (eigener Ping und RTSP). Soma liest nur `watchdog.camera_reachable`,
+   die beiden Pings später zusammenlegen. **Zuerst:** Die Zeile „Kamera nicht verfügbar seit …“ in den Prompt
+   beider Antwortwege. Heute erfährt das Sprachmodell nicht, dass es blind ist; die Ehrlichkeitsprüfung simuliert
+   diese Zeile nur (E06). Erst danach der Körperausdruck. Eine Ersatzkamera (Reachy) gibt es noch nicht. Am Pi
+   bräuchte sie NPU-Slots (8/8 belegt), also würde sie auf dem PC oder einem Jetson ausgewertet.
 5. **Wahrnehmung → Körper** – der im Briefing verlangte zweite End-to-End-Test: echte Erkennung führt zu Ausdruck mit Rückmeldung.
 6. **Strom, Lüfter, SSD, Mikrofon, Spotify** – je nachdem, was das Inventar als messbar ausweist.
 7. **Verlauf und Gedächtnis** (E8).
