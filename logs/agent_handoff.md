@@ -1,3 +1,18 @@
+# Agent Handoff — 2026-11-16 Cloud-Session (Dokumente, KEIN Code, KEIN Geraetezugriff)
+
+**Einstieg fuer die naechste Sitzung: docs/anima/README.md** - Uebersicht aller vier ANIMA-Auftraege
+(Gesamtplan #3, Nervensystem #5, Ehrlichkeitspruefung #6, Recherche-Schleuse), Vetos auf einen Blick,
+offene Entscheidungen fuer Markus. Originale von ChatGPT/DeepSeek liegen im Wortlaut neben Claudes Abgleich.
+
+Neu heute (nur Doku, Branch ccr-5df7b577-w92x94, PR #7):
+- docs/anima/pruefprotokolle/ - 72 Testfaelle (ChatGPT + DeepSeek) + ANPASSUNG_AN_DEN_CODE.md
+- docs/anima/RECHERCHE_KONZEPT_2026-11-16.md (DeepSeek) + RECHERCHE_ABGLEICH.md (Vetos V1-V7)
+
+Wichtigster neuer Befund: Der Web-Pfad im Pi-Chat schickt bei Festival-/Bandfragen Markus'
+Spotify-Hoerdaten an DeepSeek in die Cloud (chat_server.py, cross_ref_block). Markus entscheidet.
+
+---
+
 # Agent Handoff — 2026-11-15 Cloud-Session (ANIMA Master-Briefing, KEIN Geraetezugriff)
 
 Branch `ccr-5df7b577-w92x94`, aufgesetzt auf deepseek_architecture_overhaul @ d39e03a.
