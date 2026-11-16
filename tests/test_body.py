@@ -385,3 +385,42 @@ class TestEndToEnd:
                 lo, hi = maps["limits"][a]
                 assert lo <= getattr(p, a) <= hi
         assert ctl.status()["last_result"] in ("sent", "unchanged")
+
+
+# === Soma-Kanal (Issue #5) ===
+
+def test_soma_ok_und_unknown_aendern_nichts(maps):
+    basis = compute_pose(BodyState(), maps, 1.0)
+    assert compute_pose(BodyState(soma="ok"), maps, 1.0) == basis
+    assert compute_pose(BodyState(soma="unknown"), maps, 1.0) == basis
+    assert compute_pose(BodyState(soma="quatsch"), maps, 1.0) == basis
+
+
+def test_soma_belastung_senkt_kopf_und_antennen(maps):
+    ok = compute_pose(BodyState(soma="ok"), maps, 0.0)
+    st = compute_pose(BodyState(soma="strained"), maps, 0.0)
+    di = compute_pose(BodyState(soma="distressed"), maps, 0.0)
+    assert di.head_pitch < st.head_pitch < ok.head_pitch
+    assert di.antenna_l < st.antenna_l < ok.antenna_l
+
+
+def test_soma_daempft_unruhe(maps):
+    t = 0.37
+    laut = compute_pose(BodyState(tension=1.0), maps, t)
+    leise = compute_pose(BodyState(tension=1.0, soma="distressed"), maps, t)
+    assert abs(leise.head_roll) < abs(laut.head_roll)
+
+
+def test_soma_ohne_abschnitt_in_mappings(maps):
+    alt = {k: v for k, v in maps.items() if k != "soma"}
+    assert compute_pose(BodyState(soma="distressed"), alt, 1.0) == compute_pose(BodyState(), alt, 1.0)
+
+
+def test_soma_distressed_bleibt_in_grenzen(maps):
+    for t in (0.0, 0.5, 1.3):
+        p = clamp_pose(compute_pose(BodyState(being_state="withdrawing", mood="dark", zone="shadow",
+                                              tension=1.0, dominance=-1.0, soma="distressed"), maps, t),
+                       maps["limits"])
+        for ax in AXES:
+            lo, hi = maps["limits"][ax]
+            assert lo <= getattr(p, ax) <= hi

@@ -54,5 +54,13 @@
     "pitch_scale": 1.0,
     "pitch_offset": 0.0,
     "body_yaw_share": 0.4
+  },
+  "soma": {
+    "_hinweis": "Technischer Koerperzustand (core/awareness/soma.py, Issue #5). Wirkt zusaetzlich zu Zustand/Zone/Mood. ok und unknown = kein Einfluss. Werte sind Entwurf.",
+    "ok": {},
+    "recovering": {"head_pitch": -2.0, "antenna_offset": -5.0, "amplitude": 0.85},
+    "strained": {"head_pitch": -5.0, "antenna_offset": -20.0, "amplitude": 0.6},
+    "distressed": {"head_pitch": -10.0, "antenna_offset": -40.0, "amplitude": 0.3},
+    "unknown": {}
   }
 }

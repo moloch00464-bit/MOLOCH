@@ -4,6 +4,7 @@ Jede Ebene steuert einen eigenen Koerperkanal (Konzept Abschnitt 3):
     Seins-Zustand -> Grundhaltung      Zone      -> Amplitude / Tempo
     Mood          -> Antennen          Tension   -> Atmung + Unruhe
     Dominance     -> Kopfneigung       Wahrnehmung -> Blickrichtung
+    Soma          -> Haltung + Daempfung (technischer Koerperzustand, Issue #5)
 Die Pose ist danach noch NICHT geklemmt - das macht der Controller.
 """
 
@@ -27,6 +28,7 @@ class BodyState:
     gaze_yaw: Optional[float] = None    # Blickziel in Grad, None = kein Ziel
     gaze_pitch: Optional[float] = None
     speaking: bool = False
+    soma: str = "ok"                # core/awareness/soma.py: ok/strained/distressed/recovering/unknown
 
 
 def _num(value, lo: float, hi: float) -> float:
@@ -51,13 +53,16 @@ def compute_pose(state: BodyState, mappings: Dict, t: float) -> BodyPose:
     md = moods.get(state.mood) or moods["calm"]
     mod = mappings["modulation"]
     gz = mappings["gaze"]
+    # Soma: fehlt der Abschnitt oder ist der Zustand unbekannt -> kein Einfluss.
+    # Ein nicht gemessener Zustand wird nicht dargestellt (UNKNOWN != OK, aber auch != krank).
+    sm = (mappings.get("soma") or {}).get(state.soma) or {}
 
     tension = _num(state.tension, 0.0, 1.0)
     dominance = _num(state.dominance, -1.0, 1.0)
-    amp = float(zn.get("amplitude", 1.0))
+    amp = float(zn.get("amplitude", 1.0)) * float(sm.get("amplitude", 1.0))
 
     # Grundhaltung + Zone + Dominance (dominant = Kopf hoch)
-    pitch = st.get("head_pitch", 0.0) + zn.get("head_pitch", 0.0)
+    pitch = st.get("head_pitch", 0.0) + zn.get("head_pitch", 0.0) + sm.get("head_pitch", 0.0)
     pitch += dominance * mod["dominance_pitch_deg"]
 
     # Atmung: Frequenz steigt mit Tension
@@ -86,7 +91,7 @@ def compute_pose(state: BodyState, mappings: Dict, t: float) -> BodyPose:
         pitch += 2.0 * math.sin(TWO_PI * 2.0 * t)
 
     # Antennen: Grundstellung aus Zustand, Mood verschiebt und wippt
-    base = st.get("antenna", 0.0) + md.get("antenna_offset", 0.0)
+    base = st.get("antenna", 0.0) + md.get("antenna_offset", 0.0) + sm.get("antenna_offset", 0.0)
     wiggle = md.get("wiggle_deg", 0.0) * amp
     phase = TWO_PI * md.get("wiggle_hz", 0.0) * t
     asym = st.get("antenna_asym", 0.0)
