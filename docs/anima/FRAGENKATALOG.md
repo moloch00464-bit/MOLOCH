@@ -1,5 +1,8 @@
 # ANIMA – Fragenkatalog für Abnahmetests (Bereiche 1 und 2)
 
+> **Ersetzt** am 2026-11-16 durch die Ehrlichkeitsprüfung in `docs/anima/pruefprotokolle/` (72 Testfälle).
+> Bleibt als Kurzliste für schnelle Handtests stehen.
+
 Dieselben Fragen in vier Stufen stellen und vergleichen:
 1. direkt an Ollama ohne Kontext · 2. Ollama mit Molochs System-Prompt ·
 3. KI-Zentrale lokal (Persona + Gedächtnis) · 4. vollständiger Moloch-Chat über den Pi.
