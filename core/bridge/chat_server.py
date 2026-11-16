@@ -2946,6 +2946,45 @@ def speech_state(req: SpeechStateRequest):
     return {"ok": True, "speaking": data["speaking"], "source": req.source}
 
 
+# === Nervensystem Stufe 1 (Issue #5): Soma -> Koerper -> Rueckmeldung ===
+# Die Body-Bridge (PC) liest /live.soma, stellt den Zustand dar und meldet hier,
+# was passiert ist. /live.koerper zeigt dann ACCEPTED / EXECUTED / UNBESTAETIGT.
+_BODY_REPORT: Dict[str, Any] = {}
+_SOMA_LOG = {"kennung": None, "stufe": None}
+
+
+class BodyReportRequest(BaseModel):
+    kennung: str = Field(..., min_length=1, max_length=32)
+    zustand: str = Field("", max_length=20)
+    ergebnis: str = Field("", max_length=20)
+
+
+@app.post("/body/report")
+def body_report(req: BodyReportRequest):
+    """Rueckmeldung der Body-Bridge zu einem Soma-Zustand (Kennung aus /live.soma).
+
+    Gespeichert wird die Empfangszeit des Pi, nicht die Uhr des PCs - so stoert
+    eine abweichende PC-Uhr die Zuordnung nicht.
+    """
+    _BODY_REPORT.clear()
+    _BODY_REPORT.update({"kennung": req.kennung, "zustand": req.zustand,
+                         "ergebnis": req.ergebnis, "ts": time.time()})
+    return {"ok": True}
+
+
+def _soma_fuer_live(status: Dict, status_mtime: Optional[float]) -> Tuple[Dict, Dict]:
+    """Soma-Zustand + Koerper-Bestaetigung; protokolliert jede Aenderung als [SOMA]-Zeile."""
+    from core.awareness.soma import bestaetigung, get_soma_tracker
+    soma = get_soma_tracker().update_from_status(status, status_mtime)
+    koerper = bestaetigung(soma, _BODY_REPORT, time.time())
+    if (soma["kennung"], koerper["stufe"]) != (_SOMA_LOG["kennung"], _SOMA_LOG["stufe"]):
+        _SOMA_LOG.update(kennung=soma["kennung"], stufe=koerper["stufe"])
+        logger.info(f"[SOMA] {soma['kennung']} {soma['zustand']} ({soma['ursache']}, "
+                    f"quelle={soma['quelle']}) -> koerper={koerper['stufe']} "
+                    f"ergebnis={koerper.get('ergebnis')}")
+    return soma, koerper
+
+
 @app.get("/memory/recall")
 def memory_recall(q: str = "", limit: int = 3):
     """Zur Frage passende Erinnerungen - die Gedaechtnis-Schnittstelle fuer den PC.
@@ -3021,6 +3060,12 @@ def live_status():
                 "tracker_state": (d.get("ptz") or {}).get("tracker_state"),
             },
         }
+        # Technischer Koerperzustand + ob der Koerper ihn umgesetzt hat (Issue #5)
+        try:
+            out["soma"], out["koerper"] = _soma_fuer_live(
+                d, os.path.getmtime("/dev/shm/moloch_status.json"))
+        except Exception as e:
+            out["soma"] = {"zustand": "unknown", "ursache": f"Soma-Fehler: {e}", "kennung": None}
         # Letzter proaktiver Satz (Anlass, spricht gerade) fuer den Koerper
         try:
             with open("/dev/shm/moloch_speech.json", "r") as f:
