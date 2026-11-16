@@ -147,7 +147,7 @@ def bestaetigung(soma: Dict, report: Optional[Dict], now: float, timeout_s: floa
       AUSSTEHEND      noch keine passende Rueckmeldung, Zeitlimit laeuft
       UNBESTAETIGT    Zeitlimit abgelaufen, keine passende Rueckmeldung (Schweigen ist ein Befund)
       ACCEPTED        Koerper hat den Zustand gelesen, aber nichts ausgefuehrt (offline, Not-Aus ...)
-      EXECUTED        Controller hat eine Pose gesendet bzw. haelt sie
+      EXECUTED        Controller hat die Pose mit Soma-Kanal gesendet bzw. haelt sie
     VERIFIED gibt es hier nicht: dafuer braeuchte es eine unabhaengige Beobachtung
     (z. B. Sonoff-Kamera), keine Selbstauskunft der Bridge.
     Eine Rueckmeldung mit anderer Kennung zaehlt nie - auch keine verspaetete.
@@ -157,7 +157,9 @@ def bestaetigung(soma: Dict, report: Optional[Dict], now: float, timeout_s: floa
         return {"stufe": "UNBESTAETIGT" if offen > timeout_s else "AUSSTEHEND",
                 "kennung": soma.get("kennung")}
     ergebnis = report.get("ergebnis")
-    stufe = "EXECUTED" if ergebnis in ("sent", "unchanged", "neutral", "idle", "rate_limited") else "ACCEPTED"
+    # "sent"/"unchanged": die Pose mit Soma-Kanal ging raus bzw. steht schon so.
+    # Alles andere (offline, estop, ueberschrieben, neutral, idle) = nur gelesen.
+    stufe = "EXECUTED" if ergebnis in ("sent", "unchanged") else "ACCEPTED"
     return {"stufe": stufe, "kennung": soma.get("kennung"), "ergebnis": ergebnis,
             "alter_s": round(now - float(report.get("ts") or now), 1)}
 
