@@ -201,6 +201,12 @@ def _live_snippet(live: Optional[dict]) -> str:
         parts.append(f"Tension={m['tension']:+.2f}")
     if m["tageszeit"]:
         parts.append(f"Tageszeit={m['tageszeit']}")
+    # Sinne (Pi /live.sinne): Kamera weg -> nicht "niemand im Bild", sondern "du siehst nichts".
+    # Ein aelterer Pi ohne "sinne" liefert das Feld nicht - dann wie bisher.
+    kam = ((live or {}).get("sinne") or {}).get("kamera")
+    if isinstance(kam, dict) and kam.get("ok") is not True:
+        return "[LIVE] " + ", ".join(parts) + "\n" + (kam.get("zeile") or "KAMERA: Zustand unbekannt. "
+                                                       "Du siehst gerade NICHTS.")
     if m["gesicht"]:
         parts.append(f"im Bild erkannt: {m['gesicht']}")
     elif m["person"]:
