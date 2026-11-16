@@ -2950,7 +2950,7 @@ def speech_state(req: SpeechStateRequest):
 # Die Body-Bridge (PC) liest /live.soma, stellt den Zustand dar und meldet hier,
 # was passiert ist. /live.koerper zeigt dann ACCEPTED / EXECUTED / UNBESTAETIGT.
 _BODY_REPORT: Dict[str, Any] = {}
-_SOMA_LOG = {"kennung": None, "stufe": None}
+_SOMA_LOG = {"kennung": None, "stufe": None, "verdacht": None}
 
 
 class BodyReportRequest(BaseModel):
@@ -2982,6 +2982,13 @@ def _soma_fuer_live(status: Dict, status_mtime: Optional[float]) -> Tuple[Dict, 
         logger.info(f"[SOMA] {soma['kennung']} {soma['zustand']} ({soma['ursache']}, "
                     f"quelle={soma['quelle']}) -> koerper={koerper['stufe']} "
                     f"ergebnis={koerper.get('ergebnis')}")
+    verdacht = (soma.get("kuehlung") or {}).get("verdacht_noctua")
+    if verdacht != _SOMA_LOG.get("verdacht"):
+        _SOMA_LOG["verdacht"] = verdacht
+        if verdacht:
+            logger.warning(f"[SOMA] Kuehlung: {soma['kuehlung']['befund']}")
+        elif verdacht is False:
+            logger.info("[SOMA] Kuehlung: Pi-Kuehler wieder aus")
     return soma, koerper
 
 
