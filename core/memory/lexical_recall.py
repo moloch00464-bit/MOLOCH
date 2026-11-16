@@ -10,7 +10,9 @@ fuer das kleine NPU-Modell. Die Vektorsuche (vector_memory.py) ist die
 optionale Ergaenzung fuer Fragen ohne gemeinsame Woerter.
 
 Verfahren:
-- Kleinschreibung, Umlaute gefaltet (ae/oe/ue/ss), Fuellwoerter entfernt.
+- Kleinschreibung, Umlaute gefaltet (ae/oe/ue/ss), Fuellwoerter entfernt - auch
+  Woerter UEBER das Gedaechtnis ("gespeichert", "gemerkt", "heisst"): sie stehen in
+  der Frage, aber nie im Fakt, und druecken sonst passende Treffer unter die Schwelle.
 - Ein Frage-Wort trifft ein Eintrags-Wort, wenn eines das andere enthaelt
   ("musik" trifft "lieblingsmusik") - deutsche Komposita und Endungen.
 - Seltene Woerter zaehlen mehr als haeufige (IDF): "markus" steht in fast
@@ -49,6 +51,8 @@ kennst weisst weiss erzaehl erzaehle erklaer erklaere eigentlich genau denn mal 
 mag magst moegen moechte moechtest gefaellt geht gehts machst macht hallo danke okay alles
 funktioniert funktionieren laeuft laeufst spielt spiel
 ich hast hatten wurden waere wuerde koennte muss musst darf mehr immer heute gerade
+heisst heisse heissen hiess hiessen nochmal vorhin damals gesagt sagtest sag
+gespeichert speichern speicher gemerkt merken merk erinnerst erinnere erinnern
 """.split())
 
 
