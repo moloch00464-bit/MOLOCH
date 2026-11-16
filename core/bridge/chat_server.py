@@ -2542,6 +2542,7 @@ def chat(req: ChatRequest):
         # Timeout/Down -> weiter mit Original-Prompt ohne Augmentation.
         if prompt_type == "web" and not req.force_local:
             web_ctx = ""
+            web_fetched_urls = []   # per /fetch gelesene Seiten - zaehlen als Quelle (V4)
             # Welle 20a: Festival-Anfragen brauchen Volltext (Bands/Lineup
             # stehen meist nur auf der Festival-Seite, nicht im Snippet).
             festival_keywords = ("wgt", "wave-gotik", "amphi", "m'era luna",
@@ -2629,6 +2630,7 @@ def chat(req: ChatRequest):
                                             raw_text = fetched_top.get("text") or ""
                                     if not raw_text:
                                         continue
+                                    web_fetched_urls.append(url)
                                     bands = _extract_lineup_bands(raw_text)
                                     if bands:
                                         web_ctx += (
@@ -2693,10 +2695,15 @@ def chat(req: ChatRequest):
                     "oder schick mir die URL direkt, dann hol ich den Volltext."
                 )
             else:
+                # V2 (Issue #8): tentacle_llm.web_private_context=false -> Markus'
+                # Spotify-Hoerdaten gehen NICHT in den (Cloud-)Prompt; der Abgleich
+                # passiert lokal nach der Antwort. Default true = bisheriges Verhalten,
+                # bis Markus entscheidet.
+                private_ok = bool((_load_tentacle_cfg() or {}).get("web_private_context", True))
                 # Bei Festival + Spotify-Snippet: Cross-Referenz-Anweisung
                 cross_ref_block = ""
                 cross_instruction = ""
-                if spotify_ctx:
+                if spotify_ctx and private_ok:
                     cross_ref_block = f"\n\n{spotify_ctx}\n"
                     cross_instruction = (
                         " Cross-Referenz: matche Bandnamen aus WEB-RESULTS gegen "
@@ -2727,6 +2734,17 @@ def chat(req: ChatRequest):
                     out = b.ask_external(augmented, force_local=False,
                                          force_tentacle=False,
                                          prompt_type="web_research")
+                if out:
+                    # V4 (Issue #8): URLs, die nicht abgerufen wurden, sind keine Quelle.
+                    from core.bridge import web_sources
+                    out, _src = web_sources.check_sources(
+                        out, web_sources.urls_in(web_ctx) + web_fetched_urls)
+                    if _src["unbelegt"]:
+                        logger.warning(f"[W19] {len(_src['unbelegt'])} nicht belegte URL(s) "
+                                       f"ersetzt: {_src['unbelegt'][:3]}")
+                    if spotify_ctx and not private_ok:
+                        out += web_sources.format_local_matches(web_sources.local_artist_matches(
+                            web_ctx, web_sources.spotify_artists_from_snippet(spotify_ctx)))
         else:
             out = b.ask_external(req.text, force_local=req.force_local,
                                  force_tentacle=False,
