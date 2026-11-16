@@ -517,13 +517,20 @@ def _build_local_context_snippet(user_msg: Optional[str] = None) -> str:
                 return f"niemand im Bild seit {int(absence_s//60)} min"
             return "gerade niemand im Bild"
 
-        parts = [
-            f"DU SIEHST GERADE: {_presence_phrase()}."
-        ]
+        # Sinne: Ist das Bild ueberhaupt echt? Ohne Kamera stand hier frueher
+        # "niemand im Bild" - fuer das Modell eine Wahrnehmung, in Wahrheit Nichtwissen.
+        try:
+            from core.awareness.sinne import kamera_zustand
+            _kam = kamera_zustand(st, time.time() - os.path.getmtime(_STATUS_JSON_PATH))
+        except Exception:
+            _kam = {"ok": None, "zeile": "KAMERA: Zustand unbekannt. Du siehst gerade NICHTS - "
+                                         "sag das, statt etwas zu beschreiben."}
+        kamera_ok = _kam["ok"] is True
+        parts = [f"DU SIEHST GERADE: {_presence_phrase()}." if kamera_ok else _kam["zeile"]]
         # Distanz-Key auf deutsches Wort mappen (near/medium/far kommen aus Perception)
         _dist_map = {"near": "nah", "medium": "mittlere entfernung", "far": "weit weg"}
         distance_de = _dist_map.get(distance, "")
-        if person_detected:
+        if person_detected and kamera_ok:
             parts.append(f"Vor dir: {face}{(', ' + distance_de) if distance_de else ''}.")
             if approaching:
                 parts.append("Kommt naeher.")
@@ -538,7 +545,7 @@ def _build_local_context_snippet(user_msg: Optional[str] = None) -> str:
         )
         # Phase 3 Task 3e: Distanz-Kategorie + Tendenz aus BBox-Zeitreihe.
         # Nur wenn Person/Face erkannt — ansonsten leerer String.
-        dist_phrase = _distance_phrase(panel_detections)
+        dist_phrase = _distance_phrase(panel_detections) if kamera_ok else ""
         if dist_phrase:
             parts.append(f"Distanz: {dist_phrase}.")
         # Effects-Zahlen als zweite Zeile — granularer als Zone-Wort. LLM kann
