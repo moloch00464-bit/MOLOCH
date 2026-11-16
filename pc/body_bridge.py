@@ -59,6 +59,9 @@ MOODS = ("calm", "focused", "alert", "agitated", "euphoric", "dark")
 STATES = ("idle", "observing", "engaged", "overloaded", "withdrawing", "offline_anchor")
 SOMA = ("ok", "strained", "distressed", "recovering", "unknown")
 REPORT_EVERY_S = 5.0    # Rueckmeldung an den Pi: sofort bei neuer Kennung, sonst so oft
+# Ueber den SSH-Tunnel (Loopback) braucht der Pi kein Token; direkt im LAN schon, wenn gesetzt.
+REPORT_HEADERS = ({"X-Moloch-Token": os.environ["MOLOCH_API_TOKEN"]}
+                  if os.environ.get("MOLOCH_API_TOKEN") else {})
 
 
 def _antenna_rad(value_deg: float) -> float:
@@ -316,7 +319,7 @@ def main() -> None:
             rep = soma_report(soma_kennung, soma_zustand, source, wirksam)
             last_report = loop_t
             try:
-                if pi.post(f"{PI_URL}/body/report", json=rep).status_code == 200:
+                if pi.post(f"{PI_URL}/body/report", json=rep, headers=REPORT_HEADERS).status_code == 200:
                     reported_kennung = soma_kennung
             except httpx.HTTPError:
                 pass     # Pi weg: dort wird der Zustand nach 20 s UNBESTAETIGT
