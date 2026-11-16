@@ -181,7 +181,13 @@ Werkzeug: `python3 scripts/soma_probe.py --simuliere 78` (wirkt nur auf Soma, Wa
   normale Last, **keine** Stresslast. Parallel `python3 scripts/soma_probe.py` **ohne** `--simuliere` laufen lassen.
   - Geprüft wird: Regelt der Pi-Lüfter sauber? Kommt der echte Messwert frisch in `/live.soma` an
     (`quelle=watchdog.cpu_temp`, Alter < 15 s)?
-  - Erwartet: Zustand bleibt `ok`. Ein `strained` ist kein Testfehler, sondern ein Befund: Der Pi-Lüfter allein reicht nicht.
+  - Erwartet: Der Pi-Kühler (`cooling_device0`) springt an, er lief mit Noctua laut Markus noch nie. Dann zeigt
+    `/live.soma.kuehlung` `verdacht_noctua: true`, im Log steht `[SOMA] Kuehlung: ...`. Der Zustand bleibt `ok`.
+    Ein `strained` ist kein Testfehler, sondern ein Befund: Der Pi-Kühler allein reicht nicht.
+  - Ehrlichkeit: Moloch kennt nur das Symptom (Pi-Kühler läuft), nicht die Ursache. Die Noctua-Drehzahl wird
+    nicht gemessen. Er darf „Verdacht auf den Noctua“ sagen, nicht „der Noctua ist kaputt“. Mit dem Tacho-Kabel
+    des NF-A4x20 an einem GPIO wäre es ein Beweis statt eines Verdachts (später, Hardware).
+  - Vorher ohne Risiko simulieren: `soma_probe.py --simuliere 55 --pi-kuehler 2`.
   - **Abbruch:** bei 75 °C oder nach 30 min Noctua wieder an. Ab 80 °C stoppt der Watchdog das LLM und drosselt,
     ab etwa 85 °C drosselt der Pi selbst. Das wäre dann kein Test mehr, sondern eine Störung.
 - **3b – Normalbetrieb:** reale Werte ohne Eingriff, über Tage. Prüft Hysterese und Erholung unter echten Bedingungen.

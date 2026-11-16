@@ -5,6 +5,7 @@ Auf dem Pi, Chat-Server und (fuer EXECUTED) PC-Body-Bridge mit Simulator laufen:
 
     python3 scripts/soma_probe.py                 # nur beobachten
     python3 scripts/soma_probe.py --simuliere 78  # 60 s lang 78 °C vorgeben
+    python3 scripts/soma_probe.py --simuliere 55 --pi-kuehler 2   # Noctua-Ausfall vortaeuschen
 
 Die Vorgabe wirkt NUR auf den Soma-Zustand (quelle=simulation). Watchdog und
 Lueftersteuerung sehen weiter die echte Temperatur - es wird nichts gedrosselt.
@@ -27,11 +28,12 @@ def main() -> int:
     ap.add_argument("--url", default="http://127.0.0.1:9100")
     ap.add_argument("--simuliere", type=float, default=None, help="CPU-Temperatur in °C vorgeben")
     ap.add_argument("--dauer", type=float, default=60.0)
+    ap.add_argument("--pi-kuehler", type=int, default=None, help="Stufe des Pi-Kuehlers vorgeben (nur mit --simuliere)")
     args = ap.parse_args()
 
     if args.simuliere is not None:
         from core.awareness.soma import write_test_override
-        write_test_override(args.simuliere, args.dauer)
+        write_test_override(args.simuliere, args.dauer, pi_kuehler_stufe=args.pi_kuehler)
         print(f"Testvorgabe {args.simuliere} °C fuer {args.dauer:.0f} s gesetzt")
 
     ende = time.time() + args.dauer + 35
@@ -44,10 +46,13 @@ def main() -> int:
             print(f"/live nicht erreichbar: {e}")
             return 2
         s, k = live.get("soma") or {}, live.get("koerper") or {}
-        zeile = (s.get("zustand"), s.get("quelle"), s.get("kennung"), k.get("stufe"), k.get("ergebnis"))
+        kue = s.get("kuehlung") or {}
+        zeile = (s.get("zustand"), s.get("quelle"), s.get("kennung"), k.get("stufe"), k.get("ergebnis"),
+                 kue.get("pi_kuehler_stufe"))
         if zeile != zuletzt:
             print(f"{time.strftime('%H:%M:%S')}  soma={zeile[0]:<10} quelle={zeile[1]}  "
-                  f"kennung={zeile[2]}  koerper={zeile[3]} ({zeile[4]})  {s.get('ursache')}")
+                  f"kennung={zeile[2]}  koerper={zeile[3]} ({zeile[4]})  pi_kuehler={zeile[5]}  "
+                  f"{s.get('ursache')}" + (f"\n          ! {kue['befund']}" if kue.get("verdacht_noctua") else ""))
             zuletzt = zeile
         time.sleep(1.0)
     return 0
