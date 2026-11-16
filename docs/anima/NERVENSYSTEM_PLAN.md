@@ -173,8 +173,21 @@ den Betrieb stören (LLM stoppen, Pipeline drosseln). Alternative: Auslösung ü
   | Status-JSON veraltet | `/live` weist den Wert als veraltet/unbekannt aus |
   | Chat-Server neu gestartet | Schleife fängt sich ohne Eingriff |
 
-**Stufe 3 – echte Messung:** nur mit realen Werten im Normalbetrieb, ohne Eingriff in Kühlung oder Strom.
-Erst sinnvoll, wenn Stufe 2 steht. Sprachliche Reaktion nach Grundsatz 5.
+Werkzeug: `python3 scripts/soma_probe.py --simuliere 78` (wirkt nur auf Soma, Watchdog/Lüfter sehen die echte Temperatur).
+
+**Stufe 3 – echte Messung:** Erst sinnvoll, wenn Stufe 2 steht. Sprachliche Reaktion nach Grundsatz 5.
+
+- **3a – Kühlung kontrolliert reduziert** (Idee Markus, 16.11.): Gehäuselüfter (Noctua) aus, Pi-Lüfter regelt allein,
+  normale Last, **keine** Stresslast. Parallel `python3 scripts/soma_probe.py` **ohne** `--simuliere` laufen lassen.
+  - Geprüft wird: Regelt der Pi-Lüfter sauber? Kommt der echte Messwert frisch in `/live.soma` an
+    (`quelle=watchdog.cpu_temp`, Alter < 15 s)?
+  - Erwartet: Zustand bleibt `ok`. Ein `strained` ist kein Testfehler, sondern ein Befund: Der Pi-Lüfter allein reicht nicht.
+  - **Abbruch:** bei 75 °C oder nach 30 min Noctua wieder an. Ab 80 °C stoppt der Watchdog das LLM und drosselt,
+    ab etwa 85 °C drosselt der Pi selbst. Das wäre dann kein Test mehr, sondern eine Störung.
+- **3b – Normalbetrieb:** reale Werte ohne Eingriff, über Tage. Prüft Hysterese und Erholung unter echten Bedingungen.
+
+Reihenfolge: zuerst Stufe 2 (Simulation, ohne Risiko, zeigt, ob die Kette steht), danach 3a. So bleibt der Pi kühl,
+und die Logik ist trotzdem vollständig geprüft.
 
 Im Abschlussbericht je Punkt angeben, auf welcher Stufe er belegt ist. Nicht „vollständig integriert" schreiben,
 solange Stufe 2 nicht durchgelaufen ist.
