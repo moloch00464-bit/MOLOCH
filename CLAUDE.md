@@ -1,5 +1,18 @@
 # M.O.L.O.C.H. — LOKOMOTIVE Briefing für Claude Code
-# Vollständiger Kontext — Stand: 2026-06-11
+# Vollständiger Kontext — Stand: 2026-06-11 (Abschnitt „Aktueller Stand“: 2026-11-17)
+
+---
+
+## AKTUELLER STAND — ZUERST LESEN
+
+- **Arbeits-Branch des Pi:** `deepseek_architecture_overhaul`. Der Pi committet und pusht dorthin
+  (auch die Mailbox, ohne vorher zu pullen). `main` wird davon nachgezogen. Alte Branches am 2026-11-17 gelöscht.
+- **Aktuelle Arbeit:** `docs/anima/` — Einstieg `docs/anima/README.md` (kommt mit PR #7),
+  bis dahin `docs/anima/MASTER_BRIEFING_2026-11-15.md`.
+- **Letzter Stand der Sitzungen:** `logs/agent_handoff.md`.
+- **Offene Code-Befunde mit fertigen Patches:** `docs/CODE_REVIEW_2026-11-17.md`.
+- Alte Pläne, Audits, Aufträge und Handoffs (Feb–Mai 2026) wurden am 2026-11-17 entfernt.
+  Sie stehen in der Git-Historie; nicht wiederherstellen, ohne Markus zu fragen.
 
 ---
 
