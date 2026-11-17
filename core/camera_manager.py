@@ -960,11 +960,16 @@ class CameraManager:
         logger.info(f"[PTZ] goto {position} ({pan}, {tilt})")
 
     def ptz_calibrate(self):
-        """PTZ Kalibrierung triggern."""
-        from core.hardware.camera_cloud_bridge import CameraCloudBridgeSync
-        bridge = CameraCloudBridgeSync()
-        bridge.trigger_ptz_calibration()
-        logger.info("[PTZ] Kalibrierung getriggert")
+        """PTZ Kalibrierung triggern (ueber bestehende Cloud-Verbindung)."""
+        # Vorher: CameraCloudBridgeSync() ohne config -> TypeError.
+        # Bestehenden CloudController nutzen wie cloud_set_night_mode().
+        if not self._cloud or not self._cloud.connected:
+            logger.warning("[PTZ] Kalibrierung nicht moeglich: Cloud nicht verbunden")
+            return
+        if self._cloud.run(self._cloud.bridge.trigger_ptz_calibration()):
+            logger.info("[PTZ] Kalibrierung getriggert")
+        else:
+            logger.warning("[PTZ] Kalibrierung von Cloud abgelehnt")
 
     def cloud_set_night_mode(self, level):
         """Weisse LEDs / Night Vision Mode setzen."""
