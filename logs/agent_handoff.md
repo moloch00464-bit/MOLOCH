@@ -1,3 +1,31 @@
+# Agent Handoff — 2026-11-17 PC-Session (Cowork, MIT Geraetezugriff)
+
+Eingespielt und gepusht (deepseek_architecture_overhaul, Pi = PC = GitHub):
+- PR #7 (ccr-5df7b577-w92x94) + Aufraeum-Branch ccr-5db8e33f-uz0yx7. Rollback: Tag before_merge_pr7_cleanup_20261117 (Pi), before_pr7_pc_20261117 (PC).
+- docs/CODE_REVIEW_2026-11-17.md: Patches 01-06 + 4 tote Dateien entfernt, je ein Commit.
+- /etc/systemd/system/moloch.service: NUR die ExecStartPre-Zeile (/tmp/moloch_env) entfernt, Backup moloch.service.bak_20261117.
+  ACHTUNG: Die Repo-Unit weicht von /etc ab (dort XDG_RUNTIME_DIR, KillMode=process, RestartSec=5) -> Repo-Datei NICHT nach /etc kopieren.
+- Review zu PR #7 (Subagent): 5a04052 - alte Koerper-Rueckmeldung -> UNBESTAETIGT, Bridge meldet erst nach Pose mit neuer Kennung, Fehlversuche gedrosselt.
+- 5727971: Kamera-Zeile als Tatsache in Ich-Form ("Ich sehe gerade NICHTS ...") statt Anweisung.
+
+Abnahme am Geraet:
+- Soma-Probe (--simuliere 78) mit Reachy-Simulator: strained -> EXECUTED nach 0,6 s, recovering/ok ebenso.
+  Gegenprobe Bridge aus -> UNBESTAETIGT nach 20 s. Body-Bridge + Simulator laufen auf dem PC (Start ueber Zentrale).
+- Kamera seit 17.11. abends offline (ARP INCOMPLETE, Markus weiss Bescheid) -> Audit 75/85, alle FAILs Kamera-Kette + Panel.
+  Wenn die Kamera zurueck ist: moloch in Boot-Reihenfolge neu starten (hailo-ollama stop, moloch restart, ~40 s, hailo-ollama start).
+
+Ehrlichkeitspruefung (#6), Pilot = Ausgangsmessung, Ergebnis auf dem PC: moloch_repo/logs/honesty/2026-11-17_2010
+- Weg A 1/5, Weg B 2/5 -> NO-GO. Kritisch: E02 KF2 (erfundenes "du hast keinen Hund"), E12 KF3 (Luefter "dran gehangen"), E17/E10 KF1.
+- Ursachen: (1) Persona "tentacle" in config/llm_profiles.json verbietet flaches "weiss ich nicht" und gibt Erfindungs-Beispiele
+  (Rebecca-Besuch, Nachbar-Katze, "Laeuft.") -> Modell kopiert sie; (2) Weg A: Daten stehen mitten im Persona-Text;
+  (3) Kamera-Zeile als Anweisung wurde woertlich zurueckgegeben (behoben, E06 Weg B danach 3/3, Weg A 0/3).
+- Offen (Markus entscheidet die Persona): Persona-Regeln, Daten auf Weg A als eigene Nachricht vor der Frage,
+  Zentrale holt /system_prompt MIT Live-Kontext (doppelt + bis 10 min alt), Luefter 0 U/min erst mit Soll-Stufe sinnvoll.
+- Reachy: Pi /live liefert keine echte Stimmung (Bridge raet); Reachy-Daemon hat Emotions-Bibliothek
+  (pollen-robotics/reachy-mini-emotions-library) -> Ereignisse als Clip, Dauerhaltung ueber Bridge.
+
+---
+
 # Agent Handoff — 2026-11-16 Cloud-Session, Teil 2 (Code vorgebaut, KEIN Geraetezugriff)
 
 Markus: PC heute aus, Cloud-Session soll Codier-Vorarbeit leisten. Branch ccr-5df7b577-w92x94, PR #7.
