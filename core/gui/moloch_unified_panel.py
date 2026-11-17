@@ -2425,6 +2425,10 @@ class MolochUnifiedPanel:
             self.conversation_history.append({
                 "role": "user", "content": message_content
             })
+            # History begrenzen (10 Wortwechsel + aktuelle Frage) — sonst waechst
+            # jede Anfrage unbegrenzt (Kosten, Kontextlimit, 15s-Timeout)
+            if len(self.conversation_history) > 21:
+                del self.conversation_history[:-21]
 
             import requests
             api_msgs = [{"role": "system", "content": self.system_prompt}] + self.conversation_history
@@ -2463,6 +2467,9 @@ class MolochUnifiedPanel:
 
         except Exception as e:
             logger.error(f"DeepSeek error: {e}")
+            # Unbeantwortete Frage nicht in der History stehen lassen
+            if self.conversation_history and self.conversation_history[-1].get("role") == "user":
+                self.conversation_history.pop()
             return f"Fehler: {e}"
 
     def _append_chat(self, text, tag=None):
