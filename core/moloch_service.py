@@ -3500,13 +3500,19 @@ class MolochService:
         """
         # Bestehende Datei lesen (Merge statt Overwrite)
         data = {"version": 1}
-        try:
-            if os.path.exists(SETTINGS_PATH):
+        if os.path.exists(SETTINGS_PATH):
+            try:
                 with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                data["version"] = 1
-        except Exception:
-            data = {"version": 1}
+            except Exception as e:
+                # NICHT mit Rumpf-Dict weiterschreiben: sonst gehen Keys anderer
+                # Prozesse verloren (tentacle_llm, llm_profile, hand_detection_enabled ...)
+                logger.error(f"[SETTINGS] settings.json nicht lesbar ({e}) — Speichern abgebrochen")
+                return
+            if not isinstance(data, dict):
+                logger.error("[SETTINGS] settings.json ist kein JSON-Objekt — Speichern abgebrochen")
+                return
+            data["version"] = 1
 
         _inf = self._inference
 
