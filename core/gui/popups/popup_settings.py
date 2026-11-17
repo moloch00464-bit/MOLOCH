@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import shutil
+import tempfile
 import time
 import tkinter as tk
 from tkinter import messagebox
@@ -286,9 +287,19 @@ class SettingsPopup(tk.Toplevel):
             return
 
         try:
-            with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
-                json.dump(DEFAULTS, f, indent=2, ensure_ascii=False)
-                f.write("\n")
+            # Atomar schreiben: tmp + rename (NEVER #6)
+            fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(SETTINGS_PATH), suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(DEFAULTS, f, indent=2, ensure_ascii=False)
+                    f.write("\n")
+                os.replace(tmp_path, SETTINGS_PATH)
+            except OSError:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
             self._load_and_display()
             self._show_feedback("Defaults wiederhergestellt.", color=ACCENT_GREEN)
             logger.info("Settings auf Defaults zurueckgesetzt")

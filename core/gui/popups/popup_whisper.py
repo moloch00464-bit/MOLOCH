@@ -17,6 +17,7 @@ Importiert NUR panel_styles und tkinter.
 import json
 import logging
 import os
+import tempfile
 import time
 import tkinter as tk
 from tkinter import scrolledtext
@@ -424,8 +425,19 @@ class WhisperPopup:
                 },
             }
 
-            with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
-                json.dump(settings, f, indent=2, ensure_ascii=False)
+            # Atomar schreiben: tmp + rename (NEVER #6) — sonst kann der Service
+            # einen halb geschriebenen Stand lesen
+            fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(SETTINGS_PATH), suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(settings, f, indent=2, ensure_ascii=False)
+                os.replace(tmp_path, SETTINGS_PATH)
+            except Exception:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
 
             self._lbl_save_status.config(text="Gespeichert!", fg=ACCENT_GREEN)
             self.win.after(2000, lambda: self._lbl_save_status.config(text=""))
