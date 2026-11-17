@@ -905,8 +905,8 @@ class MolochUnifiedPanel:
 
             except Exception as e:
                 logger.error(f"Service init failed: {e}\n{traceback.format_exc()}")
-                self.root.after(0, lambda: self.status_label.config(
-                    text=f"Service FEHLER: {e}", fg="#ff4444"))
+                self.root.after(0, lambda err=e: self.status_label.config(
+                    text=f"Service FEHLER: {err}", fg="#ff4444"))
 
         threading.Thread(target=do_init, daemon=True, name="ServiceInit").start()
 
@@ -2094,8 +2094,8 @@ class MolochUnifiedPanel:
                     proc.send_signal(signal.SIGINT)
                     proc.wait(timeout=3)
                 except Exception as e:
-                    self.root.after(0, lambda: self._append_chat(
-                        f"[Mic Test] Aufnahme fehlgeschlagen: {e}", "system"))
+                    self.root.after(0, lambda err=e: self._append_chat(
+                        f"[Mic Test] Aufnahme fehlgeschlagen: {err}", "system"))
                     return
 
                 if not os.path.exists(test_path) or os.path.getsize(test_path) < 1000:
@@ -2134,8 +2134,8 @@ class MolochUnifiedPanel:
                             self.root.after(0, lambda: self._append_chat(
                                 "[Mic Test] Nichts erkannt", "system"))
                     except Exception as e:
-                        self.root.after(0, lambda: self._append_chat(
-                            f"[Mic Test] Whisper Fehler: {e}", "system"))
+                        self.root.after(0, lambda err=e: self._append_chat(
+                            f"[Mic Test] Whisper Fehler: {err}", "system"))
 
                     # Whisper VDevice freigeben (sonst blockiert naechste Spracheingabe!)
                     try:
@@ -2258,8 +2258,8 @@ class MolochUnifiedPanel:
                     boxes, landmarks, _lb_px, _lb_py, _lb_rw, _lb_rh)
 
             except Exception as e:
-                self.root.after(0, lambda: self._append_chat(
-                    f"[Snapshot] SCRFD Fehler: {e}", "system"))
+                self.root.after(0, lambda err=e: self._append_chat(
+                    f"[Snapshot] SCRFD Fehler: {err}", "system"))
                 return
 
             # Groesstes Gesicht finden
@@ -2303,8 +2303,8 @@ class MolochUnifiedPanel:
                 embedding = normalize_arcface(embedding)
 
             except Exception as e:
-                self.root.after(0, lambda: self._append_chat(
-                    f"[Snapshot] ArcFace Fehler: {e}", "system"))
+                self.root.after(0, lambda err=e: self._append_chat(
+                    f"[Snapshot] ArcFace Fehler: {err}", "system"))
                 return
 
             # Save to face_embeddings.json
@@ -2344,8 +2344,8 @@ class MolochUnifiedPanel:
                 logger.info(f"[SNAPSHOT] Markus embedding saved to {db_path}")
 
             except Exception as e:
-                self.root.after(0, lambda: self._append_chat(
-                    f"[Snapshot] Speichern fehlgeschlagen: {e}", "system"))
+                self.root.after(0, lambda err=e: self._append_chat(
+                    f"[Snapshot] Speichern fehlgeschlagen: {err}", "system"))
 
         threading.Thread(target=do_snapshot, daemon=True).start()
 
