@@ -270,7 +270,8 @@ def main() -> None:
     estop_on = False
     t_start = time.monotonic()
     soma_kennung, soma_zustand = None, "unknown"
-    last_report, reported_kennung, wirksam = 0.0, None, "offline"
+    last_report, versucht_kennung, wirksam, wirksam_kennung = 0.0, None, "offline", None
+    letzte_meldung = None   # HTTP-Status oder Fehler der letzten Rueckmeldung (body_status.json)
 
     while True:
         loop_t = time.monotonic()
@@ -313,21 +314,27 @@ def main() -> None:
         except httpx.HTTPError:
             pass  # der Controller verbindet beim naechsten tick() neu
         if result != "rate_limited":
-            wirksam = result     # rate_limited sagt nichts: die letzte Pose steht weiter
+            # rate_limited sagt nichts: die letzte Pose steht weiter. Das Ergebnis gehoert
+            # zu der Kennung, mit der diese Pose berechnet wurde.
+            wirksam, wirksam_kennung = result, soma_kennung
 
-        if soma_kennung and (soma_kennung != reported_kennung or loop_t - last_report >= REPORT_EVERY_S):
+        # Erst melden, wenn eine Pose MIT der aktuellen Kennung gelaufen ist - sonst ginge das
+        # Ergebnis der alten Pose als EXECUTED fuer den neuen Zustand raus. Neue Kennung: ein
+        # Versuch sofort, danach (auch nach Fehlern, z. B. 401) nur alle REPORT_EVERY_S.
+        if soma_kennung and wirksam_kennung == soma_kennung and (
+                soma_kennung != versucht_kennung or loop_t - last_report >= REPORT_EVERY_S):
             rep = soma_report(soma_kennung, soma_zustand, source, wirksam)
-            last_report = loop_t
+            last_report, versucht_kennung = loop_t, soma_kennung
             try:
-                if pi.post(f"{PI_URL}/body/report", json=rep, headers=REPORT_HEADERS).status_code == 200:
-                    reported_kennung = soma_kennung
-            except httpx.HTTPError:
-                pass     # Pi weg: dort wird der Zustand nach 20 s UNBESTAETIGT
+                letzte_meldung = pi.post(f"{PI_URL}/body/report", json=rep,
+                                         headers=REPORT_HEADERS).status_code
+            except httpx.HTTPError as e:
+                letzte_meldung = type(e).__name__  # Pi weg: dort nach 20 s UNBESTAETIGT
 
         if loop_t - last_status >= 1.0:
             last_status = loop_t
             write_status({"ts": time.time(), "quelle": source, "zustand": state,
-                          "ergebnis": result, **ctrl.status()})
+                          "ergebnis": result, "soma_meldung": letzte_meldung, **ctrl.status()})
 
         time.sleep(max(0.0, 1.0 / LOOP_HZ - (time.monotonic() - loop_t)))
 

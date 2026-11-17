@@ -182,6 +182,7 @@ def bestaetigung(soma: Dict, report: Optional[Dict], now: float, timeout_s: floa
     stufe:
       AUSSTEHEND      noch keine passende Rueckmeldung, Zeitlimit laeuft
       UNBESTAETIGT    Zeitlimit abgelaufen, keine passende Rueckmeldung (Schweigen ist ein Befund)
+                      - oder die letzte passende Rueckmeldung ist aelter als timeout_s
       ACCEPTED        Koerper hat den Zustand gelesen, aber nichts ausgefuehrt (offline, Not-Aus ...)
       EXECUTED        Controller hat die Pose mit Soma-Kanal gesendet bzw. haelt sie
     VERIFIED gibt es hier nicht: dafuer braeuchte es eine unabhaengige Beobachtung
@@ -193,11 +194,17 @@ def bestaetigung(soma: Dict, report: Optional[Dict], now: float, timeout_s: floa
         return {"stufe": "UNBESTAETIGT" if offen > timeout_s else "AUSSTEHEND",
                 "kennung": soma.get("kennung")}
     ergebnis = report.get("ergebnis")
+    alter = now - float(report.get("ts") or 0)
+    if alter > timeout_s:
+        # Passende Kennung, aber alt: Die Bridge meldet sonst alle 5 s. Bridge abgestuerzt
+        # oder Tunnel weg -> nicht weiter als ausgefuehrt anzeigen (Review 2026-11-17).
+        return {"stufe": "UNBESTAETIGT", "kennung": soma.get("kennung"), "ergebnis": ergebnis,
+                "alter_s": round(alter, 1)}
     # "sent"/"unchanged": die Pose mit Soma-Kanal ging raus bzw. steht schon so.
     # Alles andere (offline, estop, ueberschrieben, neutral, idle) = nur gelesen.
     stufe = "EXECUTED" if ergebnis in ("sent", "unchanged") else "ACCEPTED"
     return {"stufe": stufe, "kennung": soma.get("kennung"), "ergebnis": ergebnis,
-            "alter_s": round(now - float(report.get("ts") or now), 1)}
+            "alter_s": round(alter, 1)}
 
 
 _tracker: Optional[SomaTracker] = None

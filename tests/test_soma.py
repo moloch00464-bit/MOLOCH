@@ -110,6 +110,10 @@ def test_bestaetigung_stufen():
     assert bestaetigung(soma, {"kennung": "abc", "ergebnis": "sent", "ts": 105}, 110)["stufe"] == "EXECUTED"
     assert bestaetigung(soma, {"kennung": "abc", "ergebnis": "offline", "ts": 105}, 110)["stufe"] == "ACCEPTED"
     assert bestaetigung(soma, {"kennung": "abc", "ergebnis": "estop", "ts": 105}, 110)["stufe"] == "ACCEPTED"
+    # passende Kennung, aber Rueckmeldung zu alt (Bridge weg) -> nicht mehr EXECUTED
+    alt_ok = bestaetigung(soma, {"kennung": "abc", "ergebnis": "sent", "ts": 105}, 3705)
+    assert alt_ok["stufe"] == "UNBESTAETIGT" and alt_ok["alter_s"] == 3600.0
+    assert bestaetigung(soma, {"kennung": "abc", "ergebnis": "sent"}, 110)["stufe"] == "UNBESTAETIGT"
 
 
 # === Kuehlung: Pi-Kuehler laeuft -> Verdacht Noctua ===

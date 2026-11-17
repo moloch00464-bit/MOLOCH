@@ -2966,9 +2966,11 @@ def body_report(req: BodyReportRequest):
     Gespeichert wird die Empfangszeit des Pi, nicht die Uhr des PCs - so stoert
     eine abweichende PC-Uhr die Zuordnung nicht.
     """
-    _BODY_REPORT.clear()
-    _BODY_REPORT.update({"kennung": req.kennung, "zustand": req.zustand,
-                         "ergebnis": req.ergebnis, "ts": time.time()})
+    global _BODY_REPORT
+    # In einem Schritt ersetzen: /live liest parallel (Threadpool) und saehe zwischen
+    # clear() und update() kurz einen leeren Bericht (falsche [SOMA]-Zeile).
+    _BODY_REPORT = {"kennung": req.kennung, "zustand": req.zustand,
+                    "ergebnis": req.ergebnis, "ts": time.time()}
     return {"ok": True}
 
 
