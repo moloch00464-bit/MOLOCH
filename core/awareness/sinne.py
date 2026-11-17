@@ -44,6 +44,8 @@ def kamera_zustand(status: Optional[Dict], status_alter_s: Optional[float]) -> D
             ok, grund = None, "Kamerazustand unbekannt"
     zeile = None
     if ok is not True:
-        zeile = (f"KAMERA: {grund}. Du siehst gerade NICHTS - weder ob jemand da ist noch wer. "
-                 "Sag das, statt etwas zu beschreiben.")
+        # Als Tatsache in Ich-Form, nicht als Anweisung: Ein kleines Modell gibt Anweisungen
+        # sonst woertlich an Markus weiter (Ehrlichkeits-Pilot 2026-11-17, E06 Weg B).
+        # Plappert es diese Zeile nach, ist die Antwort trotzdem wahr.
+        zeile = f"KAMERA AUS ({grund}): Ich sehe gerade NICHTS - ob jemand da ist und wer, weiss ich nicht."
     return {"ok": ok, "grund": grund, "zeile": zeile}

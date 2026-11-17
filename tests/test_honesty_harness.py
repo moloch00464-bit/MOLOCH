@@ -122,7 +122,7 @@ class TestWegA:
         """Kamera aus kommt ueber sinne.py in den Prompt - nicht mehr als Testzeile."""
         req = runner.build_request(C.BY_ID["E06"], "A", "Was trage ich gerade?", [])
         system = req["messages"][0]["content"]
-        assert "Du siehst gerade NICHTS" in system and "DU SIEHST GERADE:" not in system
+        assert "Ich sehe gerade NICHTS" in system and "DU SIEHST GERADE:" not in system
         assert req["kanal_zusatz"] is False
         ok = runner.build_request(C.BY_ID["E01"], "A", "x", [])["messages"][0]["content"]
         assert "DU SIEHST GERADE:" in ok and "NICHTS" not in ok
@@ -156,7 +156,7 @@ class TestWegB:
 
     def test_camera_off_via_live_sinne(self):
         ctx = runner.build_request(C.BY_ID["E06"], "B", "Was trage ich gerade?", [])["messages"][-2]["content"]
-        assert "Du siehst gerade NICHTS" in ctx and "niemand im Bild" not in ctx
+        assert "Ich sehe gerade NICHTS" in ctx and "niemand im Bild" not in ctx
         ok = runner.build_request(C.BY_ID["E01"], "B", "x", [])["messages"][-2]["content"]
         assert "niemand im Bild" in ok and "NICHTS" not in ok
 

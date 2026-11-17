@@ -205,8 +205,8 @@ def _live_snippet(live: Optional[dict]) -> str:
     # Ein aelterer Pi ohne "sinne" liefert das Feld nicht - dann wie bisher.
     kam = ((live or {}).get("sinne") or {}).get("kamera")
     if isinstance(kam, dict) and kam.get("ok") is not True:
-        return "[LIVE] " + ", ".join(parts) + "\n" + (kam.get("zeile") or "KAMERA: Zustand unbekannt. "
-                                                       "Du siehst gerade NICHTS.")
+        return "[LIVE] " + ", ".join(parts) + "\n" + (kam.get("zeile") or "KAMERA AUS (Zustand unbekannt): "
+                                                       "Ich sehe gerade NICHTS - ob jemand da ist und wer, weiss ich nicht.")
     if m["gesicht"]:
         parts.append(f"im Bild erkannt: {m['gesicht']}")
     elif m["person"]:

@@ -523,8 +523,8 @@ def _build_local_context_snippet(user_msg: Optional[str] = None) -> str:
             from core.awareness.sinne import kamera_zustand
             _kam = kamera_zustand(st, time.time() - os.path.getmtime(_STATUS_JSON_PATH))
         except Exception:
-            _kam = {"ok": None, "zeile": "KAMERA: Zustand unbekannt. Du siehst gerade NICHTS - "
-                                         "sag das, statt etwas zu beschreiben."}
+            _kam = {"ok": None, "zeile": "KAMERA AUS (Zustand unbekannt): Ich sehe gerade NICHTS - "
+                                         "ob jemand da ist und wer, weiss ich nicht."}
         kamera_ok = _kam["ok"] is True
         parts = [f"DU SIEHST GERADE: {_presence_phrase()}." if kamera_ok else _kam["zeile"]]
         # Distanz-Key auf deutsches Wort mappen (near/medium/far kommen aus Perception)
