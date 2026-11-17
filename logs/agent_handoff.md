@@ -1,3 +1,23 @@
+# Agent Handoff — 2026-11-17 Cloud-Review (kein Pi-Zugriff)
+
+## Ergebnis
+Komplett-Review des GitHub-Stands `a5bf8cb`. **Kein Code geaendert** — der Session-Lock
+ist in der Cloud nicht aufhebbar (MCP nicht verbunden). Stattdessen: 8 gepruefte Patches
+(git apply --check, py_compile, ruff, isolierte Vorher/Nachher-Tests) + Aufraeumliste in
+`docs/CODE_REVIEW_2026-11-17.md`.
+
+## Naechste Schritte (Pi-Session)
+1. Patches 01–08 einzeln anwenden (Anleitung im Doc), je Restart + Audit + eigener Commit.
+   01/02 = ROT (moloch_service.py). 08 = Unit-Datei → Reboot-Pflicht.
+2. Nach Patch 03: PTZ-Positionen (`ptz_goto`) einmal von Hand im Panel pruefen —
+   wurden wegen des Bugs nie real angefahren.
+3. `git status --short | grep '^??'` — `core/vision/unified_pipeline.py` und
+   `hybrid_vision.py` fehlen im Repo, ohne sie startet ein frischer Clone nicht.
+4. Sicherheits-/Datenschutz-Punkte liegen bei Markus (Chat 2026-11-17), bewusst
+   nicht im oeffentlichen Repo dokumentiert.
+
+---
+
 # Agent Handoff — 2026-05-02/03 Pi-Opus (Hand-Erkennung + Audit-Cleanup)
 
 ## Session-Ergebnis
