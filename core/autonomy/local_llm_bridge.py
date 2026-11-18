@@ -672,6 +672,26 @@ def _tentacle_verlauf(frage: str) -> list:
     return out[-TENTACLE_VERLAUF_TURNS * 2:]
 
 
+def _gesehene_person() -> Optional[str]:
+    """Name der Person, die die Kamera gerade erkennt - ausser Markus (der steht in der Persona).
+
+    None bei Kamera aus/veraltet, niemand im Bild, unbekanntem Gesicht oder Lesefehler.
+    """
+    try:
+        with open(_STATUS_JSON_PATH, 'r') as f:
+            st = json.load(f)
+        from core.awareness.sinne import kamera_zustand
+        if kamera_zustand(st, time.time() - os.path.getmtime(_STATUS_JSON_PATH))["ok"] is not True:
+            return None
+        m = re.match(r"[A-Za-zÄÖÜäöüß]+", str(st.get('face_id') or "").strip())
+        if not st.get('person_detected') or not m:
+            return None
+        name = m.group(0).capitalize()
+        return None if name.lower() in ("markus", "unknown", "unbekannt", "unbekannte", "none") else name
+    except Exception:
+        return None
+
+
 def _build_tentacle_context(frage: str, prompt_type: Optional[str] = None,
                             live: bool = True) -> str:
     """Zweite System-Nachricht: Live-Zustand, Erinnerungen, Regeln (siehe Hinweis oben)."""
@@ -688,8 +708,17 @@ def _build_tentacle_context(frage: str, prompt_type: Optional[str] = None,
     if prompt_type not in ("web_research", "code_query"):
         try:
             from core.longterm_memory import get_memory
-            hits = [h for h in get_memory().recall_hits(frage, limit=3)
+            mem = get_memory()
+            hits = [h for h in mem.recall_hits(frage, limit=3)
                     if float(h.get("score") or 0) >= TENTACLE_RECALL_MIN_SCORE and h.get("text")]
+            # Erkennt die Kamera jemanden (z. B. Rebecca -> Klingonisch), kommen dessen Fakten
+            # dazu - auch wenn die Frage ihn nicht nennt. Der blosse Name ist der Suche zu kurz.
+            person = _gesehene_person() if live else None
+            if person:
+                schon = {h["text"] for h in hits}
+                hits += [h for h in mem.recall_hits(f"Wer ist {person}?", limit=2)
+                         if float(h.get("score") or 0) >= TENTACLE_RECALL_MIN_SCORE
+                         and h.get("text") and h["text"] not in schon]
         except Exception:
             hits = []  # Memory-Singleton evtl. nicht init in standalone Test
         if hits:

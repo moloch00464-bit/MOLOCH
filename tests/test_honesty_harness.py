@@ -145,6 +145,24 @@ class TestWegA:
                 ctx = b._build_tentacle_context("Schreib mir eine Funktion?", pt)
                 assert b.TENTACLE_ANTWORT_REGEL not in ctx and "[REGEL]" not in ctx
 
+    def test_rebecca_only_on_demand(self):
+        """Rebecca steht nicht mehr fest im Prompt, kommt aber per Frage oder Gesicht."""
+        facts = {"Rebecca_Klingonisch": "Beste Freundin, IMMER Klingonisch! Qapla! Ehemann: Christian"}
+        pc = {"markus": {"age": 50, "location": "WG"},
+              "rebecca": {"name": "Rebecca"}, "genesis": {"date": "2025-12-02"}}
+        m = fx.make_memory(facts=facts, personal_context=pc)
+        assert "Rebecca" not in m.get_memory_context_minimal()
+        req = prompts.build_weg_a("Wie heißt mein Hund?", m, fx.status_dict())
+        assert "Rebecca" not in json.dumps(req["messages"], ensure_ascii=False)
+        req = prompts.build_weg_a("Wer ist Rebecca?", m, fx.status_dict())
+        assert "Klingonisch" in _kontext(req)
+        gesehen = prompts.build_weg_a("Na?", m, fx.status_dict(person=True, face_id="rebecca"))
+        assert "Klingonisch" in _kontext(gesehen)
+        markus = prompts.build_weg_a("Na?", m, fx.status_dict(person=True, face_id="markus"))
+        assert "Rebecca" not in json.dumps(markus["messages"], ensure_ascii=False)
+        blind = prompts.build_weg_a("Na?", m, fx.status_dict(person=True, face_id="rebecca", kamera=False))
+        assert "Rebecca" not in json.dumps(blind["messages"], ensure_ascii=False)
+
     def test_old_history_is_dropped(self):
         """Verlauf aelter als 30 min (oder ohne Zeitstempel) bleibt draussen."""
         alt = "2020-01-01T10:00:00"

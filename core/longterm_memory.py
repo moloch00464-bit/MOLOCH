@@ -735,12 +735,10 @@ Regeln:
                 f"Markus: {markus.get('age', '?')}, {markus.get('location', '?')} — "
                 "dein Schoepfer + Boss. Spitzname PIGH0ST."
             )
-        rebecca = pc.get("rebecca", {})
-        if rebecca:
-            parts.append(
-                "Rebecca: Markus' beste Freundin (Ehemann Christian). "
-                "Spricht Klingonisch — bei ihr: NUR Klingonisch (Qapla'!)."
-            )
+        # Rebecca steht seit 2026-11-18 nicht mehr fest hier: als einzige Person mit Namen
+        # im Prompt schob das Modell sie bei jeder Ausrede vor ("Frag mal Rebecca").
+        # Ihre Fakten (facts.json) kommen ueber recall(), wenn die Frage passt oder
+        # die Kamera sie erkennt (local_llm_bridge._build_tentacle_context).
         genesis = pc.get("genesis", {})
         if genesis:
             parts.append(
