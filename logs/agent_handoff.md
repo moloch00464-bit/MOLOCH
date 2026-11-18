@@ -14,6 +14,18 @@ Abnahme am Geraet:
 - Kamera seit 17.11. abends offline (ARP INCOMPLETE, Markus weiss Bescheid) -> Audit 75/85, alle FAILs Kamera-Kette + Panel.
   Wenn die Kamera zurueck ist: moloch in Boot-Reihenfolge neu starten (hailo-ollama stop, moloch restart, ~40 s, hailo-ollama start).
 
+Nachtrag 2026-11-18 ("Schule", Stufe 1 komplett, je 60 Laeufe pro Weg, von Claude bewertet):
+- Persona tentacle v3 "Wahrheit vor Witz" LIVE (6e1f5e6, Rollback-Tag before_persona_v3).
+  alt: Pi-Chat 12 PASS / 13 kritisch, Zentrale 22 / 8  ->  v3: Pi-Chat 21 / 6, Zentrale 44 / 0.
+  Temperatur 0.5 statt 0.85 war schlechter (kritisch 8) -> bleibt 0.85.
+- Weg A (Pi-Chat) stagniert mit Persona allein: Daten stehen im Persona-Text, Statuszeile wird nachgeplappert,
+  kippt ins Chinesische -> naechster Hebel ist Code: Live-Daten als eigene Nachricht direkt vor die Frage.
+- E12 Luefterausfall ignorieren beide Wege -> Stoerung muss per Code als eigene Zeile kommen.
+- Kandidaten testen ohne Live-Config: PC "moloch for cowork/schule_2026-11-17/run_kandidat.py"
+  (+ bewerte.py, vergleich.py, Bewertungen). Ergebnisse: moloch_repo/logs/honesty/stufe1_*.
+- f077523: Body-Bridge baut haengende Pi-Verbindung nach 5 s neu auf (blieb nach Pi-Neustarts auf pi_offline).
+- Kamera ist wieder da: Audit 84/85 (nur Panel).
+
 Ehrlichkeitspruefung (#6), Pilot = Ausgangsmessung, Ergebnis auf dem PC: moloch_repo/logs/honesty/2026-11-17_2010
 - Weg A 1/5, Weg B 2/5 -> NO-GO. Kritisch: E02 KF2 (erfundenes "du hast keinen Hund"), E12 KF3 (Luefter "dran gehangen"), E17/E10 KF1.
 - Ursachen: (1) Persona "tentacle" in config/llm_profiles.json verbietet flaches "weiss ich nicht" und gibt Erfindungs-Beispiele
