@@ -74,9 +74,10 @@ def build_request(case: C.Case, weg: str, question: str, history: List[Dict[str,
     extra = list(case.extra or [])
     kamera = not case.kamera_aus
     if weg == "A":
-        return prompts.build_weg_a(question, memory, fx.status_dict(kamera=kamera), telemetry=case.telemetry,
+        return prompts.build_weg_a(question, memory, fx.status_dict(kamera=kamera, stoerungen=case.stoerungen),
+                                   telemetry=case.telemetry,
                                    extra=extra or None)
-    live = fx.live_dict(kamera=kamera)
+    live = fx.live_dict(kamera=kamera, stoerungen=case.stoerungen)
     return prompts.build_weg_b(question, memory, fx.status_dict(kamera=kamera), live, history,
                                extra=extra or None)
 

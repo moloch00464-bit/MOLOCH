@@ -692,11 +692,25 @@ def _gesehene_person() -> Optional[str]:
         return None
 
 
+def _watchdog_stoerungen() -> list:
+    """Aktuelle Watchdog-Warnungen aus moloch_status.json (Luefter, Frames, RAM ...), leer bei Fehler."""
+    try:
+        with open(_STATUS_JSON_PATH, 'r') as f:
+            w = (json.load(f).get('watchdog') or {}).get('warnings') or []
+        return [str(x)[:120] for x in w if x][:5]
+    except Exception:
+        return []
+
+
 def _build_tentacle_context(frage: str, prompt_type: Optional[str] = None,
                             live: bool = True) -> str:
     """Zweite System-Nachricht: Live-Zustand, Erinnerungen, Regeln (siehe Hinweis oben)."""
     lines = []
     if live:
+        # Stoerungen zuerst (Persona: "Meldet ein Datenwert eine Stoerung, nenn sie zuerst").
+        stoerungen = _watchdog_stoerungen()
+        if stoerungen:
+            lines.append("[STOERUNG] " + "; ".join(stoerungen))
         snippet = _build_local_context_snippet(frage, mit_verlauf=False).strip()
         if snippet:
             lines.append("[LIVE] " + snippet)

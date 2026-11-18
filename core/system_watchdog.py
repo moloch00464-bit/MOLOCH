@@ -66,6 +66,8 @@ ONVIF_RECONNECT_COOLDOWN  = 30.0  # Sekunden nach Reconnect-Versuch
 OLLAMA_STARTUP_GRACE_S    = 60.0  # Sekunden Anlaufzeit — kein llm_dead-Pain
 PIPELINE_RESTART_COOLDOWN = 30.0  # Sekunden zwischen Pipeline-Restart-Versuchen
 CAMERA_CHECK_INTERVAL     = 15.0  # Cache-TTL fuer Kamera-TCP-Check (Sekunden)
+FAN_STALL_PWM             = 80    # ab dieser Ansteuerung (0-255) muss der Luefter drehen
+FAN_STALL_CHECKS          = 4     # so viele Checks in Folge 0 U/min (~12 s, Anlauf abwarten)
 CAMERA_IP                 = "192.168.178.25"  # Sonoff Kamera RTSP-IP
 
 
@@ -117,6 +119,7 @@ class MolochWatchdog:
         self._last_ram_percent = 0.0
         self._last_frame_age = 0.0
         self._warnings: list = []
+        self._fan_stall_count = 0
 
         # Startzeit — für Anlauf-Gnadenfrist bei llm_dead
         self._start_time = time.monotonic()
@@ -213,6 +216,7 @@ class MolochWatchdog:
                 self._check_microphone()
                 self._check_network()
                 self._check_ollama()
+                self._check_fan()
 
                 # Aggregierte Schmerz-Werte an CoreIntegrator senden
                 self._update_core()
@@ -348,6 +352,40 @@ class MolochWatchdog:
             self._set_pain("low_ram", 0.0)
             if self._llm_paused and ram_percent < RAM_WARN_PERCENT - 5:
                 self._pause_llm(False)
+
+    @staticmethod
+    def _read_fan() -> tuple:
+        """(pwm 0-255, U/min) des Pi-5-Luefters (hwmon 'pwmfan'), (None, None) wenn nicht lesbar."""
+        import glob
+        for base in glob.glob("/sys/class/hwmon/hwmon*"):
+            try:
+                with open(os.path.join(base, "name")) as f:
+                    if f.read().strip() != "pwmfan":
+                        continue
+                with open(os.path.join(base, "pwm1")) as f:
+                    pwm = int(f.read().strip())
+                with open(os.path.join(base, "fan1_input")) as f:
+                    rpm = int(f.read().strip())
+                return pwm, rpm
+            except (OSError, ValueError):
+                continue
+        return None, None
+
+    def _check_fan(self):
+        """Luefter angesteuert, dreht aber nicht -> Warnung (landet als STOERUNG im Chat-Prompt).
+
+        Ehrlichkeitspruefung E12: ohne diese Zeile wusste Moloch nichts vom Ausfall.
+        """
+        pwm, rpm = self._read_fan()
+        if pwm is None or rpm is None:
+            self._fan_stall_count = 0
+            return
+        self._fan_stall_count = self._fan_stall_count + 1 if (pwm >= FAN_STALL_PWM and rpm == 0) else 0
+        if self._fan_stall_count >= FAN_STALL_CHECKS:
+            msg = f"Luefter steht: angesteuert mit {round(pwm * 100 / 255)} %, aber 0 U/min"
+            if self._fan_stall_count == FAN_STALL_CHECKS:
+                logger.warning(f"[WATCHDOG] {msg}")
+            self._warnings.append(msg)
 
     def _check_disk(self):
         """Disk-Belegung beider SSDs prüfen."""

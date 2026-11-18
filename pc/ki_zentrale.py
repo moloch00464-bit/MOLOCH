@@ -276,6 +276,10 @@ def _context_block(msg: str, live: Optional[dict], recall: Optional[dict]) -> st
     den das Modell nachplappert).
     """
     lines = [_live_snippet(live)]
+    # Watchdog-Warnungen des Pi (Luefter steht, Frame-Freeze, RAM ...) zuerst - wie im Pi-Chat.
+    stoerungen = [str(w)[:120] for w in (((live or {}).get("watchdog") or {}).get("warnings") or []) if w][:5]
+    if stoerungen:
+        lines.insert(0, "[STOERUNG] " + "; ".join(stoerungen))
     hits = [h for h in (recall or {}).get("hits", [])
             if float(h.get("score") or 0) >= RECALL_MIN_SCORE and h.get("text")]
     if hits:
