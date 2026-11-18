@@ -334,3 +334,14 @@ Memory: mailbox-open-status-unreliable.
 ## System-Stand
 FPS 20.1, RAM 34%, 7 Vision-Modelle aktiv, Tension -0.70 Zone guardian, Audit 85/85.
 Branch deepseek_architecture_overhaul, alles gepusht.
+
+## 2026-11-18 PC-Session (Cowork) - Pi-Chat-Prompt umgebaut (065516a)
+- _generate_tentacle baut wie die KI-Zentrale: Persona + Crew fest vorn, Verlauf (2 Turns, max 30 min) als Nachrichten,
+  Kontext-System-Nachricht (Live, ThreeBrain, Erinnerungen >= 0.5, Regel bei Fragen, Antwortform), Frage unveraendert.
+  Behoben nebenbei: Frage kam doppelt (/chat speichert vorher), VORHER ohne Altersgrenze, claude-Absender als Moloch gezaehlt.
+- Ollama-qwen2.5-Template zieht ALLE System-Nachrichten oben zusammen (gilt auch fuer die Zentrale).
+- Rollback: Tag before_weg_a_umbau. moloch + moloch-chat neu gestartet, Audit 84/85 (nur Panel).
+- Stufe 1, gleiche Bewertungsstrenge (Claude, 18.11.): Pi-Chat vorher 21 PASS/6 krit, nachher 26/6 (temp 0.85),
+  Versuch temp 0.3: 20/2; Zentrale heute 35/0. Antwortzeit Pi-Chat Median 25 s -> 7 s.
+- Offen: Temperatur Pi-Chat (Markus), E12 Luefterausfall ignorieren beide Wege (Stoerungszeile per Watchdog fehlt),
+  Rebecca-Spekulation in beiden Wegen (Persona-MEMORY-Zeile), Bewertungen in moloch for cowork/schule_2026-11-17/.
