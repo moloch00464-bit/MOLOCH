@@ -350,3 +350,9 @@ Branch deepseek_architecture_overhaul, alles gepusht.
   "Rebecca_Klingonisch" wird als Name nachgesprochen (Daten, Markus fragen). Tag before_rebecca_recall.
   Ideen Markus: Rebecca-Begruessung (Anlernen "Das ist Rebecca" -> Reachy-Freude-Clip + feste Klingonisch-Saetze),
   Reachy bei Rebecca per Tunnel (Tailscale) als entfernter Koerper. Gesichter laut Markus noch KEINE angelernt.
+- 70b24f4: Watchdog erkennt stehenden Luefter (pwm >= 80, 4x 0 U/min) -> [STOERUNG] zuerst in Pi-Chat + Zentrale.
+  E12: Zentrale 5/5 nennt Ausfall, Pi-Chat (temp 0.85) 1-2/5. Tag before_stoerung_luefter.
+- b0d98a8: Begruessung (core/bridge/begruessung.py, config/begruessungen.json). Rebecca 3 s erkannt -> Klingonisch-Gruss
+  (Piper-Lautschrift), Chatverlauf, /live.begruessung -> body_bridge spielt Reachy-Clip enthusiastic1.
+  Anlernen: "Merk dir, das ist Rebecca" (Keyword) -> "Was, DAS ist Rebecca?". Ende-zu-Ende erst testbar,
+  wenn ihr Gesicht angelernt ist. Hoerprobe: moloch for cowork/schule_2026-11-17/hoerprobe/. Tag before_begruessung.
