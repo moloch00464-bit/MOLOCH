@@ -265,6 +265,7 @@ def main() -> None:
     backend = ReachyHttpBackend()
     ctrl = BodyController(backend, mappings)
     pi = httpx.Client(timeout=1.5)
+    live_fehler = 0   # Pi-Abfragen ohne Ergebnis in Folge
     live_state: Optional[dict] = None
     last_live = last_status = 0.0
     estop_on = False
@@ -282,6 +283,14 @@ def main() -> None:
                 live_state = derive_state(r.json(), read_calib()) if r.status_code == 200 else None
             except (httpx.HTTPError, ValueError):
                 live_state = None
+            # Nach einem Neustart von Pi oder Tunnel kann eine Keep-alive-Verbindung haengen
+            # bleiben (2026-11-17: Bridge blieb auf pi_offline, frischer Client ging sofort).
+            # Nach 10 Fehlversuchen in Folge (5 s) den Client neu aufbauen.
+            live_fehler = 0 if live_state else live_fehler + 1
+            if live_fehler >= 10:
+                pi.close()
+                pi = httpx.Client(timeout=1.5)
+                live_fehler = 0
             soma_kennung = (live_state or {}).get("_soma_kennung")
             soma_zustand = (live_state or {}).get("soma", "unknown")
 
