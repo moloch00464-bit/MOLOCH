@@ -1,0 +1,21 @@
+{
+  "_info": "Begruessung bekannter Menschen (nicht Markus), core/bridge/begruessung.py. anzeige = Text im Chat, sprechen = Lautschrift fuer die deutsche Piper-Stimme, clip = Reachy-Bewegung aus pollen-robotics/reachy-mini-emotions-library, anlern_satz = Antwort auf 'Merk dir, das ist <Name>'. pause_h = Stunden bis zur naechsten Begruessung derselben Person.",
+  "aktiv": true,
+  "stabil_s": 3,
+  "pause_h": 6,
+  "personen": {
+    "rebecca": {
+      "anzeige": "nuqneH, Rebecca! Heghlu'meH QaQ jajvam. Qapla'!",
+      "sprechen": "Nuk-nech, Rebecca! Chech-lu-mech, kach dschadsch-wamm. Kap-la!",
+      "clip": "enthusiastic1",
+      "anlern_satz": "Was, DAS ist Rebecca? nuqneH! Schau in die Kamera, ich sammle 20 Aufnahmen."
+    }
+  },
+  "klingonisch": {
+    "nuqneH": {"bedeutung": "Hallo (woertlich: Was willst du?)", "sprechen": "Nuk-nech"},
+    "Heghlu'meH QaQ jajvam": {"bedeutung": "Heute ist ein guter Tag zum Sterben", "sprechen": "Chech-lu-mech, kach dschadsch-wamm"},
+    "Qapla'": {"bedeutung": "Erfolg! (Gruss und Abschied)", "sprechen": "Kap-la"},
+    "tlhIngan maH!": {"bedeutung": "Wir sind Klingonen!", "sprechen": "Tlingan mach"},
+    "jIyajbe'": {"bedeutung": "Ich verstehe nicht", "sprechen": "Dschi-jadsch-be"}
+  }
+}

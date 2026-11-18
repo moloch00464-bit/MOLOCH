@@ -3092,6 +3092,14 @@ def live_status():
                 out["speech"] = sp
         except (OSError, ValueError, TypeError):
             pass
+        # Begruessung (z. B. Rebecca erkannt) -> pc/body_bridge.py spielt den Reachy-Clip
+        try:
+            from core.bridge import begruessung
+            b = begruessung.fuer_live()
+            if b:
+                out["begruessung"] = b
+        except Exception:
+            pass
         return out
     except Exception as e:
         raise HTTPException(500, f"Status read error: {e}")
@@ -5131,6 +5139,12 @@ def main():
         )
     else:
         logger.info(f"MOLOCH Chat-Server startet HTTP auf {HOST}:{PORT}")
+        # Begruessung bekannter Menschen nur hier (HTTP-Instanz), sonst gruesst Moloch doppelt.
+        try:
+            from core.bridge import begruessung
+            begruessung.starte()
+        except Exception as e:
+            logger.warning(f"Begruessung nicht gestartet: {e}")
         uvicorn.run(app, host=HOST, port=PORT, log_level="info")
 
 

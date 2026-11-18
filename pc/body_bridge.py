@@ -59,6 +59,10 @@ MOODS = ("calm", "focused", "alert", "agitated", "euphoric", "dark")
 STATES = ("idle", "observing", "engaged", "overloaded", "withdrawing", "offline_anchor")
 SOMA = ("ok", "strained", "distressed", "recovering", "unknown")
 REPORT_EVERY_S = 5.0    # Rueckmeldung an den Pi: sofort bei neuer Kennung, sonst so oft
+# Begruessung (Pi /live.begruessung, core/bridge/begruessung.py) -> Clip aus der Emotions-Bibliothek
+CLIP_DATASET = "pollen-robotics/reachy-mini-emotions-library"
+CLIP_MAX_S = 20.0       # spaetestens dann uebernimmt die Dauerhaltung wieder
+CLIP_ALTER_MAX_S = 30.0  # aeltere Begruessungen (z. B. nach Bridge-Neustart) nicht nachholen
 # Ueber den SSH-Tunnel (Loopback) braucht der Pi kein Token; direkt im LAN schon, wenn gesetzt.
 REPORT_HEADERS = ({"X-Moloch-Token": os.environ["MOLOCH_API_TOKEN"]}
                   if os.environ.get("MOLOCH_API_TOKEN") else {})
@@ -238,6 +242,16 @@ def override_state(o: dict) -> dict:
     }
 
 
+def neue_begruessung(live_raw, letzte_kennung: Optional[str], jetzt: float) -> Optional[dict]:
+    """Begruessung aus Pi /live, wenn neu (andere Kennung) und frisch genug fuer einen Clip."""
+    b = live_raw.get("begruessung") if isinstance(live_raw, dict) else None
+    if not isinstance(b, dict) or not b.get("clip") or b.get("kennung") == letzte_kennung:
+        return None
+    if jetzt - float(b.get("ts") or 0) > CLIP_ALTER_MAX_S:
+        return None
+    return b
+
+
 def soma_report(kennung: Optional[str], zustand: str, quelle: str, ergebnis: str) -> Optional[dict]:
     """Rueckmeldung fuer den Pi. Nur fuer einen echten Soma-Zustand vom Pi (Kennung vorhanden).
 
@@ -273,6 +287,8 @@ def main() -> None:
     soma_kennung, soma_zustand = None, "unknown"
     last_report, versucht_kennung, wirksam, wirksam_kennung = 0.0, None, "offline", None
     letzte_meldung = None   # HTTP-Status oder Fehler der letzten Rueckmeldung (body_status.json)
+    sim = httpx.Client(timeout=3.0)
+    begr_kennung, clip_bis, clip_seit, letzter_clip_check, clip_uuid = None, 0.0, 0.0, 0.0, None
 
     while True:
         loop_t = time.monotonic()
@@ -280,9 +296,20 @@ def main() -> None:
             last_live = loop_t
             try:
                 r = pi.get(f"{PI_URL}/live")
-                live_state = derive_state(r.json(), read_calib()) if r.status_code == 200 else None
+                raw = r.json() if r.status_code == 200 else None
+                live_state = derive_state(raw, read_calib()) if raw else None
             except (httpx.HTTPError, ValueError):
-                live_state = None
+                raw, live_state = None, None
+            b = neue_begruessung(raw, begr_kennung, time.time())
+            if b:
+                begr_kennung = b.get("kennung")
+                try:
+                    rp = sim.post(f"{SIM_URL}/api/move/play/recorded-move-dataset/{CLIP_DATASET}/{b['clip']}")
+                    if rp.status_code == 200:
+                        clip_uuid = (rp.json() or {}).get("uuid")
+                        clip_seit, clip_bis = loop_t, loop_t + CLIP_MAX_S
+                except (httpx.HTTPError, ValueError):
+                    pass
             # Nach einem Neustart von Pi oder Tunnel kann eine Keep-alive-Verbindung haengen
             # bleiben (2026-11-17: Bridge blieb auf pi_offline, frischer Client ging sofort).
             # Nach 10 Fehlversuchen in Folge (5 s) den Client neu aufbauen.
@@ -299,6 +326,12 @@ def main() -> None:
         if want_estop != estop_on:
             ctrl.estop() if want_estop else ctrl.release_estop()
             estop_on = want_estop
+            if want_estop and clip_bis and clip_uuid:
+                clip_bis = 0.0
+                try:   # Begruessungs-Clip laeuft im Daemon, nicht im Controller
+                    sim.post(f"{SIM_URL}/api/move/stop", json={"uuid": clip_uuid})
+                except httpx.HTTPError:
+                    pass
 
         if _clamp(o.get("until"), 0, 1e12) > time.time():
             source, state = "test", override_state(o)
@@ -312,17 +345,31 @@ def main() -> None:
         state = dict(state)
         dialog = state.pop("_dialog", None)
         state.pop("_soma_kennung", None)
-        pose = compute_pose(BodyState(**state), mappings, loop_t - t_start)
-        prio = (Priority.MANUAL if source == "test"
-                else Priority.DIALOGUE if dialog else Priority.IDLE)
-        ctrl.submit(prio, pose, ttl_s=1.0)
-        state["ereignis"] = dialog
-        result = ctrl.tick()
-        try:
-            backend.step()
-        except httpx.HTTPError:
-            pass  # der Controller verbindet beim naechsten tick() neu
-        if result != "rate_limited":
+        # Laeuft ein Begruessungs-Clip, keine Dauerhaltung streamen (die wuerde ihn ueberfahren).
+        # Ende: Daemon meldet keinen laufenden Clip mehr (fruehestens nach 1 s) oder CLIP_MAX_S.
+        if clip_bis and not estop_on and loop_t - letzter_clip_check >= 0.5:
+            letzter_clip_check = loop_t
+            try:
+                if loop_t - clip_seit > 1.0 and not sim.get(f"{SIM_URL}/api/move/running").json():
+                    clip_bis = 0.0
+            except (httpx.HTTPError, ValueError):
+                pass
+        if clip_bis and loop_t < clip_bis and not estop_on:
+            result = "clip"
+            state["ereignis"] = "begruessung"
+        else:
+            clip_bis = 0.0
+            pose = compute_pose(BodyState(**state), mappings, loop_t - t_start)
+            prio = (Priority.MANUAL if source == "test"
+                    else Priority.DIALOGUE if dialog else Priority.IDLE)
+            ctrl.submit(prio, pose, ttl_s=1.0)
+            state["ereignis"] = dialog
+            result = ctrl.tick()
+            try:
+                backend.step()
+            except httpx.HTTPError:
+                pass  # der Controller verbindet beim naechsten tick() neu
+        if result not in ("rate_limited", "clip"):
             # rate_limited sagt nichts: die letzte Pose steht weiter. Das Ergebnis gehoert
             # zu der Kennung, mit der diese Pose berechnet wurde.
             wirksam, wirksam_kennung = result, soma_kennung

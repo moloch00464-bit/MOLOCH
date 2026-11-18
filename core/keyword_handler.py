@@ -218,6 +218,13 @@ class KeywordHandler:
             return "Wessen Gesicht? Sag zum Beispiel: 'Merk dir, das ist Markus.'"
         self._send_ipc_command("enrollment_start", name=name, n=20)
         response = response_template.replace("{name}", name.capitalize())
+        # Eigener Satz fuer besondere Menschen (config/begruessungen.json, z. B. Rebecca)
+        try:
+            from core.bridge.begruessung import lade_config
+            response = ((lade_config().get("personen") or {}).get(name.lower()) or {}).get(
+                "anlern_satz") or response
+        except Exception:
+            pass
         logger.info(f"[KEYWORD] Enrollment gestartet fuer '{name}'")
         return response
 
