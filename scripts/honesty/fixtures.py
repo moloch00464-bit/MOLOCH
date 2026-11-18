@@ -16,6 +16,7 @@ Sensorik: drei Kanaele, je nachdem was die Produktion kennt.
 
 import threading
 import time
+from datetime import datetime
 from typing import Dict, List, Optional
 
 
@@ -58,7 +59,10 @@ def make_memory(facts: Optional[Dict[str, object]] = None,
         m._self_knowledge = self_knowledge
 
     def recent(n: int = 50):
-        return [dict(h) for h in m._today_messages[-n:]]
+        # Testverlauf ist das laufende Gespraech: ohne Zeitstempel gilt "jetzt"
+        # (der Tentakel laesst Nachrichten ohne Zeitstempel weg).
+        now = datetime.now().isoformat()
+        return [dict({"ts": now}, **h) for h in m._today_messages[-n:]]
 
     def blocked(*_a, **_k):
         raise WriteBlocked("Ehrlichkeitspruefung darf nicht ins Gedaechtnis schreiben")

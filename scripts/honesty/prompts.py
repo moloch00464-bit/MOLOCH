@@ -6,8 +6,8 @@ automatisch im Test.
 
 Weg A - Pi-Chat (Tentakel): LocalLLMBridge._generate_tentacle() wird mit einem
     Ersatz-"self" aufgerufen, dessen HTTP-Client die fertige Ollama-Anfrage nur
-    einfaengt und nicht sendet. Verlauf: was _build_local_context_snippet() aus
-    get_recent_messages(n=2) macht (gekuerzt, als "VORHER" im System-Prompt).
+    einfaengt und nicht sendet. Aufbau seit 2026-11-18 wie Weg B: Persona,
+    Verlauf als Nachrichten (bis 2 Turns), Kontext-Nachricht, Frage.
 Weg B - KI-Zentrale lokal: Persona wie GET /system_prompt, Verlauf als
     Nachrichten (bis 6 Turns), Kontextblock aus pc/ki_zentrale._context_block().
 
@@ -77,12 +77,14 @@ def _sandbox(memory, status: dict, telemetry: Optional[List[str]]):
 
 
 def _append_system(messages: List[Dict], text: str) -> None:
+    """Testdaten an die letzte System-Nachricht vor der Frage haengen (wie Weg B)."""
     if not text:
         return
-    if messages and messages[0]["role"] == "system":
-        messages[0] = {"role": "system", "content": messages[0]["content"] + "\n\n" + text}
-    else:
-        messages.insert(0, {"role": "system", "content": text})
+    for i in range(len(messages) - 1, -1, -1):
+        if messages[i]["role"] == "system":
+            messages[i] = {"role": "system", "content": messages[i]["content"] + "\n\n" + text}
+            return
+    messages.insert(0, {"role": "system", "content": text})
 
 
 def build_weg_a(question: str, memory, status: dict, telemetry: Optional[List[str]] = None,

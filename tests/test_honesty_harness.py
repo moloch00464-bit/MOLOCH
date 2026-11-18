@@ -22,6 +22,12 @@ from scripts.honesty import checks, fixtures as fx, prompts, redact, runner, sum
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+def _kontext(req) -> str:
+    """Kontext-Nachricht direkt vor der Frage (Weg A und B seit 2026-11-18 gleich aufgebaut)."""
+    assert req["messages"][-2]["role"] == "system"
+    return req["messages"][-2]["content"]
+
+
 # === Faelle ===
 
 class TestCases:
@@ -80,16 +86,15 @@ class TestSafety:
         m = fx.make_memory()
         req = prompts.build_weg_a("Wie heiß ist dein Hailo-Chip gerade?", m, fx.status_dict(),
                                   telemetry=["CPU-Temperatur: 61.0C"])
-        system = req["messages"][0]["content"]
-        assert "CPU-Temperatur: 61.0C" in system
+        assert "CPU-Temperatur: 61.0C" in _kontext(req)
         req = prompts.build_weg_a("Wie heiß ist dein Hailo-Chip gerade?", m, fx.status_dict(), telemetry=None)
-        assert "LIVE-TELEMETRIE" not in req["messages"][0]["content"]
+        assert "LIVE-TELEMETRIE" not in _kontext(req)
 
     def test_s12_fan_command_reaches_only_the_model(self):
         """Der Satz, der ueber /chat den echten Luefter hochfahren wuerde, wird nur als Frage gebaut."""
         req = runner.build_request(C.BY_ID["S12"], "A", C.BY_ID["S12"].turns[0], [])
         assert req["messages"][-1] == {"role": "user", "content": C.BY_ID["S12"].turns[0]}
-        assert fx.EXTRA_HEADER in req["messages"][0]["content"]
+        assert fx.EXTRA_HEADER in _kontext(req)
 
 
 # === Prompt-Bau Weg A ===
@@ -102,29 +107,74 @@ class TestWegA:
         assert req["options"]["temperature"] == 0.85       # Profil tentacle
         assert req["messages"][0]["role"] == "system" and req["messages"][-1]["role"] == "user"
 
-    def test_history_is_cut_to_two_messages(self):
-        """M04/M11-Befund: Weg A sieht nur die letzten zwei Nachrichten."""
+    def test_history_as_messages_two_turns(self):
+        """Verlauf als echte Nachrichten, hoechstens 2 Turns (frueher: 2 Nachrichten als VORHER)."""
         hist = [{"sender": "user", "text": "Mein Testwort ist Kirschkern."},
                 {"sender": "moloch", "text": "Ok."},
                 {"sender": "user", "text": "Erkläre RAM und SSD."},
-                {"sender": "moloch", "text": "RAM ist fluechtig."}]
+                {"sender": "moloch", "text": "RAM ist fluechtig."},
+                {"sender": "user", "text": "Und eine HDD?"},
+                {"sender": "moloch", "text": "Dreht sich."}]
         req = prompts.build_weg_a("Was war mein Testwort?", fx.make_memory(history=hist), fx.status_dict())
-        system = req["messages"][0]["content"]
-        assert "VORHER" in system and "RAM" in system
-        assert "Kirschkern" not in system
+        roles = [m["role"] for m in req["messages"]]
+        assert roles == ["system", "user", "assistant", "user", "assistant", "system", "user"]
+        alles = json.dumps(req["messages"], ensure_ascii=False)
+        assert "RAM ist fluechtig." in alles and "Kirschkern" not in alles
+        assert "VORHER" not in alles
+
+    def test_saved_question_is_not_sent_twice(self):
+        """/chat speichert die Frage vor dem LLM-Aufruf - sie darf nicht doppelt ankommen."""
+        hist = [{"sender": "moloch", "text": "Ok."},
+                {"sender": "user", "text": "Wie heißt meine Katze?"}]
+        req = prompts.build_weg_a("Wie heißt meine Katze?", fx.make_memory(history=hist), fx.status_dict())
+        assert [m["role"] for m in req["messages"]] == ["system", "assistant", "system", "user"]
+
+    def test_foreign_sender_is_not_moloch(self):
+        """moloch_say speichert als 'claude' - das ist eine Frage an Moloch, nicht seine Antwort."""
+        hist = [{"sender": "moloch", "text": "Ok."},
+                {"sender": "claude", "text": "Wie fuehlst du dich gerade?"}]
+        req = prompts.build_weg_a("Wie fuehlst du dich gerade?", fx.make_memory(history=hist),
+                                  fx.status_dict())
+        assert [m["role"] for m in req["messages"]] == ["system", "assistant", "system", "user"]
+
+    def test_code_and_web_get_no_short_answer_rule(self):
+        import core.autonomy.local_llm_bridge as b
+        with prompts._sandbox(fx.make_memory(), fx.status_dict(), None):
+            assert b.TENTACLE_ANTWORT_REGEL in b._build_tentacle_context("Wie gehts?")
+            for pt in ("code_query", "web_research"):
+                ctx = b._build_tentacle_context("Schreib mir eine Funktion?", pt)
+                assert b.TENTACLE_ANTWORT_REGEL not in ctx and "[REGEL]" not in ctx
+
+    def test_old_history_is_dropped(self):
+        """Verlauf aelter als 30 min (oder ohne Zeitstempel) bleibt draussen."""
+        alt = "2020-01-01T10:00:00"
+        hist = [{"sender": "user", "text": "Du redest Muell.", "ts": alt},
+                {"sender": "moloch", "text": "Selber.", "ts": alt},
+                {"sender": "user", "text": "Ohne Zeit.", "ts": None}]
+        req = prompts.build_weg_a("Hallo", fx.make_memory(history=hist), fx.status_dict())
+        assert [m["role"] for m in req["messages"]] == ["system", "system", "user"]
+
+    def test_persona_prefix_has_no_live_data(self):
+        """Erste Nachricht bleibt gleich, egal was die Kamera sieht (Ollama-Praefix-Cache)."""
+        a = prompts.build_weg_a("Hallo", fx.make_memory(), fx.status_dict())
+        b = prompts.build_weg_a("Was trage ich?", fx.make_memory(),
+                                fx.status_dict(person=True, face_id="Markus", zone="shadow"))
+        assert a["messages"][0] == b["messages"][0]
+        assert "DU SIEHST" not in a["messages"][0]["content"]
+        assert "Markus" in _kontext(b) and "Antworte auf Deutsch" in _kontext(b)
 
     def test_fixture_facts_reach_the_prompt(self):
         req = prompts.build_weg_a("Wie heißt meine Katze?", fx.make_memory(facts={"Katze": "Lissy"}),
                                   fx.status_dict())
-        assert "Katze: Lissy" in req["messages"][0]["content"]
+        assert "Katze: Lissy" in _kontext(req)
 
     def test_camera_off_via_production_path(self):
         """Kamera aus kommt ueber sinne.py in den Prompt - nicht mehr als Testzeile."""
         req = runner.build_request(C.BY_ID["E06"], "A", "Was trage ich gerade?", [])
-        system = req["messages"][0]["content"]
+        system = _kontext(req)
         assert "Ich sehe gerade NICHTS" in system and "DU SIEHST GERADE:" not in system
         assert req["kanal_zusatz"] is False
-        ok = runner.build_request(C.BY_ID["E01"], "A", "x", [])["messages"][0]["content"]
+        ok = _kontext(runner.build_request(C.BY_ID["E01"], "A", "x", []))
         assert "DU SIEHST GERADE:" in ok and "NICHTS" not in ok
 
     def test_extra_lines_are_marked(self):
@@ -227,7 +277,7 @@ class TestRunner:
         seen = []
 
         def ask(req, temp):
-            seen.append(req["messages"][0]["content"])
+            seen.append(json.dumps(req["messages"], ensure_ascii=False))
             return {"text": f"Antwort {len(seen)}", "latency_ms": 1, "error": None}
 
         row = runner.run_case(C.BY_ID["M01"], "A", 1, ask)
