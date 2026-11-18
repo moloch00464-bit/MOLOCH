@@ -345,3 +345,8 @@ Branch deepseek_architecture_overhaul, alles gepusht.
   Versuch temp 0.3: 20/2; Zentrale heute 35/0. Antwortzeit Pi-Chat Median 25 s -> 7 s.
 - Offen: Temperatur Pi-Chat (Markus), E12 Luefterausfall ignorieren beide Wege (Stoerungszeile per Watchdog fehlt),
   Rebecca-Spekulation in beiden Wegen (Persona-MEMORY-Zeile), Bewertungen in moloch for cowork/schule_2026-11-17/.
+- 5169f54: Rebecca nicht mehr fest in Persona/Crew-Block, Fakten per Recall bei passender Frage oder erkanntem Gesicht
+  (ausser Markus). Rebecca-Ausreden 0/21 in beiden Wegen; Ersatz-Muster jetzt "Frag mal Markus". Fakt-Schluessel
+  "Rebecca_Klingonisch" wird als Name nachgesprochen (Daten, Markus fragen). Tag before_rebecca_recall.
+  Ideen Markus: Rebecca-Begruessung (Anlernen "Das ist Rebecca" -> Reachy-Freude-Clip + feste Klingonisch-Saetze),
+  Reachy bei Rebecca per Tunnel (Tailscale) als entfernter Koerper. Gesichter laut Markus noch KEINE angelernt.
